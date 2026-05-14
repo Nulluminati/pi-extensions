@@ -1,0 +1,14 @@
+{
+  "name": "pi-extensions",
+  "version": "0.1.0",
+  "description": "Personal extensions for the Pi AI CLI tool",
+  "type": "module",
+  "scripts": {
+    "validate": "bun test/validate-all.ts",
+    "validate:one": "bun test/validate.ts",
+    "test": "bun test/validate-all.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}
