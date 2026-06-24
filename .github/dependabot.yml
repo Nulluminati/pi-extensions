@@ -1,0 +1,43 @@
+# Dependabot configuration
+# https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+
+version: 2
+
+updates:
+  # npm dependencies and transitive dev dependencies
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Los_Angeles"
+    open-pull-requests-limit: 5
+    groups:
+      # Roll up all patch-level updates for direct dependencies into a single PR
+      production-patch:
+        dependency-type: "production"
+        update-types:
+          - "patch"
+      # Roll up minor and patch updates for dev dependencies into a single PR
+      development-minor:
+        dependency-type: "development"
+        update-types:
+          - "minor"
+          - "patch"
+    labels:
+      - "dependencies"
+      - "npm"
+
+  # GitHub Actions: catch updates to any actions referenced by .github/workflows
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Los_Angeles"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "github-actions"
