@@ -31,23 +31,10 @@ pi -e git:github.com/Nulluminati/pi-extensions/extensions/goal/goal.ts
 | `grep-app/` | Code search across public GitHub repositories via grep.app. `grep_search` tool queries millions of repos with optional filters for language, repository (`owner/repo`), and path. No API key required. |
 | `lsp/` | Language-agnostic code intelligence via the Language Server Protocol. Config-driven LSP server management with auto-detection by file extension. `lsp` tool with 11 operations (diagnostics, hover, goToDefinition, findReferences, goToImplementation, documentSymbol, workspaceSymbol, prepareCallHierarchy, incomingCalls, outgoingCalls, codeActions). `/lsp` status and `/lsp-restart` commands. |
 | `gondolin/` | Gondolin micro-VM sandbox. Routes all built-in tools (`read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`) and `!` commands inside a QEMU micro-VM. Host cwd is mounted at `/workspace` in the guest. Requires QEMU and Node.js >= 23.6.0. |
-| `status-bar/` | Starship-inspired two-line footer (Nerd Font icons) plus a polished input editor. **Editor:** the input box is wrapped in a neutral grey frame (held grey so it never tracks the thinking level) with the model and thinking level shown on a metadata line inside, padded for extra height — Opencode/zentui-style. **Footer line 1:** working directory, git branch + status indicator block (`! ? + ✘ » = $ ↑ ↓ ⇕`), and a right-aligned context usage bar with a token breakdown (`↑in ↓out ↗cache-read ↘cache-write $cost` — all four always visible, showing `0` at session start) followed by the turn count and cost. (Model and thinking level live in the editor box, not the footer.) **Footer line 2:** active/completed tool progress and third-party extension statuses (omitted when empty). Segments use distinct Pi theme hues (cwd blue, branch purple, tokens teal/gold/blue/purple, cost gold, git indicators red). Git status uses `--porcelain=2` for ahead/behind, stashed, conflicted, renamed, deleted, and typechanged. Toggle with `/statusbar`. |
-| `clear/` | Aliases `/clear` to `/new` for muscle memory from Claude Code and `clear`-keyed tools. Confirmation of the discard is handled by the underlying `/new` behavior. |
+| `status-bar/` | Starship-inspired two-line footer plus a polished input editor. Line 1 shows cwd, git branch + status block, and a right-aligned context usage bar with token breakdown and cost; line 2 shows in-flight tool progress and other extensions' status indicators. The editor is wrapped in a neutral grey frame with the model and thinking level shown on a metadata line inside. Toggle with `/statusbar`. |
+| `clear/` | Aliases `/clear` to `/new` for muscle memory from Claude Code and `clear`-keyed tools. Discard confirmation is handled by the underlying `/new` behavior. |
 
-### Extension configuration
-
-#### session-recap flags
-
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--recap-idle-seconds` | string | `45` | Seconds after `turn_end` before the session recap is generated |
-| `--recap-focus-min-seconds` | string | `3` | Minimum focus-out duration (seconds) before showing a recap on refocus |
-| `--recap-disable-focus` | boolean | `false` | Disable DECSET ?1004 focus reporting (idle fallback still runs) |
-| `--recap-during-active` | boolean | `false` | Allow focus-triggered recaps while an agent turn is still running |
-| `--recap-disable` | boolean | `false` | Disable the automatic session recap entirely |
-| `--recap-model` | string | `""` | Override the model for recap generation (e.g. `anthropic/claude-sonnet-4-6`) |
-
-Recaps auto-dismiss after 2 minutes. Use `/recap` to force-generate one manually.
+Per-extension configuration (flags, env vars, config files) lives in each extension's own `README.md` under the **Configuration** section.
 
 ## Development
 
@@ -125,6 +112,8 @@ npm run test:watch # Run tests in watch mode
 
 ```
 pi-extensions/
+├── docs/               # Product design specifications
+│   └── specs/          # Per-extension product specs
 ├── extensions/         # Extension files
 ├── lib/                # Shared validation logic
 ├── scripts/            # CLI entry points
