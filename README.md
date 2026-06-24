@@ -7,13 +7,13 @@ A collection of extensions for [Pi](https://pi.dev), the AI coding agent for the
 Install the entire collection:
 
 ```bash
-pi install git:github.com/natekift/pi-extensions
+pi install git:github.com/Nulluminati/pi-extensions
 ```
 
 Or try a single extension without installing:
 
 ```bash
-pi -e git:github.com/natekift/pi-extensions/extensions/goal/goal.ts
+pi -e git:github.com/Nulluminati/pi-extensions/extensions/goal/goal.ts
 ```
 
 ## Extensions
