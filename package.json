@@ -21,6 +21,7 @@
     ]
   },
   "scripts": {
+    "prepare": "husky",
     "format": "biome format --write .",
     "lint": "biome lint .",
     "check": "biome check . && tsc --noEmit && tsc --noEmit -p tsconfig.test.json && npm run validate && npm run test",
@@ -31,6 +32,9 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest"
+  },
+  "lint-staged": {
+    "*.{ts,js,mjs,json,jsonc}": "biome check --write --no-errors-on-unmatched"
   },
   "dependencies": {
     "@earendil-works/gondolin": "^0.12.0"
