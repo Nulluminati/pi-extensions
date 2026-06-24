@@ -1,0 +1,559 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import sessionRecapExtension from "../../extensions/session-recap/session-recap.ts";
+import { createMockCommandContext } from "../mocks/context-mocks.ts";
+import { createMockPi } from "../mocks/pi-mocks.ts";
+import { getCommandHandler, getEventHandler } from "../mocks/test-helpers.ts";
+
+vi.mock("@earendil-works/pi-ai", () => ({
+  completeSimple: vi.fn(),
+  getModel: vi.fn(() => undefined),
+}));
+
+// Helper to set up TTY mocks for focus reporting tests
+const ttyRestores: Array<() => void> = [];
+
+function mockTTY(): {
+  stdoutWrite: ReturnType<typeof vi.fn>;
+  stdinOn: ReturnType<typeof vi.fn>;
+  stdinOff: ReturnType<typeof vi.fn>;
+  capturedListener: ((chunk: Buffer) => void) | undefined;
+  restore: () => void;
+} {
+  const originalStdin = process.stdin;
+  const originalStdout = process.stdout;
+
+  const stdoutWrite = vi.fn(() => true);
+  let capturedListener: ((chunk: Buffer) => void) | undefined;
+
+  const stdinOn = vi.fn((event: string, listener: unknown) => {
+    if (event === "data") capturedListener = listener as (chunk: Buffer) => void;
+    return process.stdin;
+  });
+  const stdinOff = vi.fn(() => process.stdin);
+
+  Object.defineProperty(process, "stdin", {
+    value: { isTTY: true, on: stdinOn, off: stdinOff },
+    writable: true,
+    configurable: true,
+  });
+  Object.defineProperty(process, "stdout", {
+    value: { isTTY: true, write: stdoutWrite },
+    writable: true,
+    configurable: true,
+  });
+
+  let restored = false;
+  const restore = () => {
+    if (restored) return;
+    restored = true;
+    Object.defineProperty(process, "stdin", {
+      value: originalStdin,
+      writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(process, "stdout", {
+      value: originalStdout,
+      writable: true,
+      configurable: true,
+    });
+  };
+  ttyRestores.push(restore);
+
+  return {
+    stdoutWrite,
+    stdinOn,
+    stdinOff,
+    get capturedListener() {
+      return capturedListener;
+    },
+    restore,
+  };
+}
+
+// Helper to build a branch with meaningful assistant activity
+function buildMeaningfulBranch(): unknown[] {
+  return [
+    {
+      type: "message",
+      message: {
+        role: "user",
+        content: [{ type: "text", text: "fix the auth bug" }],
+      },
+    },
+    {
+      type: "message",
+      message: {
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "I have analyzed the authentication flow and identified the root cause in the token validation middleware. The bug was that expired tokens were not being properly rejected. I updated the middleware to check the expiration timestamp before proceeding. I also added unit tests to verify the fix works correctly across all the edge cases, including expired tokens, malformed tokens, and tokens with invalid signatures. The test suite now passes completely with all green results.",
+          },
+        ],
+      },
+    },
+  ];
+}
+
+describe("session-recap-extension", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    vi.resetAllMocks();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    for (const restore of ttyRestores) restore();
+    ttyRestores.length = 0;
+  });
+
+  it("registers all flags", async () => {
+    const mockPi = createMockPi();
+    await sessionRecapExtension(mockPi);
+    expect(mockPi.registerFlag).toHaveBeenCalledWith(
+      "recap-idle-seconds",
+      expect.objectContaining({ type: "string", default: "45" }),
+    );
+    expect(mockPi.registerFlag).toHaveBeenCalledWith(
+      "recap-focus-min-seconds",
+      expect.objectContaining({ type: "string", default: "3" }),
+    );
+    expect(mockPi.registerFlag).toHaveBeenCalledWith(
+      "recap-disable-focus",
+      expect.objectContaining({ type: "boolean", default: false }),
+    );
+    expect(mockPi.registerFlag).toHaveBeenCalledWith(
+      "recap-during-active",
+      expect.objectContaining({ type: "boolean", default: false }),
+    );
+    expect(mockPi.registerFlag).toHaveBeenCalledWith(
+      "recap-disable",
+      expect.objectContaining({ type: "boolean", default: false }),
+    );
+    expect(mockPi.registerFlag).toHaveBeenCalledWith(
+      "recap-model",
+      expect.objectContaining({ type: "string", default: "" }),
+    );
+  });
+
+  it("registers /recap command", async () => {
+    const mockPi = createMockPi();
+    await sessionRecapExtension(mockPi);
+    expect(mockPi.registerCommand).toHaveBeenCalledWith(
+      "recap",
+      expect.objectContaining({
+        description: expect.stringContaining("recap"),
+        handler: expect.any(Function),
+      }),
+    );
+  });
+
+  it("registers event handlers", async () => {
+    const mockPi = createMockPi();
+    await sessionRecapExtension(mockPi);
+    expect(mockPi.on).toHaveBeenCalledWith("turn_end", expect.any(Function));
+    expect(mockPi.on).toHaveBeenCalledWith("turn_start", expect.any(Function));
+    expect(mockPi.on).toHaveBeenCalledWith("input", expect.any(Function));
+    expect(mockPi.on).toHaveBeenCalledWith("agent_start", expect.any(Function));
+    expect(mockPi.on).toHaveBeenCalledWith("agent_end", expect.any(Function));
+    expect(mockPi.on).toHaveBeenCalledWith("session_shutdown", expect.any(Function));
+    expect(mockPi.on).toHaveBeenCalledWith("session_start", expect.any(Function));
+  });
+
+  it("session_start attaches focus reporting when TTY is available", async () => {
+    const tty = mockTTY();
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await sessionRecapExtension(mockPi);
+
+    const handler = getEventHandler(mockPi, "session_start");
+    await handler({ type: "session_start", reason: "new" }, mockCtx);
+
+    expect(tty.stdoutWrite).toHaveBeenCalledWith("\x1b[?1004h");
+    expect(tty.stdinOn).toHaveBeenCalledWith("data", expect.any(Function));
+  });
+
+  it("session_start does not attach focus reporting when disabled", async () => {
+    const tty = mockTTY();
+    const mockPi = createMockPi();
+    mockPi.getFlag = vi.fn((name: string) => {
+      if (name === "recap-disable-focus") return true;
+      return undefined;
+    });
+    const mockCtx = createMockCommandContext();
+    await sessionRecapExtension(mockPi);
+
+    const handler = getEventHandler(mockPi, "session_start");
+    await handler({ type: "session_start", reason: "new" }, mockCtx);
+
+    expect(tty.stdoutWrite).not.toHaveBeenCalled();
+    expect(tty.stdinOn).not.toHaveBeenCalled();
+  });
+
+  it("session_start with resume triggers recap after delay", async () => {
+    const { completeSimple } = await import("@earendil-works/pi-ai");
+    vi.mocked(completeSimple).mockResolvedValueOnce({
+      content: [{ type: "text", text: "recap: fixed the auth bug" }],
+    });
+
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
+    await sessionRecapExtension(mockPi);
+
+    const handler = getEventHandler(mockPi, "session_start");
+    await handler({ type: "session_start", reason: "resume" }, mockCtx);
+
+    // Should not call completeSimple immediately
+    expect(completeSimple).not.toHaveBeenCalled();
+
+    // Advance past the 300ms delay
+    vi.advanceTimersByTime(400);
+    await vi.waitFor(() => expect(completeSimple).toHaveBeenCalled());
+
+    expect(mockCtx.ui.setWidget).toHaveBeenCalledWith(
+      "session-recap",
+      expect.any(Function),
+      expect.objectContaining({ placement: "aboveEditor" }),
+    );
+
+    // Verify the factory renders content with the recap text
+    const factory = (mockCtx.ui.setWidget as ReturnType<typeof vi.fn>).mock.calls.find(
+      (c: unknown[]) => c[0] === "session-recap" && typeof c[1] === "function",
+    )?.[1] as ((tui: unknown, theme: unknown) => unknown) | undefined;
+    expect(factory).toBeDefined();
+    const theme = { fg: (_c: string, t: string) => t, bold: (t: string) => t };
+    const component = factory!(null, theme) as { render: (w: number) => string[] };
+    const lines = component.render(80);
+    expect(lines.some((l: string) => l.includes("recap"))).toBe(true);
+  });
+
+  it("turn_end schedules idle recap", async () => {
+    const { completeSimple } = await import("@earendil-works/pi-ai");
+    vi.mocked(completeSimple).mockResolvedValueOnce({
+      content: [{ type: "text", text: "recap: updated the middleware" }],
+    });
+
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
+    await sessionRecapExtension(mockPi);
+
+    // Start session
+    const sessionStartHandler = getEventHandler(mockPi, "session_start");
+    await sessionStartHandler({ type: "session_start", reason: "new" }, mockCtx);
+
+    // Trigger turn_end
+    const turnEndHandler = getEventHandler(mockPi, "turn_end");
+    await turnEndHandler({ type: "turn_end", turnIndex: 1, message: {}, toolResults: [] }, mockCtx);
+
+    // Should not call immediately
+    expect(completeSimple).not.toHaveBeenCalled();
+
+    // Advance past idle seconds (default 45s)
+    vi.advanceTimersByTime(46000);
+    await vi.waitFor(() => expect(completeSimple).toHaveBeenCalled());
+
+    expect(mockCtx.ui.setWidget).toHaveBeenCalledWith(
+      "session-recap",
+      expect.any(Function),
+      expect.objectContaining({ placement: "aboveEditor" }),
+    );
+  });
+
+  it("input clears recap and cancels idle timer", async () => {
+    const { completeSimple } = await import("@earendil-works/pi-ai");
+    vi.mocked(completeSimple).mockResolvedValueOnce({
+      content: [{ type: "text", text: "recap: did some work" }],
+    });
+
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
+    await sessionRecapExtension(mockPi);
+
+    // Start session and trigger turn_end
+    const sessionStartHandler = getEventHandler(mockPi, "session_start");
+    await sessionStartHandler({ type: "session_start", reason: "new" }, mockCtx);
+
+    const turnEndHandler = getEventHandler(mockPi, "turn_end");
+    await turnEndHandler({ type: "turn_end", turnIndex: 1, message: {}, toolResults: [] }, mockCtx);
+
+    // User types before idle timer fires
+    const inputHandler = getEventHandler(mockPi, "input");
+    await inputHandler({ type: "input", text: "hello", source: "interactive" }, mockCtx);
+
+    expect(mockCtx.ui.setWidget).toHaveBeenCalledWith("session-recap", undefined);
+
+    // Advance timers — completeSimple should NOT be called because timer was cleared
+    vi.advanceTimersByTime(60000);
+    expect(completeSimple).not.toHaveBeenCalled();
+  });
+
+  it("agent_start sets active state and clears recap", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await sessionRecapExtension(mockPi);
+
+    const agentStartHandler = getEventHandler(mockPi, "agent_start");
+    await agentStartHandler({ type: "agent_start" }, mockCtx);
+
+    expect(mockCtx.ui.setWidget).toHaveBeenCalledWith("session-recap", undefined);
+  });
+
+  it("agent_end triggers deferred focus recap", async () => {
+    const tty = mockTTY();
+    const { completeSimple } = await import("@earendil-works/pi-ai");
+    vi.mocked(completeSimple).mockResolvedValueOnce({
+      content: [{ type: "text", text: "recap: completed the task" }],
+    });
+
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
+    await sessionRecapExtension(mockPi);
+
+    // Start session (attaches focus reporting)
+    const sessionStartHandler = getEventHandler(mockPi, "session_start");
+    await sessionStartHandler({ type: "session_start", reason: "new" }, mockCtx);
+
+    // Agent starts (active)
+    const agentStartHandler = getEventHandler(mockPi, "agent_start");
+    await agentStartHandler({ type: "agent_start" }, mockCtx);
+
+    // Simulate focus out while agent is active
+    const listener = tty.capturedListener;
+    expect(listener).toBeDefined();
+    listener!(Buffer.from("\x1b[O"));
+
+    // Agent ends — should trigger deferred focus recap
+    const agentEndHandler = getEventHandler(mockPi, "agent_end");
+    await agentEndHandler({ type: "agent_end", messages: [] }, mockCtx);
+
+    await vi.waitFor(() => expect(completeSimple).toHaveBeenCalled());
+  });
+
+  it("turn_start cancels pending idle recap", async () => {
+    const { completeSimple } = await import("@earendil-works/pi-ai");
+    vi.mocked(completeSimple).mockResolvedValueOnce({
+      content: [{ type: "text", text: "recap: some work" }],
+    });
+
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
+    await sessionRecapExtension(mockPi);
+
+    const sessionStartHandler = getEventHandler(mockPi, "session_start");
+    await sessionStartHandler({ type: "session_start", reason: "new" }, mockCtx);
+
+    const turnEndHandler = getEventHandler(mockPi, "turn_end");
+    await turnEndHandler({ type: "turn_end", turnIndex: 1, message: {}, toolResults: [] }, mockCtx);
+
+    // Another turn starts before idle timer fires
+    const turnStartHandler = getEventHandler(mockPi, "turn_start");
+    await turnStartHandler({ type: "turn_start", turnIndex: 2, timestamp: Date.now() });
+
+    // Advance timers — should not fire because turn_start cleared it
+    vi.advanceTimersByTime(60000);
+    expect(completeSimple).not.toHaveBeenCalled();
+  });
+
+  it("/recap command generates manual recap", async () => {
+    const { completeSimple } = await import("@earendil-works/pi-ai");
+    vi.mocked(completeSimple).mockResolvedValueOnce({
+      content: [{ type: "text", text: "recap: manual recap here" }],
+    });
+
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
+    await sessionRecapExtension(mockPi);
+
+    const handler = getCommandHandler(mockPi, "recap");
+    await handler("", mockCtx);
+
+    await vi.waitFor(() => expect(completeSimple).toHaveBeenCalled());
+    expect(mockCtx.ui.setWidget).toHaveBeenCalledWith(
+      "session-recap",
+      expect.any(Function),
+      expect.objectContaining({ placement: "aboveEditor" }),
+    );
+
+    // Verify the factory renders content with the recap text
+    const factory = (mockCtx.ui.setWidget as ReturnType<typeof vi.fn>).mock.calls.find(
+      (c: unknown[]) => c[0] === "session-recap" && typeof c[1] === "function",
+    )?.[1] as ((tui: unknown, theme: unknown) => unknown) | undefined;
+    expect(factory).toBeDefined();
+    const theme = { fg: (_c: string, t: string) => t, bold: (t: string) => t };
+    const component = factory!(null, theme) as { render: (w: number) => string[] };
+    const lines = component.render(80);
+    expect(lines.some((l: string) => l.includes("manual recap here"))).toBe(true);
+  });
+
+  it("does not generate recap when there is no meaningful activity", async () => {
+    const { completeSimple } = await import("@earendil-works/pi-ai");
+    vi.mocked(completeSimple).mockResolvedValueOnce({
+      content: [{ type: "text", text: "recap: no activity" }],
+    });
+
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    // Branch with only a short assistant message (< 30 words)
+    mockCtx.sessionManager.getBranch = vi.fn(() => [
+      {
+        type: "message",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "ok done" }],
+        },
+      },
+    ]);
+    mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
+    await sessionRecapExtension(mockPi);
+
+    const sessionStartHandler = getEventHandler(mockPi, "session_start");
+    await sessionStartHandler({ type: "session_start", reason: "new" }, mockCtx);
+
+    const turnEndHandler = getEventHandler(mockPi, "turn_end");
+    await turnEndHandler({ type: "turn_end", turnIndex: 1, message: {}, toolResults: [] }, mockCtx);
+
+    vi.advanceTimersByTime(60000);
+    expect(completeSimple).not.toHaveBeenCalled();
+  });
+
+  it("session_shutdown detaches focus reporting and clears state", async () => {
+    const tty = mockTTY();
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await sessionRecapExtension(mockPi);
+
+    // Start session to attach focus
+    const sessionStartHandler = getEventHandler(mockPi, "session_start");
+    await sessionStartHandler({ type: "session_start", reason: "new" }, mockCtx);
+
+    expect(tty.stdoutWrite).toHaveBeenCalledWith("\x1b[?1004h");
+
+    // Shutdown
+    const shutdownHandler = getEventHandler(mockPi, "session_shutdown");
+    await shutdownHandler({ type: "session_shutdown", reason: "quit" }, mockCtx);
+
+    expect(tty.stdoutWrite).toHaveBeenLastCalledWith("\x1b[?1004l");
+    expect(tty.stdinOff).toHaveBeenCalled();
+    expect(mockCtx.ui.setWidget).toHaveBeenCalledWith("session-recap", undefined);
+  });
+
+  it("focus out during active agent defers recap", async () => {
+    const tty = mockTTY();
+    const { completeSimple } = await import("@earendil-works/pi-ai");
+    vi.mocked(completeSimple).mockResolvedValueOnce({
+      content: [{ type: "text", text: "recap: completed the task" }],
+    });
+
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
+    await sessionRecapExtension(mockPi);
+
+    // Start session
+    const sessionStartHandler = getEventHandler(mockPi, "session_start");
+    await sessionStartHandler({ type: "session_start", reason: "new" }, mockCtx);
+
+    // Agent active
+    const agentStartHandler = getEventHandler(mockPi, "agent_start");
+    await agentStartHandler({ type: "agent_start" }, mockCtx);
+
+    // Focus out
+    const listener = tty.capturedListener;
+    expect(listener).toBeDefined();
+    listener!(Buffer.from("\x1b[O"));
+
+    // Should NOT call completeSimple yet (deferred)
+    expect(completeSimple).not.toHaveBeenCalled();
+
+    // Agent ends
+    const agentEndHandler = getEventHandler(mockPi, "agent_end");
+    await agentEndHandler({ type: "agent_end", messages: [] }, mockCtx);
+
+    // Now it should call
+    await vi.waitFor(() => expect(completeSimple).toHaveBeenCalled());
+  });
+
+  it("quick focus glance does not show recap", async () => {
+    const tty = mockTTY();
+    const { completeSimple } = await import("@earendil-works/pi-ai");
+    vi.mocked(completeSimple).mockResolvedValueOnce({
+      content: [{ type: "text", text: "recap: some work done" }],
+    });
+
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
+    await sessionRecapExtension(mockPi);
+
+    const sessionStartHandler = getEventHandler(mockPi, "session_start");
+    await sessionStartHandler({ type: "session_start", reason: "new" }, mockCtx);
+
+    // Focus out
+    const listener = tty.capturedListener;
+    expect(listener).toBeDefined();
+    listener!(Buffer.from("\x1b[O"));
+
+    // Wait for recap to be generated
+    await vi.waitFor(() => expect(completeSimple).toHaveBeenCalled());
+
+    // Focus back in quickly (< 3s min)
+    vi.advanceTimersByTime(1000);
+    listener!(Buffer.from("\x1b[I"));
+
+    // Should not show the recap
+    const recapCalls = (mockCtx.ui.setWidget as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (call) => call[0] === "session-recap" && call[1] !== undefined,
+    );
+    expect(recapCalls.length).toBe(0);
+  });
+
+  // --- Wrapping tests ---
+
+  it("wraps long recap text via render width", async () => {
+    const { completeSimple } = await import("@earendil-works/pi-ai");
+    const longRecap = `recap: ${"x".repeat(300)}. Next: do something.`;
+    vi.mocked(completeSimple).mockResolvedValueOnce({
+      content: [{ type: "text", text: longRecap }],
+    });
+
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
+    await sessionRecapExtension(mockPi);
+
+    const handler = getCommandHandler(mockPi, "recap");
+    await handler("", mockCtx);
+
+    await vi.waitFor(() => expect(completeSimple).toHaveBeenCalled());
+
+    // Check that the factory widget was set
+    const widgetCalls = (mockCtx.ui.setWidget as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (call: unknown[]) => call[0] === "session-recap" && typeof call[1] === "function",
+    );
+    expect(widgetCalls.length).toBeGreaterThan(0);
+
+    // Verify the factory wraps text at a narrow width
+    const factory = widgetCalls[0]![1] as (tui: unknown, theme: unknown) => unknown;
+    const theme = { fg: (_c: string, t: string) => t, bold: (t: string) => t };
+    const component = factory(null, theme) as { render: (w: number) => string[] };
+    const lines = component.render(40);
+    // header line + at least one text line
+    expect(lines.length).toBeGreaterThanOrEqual(2);
+    expect(lines[0]).toContain("recap"); // header
+  });
+});
