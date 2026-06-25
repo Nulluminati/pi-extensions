@@ -9,7 +9,7 @@ on:
   pull_request:
     branches: [main]
 
-# Read-only token is enough for `npm run check` (lint, typecheck, validate, test).
+# Read-only token is enough for both jobs below.
 permissions:
   contents: read
 
@@ -39,3 +39,23 @@ jobs:
 
       - name: Run full check
         run: npm run check
+
+  secrets:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Gitleaks needs the full history to detect past leaks.
+          fetch-depth: 0
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_CONFIG: .gitleaks.toml
+          # The action fails the job on any leak by default. GITHUB_TOKEN
+          # is required for the action to post annotations on the PR.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

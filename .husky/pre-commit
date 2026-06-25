@@ -1,1 +1,16 @@
+# Scan staged changes for secrets. Skips silently if gitleaks isn't
+# installed locally — the CI workflow runs gitleaks as a required check
+# on every push and pull request, so commits that leak secrets will be
+# blocked at the server even without a local install.
+#
+# To enable local pre-commit scanning:
+#   Fedora:  sudo dnf install gitleaks
+#   macOS:   brew install gitleaks
+#   Other:   https://github.com/gitleaks/gitleaks#installing
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks protect --staged --redact --verbose --config .gitleaks.toml || exit 1
+else
+  echo "gitleaks not installed — skipping local secret scan (CI will catch it)"
+fi
+
 npx --no-install lint-staged && npm run check

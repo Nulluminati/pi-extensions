@@ -92,6 +92,17 @@ Checks run on every extension:
 - No undeclared npm imports
 - At least one pi API call (`registerTool`, `registerCommand`, `on`, `appendEntry`, or `registerProvider`)
 
+### Secret scanning
+
+A [gitleaks](https://github.com/gitleaks/gitleaks) config lives at `.gitleaks.toml` and runs two ways:
+
+- The husky pre-commit hook runs `gitleaks protect --staged` so secrets are caught before they leave the machine. The hook skips silently if gitleaks isn't installed locally; install it for early feedback:
+  - Fedora: `sudo dnf install gitleaks`
+  - macOS: `brew install gitleaks`
+- The CI workflow runs gitleaks on every push and pull request as a required check, so commits without a local install still get blocked at the server.
+
+The config extends gitleaks' default ruleset (~150 detectors for common token formats) and allowlists documentation placeholders like `syn_...` and `ctx7sk-...`.
+
 ### Testing
 
 Shared mock factories live in `test/mocks/`:

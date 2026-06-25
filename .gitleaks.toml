@@ -1,0 +1,29 @@
+# Gitleaks configuration
+# https://github.com/gitleaks/gitleaks/blob/master/config/gitleaks.toml
+
+# Use the bundled default ruleset. The rules cover ~150 common token
+# formats (GitHub PATs, AWS keys, Stripe, OpenAI, Anthropic, etc.) and
+# are kept current by the gitleaks project.
+# https://github.com/gitleaks/gitleaks/tree/master/config
+[extend]
+useDefault = true
+
+# Repository title shown in gitleaks output.
+title = "pi-extensions"
+
+# Allow the README docs in each extension to mention example API key
+# placeholders like `syn_...` and `ctx7sk-...` without tripping the scan.
+# These are documentation strings, not real secrets.
+[allowlist]
+description = "Documentation placeholders"
+paths = [
+  '''(.*/)?README\.md$''',
+  '''(.*/)?\.github/.*$''',
+]
+regexes = [
+  '''syn_\.\.\.''',
+  '''ctx7sk-\.\.\.''',
+  '''sk-\.\.\.''',
+  '''PLACEHOLDER''',
+  '''<your[_-]?key[_-]?here>''',
+]
