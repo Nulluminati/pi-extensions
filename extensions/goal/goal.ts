@@ -320,7 +320,7 @@ export default async function goalExtension(pi: ExtensionAPI) {
   }
 
   function maybeQueueContinuation(ctx: ExtensionContext) {
-    if (!state || state.status !== "active") return;
+    if (state?.status !== "active") return;
     if (continuationQueued) return;
     if (ctx.hasPendingMessages()) return;
 
@@ -369,14 +369,14 @@ export default async function goalExtension(pi: ExtensionAPI) {
   });
 
   pi.on("before_agent_start", async (event, _ctx) => {
-    if (!state || state.status !== "active") return undefined;
+    if (state?.status !== "active") return undefined;
     return {
       systemPrompt: `${event.systemPrompt}\n\n${buildGoalSystemPrompt(state)}`,
     };
   });
 
   pi.on("turn_end", async (_event, ctx) => {
-    if (!state || state.status !== "active") return;
+    if (state?.status !== "active") return;
 
     const usage = ctx.getContextUsage();
     if (usage && usage.tokens !== null) {
@@ -394,7 +394,7 @@ export default async function goalExtension(pi: ExtensionAPI) {
   });
 
   pi.on("agent_end", async (_event, ctx) => {
-    if (!state || state.status !== "active") return;
+    if (state?.status !== "active") return;
 
     if (goalCompleteCalled) {
       goalCompleteCalled = false;
@@ -464,7 +464,7 @@ export default async function goalExtension(pi: ExtensionAPI) {
     },
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      if (!state || state.status !== "active") {
+      if (state?.status !== "active") {
         return {
           content: [{ type: "text", text: "No active goal to complete." }],
           details: { error: "no_active_goal" },
@@ -611,7 +611,7 @@ export default async function goalExtension(pi: ExtensionAPI) {
         }
 
         case "pause": {
-          if (!state || state.status !== "active") {
+          if (state?.status !== "active") {
             ctx.ui.notify("No active goal to pause.", "info");
             return;
           }
