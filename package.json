@@ -40,12 +40,12 @@
     "@earendil-works/gondolin": "^0.12.0"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.1",
-    "@types/node": "^26.0.1",
+    "@biomejs/biome": "^2.5.2",
+    "@types/node": "^26.1.0",
     "@vitest/coverage-v8": "^4.1.9",
     "husky": "^9.1.7",
     "lint-staged": "^17.0.8",
-    "tsx": "^4.22.4",
+    "tsx": "^4.22.5",
     "typescript": "^6.0.3",
     "vitest": "^4.1.7"
   }
