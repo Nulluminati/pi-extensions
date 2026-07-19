@@ -19,15 +19,12 @@ const EXPECTED_MODEL_IDS = [
   "syn:large:vision",
   "syn:small:vision",
   "hf:zai-org/GLM-5.2",
-  "hf:zai-org/GLM-5.1",
-  "hf:moonshotai/Kimi-K2.6",
+  "hf:moonshotai/Kimi-K2.7-Code",
   "hf:Qwen/Qwen3.6-27B",
   "hf:MiniMaxAI/MiniMax-M3",
   "hf:zai-org/GLM-4.7-Flash",
   "hf:nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4",
-  "hf:zai-org/GLM-4.7",
   "hf:openai/gpt-oss-120b",
-  "hf:Qwen/Qwen3.5-397B-A17B",
 ];
 
 describe("synthetic-extension", () => {
@@ -103,14 +100,20 @@ describe("synthetic-extension", () => {
     }
   });
 
-  it("maps off to null for MiniMax-M3 (thinking cannot be disabled)", () => {
-    const minimax = STATIC_MODELS.find((m) => m.id === "hf:MiniMaxAI/MiniMax-M3");
-    expect(minimax?.thinkingLevelMap?.off).toBeNull();
+  it("maps off to null for always-on reasoning models (thinking cannot be disabled)", () => {
+    const alwaysOn = STATIC_MODELS.filter(
+      (m) =>
+        m.reasoning && (m.id === "hf:MiniMaxAI/MiniMax-M3" || m.id === "hf:openai/gpt-oss-120b"),
+    );
+    expect(alwaysOn.length).toBe(2);
+    for (const m of alwaysOn) {
+      expect(m.thinkingLevelMap?.off, `${m.id} should map off to null`).toBeNull();
+    }
   });
 
   it("maps off to 'none' for the other reasoning models (thinking is disableable)", () => {
     const disableable = STATIC_MODELS.filter(
-      (m) => m.reasoning && m.id !== "hf:MiniMaxAI/MiniMax-M3",
+      (m) => m.reasoning && m.id !== "hf:MiniMaxAI/MiniMax-M3" && m.id !== "hf:openai/gpt-oss-120b",
     );
     expect(disableable.length).toBeGreaterThan(0);
     for (const m of disableable) {
@@ -118,9 +121,12 @@ describe("synthetic-extension", () => {
     }
   });
 
-  it("marks non-reasoning models reasoning:false with no thinkingLevelMap", () => {
-    for (const m of STATIC_MODELS) {
-      if (m.reasoning) continue;
+  it("marks every non-reasoning model reasoning:false with no thinkingLevelMap", () => {
+    // The live catalog (verified 2026-07) lists reasoning support on every
+    // always-on, tools-capable model, so there are currently no non-reasoning
+    // entries. The guard stays in case the catalog regresses.
+    const nonReasoning = STATIC_MODELS.filter((m) => !m.reasoning);
+    for (const m of nonReasoning) {
       expect(m.thinkingLevelMap, `${m.id} should not carry a thinkingLevelMap`).toBeUndefined();
     }
   });
@@ -247,7 +253,7 @@ describe("synthetic-extension", () => {
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("vision"), "info");
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("reasoning"), "info");
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(
-      expect.stringContaining("hf:moonshotai/Kimi-K2.6"),
+      expect.stringContaining("hf:moonshotai/Kimi-K2.7-Code"),
       "info",
     );
   });
@@ -338,7 +344,11 @@ describe("synthetic-extension", () => {
     await handler(
       {
         type: "model_select",
-        model: { id: "hf:moonshotai/Kimi-K2.6", name: "Kimi-K2.6", provider: "synthetic" },
+        model: {
+          id: "hf:moonshotai/Kimi-K2.7-Code",
+          name: "Kimi-K2.7-Code",
+          provider: "synthetic",
+        },
         previousModel: undefined,
         source: "set",
       },

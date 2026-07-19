@@ -104,9 +104,10 @@ interface SyntheticQuotaResponse {
  *
  * Pricing is per million tokens, sourced from the authenticated
  * GET /openai/v1/models endpoint. Thinking maps reflect the gateway's accepted
- * reasoning_effort enum (verified 2026-06): every reasoning model accepts
- * none/minimal/low/medium/high/xhigh and rejects "max". MiniMax-M3 is special:
- * it always thinks and cannot be turned off, so off maps to null.
+ * reasoning_effort enum (verified 2026-07): every reasoning model accepts
+ * none/minimal/low/medium/high/xhigh and rejects "max". Two models always think
+ * and cannot be turned off (MiniMax-M3, gpt-oss-120b), so off maps to null for
+ * them.
  *
  * The syn:* ids are first-class selectable models in the Synthetic API (each
  * points at a concrete model behind the scenes) and are registered standalone.
@@ -176,30 +177,6 @@ const STATIC_MODELS: ProviderModelConfig[] = [
     compat: SYNTHETIC_COMPAT,
   },
   {
-    id: "hf:zai-org/GLM-5.1",
-    name: "GLM-5.1",
-    api: "openai-completions",
-    reasoning: true,
-    thinkingLevelMap: DISABLEABLE_THINKING_MAP,
-    input: ["text"],
-    cost: { input: 1, output: 3, cacheRead: 1, cacheWrite: 0 },
-    contextWindow: 196608,
-    maxTokens: 65536,
-    compat: SYNTHETIC_COMPAT,
-  },
-  {
-    id: "hf:zai-org/GLM-4.7",
-    name: "GLM-4.7",
-    api: "openai-completions",
-    reasoning: true,
-    thinkingLevelMap: DISABLEABLE_THINKING_MAP,
-    input: ["text"],
-    cost: { input: 0.45, output: 2.19, cacheRead: 0.45, cacheWrite: 0 },
-    contextWindow: 202752,
-    maxTokens: 65536,
-    compat: SYNTHETIC_COMPAT,
-  },
-  {
     id: "hf:zai-org/GLM-4.7-Flash",
     name: "GLM-4.7-Flash",
     api: "openai-completions",
@@ -214,8 +191,8 @@ const STATIC_MODELS: ProviderModelConfig[] = [
 
   // --- Other reasoning models ---
   {
-    id: "hf:moonshotai/Kimi-K2.6",
-    name: "Kimi-K2.6",
+    id: "hf:moonshotai/Kimi-K2.7-Code",
+    name: "Kimi-K2.7-Code",
     api: "openai-completions",
     reasoning: true,
     thinkingLevelMap: DISABLEABLE_THINKING_MAP,
@@ -246,7 +223,7 @@ const STATIC_MODELS: ProviderModelConfig[] = [
     thinkingLevelMap: ALWAYS_ON_THINKING_MAP,
     input: ["text", "image"],
     cost: { input: 0.6, output: 1.2, cacheRead: 0.6, cacheWrite: 0 },
-    contextWindow: 524288,
+    contextWindow: 262144,
     maxTokens: 65536,
     compat: SYNTHETIC_COMPAT,
   },
@@ -263,27 +240,20 @@ const STATIC_MODELS: ProviderModelConfig[] = [
     compat: SYNTHETIC_COMPAT,
   },
 
-  // --- Non-reasoning models ---
+  // --- gpt-oss (reasoning, always on) ---
   {
     id: "hf:openai/gpt-oss-120b",
     name: "gpt-oss-120b",
     api: "openai-completions",
-    reasoning: false,
+    reasoning: true,
+    // The catalog advertises reasoning and the probe confirms it: gpt-oss-120b
+    // emits a `reasoning` block on every request including `none`, so thinking
+    // cannot be turned off. off is hidden.
+    thinkingLevelMap: ALWAYS_ON_THINKING_MAP,
     input: ["text"],
     cost: { input: 0.1, output: 0.1, cacheRead: 0.1, cacheWrite: 0 },
     contextWindow: 131072,
-    maxTokens: 32768,
-    compat: SYNTHETIC_COMPAT,
-  },
-  {
-    id: "hf:Qwen/Qwen3.5-397B-A17B",
-    name: "Qwen3.5-397B-A17B",
-    api: "openai-completions",
-    reasoning: false,
-    input: ["text", "image"],
-    cost: { input: 0.6, output: 3.6, cacheRead: 0.6, cacheWrite: 0 },
-    contextWindow: 262144,
-    maxTokens: 32768,
+    maxTokens: 65536,
     compat: SYNTHETIC_COMPAT,
   },
 ];
