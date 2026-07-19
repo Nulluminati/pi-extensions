@@ -111,6 +111,7 @@ class MockSelectList {
 
 /** Mock `Key` helper. */
 const MockKey = {
+  space: "space",
   alt: (k: string) => `alt+${k}`,
   ctrlAlt: (k: string) => `ctrl+alt+${k}`,
   up: "up",
@@ -121,6 +122,7 @@ const MockKey = {
 
 /** Mock `matchesKey` — recognizes a few key sequences. */
 function mockMatchesKey(data: string, keyId: string): boolean {
+  if (keyId === "space") return data === " " || data === "space-release";
   if (keyId === "up") return data === "\x1b[A" || data === "\x1bOA";
   if (keyId === "down") return data === "\x1b[B" || data === "\x1bOB";
   if (keyId === "pageUp") return data === "\x1b[5~" || data === "\x1b[[5~";
@@ -168,4 +170,7 @@ vi.mock("@earendil-works/pi-tui", () => ({
   SelectList: MockSelectList,
   Key: MockKey,
   matchesKey: mockMatchesKey,
+  isKeyRelease: vi.fn((data: string) => data === "space-release"),
+  isKeyRepeat: vi.fn(() => false),
+  isKittyProtocolActive: vi.fn(() => false),
 }));

@@ -57,6 +57,7 @@ export function createMockContext(): DeepMocked<ExtensionContext> {
   return {
     ui: createMockUI(),
     hasUI: true,
+    mode: "tui" as const,
     cwd: "/home/test",
     sessionManager: {
       getBranch: vi.fn(() => []),
@@ -65,6 +66,8 @@ export function createMockContext(): DeepMocked<ExtensionContext> {
       getSessionFile: vi.fn(() => undefined),
     },
     modelRegistry: {
+      getAll: vi.fn(() => []),
+      getAvailable: vi.fn(() => []),
       getApiKeyAndHeaders: vi.fn(() =>
         Promise.resolve({ ok: true, apiKey: "test-key", headers: {} }),
       ),

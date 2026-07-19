@@ -56,6 +56,7 @@ declare module "pi" {
   export interface ExtensionContext {
     ui: ExtensionUIContext;
     hasUI: boolean;
+    mode: "tui" | "rpc" | "json" | "print";
     cwd: string;
     sessionManager: ReadonlySessionManager;
     modelRegistry: ModelRegistry;
@@ -328,6 +329,8 @@ declare module "pi" {
   }
 
   export interface ModelRegistry {
+    getAll(): Model<any>[];
+    getAvailable(): Model<any>[];
     getApiKeyAndHeaders(model: any): Promise<{
       ok: boolean;
       apiKey?: string;
@@ -596,6 +599,9 @@ declare module "@earendil-works/pi-tui" {
   ): string;
   export function visibleWidth(str: string): number;
   export function wrapTextWithAnsi(str: string, width: number): string[];
+  export function isKeyRelease(data: string): boolean;
+  export function isKeyRepeat(data: string): boolean;
+  export function isKittyProtocolActive(): boolean;
 
   export class Input {
     value: string;
@@ -691,6 +697,7 @@ declare module "@earendil-works/pi-tui" {
   // Key descriptor helpers. Alt-prefixed sequences are the only modifier
   // combos that resolve reliably across terminal emulators.
   export const Key: {
+    space: string;
     alt(key: string): string;
     ctrlAlt(key: string): string;
   };
