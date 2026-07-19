@@ -134,7 +134,11 @@ function formatTokenCount(n: number): string {
 }
 
 function buildUsageBar(percent: number, theme: any): string {
-  const filled = Math.round((percent / 100) * BAR_SEGMENTS);
+  // Clamp so a context larger than the window (e.g. a continued session whose
+  // prior context exceeds the selected model's window) renders a full bar
+  // instead of passing a negative count to String.repeat and crashing.
+  const clamped = Math.max(0, Math.min(100, percent));
+  const filled = Math.round((clamped / 100) * BAR_SEGMENTS);
   const empty = BAR_SEGMENTS - filled;
 
   let color: string;

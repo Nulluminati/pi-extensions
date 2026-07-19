@@ -305,6 +305,32 @@ describe("status-bar-extension", () => {
     expect(lines[0]).toContain("50.0k/200.0k");
   });
 
+  it("clamps usage bar when context exceeds window (e.g. continued session)", async () => {
+    // Regression: continuing a session whose context is already larger than
+    // the selected model's window yields percent > 100, which made
+    // String.repeat receive a negative count and crashed pi at boot.
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.getContextUsage = vi.fn(() => ({
+      tokens: 262000,
+      contextWindow: 200000,
+      percent: 131,
+    }));
+    await enableBar(mockPi, mockCtx);
+
+    const component = getFooterFactory(mockCtx)(
+      { requestRender: vi.fn() },
+      plainTheme(),
+      footerData(),
+    );
+
+    // Must not throw RangeError: Invalid count value (negative repeat).
+    const lines = component.render(120);
+    expect(lines[0]).toContain("262.0k/200.0k");
+    // Bar is fully filled (10 blocks) rather than crashing.
+    expect(lines[0]).toContain("[██████████]");
+  });
+
   it("token indicators use distinct colors per bucket", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
