@@ -7,13 +7,9 @@
  *
  * Commands:
  *   Hold Space for 1 second  Open the voice dictation overlay.
- *   /voice                    Open the voice dictation overlay.
- *   /voice-models             Select the active transcription model.
+ *   /voice                    Open voice settings.
  *   /voice-speak [full]       Summarize and speak the latest assistant message.
  *   /voice-stop               Stop current speech generation or playback.
- *   /voice-voices             Select the local Kitten TTS voice.
- *   /voice-summary-model      Select the cloud summarization model.
- *   /voice-info               Show model downloads and audio device information.
  *
  * Models live in $PI_VOICE_MODELS (default ~/.cache/pi-voice/models).
  *
@@ -25,22 +21,26 @@
 
 // --- Imports ---
 
-import { execSync, spawn } from "node:child_process";
-import { existsSync, rmSync } from "node:fs";
+import { execFileSync, execSync, spawn } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { completeSimple } from "@earendil-works/pi-ai";
-import { CustomEditor } from "@earendil-works/pi-coding-agent";
+import { CustomEditor, getSettingsListTheme } from "@earendil-works/pi-coding-agent";
 import {
   isKeyRelease,
   isKeyRepeat,
   isKittyProtocolActive,
   Key,
   matchesKey,
+  type SettingItem,
+  SettingsList,
+  truncateToWidth,
   visibleWidth,
 } from "@earendil-works/pi-tui";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "pi";
+import { resolveSmallModel } from "../../lib/small-model.ts";
 
 // --- Constants ---
 
@@ -52,8 +52,6 @@ const HOLD_REPEAT_GAP_MS = 1200;
 const HOLD_REPEAT_MIN_EVENTS = 2;
 const DEFAULT_MODEL_ID = "moonshine-base-int8";
 const DEFAULT_TTS_MODEL_ID = "kitten-nano-en-v0_1-fp16";
-const DEFAULT_SUMMARY_PROVIDER = "synthetic";
-const DEFAULT_SUMMARY_MODEL_ID = "syn:small:text";
 const TTS_STATUS_KEY = "voice-speak";
 const KITTEN_VOICES = [
   "expr-voice-2-m",
@@ -66,7 +64,9 @@ const KITTEN_VOICES = [
   "expr-voice-5-f",
 ] as const;
 const MODELS_ENV_VAR = "PI_VOICE_MODELS";
+const VOICE_CONFIG_ENV_VAR = "PI_VOICE_CONFIG";
 const DEFAULT_MODELS_SUBDIR = join(".cache", "pi-voice", "models");
+const DEFAULT_CONFIG_SUBPATH = join(".pi", "agent", "extensions", "voice", "config.json");
 const VAD_MODEL_FILE = "silero_vad.onnx";
 const VAD_WINDOW_SIZE = 512;
 const VAD_SPEECH_THRESHOLD = 0.5;
@@ -85,6 +85,7 @@ interface ModelDef {
   kind: ModelKind;
   family: ModelFamily;
   dirName: string;
+  displayName: string;
   description: string;
   /** Files that must exist for the model to count as downloaded. */
   files: string[];
@@ -150,6 +151,33 @@ interface OfflineTtsInstance {
   }): Promise<{ samples: Float32Array; sampleRate: number }>;
 }
 
+interface OnnxTensor {
+  data: unknown;
+  dims: readonly number[];
+}
+
+interface OnnxSession {
+  run(feeds: Record<string, unknown>): Promise<Record<string, OnnxTensor>>;
+}
+
+interface OnnxRuntime {
+  Tensor: new (
+    type: "float32" | "int64",
+    data: Float32Array | BigInt64Array,
+    dimensions: readonly number[],
+  ) => OnnxTensor;
+  InferenceSession: {
+    create(
+      modelPath: string,
+      options: {
+        executionProviders: string[];
+        intraOpNumThreads: number;
+        interOpNumThreads: number;
+      },
+    ): Promise<OnnxSession>;
+  };
+}
+
 interface SpeechJob {
   cancelled: boolean;
   player: ReturnType<typeof spawn> | null;
@@ -181,17 +209,17 @@ interface HoldToVoiceDeps {
   isRepeat: (data: string) => boolean;
 }
 
+type TtsBackend = "kitten" | "inflect";
+
 interface TtsModelDef {
   id: string;
+  backend: TtsBackend;
   dirName: string;
   description: string;
   files: string[];
-  downloadUrl: string;
-}
-
-interface SummaryModelRef {
-  provider: string;
-  id: string;
+  downloadUrl?: string;
+  repository?: string;
+  displayName: string;
 }
 
 // --- Model registry ---
@@ -199,11 +227,31 @@ interface SummaryModelRef {
 const TTS_MODELS: TtsModelDef[] = [
   {
     id: "kitten-nano-en-v0_1-fp16",
+    backend: "kitten",
     dirName: "kitten-nano-en-v0_1-fp16",
+    displayName: "Kitten Nano",
     description: "Kitten Nano English FP16 with eight local voices.",
     files: ["model.fp16.onnx", "voices.bin", "tokens.txt", "espeak-ng-data"],
     downloadUrl:
       "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kitten-nano-en-v0_1-fp16.tar.bz2",
+  },
+  {
+    id: "inflect-nano-v2-onnx",
+    backend: "inflect",
+    dirName: "inflect-nano-v2-onnx",
+    displayName: "Inflect Nano v2",
+    description: "Inflect Nano v2, 3.96M parameters with one fixed English voice.",
+    files: ["duration.onnx", "decode.onnx"],
+    repository: "owensong/Inflect-Nano-v2-ONNX",
+  },
+  {
+    id: "inflect-micro-v2-onnx",
+    backend: "inflect",
+    dirName: "inflect-micro-v2-onnx",
+    displayName: "Inflect Micro v2",
+    description: "Inflect Micro v2, 9.36M parameters with one fixed English voice.",
+    files: ["duration.onnx", "decode.onnx"],
+    repository: "owensong/Inflect-Micro-v2-ONNX",
   },
 ];
 
@@ -213,6 +261,7 @@ const MODELS: ModelDef[] = [
     kind: "offline",
     family: "moonshine",
     dirName: "sherpa-onnx-moonshine-base-en-int8",
+    displayName: "Moonshine Base",
     description: "Moonshine Base (English), int8. Fast and robust to noisy microphones.",
     files: [
       "preprocess.onnx",
@@ -230,6 +279,7 @@ const MODELS: ModelDef[] = [
     family: "whisper",
     filePrefix: "tiny.en",
     dirName: "sherpa-onnx-whisper-tiny.en",
+    displayName: "Whisper Tiny",
     description: "Whisper Tiny (English), int8. Compact general-purpose transcription.",
     files: ["tiny.en-encoder.int8.onnx", "tiny.en-decoder.int8.onnx", "tiny.en-tokens.txt"],
     downloadUrl:
@@ -241,6 +291,7 @@ const MODELS: ModelDef[] = [
     family: "whisper",
     filePrefix: "small.en",
     dirName: "sherpa-onnx-whisper-small.en",
+    displayName: "Whisper Small",
     description: "Whisper Small (English), int8. More accurate, with slower CPU transcription.",
     files: ["small.en-encoder.int8.onnx", "small.en-decoder.int8.onnx", "small.en-tokens.txt"],
     downloadUrl:
@@ -249,6 +300,131 @@ const MODELS: ModelDef[] = [
 ];
 
 // --- Pure helpers ---
+
+// Inflect v2's Apache-2.0 symbol inventory mirrors runtime/text/symbols.py.
+const INFLECT_PUNCTUATION = ';:,.!?¡¿—…"«»“” ';
+const INFLECT_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+const INFLECT_IPA =
+  "ɑɐɒæɓʙβɔɕçɗɖðʤəɘɚɛɜɝɞɟʄɡɠɢʛɦɧħɥʜɨɪʝɭɬɫɮʟɱɯɰŋɳɲɴøɵɸθœɶʘɹɺɾɻʀʁɽʂʃʈʧʉʊʋⱱʌɣɤʍχʎʏʑʐʒʔʡʕʢǀǁǂǃˈˌːˑʼʴʰʱʲʷˠˤ˞↓↑→↗↘'̩'ᵻ";
+const INFLECT_SYMBOLS = ["_", ...INFLECT_PUNCTUATION, ...INFLECT_LETTERS, ...INFLECT_IPA];
+const INFLECT_SYMBOL_TO_ID = new Map(INFLECT_SYMBOLS.map((symbol, index) => [symbol, index]));
+function applyInflectPhonemeOverrides(text: string): string {
+  return text
+    .replaceAll("sˈæskɐtʃˌuːən", "sɐskˈætʃəwən")
+    .replaceAll("flʊɹɹˈɛsənt", "flʊˈɹɛsənt")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildInflectPhonemeText(text: string, phonemize: (text: string) => string): string {
+  const parts = text.split(/([,;:.!?])/);
+  const phonemeParts: string[] = [];
+  for (let index = 0; index < parts.length; index += 2) {
+    const words = parts[index]?.trim();
+    const punctuation = parts[index + 1] ?? "";
+    if (words) phonemeParts.push(`${applyInflectPhonemeOverrides(phonemize(words))}${punctuation}`);
+    else if (punctuation) phonemeParts.push(punctuation);
+  }
+  return phonemeParts.join(" ").trim();
+}
+
+function inflectTextToTokens(phonemeText: string): number[] {
+  const tokenIds: number[] = [];
+  for (const symbol of phonemeText) {
+    const id = INFLECT_SYMBOL_TO_ID.get(symbol);
+    if (id !== undefined) tokenIds.push(id);
+  }
+  if (tokenIds.length === 0) throw new Error("Inflect frontend produced no speakable tokens.");
+  const withBlanks = new Array<number>(tokenIds.length * 2 + 1).fill(0);
+  for (let index = 0; index < tokenIds.length; index++) {
+    withBlanks[index * 2 + 1] = tokenIds[index] ?? 0;
+  }
+  return withBlanks;
+}
+
+function splitInflectText(text: string, limit = 280): string[] {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) return [];
+  const sentences = normalized.split(/(?<=[.!?;:])\s+/).filter(Boolean);
+  const chunks: string[] = [];
+  for (let sentence of sentences.length > 0 ? sentences : [normalized]) {
+    while (sentence.length > limit) {
+      const search = sentence.slice(0, limit + 1);
+      let punctuation = -1;
+      for (const mark of [",", ";", ":"])
+        punctuation = Math.max(punctuation, search.lastIndexOf(mark));
+      let splitAt =
+        punctuation >= Math.floor(limit / 2) ? punctuation + 1 : sentence.lastIndexOf(" ", limit);
+      if (splitAt < Math.floor(limit / 2)) splitAt = limit;
+      chunks.push(sentence.slice(0, splitAt).trim());
+      sentence = sentence.slice(splitAt).trimStart();
+    }
+    if (sentence) chunks.push(sentence);
+  }
+  return chunks;
+}
+
+function phonemizeInflectText(text: string): string {
+  return execFileSync("espeak-ng", ["-q", "--ipa=2", "-v", "en-us", text], {
+    encoding: "utf8",
+    maxBuffer: 1024 * 1024,
+  }).trim();
+}
+
+function createInflectGaussianSamples(length: number, seedInput: number): Float32Array {
+  let seed = seedInput;
+  let spare: number | null = null;
+  const random = (): number => {
+    seed |= 0;
+    seed = (seed + 0x6d2b79f5) | 0;
+    let value = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    value = (value + Math.imul(value ^ (value >>> 7), 61 | value)) ^ value;
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+  const gaussian = (): number => {
+    if (spare !== null) {
+      const value = spare;
+      spare = null;
+      return value;
+    }
+    let u = 0;
+    let v = 0;
+    let radius = 0;
+    do {
+      u = random() * 2 - 1;
+      v = random() * 2 - 1;
+      radius = u * u + v * v;
+    } while (radius >= 1 || radius === 0);
+    const multiplier = Math.sqrt((-2 * Math.log(radius)) / radius);
+    spare = v * multiplier;
+    return u * multiplier;
+  };
+  return Float32Array.from({ length }, gaussian);
+}
+
+function encodePcm16Wave(samples: Float32Array, sampleRate: number): Buffer {
+  const bytesPerSample = 2;
+  const dataLength = samples.length * bytesPerSample;
+  const wave = Buffer.alloc(44 + dataLength);
+  wave.write("RIFF", 0);
+  wave.writeUInt32LE(36 + dataLength, 4);
+  wave.write("WAVEfmt ", 8);
+  wave.writeUInt32LE(16, 16);
+  wave.writeUInt16LE(1, 20);
+  wave.writeUInt16LE(1, 22);
+  wave.writeUInt32LE(sampleRate, 24);
+  wave.writeUInt32LE(sampleRate * bytesPerSample, 28);
+  wave.writeUInt16LE(bytesPerSample, 32);
+  wave.writeUInt16LE(16, 34);
+  wave.write("data", 36);
+  wave.writeUInt32LE(dataLength, 40);
+  for (let index = 0; index < samples.length; index++) {
+    const sample = Math.max(-1, Math.min(1, samples[index] ?? 0));
+    const pcm = sample < 0 ? Math.round(sample * 32768) : Math.round(sample * 32767);
+    wave.writeInt16LE(pcm, 44 + index * bytesPerSample);
+  }
+  return wave;
+}
 
 function addHoldToVoice<T extends HoldToVoiceEditor>(
   editor: T,
@@ -497,6 +673,67 @@ function resolveModelsDir(env: NodeJS.ProcessEnv): string {
   return join(homedir(), DEFAULT_MODELS_SUBDIR);
 }
 
+function resolveVoiceConfigPath(env: NodeJS.ProcessEnv, homeDir = homedir()): string {
+  const fromEnv = env[VOICE_CONFIG_ENV_VAR];
+  if (fromEnv?.trim()) return fromEnv.trim();
+  return join(homeDir, DEFAULT_CONFIG_SUBPATH);
+}
+
+function readVoiceConfig(configPath: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(readFileSync(configPath, "utf8"));
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeVoiceConfig(configPath: string, changes: Record<string, unknown>): void {
+  const config = { ...readVoiceConfig(configPath), ...changes };
+  mkdirSync(dirname(configPath), { recursive: true });
+  const temporaryPath = `${configPath}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    writeFileSync(temporaryPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+    renameSync(temporaryPath, configPath);
+  } catch (error) {
+    rmSync(temporaryPath, { force: true });
+    throw error;
+  }
+}
+
+function loadActiveModelId(configPath: string): string {
+  const modelId = readVoiceConfig(configPath).dictationModel;
+  return typeof modelId === "string" && MODELS.some((model) => model.id === modelId)
+    ? modelId
+    : DEFAULT_MODEL_ID;
+}
+
+function loadActiveSpeakerId(configPath: string): number {
+  const voice = readVoiceConfig(configPath).voice;
+  if (typeof voice !== "string") return 0;
+  const speakerId = KITTEN_VOICES.indexOf(voice as (typeof KITTEN_VOICES)[number]);
+  return speakerId >= 0 ? speakerId : 0;
+}
+
+function loadActiveTtsModelId(configPath: string): string {
+  const modelId = readVoiceConfig(configPath).ttsModel;
+  return typeof modelId === "string" && TTS_MODELS.some((model) => model.id === modelId)
+    ? modelId
+    : DEFAULT_TTS_MODEL_ID;
+}
+
+function saveActiveModel(configPath: string, modelId: string): void {
+  writeVoiceConfig(configPath, { dictationModel: modelId });
+}
+
+function saveActiveVoice(configPath: string, voice: (typeof KITTEN_VOICES)[number]): void {
+  writeVoiceConfig(configPath, { voice });
+}
+
+function saveActiveTtsModel(configPath: string, modelId: string): void {
+  writeVoiceConfig(configPath, { ttsModel: modelId });
+}
+
 function modelDirPath(modelsDir: string, model: ModelDef | TtsModelDef): string {
   return join(modelsDir, model.dirName);
 }
@@ -505,6 +742,121 @@ function modelDirPath(modelsDir: string, model: ModelDef | TtsModelDef): string 
 function modelIsDownloaded(modelsDir: string, model: ModelDef | TtsModelDef): boolean {
   const dir = modelDirPath(modelsDir, model);
   return model.files.every((file) => existsSync(join(dir, file)));
+}
+
+class InflectTtsEngine {
+  readonly sampleRate = 24_000;
+
+  private constructor(
+    private readonly ort: OnnxRuntime,
+    private readonly durationSession: OnnxSession,
+    private readonly decodeSession: OnnxSession,
+  ) {}
+
+  static async create(
+    ort: OnnxRuntime,
+    model: TtsModelDef,
+    modelsDir: string,
+  ): Promise<InflectTtsEngine> {
+    const dir = modelDirPath(modelsDir, model);
+    const options = {
+      executionProviders: ["cpu"],
+      intraOpNumThreads: 4,
+      interOpNumThreads: 1,
+    };
+    const [durationSession, decodeSession] = await Promise.all([
+      ort.InferenceSession.create(join(dir, "duration.onnx"), options),
+      ort.InferenceSession.create(join(dir, "decode.onnx"), options),
+    ]);
+    return new InflectTtsEngine(ort, durationSession, decodeSession);
+  }
+
+  async generate(text: string, job: SpeechJob): Promise<Float32Array> {
+    const chunks = splitInflectText(text);
+    const pieces: Float32Array[] = [];
+    for (let index = 0; index < chunks.length; index++) {
+      if (job.cancelled) break;
+      const chunk = chunks[index];
+      if (!chunk) continue;
+      if (index > 0) {
+        const previous = chunks[index - 1] ?? "";
+        pieces.push(new Float32Array(Math.round(this.sampleRate * inflectBoundaryPause(previous))));
+      }
+      pieces.push(await this.generateChunk(chunk, 7 + index));
+    }
+    return concatFloat32(pieces);
+  }
+
+  private async generateChunk(text: string, seed: number): Promise<Float32Array> {
+    const phonemeText = buildInflectPhonemeText(text, phonemizeInflectText);
+    const tokens = inflectTextToTokens(phonemeText);
+    const tokenCount = tokens.length;
+    const durationOutputs = await this.durationSession.run({
+      tokens: new this.ort.Tensor(
+        "int64",
+        BigInt64Array.from(tokens, (token) => BigInt(token)),
+        [1, tokenCount],
+      ),
+      lengths: new this.ort.Tensor("int64", BigInt64Array.of(BigInt(tokenCount)), [1]),
+      length_scale: new this.ort.Tensor("float32", Float32Array.of(1), []),
+    });
+    const mean = durationOutputs.m_p_exp;
+    const logs = durationOutputs.logs_p_exp;
+    const mask = durationOutputs.y_mask;
+    if (!mean || !logs || !mask)
+      throw new Error("Inflect duration graph returned incomplete output.");
+
+    const dimensions = [...mean.dims];
+    const sampleCount = dimensions.reduce((total, value) => total * value, 1);
+    const decodeOutputs = await this.decodeSession.run({
+      m_p_exp: mean,
+      logs_p_exp: logs,
+      y_mask: mask,
+      zp_noise: new this.ort.Tensor(
+        "float32",
+        createInflectGaussianSamples(sampleCount, seed),
+        dimensions,
+      ),
+      noise_scale: new this.ort.Tensor("float32", Float32Array.of(0.667), []),
+    });
+    const waveform = decodeOutputs.waveform;
+    if (!waveform || !(waveform.data instanceof Float32Array)) {
+      throw new Error("Inflect decode graph returned no float32 waveform.");
+    }
+    return applyInflectEdgeFade(waveform.data, this.sampleRate);
+  }
+}
+
+function inflectBoundaryPause(text: string): number {
+  const ending = text.trim().slice(-1);
+  const pauses: Record<string, number> = {
+    "?": 0.28,
+    "!": 0.24,
+    ".": 0.22,
+    ";": 0.16,
+    ":": 0.13,
+    ",": 0.09,
+  };
+  return pauses[ending] ?? 0.08;
+}
+
+function applyInflectEdgeFade(
+  samples: Float32Array,
+  sampleRate: number,
+  milliseconds = 5,
+): Float32Array {
+  const frames = Math.min(
+    Math.round((sampleRate * milliseconds) / 1000),
+    Math.floor(samples.length / 2),
+  );
+  const output = Float32Array.from(samples);
+  for (let index = 0; index < frames; index++) {
+    const ramp = frames > 1 ? index / (frames - 1) : 1;
+    output[index] = (output[index] ?? 0) * ramp;
+    const endIndex = output.length - index - 1;
+    output[endIndex] = (output[endIndex] ?? 0) * ramp;
+  }
+  return output;
 }
 
 function buildKittenConfig(model: TtsModelDef, modelsDir: string, numThreads: number): unknown {
@@ -535,32 +887,17 @@ function stopSpeechJob(job: SpeechJob): void {
   job.player = null;
 }
 
-async function playKittenSpeech(
-  sherpa: TtsSherpa,
-  engine: OfflineTtsInstance,
-  text: string,
-  speakerId: number,
+function resolvePlaybackCommand(): "pw-play" | "ffplay" {
+  if (hasTool("pw-play")) return "pw-play";
+  if (hasTool("ffplay")) return "ffplay";
+  throw new Error("Install PipeWire (pw-play) or ffmpeg (ffplay) for playback.");
+}
+
+async function playWaveFile(
+  playerCommand: "pw-play" | "ffplay",
+  wavPath: string,
   job: SpeechJob,
 ): Promise<void> {
-  if (job.cancelled) return;
-  const playerCommand = hasTool("pw-play") ? "pw-play" : hasTool("ffplay") ? "ffplay" : undefined;
-  if (!playerCommand) {
-    throw new Error("Install PipeWire (pw-play) or ffmpeg (ffplay) for playback.");
-  }
-
-  const audio = await engine.generateAsync({
-    text,
-    generationConfig: new sherpa.GenerationConfig({
-      sid: speakerId,
-      speed: 1,
-      silenceScale: 0.2,
-    }),
-    onProgress: () => !job.cancelled,
-  });
-  if (job.cancelled) return;
-
-  const wavPath = join(tmpdir(), `pi-voice-tts-${process.pid}-${Date.now()}.wav`);
-  sherpa.writeWave(wavPath, audio);
   const playerArgs =
     playerCommand === "pw-play"
       ? [wavPath]
@@ -578,6 +915,56 @@ async function playKittenSpeech(
   } finally {
     if (job.player === player) job.player = null;
     if (job.cancelled) player.kill("SIGKILL");
+  }
+}
+
+async function playKittenSpeech(
+  sherpa: TtsSherpa,
+  engine: OfflineTtsInstance,
+  text: string,
+  speakerId: number,
+  job: SpeechJob,
+): Promise<void> {
+  if (job.cancelled) return;
+  const playerCommand = resolvePlaybackCommand();
+  const audio = await engine.generateAsync({
+    text,
+    generationConfig: new sherpa.GenerationConfig({
+      sid: speakerId,
+      speed: 1,
+      silenceScale: 0.2,
+    }),
+    onProgress: () => !job.cancelled,
+  });
+  if (job.cancelled) return;
+
+  const wavPath = join(tmpdir(), `pi-voice-tts-${process.pid}-${Date.now()}.wav`);
+  sherpa.writeWave(wavPath, audio);
+  try {
+    await playWaveFile(playerCommand, wavPath, job);
+  } finally {
+    rmSync(wavPath, { force: true });
+  }
+}
+
+async function playInflectSpeech(
+  engine: InflectTtsEngine,
+  text: string,
+  job: SpeechJob,
+): Promise<void> {
+  if (job.cancelled) return;
+  if (!hasTool("espeak-ng")) {
+    throw new Error("Install espeak-ng for Inflect text processing.");
+  }
+  const playerCommand = resolvePlaybackCommand();
+  const samples = await engine.generate(text, job);
+  if (job.cancelled || samples.length === 0) return;
+
+  const wavPath = join(tmpdir(), `pi-voice-inflect-${process.pid}-${Date.now()}.wav`);
+  writeFileSync(wavPath, encodePcm16Wave(samples, engine.sampleRate));
+  try {
+    await playWaveFile(playerCommand, wavPath, job);
+  } finally {
     rmSync(wavPath, { force: true });
   }
 }
@@ -721,36 +1108,6 @@ function resolveSource(env: NodeJS.ProcessEnv): string {
   return "default";
 }
 
-interface SourceInfo {
-  name: string;
-  description: string;
-}
-
-/** Parse `pactl list short sources` into name/description pairs. Pure. */
-function parseSourcesListing(output: string): SourceInfo[] {
-  const lines = output.split("\n").filter((line) => line.trim());
-  const result: SourceInfo[] = [];
-  for (const line of lines) {
-    // Format: <id>\t<name>\t<driver>\t<sample-spec>\t<state>
-    const parts = line.split("\t");
-    const name = parts[1]?.trim();
-    if (name) result.push({ name, description: parts[4]?.trim() || name });
-  }
-  return result;
-}
-
-function listSources(): SourceInfo[] {
-  try {
-    const out = execSync("pactl list short sources", {
-      stdio: ["ignore", "pipe", "ignore"],
-      timeout: 3000,
-    }).toString();
-    return parseSourcesListing(out);
-  } catch {
-    return [];
-  }
-}
-
 // --- Native addon loading ---
 
 function loadSherpa(): SherpaOnnx {
@@ -758,6 +1115,11 @@ function loadSherpa(): SherpaOnnx {
   // so repeated calls are instant.
   const require = createRequire(import.meta.url);
   return require("sherpa-onnx-node") as SherpaOnnx;
+}
+
+function loadOnnxRuntime(): OnnxRuntime {
+  const require = createRequire(import.meta.url);
+  return require("onnxruntime-node") as OnnxRuntime;
 }
 
 // --- Transcription (dependency-injected for testability) ---
@@ -1169,7 +1531,7 @@ async function runVoiceOverlay(
   const model = getModel(modelId);
   if (!model || !modelIsDownloaded(modelsDir, model)) {
     ctx.ui.notify(
-      `Model "${modelId}" not found in ${modelsDir}. Run /voice-info for download instructions.`,
+      `Model "${modelId}" not found in ${modelsDir}. Open /voice or see the voice README for setup.`,
       "error",
     );
     return;
@@ -1333,28 +1695,23 @@ async function runVoiceOverlay(
 
 // --- Command handlers ---
 
-async function summarizeForSpeech(
-  text: string,
-  ctx: ExtensionCommandContext,
-  modelRef: SummaryModelRef,
-): Promise<string> {
-  const model = ctx.modelRegistry.find(modelRef.provider, modelRef.id);
-  if (!model) throw new Error(`Summary model not found: ${modelRef.provider}/${modelRef.id}`);
-  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-  if (!auth?.ok || !auth.apiKey) {
-    throw new Error(`No credentials for summary model: ${modelRef.provider}/${modelRef.id}`);
-  }
+async function summarizeForSpeech(text: string, ctx: ExtensionCommandContext): Promise<string> {
+  const resolved = await resolveSmallModel(ctx);
   const completionOptions: {
     apiKey: string;
     headers?: Record<string, string>;
+    env?: Record<string, string>;
     maxTokens: number;
+    reasoning?: string;
   } = {
-    apiKey: auth.apiKey,
+    apiKey: resolved.auth.apiKey,
     maxTokens: 160,
   };
-  if (auth.headers) completionOptions.headers = auth.headers;
+  if (resolved.auth.headers) completionOptions.headers = resolved.auth.headers;
+  if (resolved.auth.env) completionOptions.env = resolved.auth.env;
+  if (resolved.reasoning) completionOptions.reasoning = resolved.reasoning;
   const response = await completeSimple(
-    model,
+    resolved.model,
     {
       systemPrompt: "You write short, accurate spoken summaries of coding-agent responses.",
       messages: [
@@ -1381,6 +1738,7 @@ async function runVoiceSpeak(
   ctx: ExtensionCommandContext,
   opts: {
     modelsDir?: string;
+    ttsModelId?: string;
     summarize: (text: string, ctx: ExtensionCommandContext) => Promise<string>;
     speak: (text: string, speakerId: number) => Promise<void>;
     speakerId: number;
@@ -1392,10 +1750,12 @@ async function runVoiceSpeak(
     return;
   }
   const modelsDir = opts.modelsDir ?? resolveModelsDir(process.env);
-  const ttsModel = TTS_MODELS.find((model) => model.id === DEFAULT_TTS_MODEL_ID);
+  const ttsModelId = opts.ttsModelId ?? DEFAULT_TTS_MODEL_ID;
+  const ttsModel = TTS_MODELS.find((model) => model.id === ttsModelId);
   if (!ttsModel || !modelIsDownloaded(modelsDir, ttsModel)) {
+    const modelName = ttsModel?.displayName ?? ttsModelId;
     ctx.ui.notify(
-      `Kitten Nano TTS is not downloaded in ${modelsDir}. Run /voice-info for instructions.`,
+      `${modelName} TTS is not downloaded in ${modelsDir}. Open /voice or see the voice README for setup.`,
       "error",
     );
     return;
@@ -1423,95 +1783,346 @@ async function runVoiceSpeak(
   }
 }
 
-async function runVoiceModels(
+interface VoiceSettingsTheme {
+  fg(color: string, text: string): string;
+  bold(text: string): string;
+}
+
+interface VoiceSettingsOptions {
+  modelsDir?: string;
+  activeModelId?: string;
+  activeTtsModelId?: string;
+  activeSpeakerId?: number;
+  recorder?: RecorderDeps;
+  playbackReady?: boolean;
+  source?: string;
+  onModelSelect: (modelId: string) => void;
+  onTtsModelSelect: (modelId: string) => void;
+  onSpeakerSelect: (speakerId: number) => void;
+}
+
+function settingsFrameLine(theme: VoiceSettingsTheme, width: number, content: string): string {
+  const innerWidth = Math.max(1, width - 2);
+  const inner = truncateToWidth(content, innerWidth, "…", true);
+  return theme.fg("border", "│") + inner + theme.fg("border", "│");
+}
+
+function settingsRuleLine(theme: VoiceSettingsTheme, width: number): string {
+  const innerWidth = Math.max(1, width - 2);
+  return theme.fg("border", `├${"─".repeat(innerWidth)}┤`);
+}
+
+function settingsBorderLine(
+  theme: VoiceSettingsTheme,
+  width: number,
+  edge: "top" | "bottom",
+): string {
+  const innerWidth = Math.max(1, width - 2);
+  const left = edge === "top" ? "┌" : "└";
+  const right = edge === "top" ? "┐" : "┘";
+  return theme.fg("border", `${left}${"─".repeat(innerWidth)}${right}`);
+}
+
+function modelSettingValue(modelsDir: string, model: ModelDef | TtsModelDef): string {
+  const status = modelIsDownloaded(modelsDir, model) ? "Ready" : "Missing";
+  return `${model.displayName} · ${status}`;
+}
+
+function speakerSettingValue(speakerId: number): string {
+  const voice = KITTEN_VOICES[speakerId] ?? KITTEN_VOICES[0];
+  const match = voice.match(/expr-voice-(\d)-([mf])/);
+  if (!match) return voice;
+  return `Voice ${match[1]} · ${match[2] === "m" ? "Masculine" : "Feminine"}`;
+}
+
+async function runVoiceSettings(
   _args: string,
   ctx: ExtensionCommandContext,
-  opts?: {
-    modelsDir?: string;
-    activeModelId?: string;
-    onSelect?: (modelId: string) => void;
-  },
+  opts: VoiceSettingsOptions,
 ): Promise<void> {
-  const modelsDir = opts?.modelsDir ?? resolveModelsDir(process.env);
-  const activeModelId = opts?.activeModelId ?? DEFAULT_MODEL_ID;
-  const options = MODELS.map((model) => {
-    const active = model.id === activeModelId ? " (active)" : "";
-    const status = modelIsDownloaded(modelsDir, model) ? "ready" : "missing";
-    return `${model.id}${active} [${status}] — ${model.description}`;
-  });
-  const selected = await ctx.ui.select("Select voice model", options);
-  if (!selected) return;
-
-  const selectedIndex = options.indexOf(selected);
-  const model = selectedIndex >= 0 ? MODELS[selectedIndex] : undefined;
-  if (!model) return;
-  if (!modelIsDownloaded(modelsDir, model)) {
-    ctx.ui.notify(
-      `Model "${model.id}" is not downloaded. Run /voice-info for instructions.`,
-      "error",
-    );
+  if (ctx.mode !== "tui") {
+    ctx.ui.notify("Voice settings require TUI mode.", "error");
     return;
   }
 
-  opts?.onSelect?.(model.id);
-  ctx.ui.notify(`Voice model set to ${model.id}.`, "info");
-}
+  const modelsDir = opts.modelsDir ?? resolveModelsDir(process.env);
+  const recorder = opts.recorder ?? detectRecorders();
+  const playbackReady = opts.playbackReady ?? (hasTool("pw-play") || hasTool("ffplay"));
+  const source = opts.source ?? resolveSource(process.env);
+  let activeModelId = opts.activeModelId ?? DEFAULT_MODEL_ID;
+  let activeTtsModelId = opts.activeTtsModelId ?? DEFAULT_TTS_MODEL_ID;
+  let activeSpeakerId = opts.activeSpeakerId ?? 0;
 
-async function runVoiceInfo(
-  _args: string,
-  ctx: ExtensionCommandContext,
-  opts?: { modelsDir?: string; source?: string; sources?: SourceInfo[] },
-): Promise<void> {
-  const modelsDir = opts?.modelsDir ?? resolveModelsDir(process.env);
-  const currentSource = opts?.source ?? resolveSource(process.env);
-  const sources = opts?.sources ?? listSources();
-  const lines = [
-    `Models directory: ${modelsDir}`,
-    "",
-    "Model downloads:",
-    `  mkdir -p "${modelsDir}" && cd "${modelsDir}"`,
+  const dictationValues = new Map(
+    MODELS.map((model) => [modelSettingValue(modelsDir, model), model] as const),
+  );
+  const speechValues = new Map(
+    TTS_MODELS.map((model) => [modelSettingValue(modelsDir, model), model] as const),
+  );
+  const speakerValues = new Map(
+    KITTEN_VOICES.map((_, speakerId) => [speakerSettingValue(speakerId), speakerId] as const),
+  );
+  const activeModel = getModel(activeModelId) ?? MODELS[0];
+  const activeTtsModel = TTS_MODELS.find((model) => model.id === activeTtsModelId) ?? TTS_MODELS[0];
+  if (!activeModel || !activeTtsModel) {
+    ctx.ui.notify("Voice model registry is empty.", "error");
+    return;
+  }
+  const activeModelValue = modelSettingValue(modelsDir, activeModel);
+  const activeTtsModelValue = modelSettingValue(modelsDir, activeTtsModel);
+  const selectableDictationValues = MODELS.filter((model) =>
+    modelIsDownloaded(modelsDir, model),
+  ).map((model) => modelSettingValue(modelsDir, model));
+  if (!selectableDictationValues.includes(activeModelValue)) {
+    selectableDictationValues.unshift(activeModelValue);
+  }
+  const selectableSpeechValues = TTS_MODELS.filter((model) =>
+    modelIsDownloaded(modelsDir, model),
+  ).map((model) => modelSettingValue(modelsDir, model));
+  if (!selectableSpeechValues.includes(activeTtsModelValue)) {
+    selectableSpeechValues.unshift(activeTtsModelValue);
+  }
+
+  const voiceItem: SettingItem = {
+    id: "voice",
+    label: "Local voice",
+    description:
+      activeTtsModel.backend === "kitten"
+        ? "Kitten provides eight local voices."
+        : `${activeTtsModel.displayName} uses one fixed voice.`,
+    currentValue:
+      activeTtsModel.backend === "kitten" ? speakerSettingValue(activeSpeakerId) : "Fixed voice",
+  };
+  if (activeTtsModel.backend === "kitten") voiceItem.values = [...speakerValues.keys()];
+
+  const items: SettingItem[] = [
+    {
+      id: "dictation-model",
+      label: "Dictation model",
+      description: `Turns microphone audio into text. ${[...dictationValues.keys()].join(" · ")}`,
+      currentValue: activeModelValue,
+      values: selectableDictationValues,
+    },
+    {
+      id: "speech-model",
+      label: "Speech model",
+      description: `Turns response summaries into local speech. ${[...speechValues.keys()].join(" · ")}`,
+      currentValue: activeTtsModelValue,
+      values: selectableSpeechValues,
+    },
+    voiceItem,
+    {
+      id: "recording-input",
+      label: "Recording input",
+      description: `Set a different source with ${SOURCE_ENV_VAR} before starting Pi.`,
+      currentValue: `${source} · ${recorder.hasFfmpeg || recorder.hasArecord ? "Ready" : "Not connected"}`,
+    },
+    {
+      id: "speech-output",
+      label: "Speech output",
+      description: "Playback requires pw-play or ffplay.",
+      currentValue: playbackReady ? "Ready" : "Not connected",
+    },
+    {
+      id: "voice-activity",
+      label: "Voice activity",
+      description: "Silero VAD removes silence before transcription.",
+      currentValue: resolveVadModel(modelsDir) ? "Ready" : "Missing (optional)",
+    },
   ];
 
-  for (const model of [...MODELS, ...TTS_MODELS]) {
-    const archive = model.downloadUrl.split("/").at(-1);
-    const status = modelIsDownloaded(modelsDir, model) ? "ready" : "missing";
-    lines.push("", `  # ${model.id} [${status}]`, `  wget ${model.downloadUrl}`);
-    if (archive) lines.push(`  tar xf ${archive} && rm ${archive}`);
-  }
-  lines.push(
-    "",
-    "  # Silero VAD (recommended)",
-    `  wget https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/${VAD_MODEL_FILE}`,
-    "",
-    `Current source: ${currentSource}`,
-    "Audio sources:",
-  );
+  await ctx.ui.custom<void>(
+    (tui, theme, _keybindings, done) => {
+      const settingsTheme = getSettingsListTheme();
+      let settingsList: SettingsList;
+      settingsList = new SettingsList(
+        items,
+        items.length,
+        { ...settingsTheme, hint: () => "" },
+        (id, newValue) => {
+          if (id === "dictation-model") {
+            const previousValue = modelSettingValue(
+              modelsDir,
+              getModel(activeModelId) ?? activeModel,
+            );
+            const model = dictationValues.get(newValue);
+            if (!model || !modelIsDownloaded(modelsDir, model)) {
+              settingsList.updateValue(id, previousValue);
+              if (model) {
+                ctx.ui.notify(
+                  `${model.displayName} is not downloaded in ${modelsDir}. See the voice README for setup.`,
+                  "error",
+                );
+              }
+              return;
+            }
+            try {
+              opts.onModelSelect(model.id);
+            } catch (error) {
+              settingsList.updateValue(id, previousValue);
+              ctx.ui.notify(
+                `Could not save dictation model: ${error instanceof Error ? error.message : String(error)}`,
+                "error",
+              );
+              return;
+            }
+            activeModelId = model.id;
+            ctx.ui.notify(`Dictation model set to ${model.displayName}.`, "info");
+            return;
+          }
 
-  if (sources.length === 0) {
-    lines.push("  No PipeWire/PulseAudio sources found. Install pactl and check the audio setup.");
-  } else {
-    for (const source of sources) {
-      const mark = source.name === currentSource ? "*" : " ";
-      lines.push(`  ${mark} ${source.name} (${source.description})`);
-    }
-  }
-  lines.push("", `Set the source with: export ${SOURCE_ENV_VAR}=<name>`);
-  ctx.ui.notify(lines.join("\n"), "info");
+          if (id === "speech-model") {
+            const previousModel =
+              TTS_MODELS.find((model) => model.id === activeTtsModelId) ?? activeTtsModel;
+            const previousValue = modelSettingValue(modelsDir, previousModel);
+            const model = speechValues.get(newValue);
+            if (!model || !modelIsDownloaded(modelsDir, model)) {
+              settingsList.updateValue(id, previousValue);
+              if (model) {
+                ctx.ui.notify(
+                  `${model.displayName} is not downloaded in ${modelsDir}. See the voice README for setup.`,
+                  "error",
+                );
+              }
+              return;
+            }
+            try {
+              opts.onTtsModelSelect(model.id);
+            } catch (error) {
+              settingsList.updateValue(id, previousValue);
+              ctx.ui.notify(
+                `Could not save speech model: ${error instanceof Error ? error.message : String(error)}`,
+                "error",
+              );
+              return;
+            }
+            activeTtsModelId = model.id;
+            if (model.backend === "kitten") {
+              voiceItem.currentValue = speakerSettingValue(activeSpeakerId);
+              voiceItem.values = [...speakerValues.keys()];
+              voiceItem.description = "Kitten provides eight local voices.";
+            } else {
+              voiceItem.currentValue = "Fixed voice";
+              delete voiceItem.values;
+              voiceItem.description = `${model.displayName} uses one fixed voice.`;
+            }
+            ctx.ui.notify(`Speech model set to ${model.displayName}.`, "info");
+            return;
+          }
+
+          if (id !== "voice") return;
+          const previousValue = speakerSettingValue(activeSpeakerId);
+          const speakerId = speakerValues.get(newValue);
+          if (speakerId === undefined) {
+            settingsList.updateValue(id, previousValue);
+            return;
+          }
+          try {
+            opts.onSpeakerSelect(speakerId);
+          } catch (error) {
+            settingsList.updateValue(id, previousValue);
+            ctx.ui.notify(
+              `Could not save local voice: ${error instanceof Error ? error.message : String(error)}`,
+              "error",
+            );
+            return;
+          }
+          activeSpeakerId = speakerId;
+          ctx.ui.notify(`Local voice set to ${newValue}.`, "info");
+        },
+        () => done(undefined),
+      );
+
+      const overlayTheme = theme as VoiceSettingsTheme;
+      return {
+        render: (width: number) => {
+          const frameWidth = Math.max(24, width);
+          const innerWidth = Math.max(22, frameWidth - 2);
+          const settingsLines = settingsList.render(innerWidth);
+          while (
+            settingsLines.length > 0 &&
+            visibleWidth(settingsLines[settingsLines.length - 1] ?? "") === 0
+          ) {
+            settingsLines.pop();
+          }
+
+          const lines = [
+            settingsBorderLine(overlayTheme, frameWidth, "top"),
+            settingsFrameLine(
+              overlayTheme,
+              frameWidth,
+              overlayTheme.fg("accent", overlayTheme.bold("VOICE")),
+            ),
+            settingsFrameLine(
+              overlayTheme,
+              frameWidth,
+              `${overlayTheme.fg("accent", "local audio")} · MIC → TEXT → SPEECH`,
+            ),
+            settingsRuleLine(overlayTheme, frameWidth),
+            ...settingsLines.map((line) => settingsFrameLine(overlayTheme, frameWidth, line)),
+            settingsRuleLine(overlayTheme, frameWidth),
+            settingsFrameLine(
+              overlayTheme,
+              frameWidth,
+              overlayTheme.fg("dim", "↑↓: navigate · enter/space: change · esc: dismiss"),
+            ),
+            settingsBorderLine(overlayTheme, frameWidth, "bottom"),
+          ];
+          return lines.map((line) => truncateToWidth(line, width, ""));
+        },
+        invalidate: () => settingsList.invalidate(),
+        handleInput: (data: string) => {
+          settingsList.handleInput(data);
+          tui.requestRender();
+        },
+      };
+    },
+    {
+      overlay: true,
+      overlayOptions: {
+        width: "78%",
+        minWidth: 72,
+        maxHeight: "78%",
+        anchor: "center",
+        margin: { top: 1, bottom: 1, left: 2, right: 2 },
+      },
+      onHandle: (handle) => handle.focus(),
+    },
+  );
 }
 
 // --- Default export ---
 
 export default async function voiceExtension(pi: ExtensionAPI) {
-  let activeModelId = DEFAULT_MODEL_ID;
-  let activeSpeakerId = 0;
-  let summaryModelRef: SummaryModelRef = {
-    provider: DEFAULT_SUMMARY_PROVIDER,
-    id: DEFAULT_SUMMARY_MODEL_ID,
-  };
+  const voiceConfigPath = resolveVoiceConfigPath(process.env);
+  let activeModelId = loadActiveModelId(voiceConfigPath);
+  let activeSpeakerId = loadActiveSpeakerId(voiceConfigPath);
+  let activeTtsModelId = loadActiveTtsModelId(voiceConfigPath);
   let speechJob: SpeechJob | null = null;
   let ttsSherpa: (SherpaOnnx & TtsSherpa) | null = null;
   let ttsEnginePromise: Promise<OfflineTtsInstance> | null = null;
+  let onnxRuntime: OnnxRuntime | null = null;
+  const inflectEnginePromises = new Map<string, Promise<InflectTtsEngine>>();
   let previousEditorFactory: ReturnType<ExtensionContext["ui"]["getEditorComponent"]>;
+
+  async function getInflectEngine(
+    model: TtsModelDef,
+    modelsDir: string,
+  ): Promise<InflectTtsEngine> {
+    onnxRuntime ??= loadOnnxRuntime();
+    const key = modelDirPath(modelsDir, model);
+    let enginePromise = inflectEnginePromises.get(key);
+    if (!enginePromise) {
+      enginePromise = InflectTtsEngine.create(onnxRuntime, model, modelsDir);
+      inflectEnginePromises.set(key, enginePromise);
+    }
+    try {
+      return await enginePromise;
+    } catch (error) {
+      inflectEnginePromises.delete(key);
+      throw error;
+    }
+  }
 
   async function getTtsEngine(
     model: TtsModelDef,
@@ -1667,28 +2278,27 @@ export default async function voiceExtension(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("voice", {
-    description: "Open the voice dictation overlay with live transcript",
+    description: "Open voice model, voice, and connection settings",
     handler: async (args, ctx: ExtensionCommandContext) => {
-      await runVoiceOverlay(args, ctx, { activeModelId });
-    },
-  });
-
-  pi.registerCommand("voice-models", {
-    description: "Select the active local voice model",
-    handler: async (args, ctx: ExtensionCommandContext) => {
-      await runVoiceModels(args, ctx, {
+      await runVoiceSettings(args, ctx, {
         activeModelId,
-        onSelect: (modelId) => {
+        activeTtsModelId,
+        activeSpeakerId,
+        onModelSelect: (modelId) => {
+          saveActiveModel(voiceConfigPath, modelId);
           activeModelId = modelId;
         },
+        onTtsModelSelect: (modelId) => {
+          saveActiveTtsModel(voiceConfigPath, modelId);
+          activeTtsModelId = modelId;
+        },
+        onSpeakerSelect: (speakerId) => {
+          const voice = KITTEN_VOICES[speakerId];
+          if (!voice) throw new Error(`Unknown local voice index: ${speakerId}`);
+          saveActiveVoice(voiceConfigPath, voice);
+          activeSpeakerId = speakerId;
+        },
       });
-    },
-  });
-
-  pi.registerCommand("voice-info", {
-    description: "Show voice model downloads and audio device information",
-    handler: async (args, ctx: ExtensionCommandContext) => {
-      await runVoiceInfo(args, ctx);
     },
   });
 
@@ -1699,15 +2309,21 @@ export default async function voiceExtension(pi: ExtensionAPI) {
       const job = createSpeechJob();
       speechJob = job;
       const modelsDir = resolveModelsDir(process.env);
-      const ttsModel = TTS_MODELS.find((model) => model.id === DEFAULT_TTS_MODEL_ID);
+      const ttsModel = TTS_MODELS.find((model) => model.id === activeTtsModelId);
       void runVoiceSpeak(args, ctx, {
         modelsDir,
+        ttsModelId: activeTtsModelId,
         speakerId: activeSpeakerId,
-        summarize: (text, commandCtx) => summarizeForSpeech(text, commandCtx, summaryModelRef),
+        summarize: (text, commandCtx) => summarizeForSpeech(text, commandCtx),
         speak: async (text, speakerId) => {
-          if (!ttsModel) throw new Error("Kitten Nano TTS model is not configured.");
-          const { sherpa, engine } = await getTtsEngine(ttsModel, modelsDir);
-          await playKittenSpeech(sherpa, engine, text, speakerId, job);
+          if (!ttsModel) throw new Error(`Speech model is not configured: ${activeTtsModelId}`);
+          if (ttsModel.backend === "kitten") {
+            const { sherpa, engine } = await getTtsEngine(ttsModel, modelsDir);
+            await playKittenSpeech(sherpa, engine, text, speakerId, job);
+            return;
+          }
+          const engine = await getInflectEngine(ttsModel, modelsDir);
+          await playInflectSpeech(engine, text, job);
         },
       }).finally(() => {
         if (speechJob === job) speechJob = null;
@@ -1728,71 +2344,37 @@ export default async function voiceExtension(pi: ExtensionAPI) {
       ctx.ui.notify("Voice playback stopped.", "info");
     },
   });
-
-  pi.registerCommand("voice-voices", {
-    description: "Select the local Kitten TTS voice",
-    handler: async (_args, ctx: ExtensionCommandContext) => {
-      const options = KITTEN_VOICES.map(
-        (voice, index) => `${voice}${index === activeSpeakerId ? " (active)" : ""}`,
-      );
-      const selected = await ctx.ui.select("Select local voice", options);
-      if (!selected) return;
-      const selectedIndex = options.indexOf(selected);
-      if (selectedIndex < 0) return;
-      activeSpeakerId = selectedIndex;
-      ctx.ui.notify(`Local voice set to ${KITTEN_VOICES[activeSpeakerId]}.`, "info");
-    },
-  });
-
-  pi.registerCommand("voice-summary-model", {
-    description: "Select the cloud model used for spoken summaries",
-    handler: async (_args, ctx: ExtensionCommandContext) => {
-      const models = ctx.modelRegistry
-        .getAvailable()
-        .filter((model) => model.input.includes("text"))
-        .sort((a, b) => `${a.provider}/${a.id}`.localeCompare(`${b.provider}/${b.id}`));
-      const options = models.map((model) => {
-        const key = `${model.provider}/${model.id}`;
-        const active =
-          model.provider === summaryModelRef.provider && model.id === summaryModelRef.id;
-        return `${key}${active ? " (active)" : ""}`;
-      });
-      const selected = await ctx.ui.select("Select summary model", options);
-      if (!selected) return;
-      const selectedIndex = options.indexOf(selected);
-      const model = selectedIndex >= 0 ? models[selectedIndex] : undefined;
-      if (!model?.provider) return;
-      summaryModelRef = { provider: model.provider, id: model.id };
-      ctx.ui.notify(`Summary model set to ${model.provider}/${model.id}.`, "info");
-    },
-  });
 }
 
 // --- Exported for tests ---
 
 export {
   addHoldToVoice,
+  buildInflectPhonemeText,
   buildKittenConfig,
   buildOfflineConfig,
   buildOnlineConfig,
   buildSpokenSummaryPrompt,
   cleanTextForSpeech,
+  createInflectGaussianSamples,
+  encodePcm16Wave,
   findLatestAssistantText,
   getModel,
+  InflectTtsEngine,
+  inflectTextToTokens,
   isHallucination,
-  listSources,
   MODELS,
   modelDirPath,
   modelIsDownloaded,
-  parseSourcesListing,
   resolveModelsDir,
   resolveSource,
   resolveVadModel,
-  runVoiceInfo,
-  runVoiceModels,
+  resolveVoiceConfigPath,
   runVoiceOverlay,
+  runVoiceSettings,
   runVoiceSpeak,
   SttEngine,
+  splitInflectText,
   stripRepetitionLoop,
   summarizeForSpeech,
   TTS_MODELS,

@@ -1,26 +1,30 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { completeSimple } from "@earendil-works/pi-ai";
 import { isKittyProtocolActive } from "@earendil-works/pi-tui";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import voiceExtension, {
   addHoldToVoice,
+  buildInflectPhonemeText,
   buildKittenConfig,
   buildOfflineConfig,
   buildSpokenSummaryPrompt,
   cleanTextForSpeech,
+  createInflectGaussianSamples,
+  encodePcm16Wave,
   findLatestAssistantText,
   getModel,
+  inflectTextToTokens,
   isHallucination,
   MODELS,
   modelIsDownloaded,
-  parseSourcesListing,
   resolveModelsDir,
   resolveSource,
-  runVoiceInfo,
-  runVoiceModels,
+  resolveVoiceConfigPath,
+  runVoiceSettings,
   runVoiceSpeak,
+  splitInflectText,
   stripRepetitionLoop,
   summarizeForSpeech,
   TTS_MODELS,
@@ -33,6 +37,11 @@ import { getCommandHandler, getEventHandler } from "../mocks/test-helpers.ts";
 vi.mock("@earendil-works/pi-ai", () => ({
   completeSimple: vi.fn(),
 }));
+
+beforeEach(() => {
+  vi.stubEnv("PI_SMALL_MODEL", "test-provider/test-model");
+  vi.stubEnv("PI_SMALL_MODEL_THINKING", "minimal");
+});
 
 afterEach(() => {
   vi.mocked(completeSimple).mockReset();
@@ -198,10 +207,7 @@ describe("voice-extension", () => {
       vi.advanceTimersByTime(500);
 
       expect(ctx.ui.setEditorText).toHaveBeenCalledWith("prompt");
-      expect(ctx.ui.notify).toHaveBeenCalledWith(
-        expect.stringContaining("Run /voice-info"),
-        "error",
-      );
+      expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Open /voice"), "error");
     });
 
     it("keeps holding across NX release-press repeat pairs", async () => {
@@ -227,10 +233,7 @@ describe("voice-extension", () => {
         vi.advanceTimersByTime(99);
       }
 
-      expect(ctx.ui.notify).toHaveBeenCalledWith(
-        expect.stringContaining("Run /voice-info"),
-        "error",
-      );
+      expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Open /voice"), "error");
     });
 
     it("does not open voice after a single Space with no repeat", async () => {
@@ -277,15 +280,7 @@ describe("voice-extension", () => {
       const mockPi = createMockPi();
       await voiceExtension(mockPi);
       const names = mockPi.registerCommand.mock.calls.map((c: unknown[]) => c[0]);
-      expect(names).toEqual([
-        "voice",
-        "voice-models",
-        "voice-info",
-        "voice-speak",
-        "voice-stop",
-        "voice-voices",
-        "voice-summary-model",
-      ]);
+      expect(names).toEqual(["voice", "voice-speak", "voice-stop"]);
     });
 
     it("each command has a description and a handler", async () => {
@@ -343,21 +338,26 @@ describe("voice-extension", () => {
       expect(prompt).toContain("Implemented voice playback");
     });
 
-    it("uses the configured cloud model for a spoken summary", async () => {
+    it("uses the global small model instead of the active model for a spoken summary", async () => {
       const ctx = createMockCommandContext();
-      ctx.modelRegistry.find = vi.fn(() => ctx.model);
+      const activeModel = ctx.model;
+      const smallModel = {
+        ...activeModel,
+        id: "small-model",
+        provider: "small-provider",
+        reasoning: true,
+      };
+      vi.stubEnv("PI_SMALL_MODEL", "small-provider/small-model");
+      ctx.modelRegistry.find = vi.fn(() => smallModel);
       vi.mocked(completeSimple).mockResolvedValue({
         content: [{ type: "text", text: "**Short result.** Next, test playback." }],
       });
 
-      const result = await summarizeForSpeech("A long assistant response.", ctx, {
-        provider: "synthetic",
-        id: "syn:small:text",
-      });
+      const result = await summarizeForSpeech("A long assistant response.", ctx);
 
-      expect(ctx.modelRegistry.find).toHaveBeenCalledWith("synthetic", "syn:small:text");
+      expect(ctx.modelRegistry.find).toHaveBeenCalledWith("small-provider", "small-model");
       expect(completeSimple).toHaveBeenCalledWith(
-        ctx.model,
+        smallModel,
         expect.objectContaining({
           systemPrompt: expect.stringContaining("spoken summaries"),
           messages: [
@@ -370,7 +370,16 @@ describe("voice-extension", () => {
             }),
           ],
         }),
-        expect.objectContaining({ apiKey: "test-key", maxTokens: 160 }),
+        expect.objectContaining({
+          apiKey: "test-key",
+          maxTokens: 160,
+          reasoning: "minimal",
+        }),
+      );
+      expect(completeSimple).not.toHaveBeenCalledWith(
+        activeModel,
+        expect.anything(),
+        expect.anything(),
       );
       expect(result).toBe("Short result. Next, test playback.");
     });
@@ -413,6 +422,29 @@ describe("voice-extension", () => {
       expect(speak).toHaveBeenCalledWith("Done. npm test passes.", 0);
     });
 
+    it("accepts a downloaded Inflect model for speech", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "pi-voice-inflect-"));
+      const modelDir = join(dir, "inflect-nano-v2-onnx");
+      mkdirSync(modelDir);
+      writeFileSync(join(modelDir, "duration.onnx"), "stub");
+      writeFileSync(join(modelDir, "decode.onnx"), "stub");
+      const ctx = createMockCommandContext();
+      ctx.sessionManager.getBranch = vi.fn(() => [
+        { type: "message", message: { role: "assistant", content: "Inflect response." } },
+      ]);
+      const speak = vi.fn(async () => {});
+
+      await runVoiceSpeak("full", ctx, {
+        modelsDir: dir,
+        ttsModelId: "inflect-nano-v2-onnx",
+        summarize: vi.fn(),
+        speak,
+        speakerId: 0,
+      });
+
+      expect(speak).toHaveBeenCalledWith("Inflect response.", 0);
+    });
+
     it("reports when there is no assistant message to speak", async () => {
       const ctx = createMockCommandContext();
       await runVoiceSpeak("", ctx, {
@@ -441,13 +473,33 @@ describe("voice-extension", () => {
 
   describe("TTS model registry", () => {
     it("includes Kitten Nano with its required files and download URL", () => {
-      expect(TTS_MODELS).toEqual([
+      expect(TTS_MODELS).toContainEqual(
         expect.objectContaining({
           id: "kitten-nano-en-v0_1-fp16",
+          backend: "kitten",
           files: expect.arrayContaining(["model.fp16.onnx", "voices.bin", "tokens.txt"]),
           downloadUrl: expect.stringContaining("kitten-nano-en-v0_1-fp16.tar.bz2"),
         }),
-      ]);
+      );
+    });
+
+    it("includes official Inflect Nano and Micro ONNX models", () => {
+      expect(TTS_MODELS).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: "inflect-nano-v2-onnx",
+            backend: "inflect",
+            files: ["duration.onnx", "decode.onnx"],
+            repository: "owensong/Inflect-Nano-v2-ONNX",
+          }),
+          expect.objectContaining({
+            id: "inflect-micro-v2-onnx",
+            backend: "inflect",
+            files: ["duration.onnx", "decode.onnx"],
+            repository: "owensong/Inflect-Micro-v2-ONNX",
+          }),
+        ]),
+      );
     });
 
     it("builds a sherpa Kitten configuration", () => {
@@ -464,6 +516,65 @@ describe("voice-extension", () => {
       expect(config.model.kitten.dataDir).toContain("espeak-ng-data");
       expect(config.model.numThreads).toBe(4);
       expect(config.model.provider).toBe("cpu");
+    });
+  });
+
+  describe("Inflect frontend", () => {
+    it("preserves punctuation around phonemized text", () => {
+      const phonemize = vi.fn((text: string) => `<${text}>`);
+
+      expect(buildInflectPhonemeText("Hello, world!", phonemize)).toBe("<Hello>, <world>!");
+      expect(phonemize).toHaveBeenNthCalledWith(1, "Hello");
+      expect(phonemize).toHaveBeenNthCalledWith(2, "world");
+    });
+
+    it("maps known symbols and inserts VITS blank tokens", () => {
+      const tokens = inflectTextToTokens("a.");
+
+      expect(tokens.length).toBe(5);
+      expect(tokens[0]).toBe(0);
+      expect(tokens[2]).toBe(0);
+      expect(tokens[4]).toBe(0);
+      expect(tokens[1]).not.toBe(0);
+      expect(tokens[3]).not.toBe(0);
+    });
+
+    it("drops unsupported phoneme formatting characters", () => {
+      expect(inflectTextToTokens("a͡ɪ")).toEqual(inflectTextToTokens("aɪ"));
+    });
+
+    it("splits long text at sentence and punctuation boundaries", () => {
+      expect(splitInflectText("First sentence. Second sentence!", 20)).toEqual([
+        "First sentence.",
+        "Second sentence!",
+      ]);
+      expect(splitInflectText("one two three four five six", 15)).toEqual([
+        "one two three",
+        "four five six",
+      ]);
+    });
+
+    it("generates deterministic Gaussian latent noise", () => {
+      const first = createInflectGaussianSamples(6, 7);
+      const second = createInflectGaussianSamples(6, 7);
+      const different = createInflectGaussianSamples(6, 8);
+
+      expect(first).toEqual(second);
+      expect(first).not.toEqual(different);
+      expect([...first].every(Number.isFinite)).toBe(true);
+    });
+
+    it("encodes generated samples as a 24 kHz PCM WAV", () => {
+      const wav = encodePcm16Wave(Float32Array.from([-1, 0, 1]), 24_000);
+
+      expect(wav.toString("ascii", 0, 4)).toBe("RIFF");
+      expect(wav.toString("ascii", 8, 12)).toBe("WAVE");
+      expect(wav.readUInt32LE(24)).toBe(24_000);
+      expect(wav.readUInt16LE(34)).toBe(16);
+      expect(wav.readUInt32LE(40)).toBe(6);
+      expect(wav.readInt16LE(44)).toBe(-32_768);
+      expect(wav.readInt16LE(46)).toBe(0);
+      expect(wav.readInt16LE(48)).toBe(32_767);
     });
   });
 
@@ -511,6 +622,20 @@ describe("voice-extension", () => {
     it("falls back to ~/.cache/pi-voice/models when unset", () => {
       const dir = resolveModelsDir({});
       expect(dir.endsWith(join(".cache", "pi-voice", "models"))).toBe(true);
+    });
+  });
+
+  describe("resolveVoiceConfigPath", () => {
+    it("uses the global Pi extension config directory by default", () => {
+      expect(resolveVoiceConfigPath({}, "/home/zero")).toBe(
+        "/home/zero/.pi/agent/extensions/voice/config.json",
+      );
+    });
+
+    it("uses a trimmed PI_VOICE_CONFIG override", () => {
+      expect(
+        resolveVoiceConfigPath({ PI_VOICE_CONFIG: "  /custom/voice.json  " }, "/home/zero"),
+      ).toBe("/custom/voice.json");
     });
   });
 
@@ -661,83 +786,174 @@ describe("voice-extension", () => {
     });
   });
 
-  describe("runVoiceModels command", () => {
-    it("shows a selection menu and activates a downloaded model", async () => {
-      const dir = mkdtempSync(join(tmpdir(), "pi-voice-ready-"));
-      for (const model of MODELS) {
-        mkdirSync(join(dir, model.dirName), { recursive: true });
-        for (const file of model.files) writeFileSync(join(dir, model.dirName, file), "stub");
-      }
+  describe("voice settings modal", () => {
+    it("shows the voice route, selected models, and connection status", async () => {
+      const modelsDir = createDownloadedVoiceModels();
       const ctx = createMockCommandContext();
-      ctx.ui.select = vi.fn(async (_title, options) => options[1]);
-      const onSelect = vi.fn();
-
-      await runVoiceModels("", ctx, {
-        modelsDir: dir,
-        activeModelId: "moonshine-base-int8",
-        onSelect,
+      let component:
+        | { render(width: number): string[]; handleInput?(data: string): void }
+        | undefined;
+      ctx.ui.custom = vi.fn(async (factory) => {
+        component = await factory({ requestRender: vi.fn() }, createTestTheme(), {}, vi.fn());
+        return undefined;
       });
 
-      expect(ctx.ui.select).toHaveBeenCalledWith(
-        "Select voice model",
-        expect.arrayContaining([
-          expect.stringContaining("moonshine-base-int8"),
-          expect.stringContaining("whisper-tiny-en-int8"),
-        ]),
-      );
-      expect(onSelect).toHaveBeenCalledWith("whisper-tiny-en-int8");
-      expect(ctx.ui.notify).toHaveBeenCalledWith(
-        "Voice model set to whisper-tiny-en-int8.",
-        "info",
-      );
+      await runVoiceSettings("", ctx, {
+        modelsDir,
+        activeModelId: "moonshine-base-int8",
+        activeTtsModelId: "kitten-nano-en-v0_1-fp16",
+        activeSpeakerId: 0,
+        recorder: { hasFfmpeg: true, hasArecord: false },
+        playbackReady: false,
+        source: "studio-mic",
+        onModelSelect: vi.fn(),
+        onTtsModelSelect: vi.fn(),
+        onSpeakerSelect: vi.fn(),
+      });
+
+      expect(ctx.ui.custom).toHaveBeenCalledWith(expect.any(Function), {
+        overlay: true,
+        overlayOptions: {
+          width: "78%",
+          minWidth: 72,
+          maxHeight: "78%",
+          anchor: "center",
+          margin: { top: 1, bottom: 1, left: 2, right: 2 },
+        },
+        onHandle: expect.any(Function),
+      });
+      const renderedLines = component?.render(72) ?? [];
+      const rendered = renderedLines.join("\n");
+      expect(renderedLines[0]).toBe(`┌${"─".repeat(70)}┐`);
+      expect(renderedLines.at(-1)).toBe(`└${"─".repeat(70)}┘`);
+      expect(renderedLines.every((line) => line.length === 72)).toBe(true);
+      expect(rendered).not.toContain("FOCUSED");
+      expect(rendered).toContain("VOICE");
+      expect(rendered).toContain("local audio · MIC → TEXT → SPEECH");
+      expect(rendered).toContain(`├${"─".repeat(70)}┤`);
+      expect(rendered).toContain("Dictation model");
+      expect(rendered).toContain("Moonshine Base · Ready");
+      expect(rendered).toContain("Speech model");
+      expect(rendered).toContain("Kitten Nano · Ready");
+      expect(rendered).toContain("Local voice");
+      expect(rendered).toContain("Recording input");
+      expect(rendered).toContain("studio-mic · Ready");
+      expect(rendered).toContain("Speech output");
+      expect(rendered).toContain("Not connected");
     });
 
-    it("does not activate a model that has not been downloaded", async () => {
-      const dir = mkdtempSync(join(tmpdir(), "pi-voice-missing-"));
+    it("changes settings with arrow and Enter keys", async () => {
+      const modelsDir = createDownloadedVoiceModels();
       const ctx = createMockCommandContext();
-      ctx.ui.select = vi.fn(async (_title, options) => options[1]);
-      const onSelect = vi.fn();
-
-      await runVoiceModels("", ctx, {
-        modelsDir: dir,
-        activeModelId: "moonshine-base-int8",
-        onSelect,
+      const onModelSelect = vi.fn();
+      const onTtsModelSelect = vi.fn();
+      const onSpeakerSelect = vi.fn();
+      let component:
+        | { handleInput?(data: string): void; render(width: number): string[] }
+        | undefined;
+      ctx.ui.custom = vi.fn(async (factory) => {
+        component = await factory({ requestRender: vi.fn() }, createTestTheme(), {}, vi.fn());
+        return undefined;
       });
 
-      expect(onSelect).not.toHaveBeenCalled();
+      await runVoiceSettings("", ctx, {
+        modelsDir,
+        activeModelId: "moonshine-base-int8",
+        activeTtsModelId: "kitten-nano-en-v0_1-fp16",
+        activeSpeakerId: 0,
+        recorder: { hasFfmpeg: true, hasArecord: false },
+        playbackReady: true,
+        source: "default",
+        onModelSelect,
+        onTtsModelSelect,
+        onSpeakerSelect,
+      });
+
+      component?.handleInput?.("\r");
+      component?.handleInput?.("\x1b[B");
+      component?.handleInput?.("\r");
+      component?.handleInput?.("\x1b[B");
+      component?.handleInput?.("\r");
+
+      expect(onModelSelect).toHaveBeenCalledWith("whisper-tiny-en-int8");
+      expect(onTtsModelSelect).toHaveBeenCalledWith("inflect-nano-v2-onnx");
+      expect(onSpeakerSelect).not.toHaveBeenCalled();
+      expect(component?.render(72).join("\n")).toContain("Fixed voice");
+    });
+
+    it("skips missing models while cycling through available choices", async () => {
+      const modelsDir = createDownloadedVoiceModels();
+      const missingModel = MODELS[1];
+      if (!missingModel) throw new Error("Missing dictation model fixture");
+      rmSync(join(modelsDir, missingModel.dirName), { recursive: true });
+      const ctx = createMockCommandContext();
+      const onModelSelect = vi.fn();
+      const getComponent = captureCustomComponent(ctx);
+
+      await runVoiceSettings("", ctx, {
+        modelsDir,
+        activeModelId: "moonshine-base-int8",
+        activeTtsModelId: "kitten-nano-en-v0_1-fp16",
+        activeSpeakerId: 0,
+        recorder: { hasFfmpeg: true, hasArecord: false },
+        playbackReady: true,
+        source: "default",
+        onModelSelect,
+        onTtsModelSelect: vi.fn(),
+        onSpeakerSelect: vi.fn(),
+      });
+      const component = getComponent();
+      component.handleInput?.("\r");
+
+      expect(onModelSelect).toHaveBeenCalledWith("whisper-small-en-int8");
+    });
+
+    it("rejects a missing model and restores the previous selection", async () => {
+      const modelsDir = mkdtempSync(join(tmpdir(), "pi-voice-missing-"));
+      const ctx = createMockCommandContext();
+      const onModelSelect = vi.fn();
+      let component:
+        | { handleInput?(data: string): void; render(width: number): string[] }
+        | undefined;
+      ctx.ui.custom = vi.fn(async (factory) => {
+        component = await factory({ requestRender: vi.fn() }, createTestTheme(), {}, vi.fn());
+        return undefined;
+      });
+
+      await runVoiceSettings("", ctx, {
+        modelsDir,
+        activeModelId: "moonshine-base-int8",
+        activeTtsModelId: "kitten-nano-en-v0_1-fp16",
+        activeSpeakerId: 0,
+        recorder: { hasFfmpeg: false, hasArecord: false },
+        playbackReady: false,
+        source: "default",
+        onModelSelect,
+        onTtsModelSelect: vi.fn(),
+        onSpeakerSelect: vi.fn(),
+      });
+      component?.handleInput?.("\r");
+
+      expect(onModelSelect).not.toHaveBeenCalled();
       expect(ctx.ui.notify).toHaveBeenCalledWith(
-        expect.stringContaining("Run /voice-info"),
+        expect.stringContaining("is not downloaded"),
         "error",
       );
+      expect(component?.render(72).join("\n")).toContain("Moonshine Base · Missing");
     });
-  });
 
-  describe("runVoiceInfo command", () => {
-    it("shows model downloads and voice device information together", async () => {
-      const dir = mkdtempSync(join(tmpdir(), "pi-voice-info-"));
+    it("requires TUI mode", async () => {
       const ctx = createMockCommandContext();
+      ctx.mode = "print";
 
-      await runVoiceInfo("", ctx, {
-        modelsDir: dir,
-        source: "studio-mic",
-        sources: [
-          { name: "studio-mic", description: "RUNNING" },
-          { name: "laptop-mic", description: "SUSPENDED" },
-        ],
+      await runVoiceSettings("", ctx, {
+        onModelSelect: vi.fn(),
+        onTtsModelSelect: vi.fn(),
+        onSpeakerSelect: vi.fn(),
       });
 
-      const message = (ctx.ui.notify.mock.calls[0] as unknown[])[0] as string;
-      expect(message).toContain(dir);
-      expect(message).toContain("moonshine-base-int8");
-      expect(message).toContain("whisper-tiny-en-int8");
-      expect(message).toContain("whisper-small-en-int8");
-      expect(message).toContain("kitten-nano-en-v0_1-fp16");
-      expect(message).toContain("silero_vad.onnx");
-      expect(message).toContain("Current source: studio-mic");
-      expect(message).toContain("laptop-mic");
-      expect(message).toContain("PI_VOICE_SOURCE");
-      expect(message).not.toContain("zipformer");
-      expect(ctx.ui.notify).toHaveBeenCalledTimes(1);
+      expect(ctx.ui.custom).not.toHaveBeenCalled();
+      expect(ctx.ui.notify).toHaveBeenCalledWith("Voice settings require TUI mode.", "error");
     });
   });
 
@@ -756,92 +972,107 @@ describe("voice-extension", () => {
     });
   });
 
-  describe("parseSourcesListing", () => {
-    it("parses pactl short-format rows into name/description", () => {
-      const output = [
-        "601\tnx_remapped_out\tPipeWire\tfloat32le 2ch 48000Hz\tRUNNING",
-        "636\tnx_voice_out.monitor\tPipeWire\tfloat32le 2ch 48000Hz\tIDLE",
-        "",
-      ].join("\n");
-      const sources = parseSourcesListing(output);
-      expect(sources).toHaveLength(2);
-      expect(sources[0]).toEqual({ name: "nx_remapped_out", description: "RUNNING" });
-      expect(sources[1]?.name).toBe("nx_voice_out.monitor");
-    });
-
-    it("returns empty for no output", () => {
-      expect(parseSourcesListing("")).toEqual([]);
-      expect(parseSourcesListing("\n\n")).toEqual([]);
-    });
-  });
-
   describe("handler wiring", () => {
-    it("the /voice-models handler keeps the selected model active", async () => {
-      const dir = mkdtempSync(join(tmpdir(), "pi-voice-active-"));
-      for (const model of MODELS) {
-        mkdirSync(join(dir, model.dirName), { recursive: true });
-        for (const file of model.files) writeFileSync(join(dir, model.dirName, file), "stub");
-      }
-      vi.stubEnv("PI_VOICE_MODELS", dir);
-      const mockPi = createMockPi();
-      await voiceExtension(mockPi);
-      const handler = getCommandHandler(mockPi, "voice-models");
-      const ctx = createMockCommandContext();
-      ctx.ui.select = vi
-        .fn()
-        .mockImplementationOnce(async (_title, options: string[]) =>
-          options.find((option) => option.startsWith("whisper-tiny-en-int8")),
-        )
-        .mockResolvedValueOnce(undefined);
+    it("/voice persists dictation, speech, and Kitten voice settings", async () => {
+      const configPath = join(mkdtempSync(join(tmpdir(), "pi-voice-config-")), "config.json");
+      const modelsDir = createDownloadedVoiceModels(false);
+      vi.stubEnv("PI_VOICE_CONFIG", configPath);
+      vi.stubEnv("PI_VOICE_MODELS", modelsDir);
+      const firstPi = createMockPi();
+      await voiceExtension(firstPi);
+      const firstHandler = getCommandHandler(firstPi, "voice");
+      const firstCtx = createMockCommandContext();
+      const getFirstComponent = captureCustomComponent(firstCtx);
 
-      await handler("", ctx);
-      await handler("", ctx);
+      await firstHandler("", firstCtx);
+      const firstComponent = getFirstComponent();
+      firstComponent.handleInput?.("\x1b[B");
+      firstComponent.handleInput?.("\x1b[B");
+      firstComponent.handleInput?.("\r");
+      firstComponent.handleInput?.("\x1b[A");
+      firstComponent.handleInput?.("\r");
+      firstComponent.handleInput?.("\x1b[A");
+      firstComponent.handleInput?.("\r");
 
-      expect(ctx.ui.select).toHaveBeenNthCalledWith(
-        1,
-        "Select voice model",
-        expect.arrayContaining([expect.stringContaining("moonshine-base-int8 (active)")]),
-      );
-      expect(ctx.ui.select).toHaveBeenNthCalledWith(
-        2,
-        "Select voice model",
-        expect.arrayContaining([expect.stringContaining("whisper-tiny-en-int8 (active)")]),
-      );
+      expect(JSON.parse(readFileSync(configPath, "utf8"))).toEqual({
+        voice: "expr-voice-2-f",
+        ttsModel: "inflect-nano-v2-onnx",
+        dictationModel: "whisper-tiny-en-int8",
+      });
+
+      const restartedPi = createMockPi();
+      await voiceExtension(restartedPi);
+      const restartedHandler = getCommandHandler(restartedPi, "voice");
+      const restartedCtx = createMockCommandContext();
+      const getRestartedComponent = captureCustomComponent(restartedCtx);
+
+      await restartedHandler("", restartedCtx);
+
+      const rendered = getRestartedComponent().render(72).join("\n");
+      expect(rendered).toContain("Whisper Tiny · Ready");
+      expect(rendered).toContain("Inflect Nano v2 · Ready");
+      expect(rendered).toContain("Fixed voice");
     });
 
-    it("/voice-voices selects the active local speaker", async () => {
+    it.each([
+      ["malformed JSON", "{"],
+      [
+        "unknown settings",
+        JSON.stringify({
+          voice: "not-a-kitten-voice",
+          ttsModel: "unknown-tts-model",
+          dictationModel: "unknown-dictation-model",
+        }),
+      ],
+    ])("/voice uses defaults for %s", async (_case, contents) => {
+      const configPath = join(mkdtempSync(join(tmpdir(), "pi-voice-config-")), "config.json");
+      writeFileSync(configPath, contents);
+      vi.stubEnv("PI_VOICE_CONFIG", configPath);
+      vi.stubEnv("PI_VOICE_MODELS", mkdtempSync(join(tmpdir(), "pi-voice-empty-models-")));
       const mockPi = createMockPi();
       await voiceExtension(mockPi);
-      const handler = getCommandHandler(mockPi, "voice-voices");
+      const handler = getCommandHandler(mockPi, "voice");
       const ctx = createMockCommandContext();
-      ctx.ui.select = vi.fn(async (_title, options) => options[3]);
+      const getComponent = captureCustomComponent(ctx);
 
       await handler("", ctx);
 
-      expect(ctx.ui.select).toHaveBeenCalledWith(
-        "Select local voice",
-        expect.arrayContaining(["expr-voice-2-m (active)", "expr-voice-3-f"]),
-      );
-      expect(ctx.ui.notify).toHaveBeenCalledWith("Local voice set to expr-voice-3-f.", "info");
+      const rendered = getComponent().render(72).join("\n");
+      expect(rendered).toContain("Moonshine Base · Missing");
+      expect(rendered).toContain("Kitten Nano · Missing");
+      expect(rendered).toContain("Voice 2 · Masculine");
     });
 
-    it("/voice-summary-model selects an available cloud model", async () => {
+    it("/voice reports config write failures and restores the displayed value", async () => {
+      const configDir = mkdtempSync(join(tmpdir(), "pi-voice-config-"));
+      const blockingFile = join(configDir, "not-a-directory");
+      writeFileSync(blockingFile, "blocked");
+      vi.stubEnv("PI_VOICE_CONFIG", join(blockingFile, "config.json"));
       const mockPi = createMockPi();
       await voiceExtension(mockPi);
-      const handler = getCommandHandler(mockPi, "voice-summary-model");
+      const handler = getCommandHandler(mockPi, "voice");
       const ctx = createMockCommandContext();
-      ctx.modelRegistry.getAvailable = vi.fn(() => [ctx.model]);
-      ctx.ui.select = vi.fn(async (_title, options) => options[0]);
+      const getComponent = captureCustomComponent(ctx);
 
       await handler("", ctx);
+      const component = getComponent();
+      component.handleInput?.("\x1b[B");
+      component.handleInput?.("\x1b[B");
+      component.handleInput?.("\r");
 
-      expect(ctx.ui.select).toHaveBeenCalledWith("Select summary model", [
-        "test-provider/test-model",
-      ]);
       expect(ctx.ui.notify).toHaveBeenCalledWith(
-        "Summary model set to test-provider/test-model.",
-        "info",
+        expect.stringContaining("Could not save local voice"),
+        "error",
       );
+      expect(component.render(72).join("\n")).toContain("Voice 2 · Masculine");
+    });
+
+    it("does not register a voice-specific summary model command", async () => {
+      const mockPi = createMockPi();
+      await voiceExtension(mockPi);
+      const names = mockPi.registerCommand.mock.calls.map((call: unknown[]) => call[0]);
+
+      expect(names).not.toContain("voice-summary-model");
     });
 
     it("/voice-stop reports when playback is already idle", async () => {
@@ -939,4 +1170,44 @@ function createDownloadedTtsModel(): string {
     writeFileSync(join(dir, model.dirName, file), "stub");
   }
   return dir;
+}
+
+function createDownloadedVoiceModels(includeDefaultDictationModel = true): string {
+  const dir = mkdtempSync(join(tmpdir(), "pi-voice-models-"));
+  for (const model of [...MODELS, ...TTS_MODELS]) {
+    if (!includeDefaultDictationModel && model.id === "moonshine-base-int8") continue;
+    mkdirSync(join(dir, model.dirName), { recursive: true });
+    for (const file of model.files) {
+      const path = join(dir, model.dirName, file);
+      if (file === "espeak-ng-data") mkdirSync(path, { recursive: true });
+      else writeFileSync(path, "stub");
+    }
+  }
+  return dir;
+}
+
+interface TestComponent {
+  render(width: number): string[];
+  handleInput?(data: string): void;
+}
+
+function captureCustomComponent(
+  ctx: ReturnType<typeof createMockCommandContext>,
+): () => TestComponent {
+  let component: TestComponent | undefined;
+  ctx.ui.custom = vi.fn(async (factory) => {
+    component = await factory({ requestRender: vi.fn() }, createTestTheme(), {}, vi.fn());
+    return undefined;
+  });
+  return () => {
+    if (!component) throw new Error("Custom component was not created");
+    return component;
+  };
+}
+
+function createTestTheme() {
+  return {
+    fg: (_color: string, text: string) => text,
+    bold: (text: string) => text,
+  };
 }

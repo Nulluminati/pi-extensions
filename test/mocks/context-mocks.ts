@@ -54,6 +54,16 @@ export function createMockUI(): DeepMocked<ExtensionUIContext> {
 }
 
 export function createMockContext(): DeepMocked<ExtensionContext> {
+  const model = {
+    id: "test-model",
+    name: "Test Model",
+    provider: "test-provider",
+    api: {},
+    reasoning: false,
+    input: ["text"] as ("text" | "image")[],
+    contextWindow: 128_000,
+    maxTokens: 4096,
+  };
   return {
     ui: createMockUI(),
     hasUI: true,
@@ -72,18 +82,11 @@ export function createMockContext(): DeepMocked<ExtensionContext> {
         Promise.resolve({ ok: true, apiKey: "test-key", headers: {} }),
       ),
       getApiKeyForProvider: vi.fn(() => Promise.resolve(undefined)),
-      find: vi.fn(() => undefined),
+      find: vi.fn((providerName: string, modelId: string) =>
+        providerName === model.provider && modelId === model.id ? model : undefined,
+      ),
     },
-    model: {
-      id: "test-model",
-      name: "Test Model",
-      provider: "test-provider",
-      api: {},
-      reasoning: false,
-      input: ["text"] as ("text" | "image")[],
-      contextWindow: 128_000,
-      maxTokens: 4096,
-    },
+    model,
     isIdle: vi.fn(() => true),
     signal: undefined,
     abort: vi.fn(),

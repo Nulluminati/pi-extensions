@@ -109,6 +109,60 @@ class MockSelectList {
   handleInput(_data: string): void {}
 }
 
+/** Mock `SettingsList` — supports arrow navigation and value cycling. */
+class MockSettingsList {
+  private selectedIndex = 0;
+  constructor(
+    public items: Array<{
+      id: string;
+      label: string;
+      description?: string;
+      currentValue: string;
+      values?: string[];
+    }>,
+    public _maxVisible: number,
+    public _theme: unknown,
+    private onChange: (id: string, newValue: string) => void,
+    private onCancel: () => void,
+  ) {}
+  updateValue(id: string, newValue: string): void {
+    const item = this.items.find((candidate) => candidate.id === id);
+    if (item) item.currentValue = newValue;
+  }
+  invalidate(): void {}
+  render(_width: number): string[] {
+    const lines = this.items.map((item, index) => {
+      const cursor = index === this.selectedIndex ? "> " : "  ";
+      return `${cursor}${item.label}  ${item.currentValue}`;
+    });
+    const selected = this.items[this.selectedIndex];
+    if (selected?.description) lines.push(selected.description);
+    return lines;
+  }
+  handleInput(data: string): void {
+    if (data === "\x1b[A" && this.items.length > 0) {
+      this.selectedIndex = (this.selectedIndex - 1 + this.items.length) % this.items.length;
+      return;
+    }
+    if (data === "\x1b[B" && this.items.length > 0) {
+      this.selectedIndex = (this.selectedIndex + 1) % this.items.length;
+      return;
+    }
+    if (data === "\x1b") {
+      this.onCancel();
+      return;
+    }
+    if (data !== "\r" && data !== "\n" && data !== " ") return;
+    const item = this.items[this.selectedIndex];
+    if (!item?.values || item.values.length === 0) return;
+    const currentIndex = item.values.indexOf(item.currentValue);
+    const nextValue = item.values[(currentIndex + 1) % item.values.length];
+    if (!nextValue) return;
+    item.currentValue = nextValue;
+    this.onChange(item.id, nextValue);
+  }
+}
+
 /** Mock `Key` helper. */
 const MockKey = {
   space: "space",
@@ -133,6 +187,13 @@ function mockMatchesKey(data: string, keyId: string): boolean {
 }
 
 vi.mock("@earendil-works/pi-tui", () => ({
+  fuzzyFilter: <T>(items: T[], query: string, getText: (item: T) => string): T[] => {
+    const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+    return items.filter((item) => {
+      const text = getText(item).toLowerCase();
+      return terms.every((term) => text.includes(term));
+    });
+  },
   truncateToWidth: (str: string, width: number, ellipsis?: string, pad?: boolean): string => {
     const stripped = str.replace(ANSI_RE, "");
     if (stripped.length <= width) {
@@ -168,6 +229,7 @@ vi.mock("@earendil-works/pi-tui", () => ({
   Container: MockContainer,
   Text: MockText,
   SelectList: MockSelectList,
+  SettingsList: MockSettingsList,
   Key: MockKey,
   matchesKey: mockMatchesKey,
   isKeyRelease: vi.fn((data: string) => data === "space-release"),

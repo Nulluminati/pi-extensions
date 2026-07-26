@@ -39,5 +39,16 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
       return [this.color ? this.color(bar) : bar];
     }
   }
-  return { CustomEditor, DynamicBorder };
+  return {
+    CustomEditor,
+    DynamicBorder,
+    getAgentDir: vi.fn(() => "/home/test/.pi/agent"),
+    getSettingsListTheme: vi.fn(() => ({
+      label: (text: string) => text,
+      value: (text: string) => text,
+      description: (text: string) => text,
+      cursor: "> ",
+      hint: (text: string) => text,
+    })),
+  };
 });

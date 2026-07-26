@@ -335,6 +335,7 @@ declare module "pi" {
       ok: boolean;
       apiKey?: string;
       headers?: Record<string, string>;
+      env?: Record<string, string>;
       error?: string;
     }>;
     getApiKeyForProvider(providerName: string): Promise<string | undefined>;
@@ -394,8 +395,8 @@ declare module "pi" {
   }
 
   // Levels pi exposes across reasoning models. "off" disables thinking; "xhigh"
-  // is opt-in per model via thinkingLevelMap (see getSupportedThinkingLevels).
-  export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+  // and "max" are opt-in per model via thinkingLevelMap.
+  export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
   // Maps pi thinking levels to provider-side values. Omitted = provider default,
   // string = send that value, null = level is unsupported (hidden/skipped).
@@ -599,6 +600,7 @@ declare module "@earendil-works/pi-tui" {
   ): string;
   export function visibleWidth(str: string): number;
   export function wrapTextWithAnsi(str: string, width: number): string[];
+  export function fuzzyFilter<T>(items: T[], query: string, getText: (item: T) => string): T[];
   export function isKeyRelease(data: string): boolean;
   export function isKeyRepeat(data: string): boolean;
   export function isKittyProtocolActive(): boolean;
@@ -654,6 +656,37 @@ declare module "@earendil-works/pi-tui" {
     handleInput(keyData: string): void;
   }
 
+  export interface SettingItem {
+    id: string;
+    label: string;
+    description?: string;
+    currentValue: string;
+    values?: string[];
+  }
+
+  export interface SettingsListTheme {
+    label: (text: string, selected: boolean) => string;
+    value: (text: string, selected: boolean) => string;
+    description: (text: string) => string;
+    cursor: string;
+    hint: (text: string) => string;
+  }
+
+  export class SettingsList {
+    constructor(
+      items: SettingItem[],
+      maxVisible: number,
+      theme: SettingsListTheme,
+      onChange: (id: string, newValue: string) => void,
+      onCancel: () => void,
+      options?: { enableSearch?: boolean },
+    );
+    updateValue(id: string, newValue: string): void;
+    invalidate(): void;
+    render(width: number): string[];
+    handleInput(data: string): void;
+  }
+
   // Empty vertical gap, `lines` blank rows.
   export class Spacer {
     constructor(lines?: number);
@@ -705,6 +738,11 @@ declare module "@earendil-works/pi-tui" {
   export function matchesKey(data: string, keyId: string): boolean;
 }
 
+declare module "@earendil-works/pi-coding-agent" {
+  export function getAgentDir(): string;
+  export function getSettingsListTheme(): any;
+}
+
 declare module "@earendil-works/pi-ai" {
   export function StringEnum<T extends readonly string[]>(values: T): any;
   export function complete(model: any, payload: any, options: any): Promise<any>;
@@ -721,6 +759,7 @@ declare module "@earendil-works/pi-ai" {
     options: {
       apiKey: string;
       headers?: Record<string, string>;
+      env?: Record<string, string>;
       signal?: AbortSignal;
       cacheRetention?: string;
       maxTokens?: number;
