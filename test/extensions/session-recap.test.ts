@@ -6,7 +6,6 @@ import { getCommandHandler, getEventHandler } from "../mocks/test-helpers.ts";
 
 vi.mock("@earendil-works/pi-ai", () => ({
   completeSimple: vi.fn(),
-  getModel: vi.fn(() => undefined),
 }));
 
 // Helper to set up TTY mocks for focus reporting tests
@@ -99,10 +98,13 @@ describe("session-recap-extension", () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     vi.resetAllMocks();
+    vi.stubEnv("PI_SMALL_MODEL", "test-provider/test-model");
+    vi.stubEnv("PI_SMALL_MODEL_THINKING", "minimal");
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllEnvs();
     for (const restore of ttyRestores) restore();
     ttyRestores.length = 0;
   });
@@ -130,10 +132,8 @@ describe("session-recap-extension", () => {
       "recap-disable",
       expect.objectContaining({ type: "boolean", default: false }),
     );
-    expect(mockPi.registerFlag).toHaveBeenCalledWith(
-      "recap-model",
-      expect.objectContaining({ type: "string", default: "" }),
-    );
+    const flagNames = mockPi.registerFlag.mock.calls.map((call: unknown[]) => call[0]);
+    expect(flagNames).not.toContain("recap-model");
   });
 
   it("registers /recap command", async () => {
@@ -395,6 +395,61 @@ describe("session-recap-extension", () => {
     const component = factory!(null, theme) as { render: (w: number) => string[] };
     const lines = component.render(80);
     expect(lines.some((l: string) => l.includes("manual recap here"))).toBe(true);
+  });
+
+  it("uses the global small model instead of the active model", async () => {
+    const { completeSimple } = await import("@earendil-works/pi-ai");
+    vi.mocked(completeSimple).mockResolvedValueOnce({
+      content: [{ type: "text", text: "recap: used the small model" }],
+    });
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    const activeModel = mockCtx.model;
+    const smallModel = {
+      ...activeModel,
+      id: "small-model",
+      provider: "small-provider",
+      reasoning: true,
+    };
+    vi.stubEnv("PI_SMALL_MODEL", "small-provider/small-model");
+    mockCtx.modelRegistry.find = vi.fn(() => smallModel);
+    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
+    await sessionRecapExtension(mockPi);
+
+    await getCommandHandler(mockPi, "recap")("", mockCtx);
+    await vi.waitFor(() => expect(completeSimple).toHaveBeenCalled());
+
+    expect(completeSimple).toHaveBeenCalledWith(
+      smallModel,
+      expect.anything(),
+      expect.objectContaining({ apiKey: "test-key", reasoning: "minimal", maxTokens: 256 }),
+    );
+    expect(completeSimple).not.toHaveBeenCalledWith(
+      activeModel,
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it("manual recap reports an unavailable global small model without falling back", async () => {
+    const { completeSimple } = await import("@earendil-works/pi-ai");
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.modelRegistry.find = vi.fn(() => undefined);
+    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
+    await sessionRecapExtension(mockPi);
+
+    await getCommandHandler(mockPi, "recap")("", mockCtx);
+    await vi.waitFor(() =>
+      expect(mockCtx.ui.notify).toHaveBeenCalledWith(
+        expect.stringContaining("Global small model not found"),
+        "error",
+      ),
+    );
+
+    expect(completeSimple).not.toHaveBeenCalled();
   });
 
   it("does not generate recap when there is no meaningful activity", async () => {

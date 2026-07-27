@@ -932,6 +932,7 @@ describe("status-bar-extension", () => {
       footerData({
         statuses: new Map([
           ["goal", "🎯 active"],
+          ["small-model", "small synthetic/syn:small:text · minimal"],
           ["other", "some status"],
         ]),
       }),
@@ -940,6 +941,7 @@ describe("status-bar-extension", () => {
 
     expect(lines.length).toBe(2);
     expect(lines[1]).toContain("🎯 active");
+    expect(lines[1]).toContain("small synthetic/syn:small:text · minimal");
     expect(lines[1]).toContain("some status");
     // Model lives in the editor box, not the footer.
     expect(lines[0]).not.toContain("test-model");

@@ -16,16 +16,16 @@
  *   --recap-disable-focus         Disable focus reporting
  *   --recap-during-active         Allow recaps during active agent turn
  *   --recap-disable               Disable entirely
- *   --recap-model <p/id>          Override model for recap generation
  *
  * Command:
  *   /recap                        Force-generate a recap now
  */
 
-import { completeSimple, getModel } from "@earendil-works/pi-ai";
+import { completeSimple } from "@earendil-works/pi-ai";
 import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { ExtensionAPI, ExtensionContext } from "pi";
 import { extractText, extractToolCallBlocks } from "../../lib/session-utils.ts";
+import { resolveSmallModel } from "../../lib/small-model.ts";
 
 // --- Constants ---
 
@@ -124,12 +124,6 @@ function resetState(state: RecapState) {
 
 // --- Utilities ---
 
-function splitModel(spec: string): { provider: string; id: string } | undefined {
-  const idx = spec.indexOf("/");
-  if (idx <= 0) return undefined;
-  return { provider: spec.slice(0, idx), id: spec.slice(idx + 1) };
-}
-
 function formatToolCallSummary(content: unknown): string[] {
   const blocks = extractToolCallBlocks(content);
   return blocks.map((b) => {
@@ -201,37 +195,9 @@ function hasMeaningfulActivity(entries: Entry[]): boolean {
 async function generateRecap(
   transcript: string,
   ctx: ExtensionContext,
-  modelOverride: string | undefined,
   signal: AbortSignal | undefined,
 ): Promise<string | undefined> {
-  let model = ctx.model;
-  if (modelOverride) {
-    const parsed = splitModel(modelOverride);
-    if (!parsed) {
-      if (ctx.hasUI) {
-        ctx.ui.notify(
-          `Invalid --recap-model format: ${modelOverride}. Expected provider/model-id.`,
-          "warning",
-        );
-      }
-      return undefined;
-    }
-    const found = getModel(parsed.provider, parsed.id);
-    if (found) {
-      model = found;
-    } else {
-      if (ctx.hasUI) {
-        ctx.ui.notify(
-          `--recap-model not found: ${modelOverride}. Falling back to active model.`,
-          "warning",
-        );
-      }
-    }
-  }
-  if (!model) return undefined;
-
-  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-  if (!auth?.ok || !auth.apiKey) return undefined;
+  const resolved = await resolveSmallModel(ctx);
 
   const prompt = `You produce a single-line recap of what the coding agent just did, so the user can re-enter flow after switching focus back to this session.
 
@@ -250,23 +216,31 @@ ${transcript.slice(0, 12000)}
   const options: {
     apiKey: string;
     headers?: Record<string, string>;
+    env?: Record<string, string>;
     signal?: AbortSignal;
     cacheRetention: string;
     maxTokens: number;
+    reasoning?: string;
   } = {
-    apiKey: auth.apiKey,
+    apiKey: resolved.auth.apiKey,
     cacheRetention: "none",
     maxTokens: 256,
   };
-  if (auth.headers) {
-    options.headers = auth.headers;
+  if (resolved.auth.headers) {
+    options.headers = resolved.auth.headers;
+  }
+  if (resolved.auth.env) {
+    options.env = resolved.auth.env;
+  }
+  if (resolved.reasoning) {
+    options.reasoning = resolved.reasoning;
   }
   if (signal) {
     options.signal = signal;
   }
 
   const response = await completeSimple(
-    model,
+    resolved.model,
     {
       systemPrompt: "You write terse, concrete session recaps for a coding agent UI.",
       messages: [
@@ -502,8 +476,7 @@ async function generateAndShow(
   }
 
   try {
-    const override = (pi.getFlag("recap-model") as string | undefined)?.trim() || undefined;
-    const recap = await generateRecap(transcript, ctx, override, controller.signal);
+    const recap = await generateRecap(transcript, ctx, controller.signal);
     if (!recap || controller.signal.aborted) return;
     if (ctx.sessionManager.getLeafId() !== startLeaf) return;
 
@@ -520,7 +493,13 @@ async function generateAndShow(
       showRecap(pi, ctx, recap);
     }
   } catch (err) {
-    if (!controller.signal.aborted) console.error("[session-recap] failed:", err);
+    if (!controller.signal.aborted) {
+      if (opts.reason === "manual" && ctx.hasUI) {
+        ctx.ui.notify(err instanceof Error ? err.message : String(err), "error");
+      } else {
+        console.error("[session-recap] failed:", err);
+      }
+    }
   } finally {
     if (state.activeController === controller) {
       state.activeController = undefined;
@@ -575,12 +554,6 @@ export default async function sessionRecapExtension(pi: ExtensionAPI) {
     type: "boolean",
     default: false,
   });
-  pi.registerFlag("recap-model", {
-    description: "Override the default (active) model, e.g. anthropic/claude-sonnet-4-6",
-    type: "string",
-    default: "",
-  });
-
   // --- Event handlers ---
 
   pi.on("turn_end", async (_event, ctx) => {

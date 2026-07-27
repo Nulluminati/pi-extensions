@@ -101,9 +101,8 @@ All state is stored in a `WeakMap<ExtensionAPI, RecapState>` with the following 
 | `ctx.ui.theme.fg()` | Styles the recap header with accent color |
 | `ctx.sessionManager.getBranch()` | Extracts conversation transcript |
 | `ctx.sessionManager.getLeafId()` | Detects branch navigation during generation |
-| `ctx.modelRegistry.getApiKeyAndHeaders()` | Resolves auth for the LLM call |
+| `ctx.modelRegistry.find()` / `getApiKeyAndHeaders()` | Resolves the global small model and its credentials |
 | `completeSimple()` from `@earendil-works/pi-ai` | Generates the recap text |
-| `getModel()` from `@earendil-works/pi-ai` | Resolves `--recap-model` override |
 
 ## Configuration
 
@@ -114,10 +113,11 @@ All state is stored in a `WeakMap<ExtensionAPI, RecapState>` with the following 
 | `--recap-disable-focus` | boolean | `false` | Disable DECSET ?1004 focus reporting (idle fallback still runs) |
 | `--recap-during-active` | boolean | `false` | Allow focus-triggered recaps while an agent turn is still running |
 | `--recap-disable` | boolean | `false` | Disable the automatic session recap entirely |
-| `--recap-model` | string | `""` | Override the default (active) model for recap generation, e.g. `anthropic/claude-sonnet-4-6` |
+
+Set the recap model with `/small-model`. Recap generation does not fall back to the active chat model.
 
 Example:
 
 ```bash
-pi --recap-idle-seconds 30 --recap-model anthropic/claude-sonnet-4-6
+pi --recap-idle-seconds 30
 ```
