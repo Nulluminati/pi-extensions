@@ -4,7 +4,7 @@ Summarize the current session into a compact continuation prompt, then open a ne
 
 ## What It Does
 
-Long sessions run out of context. Handoff gives you a clean exit: it reads your current branch, asks the active model to condense it into a tight prompt that captures the goal, what's done, and what's next, lets you review and edit the result, and starts a new session with that prompt already in the editor. The new session is parented to the old one, so the lineage is preserved.
+Long sessions run out of context. Handoff reads the current branch, asks the global small model to condense it into a continuation prompt, lets you edit the result, and starts a new session with that prompt in the editor. The new session is parented to the old one.
 
 ## Usage
 
@@ -30,7 +30,7 @@ The goal is used to steer the summary (it tells the model what the next session 
 
 ### Summary generation
 
-1. **Transcript build** — Walks the current branch and extracts user text, assistant text, and tool results into a compact transcript. Each segment is bounded (a couple thousand characters for messages, a few hundred for tool results) so the input stays in a predictable size range.
+1. **Transcript build** — Walks backward through the current branch and extracts the most recent user text, assistant text, and tool results until the transcript reaches its size limit. Each segment is bounded (a couple thousand characters for messages, a few hundred for tool results) so the input stays in a predictable size range.
 2. **Goal and transcript sent to the model** — `completeSimple` from `@earendil-works/pi-ai` is called with a system prompt that asks for a concise continuation prompt: original request, what's done, key decisions, files touched, what remains, concrete next steps. No greetings, no code fences, no meta-commentary.
 3. **Output validation** — Empty or unparseable responses surface as a notification; the handoff is cancelled.
 
@@ -40,9 +40,9 @@ The summary is shown in `ctx.ui.editor("Review handoff prompt", summary)`. The u
 
 ### New session
 
-`ctx.newSession()` opens a fresh session with the edited summary pre-filled in its editor. The `withSession` callback also drops a "Handoff ready" notification in the new context. The current session's file path is passed as `parentSession` so the lineage is recorded.
+`ctx.newSession()` opens a fresh session with the edited summary pre-filled in its editor. Its `setup` callback names the session before the switch, and its `withSession` callback displays the "Handoff ready" notification through the replacement context. The current session's file path is passed as `parentSession` so the lineage is recorded.
 
-The new session is named from the goal (capitalized, truncated for display). A final "Handoff complete" notification names it.
+The new session name comes from the goal, capitalized and truncated for display.
 
 ### Status indicator
 
@@ -63,17 +63,16 @@ While the summary is generating, a Nerd Font swap icon with a "Generating handof
 | API | Purpose |
 |-----|---------|
 | `pi.registerCommand("handoff")` | The `/handoff` slash command |
-| `pi.setSessionName(name)` | Names the new session from the goal |
-| `ctx.newSession({ parentSession, withSession })` | Opens a new session, parents it to the current one, and pre-fills the editor |
+| `ctx.newSession({ parentSession, setup, withSession })` | Opens and names a parented session, then pre-fills its editor through the replacement context |
 | `ctx.ui.input(prompt, placeholder)` | Collects the goal when none is passed on the command line |
 | `ctx.ui.editor(title, text)` | The review/edit step for the generated summary |
 | `ctx.ui.setStatus(key, text)` | The "Generating handoff summary…" status line |
-| `ctx.ui.notify(message, severity)` | Errors, cancellation, and completion notifications |
+| `ctx.ui.notify(message, severity)` | Errors, cancellation, and the replacement-session ready notification |
 | `ctx.ui.theme.fg(color, text)` | Colors the status icon and label |
-| `ctx.model` / `ctx.modelRegistry.getApiKeyAndHeaders()` | Resolves the active model and its credentials |
+| `ctx.modelRegistry.find()` / `getApiKeyAndHeaders()` | Resolves the global small model and its credentials |
 | `ctx.sessionManager.getBranch()` / `getSessionFile()` | Reads the transcript and parents the new session |
 | `completeSimple()` from `@earendil-works/pi-ai` | The LLM call that produces the summary |
 
 ## Configuration
 
-None. The extension reads whatever model is active and uses its credentials.
+Set the shared model with `/small-model`. Handoff stops with an error if that model is missing or unauthenticated; it does not fall back to the active chat model.

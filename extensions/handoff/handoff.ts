@@ -12,6 +12,7 @@
 
 import { completeSimple } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "pi";
+import { resolveSmallModel } from "../../lib/small-model.ts";
 
 // --- Constants ---
 
@@ -24,7 +25,7 @@ export const TEXT_COLOR = "muted";
 
 const STATUS_KEY = "handoff";
 const GOAL_MAX_LENGTH = 4000;
-const TRANSCRIPT_MAX_CHARS = 12000;
+const TRANSCRIPT_MAX_CHARS = 36000;
 const SUMMARY_MAX_TOKENS = 2048;
 
 // --- Types ---
@@ -49,6 +50,17 @@ interface SummaryError {
   error: string;
 }
 
+interface HandoffSessionManager {
+  appendSessionInfo(name: string): unknown;
+}
+
+interface HandoffReplacementContext {
+  ui: {
+    setEditorText(text: string): void;
+    notify(message: string, type: "info" | "warning" | "error"): void;
+  };
+}
+
 // --- Pure utilities ---
 
 function extractText(content: unknown): string {
@@ -63,23 +75,49 @@ function extractText(content: unknown): string {
     .join("");
 }
 
+function formatTranscriptEntry(entry: HandoffEntry): string | undefined {
+  if (entry.type !== "message" || !entry.message?.role) return undefined;
+
+  const role = entry.message.role;
+  const text = extractText(entry.message.content).trim();
+
+  if (role === "user" && text) {
+    return `User: ${text.slice(0, 1200)}`;
+  }
+  if (role === "assistant" && text) {
+    return `Assistant: ${text.slice(0, 1200)}`;
+  }
+  if (role === "toolResult" && text) {
+    const name = entry.message.toolName ?? "tool";
+    return `Result(${name}): ${text.slice(0, 400)}`;
+  }
+  return undefined;
+}
+
 function buildTranscript(entries: HandoffEntry[]): string {
   const lines: string[] = [];
-  for (const entry of entries) {
-    if (entry.type !== "message" || !entry.message?.role) continue;
+  let length = 0;
 
-    const role = entry.message.role;
-    const text = extractText(entry.message.content).trim();
+  for (let index = entries.length - 1; index >= 0; index--) {
+    const entry = entries[index];
+    if (!entry) continue;
 
-    if (role === "user" && text) {
-      lines.push(`User: ${text.slice(0, 1200)}`);
-    } else if (role === "assistant" && text) {
-      lines.push(`Assistant: ${text.slice(0, 1200)}`);
-    } else if (role === "toolResult" && text) {
-      const name = entry.message.toolName ?? "tool";
-      lines.push(`Result(${name}): ${text.slice(0, 400)}`);
+    const line = formatTranscriptEntry(entry);
+    if (!line) continue;
+
+    const separatorLength = lines.length > 0 ? 1 : 0;
+    const available = TRANSCRIPT_MAX_CHARS - length - separatorLength;
+    if (available <= 0) break;
+
+    if (line.length > available) {
+      lines.unshift(available > 1 ? `${line.slice(0, available - 1)}…` : line.slice(0, available));
+      break;
     }
+
+    lines.unshift(line);
+    length += line.length + separatorLength;
   }
+
   return lines.join("\n");
 }
 
@@ -106,7 +144,7 @@ function buildSummaryUserMessage(transcript: string, goal: string): string {
   return `Goal for the new session: ${goal}
 
 <conversation_transcript>
-${transcript.slice(0, TRANSCRIPT_MAX_CHARS)}
+${transcript}
 </conversation_transcript>
 
 Write the handoff prompt.`;
@@ -125,31 +163,26 @@ async function generateSummary(
   goal: string,
   ctx: ExtensionContext,
 ): Promise<SummaryResult | SummaryError> {
-  const model = ctx.model;
-  if (!model) {
-    return { ok: false, error: "No model selected. Use /model to select a model first." };
-  }
-
-  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-  if (!auth?.ok || !auth.apiKey) {
-    return { ok: false, error: "No API key available for the active model." };
-  }
-
-  const options: {
-    apiKey: string;
-    headers?: Record<string, string>;
-    signal?: AbortSignal;
-    maxTokens: number;
-  } = {
-    apiKey: auth.apiKey,
-    maxTokens: SUMMARY_MAX_TOKENS,
-  };
-  if (auth.headers) options.headers = auth.headers;
-  if (ctx.signal) options.signal = ctx.signal;
-
   try {
+    const resolved = await resolveSmallModel(ctx);
+    const options: {
+      apiKey: string;
+      headers?: Record<string, string>;
+      env?: Record<string, string>;
+      signal?: AbortSignal;
+      maxTokens: number;
+      reasoning?: string;
+    } = {
+      apiKey: resolved.auth.apiKey,
+      maxTokens: SUMMARY_MAX_TOKENS,
+    };
+    if (resolved.auth.headers) options.headers = resolved.auth.headers;
+    if (resolved.auth.env) options.env = resolved.auth.env;
+    if (ctx.signal) options.signal = ctx.signal;
+    if (resolved.reasoning) options.reasoning = resolved.reasoning;
+
     const response = await completeSimple(
-      model,
+      resolved.model,
       {
         systemPrompt: buildSummarySystemPrompt(),
         messages: [
@@ -241,11 +274,6 @@ export default async function handoffExtension(pi: ExtensionAPI) {
       const goal = await resolveGoal(args, ctx);
       if (!goal) return;
 
-      if (!ctx.model) {
-        notify(ctx, "No model selected. Use /model to select a model first.", "error");
-        return;
-      }
-
       const entries = ctx.sessionManager.getBranch() as HandoffEntry[];
       const transcript = buildTranscript(entries);
       if (!transcript.trim()) {
@@ -288,8 +316,12 @@ export default async function handoffExtension(pi: ExtensionAPI) {
 
       const newSessionOptions: {
         parentSession?: string;
-        withSession: (newCtx: any) => Promise<void>;
+        setup: (sessionManager: HandoffSessionManager) => Promise<void>;
+        withSession: (newCtx: HandoffReplacementContext) => Promise<void>;
       } = {
+        setup: async (sessionManager) => {
+          sessionManager.appendSessionInfo(sessionName);
+        },
         withSession: async (newCtx) => {
           newCtx.ui.setEditorText(editedSummary);
           newCtx.ui.notify("Handoff ready. Press Enter to continue in the new session.", "info");
@@ -303,11 +335,7 @@ export default async function handoffExtension(pi: ExtensionAPI) {
 
       if (result.cancelled) {
         notify(ctx, "New session cancelled.", "info");
-        return;
       }
-
-      pi.setSessionName(sessionName);
-      notify(ctx, `Handoff complete. New session: ${sessionName}`, "info");
     },
   });
 }
