@@ -86,6 +86,16 @@ const NEURALWATT_REASONING_COMPAT = {
  * high are also accepted and engage thinking, so they are exposed here.
  */
 
+// Disableable with identity mapping through xhigh (gemma-4-31b).
+const DISABLEABLE_IDENTITY_MAP: ThinkingLevelMap = {
+  off: "none",
+  minimal: "minimal",
+  low: "low",
+  medium: "medium",
+  high: "high",
+  xhigh: "xhigh",
+};
+
 // Disableable, accepts the full enum including `max` (glm-5.2, qwen3.5-397b).
 const DISABLEABLE_FULL_MAP: ThinkingLevelMap = {
   off: "none",
@@ -107,14 +117,18 @@ const ALWAYS_ON_FULL_MAP: ThinkingLevelMap = {
   xhigh: "max",
 };
 
-// Disableable, but rejects minimal/xhigh/max (moonshotai/Kimi-K2.5).
-const DISABLEABLE_RESTRICTED_MAP: ThinkingLevelMap = {
-  off: "none",
-  minimal: null,
+// Cannot be disabled and accepts identity-mapped levels through xhigh
+// (moonshotai/Kimi-K2.5). Re-probed in 2026-07 after the gateway behavior
+// changed: `none` still produced reasoning, while minimal and xhigh returned
+// HTTP 200. Keep xhigh as an identity mapping because the probe found no
+// evidence to remap it.
+const KIMI_K2_5_MAP: ThinkingLevelMap = {
+  off: null,
+  minimal: "minimal",
   low: "low",
   medium: "medium",
   high: "high",
-  xhigh: null,
+  xhigh: "xhigh",
 };
 
 // Cannot be disabled and rejects minimal/xhigh/max (qwen3.6-35b).
@@ -193,11 +207,29 @@ interface NeuralwattQuotaResponse {
  * (see the DISABLEABLE and ALWAYS_ON map constants below); each map's comment
  * records how that model's levels were probed against the gateway.
  *
- * Each reasoning/fast pair shares pricing; the "-fast" variants are
- * non-reasoning. Legacy model ids (e.g. glm-5.1, moonshotai/Kimi-K2.6) are not
- * included — add them as aliases if backwards compatibility is needed.
+ * The GLM, Kimi, and Qwen reasoning/fast pairs share pricing; their "-fast"
+ * variants are non-reasoning. Legacy model ids (e.g. glm-5.1,
+ * moonshotai/Kimi-K2.6) are not included — add them as aliases if backwards
+ * compatibility is needed.
  */
 const STATIC_MODELS: ProviderModelConfig[] = [
+  // --- Gemma 4 (Google/NVIDIA) ---
+  // The catalog reports reasoning:false and reasoning_effort:false, but two
+  // direct probes in 2026-07 showed that efforts through xhigh are accepted,
+  // those enabled levels emit `reasoning`, and none disables thinking.
+  {
+    id: "gemma-4-31b",
+    name: "Gemma 4 31B",
+    api: "openai-completions",
+    reasoning: true,
+    thinkingLevelMap: DISABLEABLE_IDENTITY_MAP,
+    input: ["text", "image"],
+    cost: { input: 0.144, output: 0.42, cacheRead: 0.036, cacheWrite: 0 },
+    contextWindow: 262128,
+    maxTokens: 16384,
+    compat: NEURALWATT_REASONING_COMPAT,
+  },
+
   // --- GLM-5.2 (ZhipuAI) ---
   {
     id: "glm-5.2",
@@ -259,7 +291,7 @@ const STATIC_MODELS: ProviderModelConfig[] = [
     name: "Kimi K2.5",
     api: "openai-completions",
     reasoning: true,
-    thinkingLevelMap: DISABLEABLE_RESTRICTED_MAP,
+    thinkingLevelMap: KIMI_K2_5_MAP,
     input: ["text", "image"],
     cost: { input: 0.52, output: 2.59, cacheRead: 0.13, cacheWrite: 0 },
     contextWindow: 262128,

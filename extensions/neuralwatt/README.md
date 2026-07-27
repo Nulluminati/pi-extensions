@@ -4,7 +4,7 @@ Registers [Neuralwatt](https://neuralwatt.com) as a Pi model provider using thei
 
 ## What It Does
 
-Registers the `neuralwatt` provider so you can use Neuralwatt's hosted open-source models (GLM-5.2, Kimi K2.5/K2.6/K2.7, Qwen3.5/3.6) in Pi. It:
+Registers the `neuralwatt` provider so you can use Neuralwatt's hosted open-source models (Gemma 4, GLM-5.2, Kimi K2.5/K2.6/K2.7, and Qwen3.5/3.6) in Pi. It:
 
 1. Registers the provider at load time with a hardcoded catalog of public models, so Pi starts even when the API is unreachable or no key is configured.
 2. On `session_start`, fetches the public `/v1/models` view and warns when Neuralwatt publishes models the static list lacks.
@@ -50,6 +50,7 @@ The catalog comes from Neuralwatt's `/v1/models` metadata. Pricing is per millio
 
 | Model | Context | Reasoning | Vision | In / Out (per 1M) |
 |-------|---------|-----------|--------|--------------------|
+| gemma-4-31b | 256K | yes* | yes | $0.144 / $0.42 |
 | glm-5.2 | 1M | yes | — | $1.45 / $4.50 |
 | glm-5.2-fast | 1M | no | — | $1.45 / $4.50 |
 | glm-5.2-short | 200K | yes | — | $1.45 / $4.50 |
@@ -64,7 +65,7 @@ The catalog comes from Neuralwatt's `/v1/models` metadata. Pricing is per millio
 | qwen3.6-35b | 128K | yes | yes | $0.29 / $1.15 |
 | qwen3.6-35b-fast | 128K | no | yes | $0.29 / $1.15 |
 
-Each reasoning model pairs with a `-fast` non-reasoning variant that shares pricing. Legacy ids (for example `glm-5.1`, `moonshotai/Kimi-K2.6`) are not included; add them as aliases if you need backwards compatibility.
+The GLM, Kimi, and Qwen reasoning models pair with `-fast` non-reasoning variants that share pricing. Gemma has no listed fast variant. Its catalog metadata says reasoning is unsupported, but direct probes found that levels through `xhigh` are accepted, enabled levels emit reasoning, and `none` disables it. Legacy ids (for example `glm-5.1`, `moonshotai/Kimi-K2.6`) are not included; add them as aliases if you need backwards compatibility.
 
 ### Startup staleness check
 
@@ -87,24 +88,25 @@ Reasoning models carry per-model `thinkingLevelMap` values verified by probing t
 
 | Model | off | minimal | low | medium | high | xhigh |
 |-------|-----|---------|-----|--------|------|-------|
+| gemma-4-31b | none | minimal | low | medium | high | xhigh |
 | glm-5.2 | none | minimal | low | medium | high | max |
 | glm-5.2-short | none | minimal | low | medium | high | max |
 | qwen3.5-397b | none | minimal | low | medium | high | max |
 | kimi-k2.6 | (hidden) | minimal | low | medium | high | max |
 | kimi-k2.7-code | (hidden) | minimal | low | medium | high | max |
-| moonshotai/Kimi-K2.5 | none | (hidden) | low | medium | high | (hidden) |
+| moonshotai/Kimi-K2.5 | (hidden) | minimal | low | medium | high | xhigh |
 | qwen3.6-35b | (hidden) | (hidden) | low | medium | high | (hidden) |
 
 Neuralwatt returns thinking under a top-level `reasoning` field, not `reasoning_content`. Pi's openai-completions provider reads reasoning from any of `reasoning_content`, `reasoning`, or `reasoning_text`, so thinking parses and replays correctly with no special compat flag. `compat.supportsReasoningEffort` is `true` on every reasoning model so pi sends `reasoning_effort` on the wire.
 
-The published pi-neuralwatt extension exposes only `medium` for Kimi/Qwen, but that restriction came from probing with the wrong key (`reasoning_content` instead of `reasoning`); direct probing shows `low` and `high` are also accepted and engage thinking, so they are exposed here. To re-verify a model after API changes:
+The published pi-neuralwatt extension exposes only `medium` for Kimi/Qwen, but that restriction came from probing with the wrong key (`reasoning_content` instead of `reasoning`). Direct probes show the other listed levels are accepted and engage thinking. Kimi K2.5 was re-probed in 2026-07 after its gateway behavior changed: `none` still produced reasoning, while `minimal` and `xhigh` returned HTTP 200. To re-verify a model after API changes:
 
 ```bash
 .pi/skills/probe-model/scripts/probe_model.py glm-5.2 \
   --base-url https://api.neuralwatt.com/v1 -k $NEURALWATT_API_KEY
 ```
 
-Note the probe script checks `reasoning_content`, which Neuralwatt does not populate; inspect the `reasoning` field in the raw response when interpreting its engagement results.
+The probe checks `reasoning_content`, `reasoning`, and `reasoning_text`. Neuralwatt currently returns thinking through `reasoning`.
 
 ## Pi APIs Used
 

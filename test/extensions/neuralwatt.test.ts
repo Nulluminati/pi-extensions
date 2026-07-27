@@ -15,6 +15,7 @@ function mockModelsResponse(models: unknown[]): Response {
 
 // Ids present in the static catalog. Startup check tests use these.
 const EXPECTED_MODEL_IDS = [
+  "gemma-4-31b",
   "glm-5.2",
   "glm-5.2-fast",
   "glm-5.2-short",
@@ -50,6 +51,21 @@ describe("neuralwatt-extension", () => {
     for (const id of EXPECTED_MODEL_IDS) {
       expect(ids, `static list missing ${id}`).toContain(id);
     }
+  });
+
+  it("configures Gemma 4 from live metadata and probed reasoning behavior", () => {
+    const model = STATIC_MODELS.find((candidate) => candidate.id === "gemma-4-31b");
+
+    expect(model).toEqual(
+      expect.objectContaining({
+        name: "Gemma 4 31B",
+        reasoning: true,
+        input: ["text", "image"],
+        cost: { input: 0.144, output: 0.42, cacheRead: 0.036, cacheWrite: 0 },
+        contextWindow: 262128,
+        maxTokens: 16384,
+      }),
+    );
   });
 
   it("registers the provider synchronously with the full static model list", async () => {
@@ -104,6 +120,16 @@ describe("neuralwatt-extension", () => {
   it("maps each reasoning model's levels to the probed gateway behavior", () => {
     const byId = Object.fromEntries(STATIC_MODELS.map((m) => [m.id, m]));
 
+    // Disableable + accepts identity-mapped levels through xhigh.
+    expect(byId["gemma-4-31b"].thinkingLevelMap).toEqual({
+      off: "none",
+      minimal: "minimal",
+      low: "low",
+      medium: "medium",
+      high: "high",
+      xhigh: "xhigh",
+    });
+
     // Disableable + accepts full enum (incl. max); xhigh -> "max" for deepest tier.
     expect(byId["glm-5.2"].thinkingLevelMap).toEqual({
       off: "none",
@@ -148,14 +174,14 @@ describe("neuralwatt-extension", () => {
       xhigh: "max",
     });
 
-    // Disableable but rejects minimal/xhigh/max (those levels hidden).
+    // Cannot be disabled + accepts identity-mapped levels through xhigh.
     expect(byId["moonshotai/Kimi-K2.5"].thinkingLevelMap).toEqual({
-      off: "none",
-      minimal: null,
+      off: null,
+      minimal: "minimal",
       low: "low",
       medium: "medium",
       high: "high",
-      xhigh: null,
+      xhigh: "xhigh",
     });
 
     // Cannot be disabled and rejects minimal/xhigh/max.
