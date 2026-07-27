@@ -1,13 +1,7 @@
-import { readdirSync } from "node:fs";
-import { join } from "node:path";
-import { validateFile } from "../lib/validate-extension.ts";
+import { findExtensionEntrypoints, validateFile } from "../lib/validate-extension.ts";
 
 const extensionsDir = "./extensions";
-const files = readdirSync(extensionsDir, { recursive: true })
-  .filter(
-    (f): f is string => typeof f === "string" && f.endsWith(".ts") && !f.endsWith("_template.ts"),
-  )
-  .map((f) => join(extensionsDir, f));
+const files = findExtensionEntrypoints(extensionsDir);
 
 if (files.length === 0) {
   console.log("No extensions to validate.");

@@ -1,3 +1,5 @@
+import { readdir } from "node:fs/promises";
+import { resolve } from "node:path";
 import { completeSimple, stream } from "@earendil-works/pi-ai";
 import {
   createBashTool,
@@ -5,7 +7,7 @@ import {
   createReadTool,
   createWriteTool,
 } from "@earendil-works/pi-coding-agent";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import btwExtension from "../../extensions/btw/btw.ts";
 import { createMockCommandContext } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
@@ -21,6 +23,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
   createBashTool: vi.fn(),
   createEditTool: vi.fn(),
   createWriteTool: vi.fn(),
+  getAgentDir: vi.fn(() => "/home/test/.pi/agent"),
 }));
 
 // --- Test helpers ---
@@ -212,6 +215,26 @@ function registerAll(mockPi: ReturnType<typeof createMockPi>) {
 describe("btw-extension", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    vi.stubEnv("PI_SMALL_MODEL", "test-provider/test-model");
+    vi.stubEnv("PI_SMALL_MODEL_THINKING", "minimal");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  describe("file structure", () => {
+    it("keeps one discoverable entrypoint and implementation modules under src", async () => {
+      const extensionDir = resolve(import.meta.dirname, "../../extensions/btw");
+      const rootEntries = await readdir(extensionDir, { withFileTypes: true });
+      const rootTypeScriptFiles = rootEntries
+        .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
+        .map((entry) => entry.name);
+      const sourceFiles = await readdir(resolve(extensionDir, "src"));
+
+      expect(rootTypeScriptFiles).toEqual(["btw.ts"]);
+      expect(sourceFiles.filter((file) => file.endsWith(".ts")).length).toBeGreaterThan(1);
+    });
   });
 
   // §4 Capabilities — registration
@@ -229,7 +252,6 @@ describe("btw-extension", () => {
           "btw:clear",
           "btw:inject",
           "btw:summarize",
-          "btw:model",
           "btw:thinking",
         ]),
       );
@@ -278,16 +300,16 @@ describe("btw-extension", () => {
       );
     });
 
-    it("/btw with no model available shows error and does nothing", async () => {
+    it("/btw with no global small model available shows error and does nothing", async () => {
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       const mockPi = createMockPi() as any;
       const { mockCtx } = setupContext();
-      mockCtx.model = undefined;
+      mockCtx.modelRegistry.find = vi.fn(() => undefined);
       await registerAll(mockPi);
       await getCommandHandler(mockPi, "btw")("question?", mockCtx);
       await flush();
       expect(mockCtx.ui.notify).toHaveBeenCalledWith(
-        expect.stringContaining("No model is available"),
+        expect.stringContaining("Global small model not found"),
         "error",
       );
       expect(stream).not.toHaveBeenCalled();
@@ -632,6 +654,14 @@ describe("btw-extension", () => {
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       const mockPi = createMockPi() as any;
       const { mockCtx } = setupContext();
+      const smallModel = {
+        ...mockCtx.model,
+        id: "small-model",
+        provider: "small-provider",
+        reasoning: true,
+      };
+      vi.stubEnv("PI_SMALL_MODEL", "small-provider/small-model");
+      mockCtx.modelRegistry.find = vi.fn(() => smallModel);
       await registerAll(mockPi);
       await getCommandHandler(mockPi, "btw")("should we use A or B?", mockCtx);
       await flush();
@@ -640,7 +670,8 @@ describe("btw-extension", () => {
       await flush();
 
       expect(completeSimple).toHaveBeenCalledTimes(1);
-      const [, , options] = vi.mocked(completeSimple).mock.calls[0];
+      const [summaryModel, , options] = vi.mocked(completeSimple).mock.calls[0];
+      expect(summaryModel).toBe(smallModel);
       // Summarization always runs with thinking off (minimal).
       expect(options).toMatchObject({ reasoning: "minimal" });
       const [content] =
@@ -649,133 +680,41 @@ describe("btw-extension", () => {
     });
   });
 
-  // §4/§9/§10 — model override
-  describe("model override", () => {
-    it("/btw:model shows the inherited main model by default", async () => {
-      // biome-ignore lint/suspicious/noExplicitAny: test mock
-      const mockPi = createMockPi() as any;
-      const { mockCtx } = setupContext();
-      await registerAll(mockPi);
-      await getCommandHandler(mockPi, "btw:model")("", mockCtx);
-      expect(mockCtx.ui.notify).toHaveBeenCalledWith(
-        expect.stringContaining("inheriting main thread"),
-        "info",
-      );
-    });
-
-    it("/btw:model with an unknown model errors and points at adding it first", async () => {
-      // biome-ignore lint/suspicious/noExplicitAny: test mock
-      const mockPi = createMockPi() as any;
-      const { mockCtx } = setupContext();
-      mockCtx.modelRegistry.find = vi.fn(() => undefined);
-      await registerAll(mockPi);
-      await getCommandHandler(mockPi, "btw:model")(
-        "anthropic claude-haiku-4-5 anthropic-messages",
-        mockCtx,
-      );
-      expect(mockCtx.ui.notify).toHaveBeenCalledWith(
-        expect.stringContaining("Unknown model"),
-        "error",
-      );
-    });
-
-    it("/btw:model <provider> <model> <api> sets a known override", async () => {
-      // biome-ignore lint/suspicious/noExplicitAny: test mock
-      const mockPi = createMockPi() as any;
-      const { mockCtx } = setupContext();
-      const haiku = { id: "claude-haiku-4-5", provider: "anthropic", api: "anthropic-messages" };
-      // biome-ignore lint/suspicious/noExplicitAny: test mock
-      mockCtx.modelRegistry.find = vi.fn(() => haiku as any);
-      await registerAll(mockPi);
-      await getCommandHandler(mockPi, "btw:model")(
-        "anthropic claude-haiku-4-5 anthropic-messages",
-        mockCtx,
-      );
-      expect(mockCtx.ui.notify).toHaveBeenCalledWith(
-        expect.stringContaining("Side model set to anthropic/claude-haiku-4-5"),
-        "info",
-      );
-    });
-
-    it("/btw:model clear resets the override", async () => {
-      // biome-ignore lint/suspicious/noExplicitAny: test mock
-      const mockPi = createMockPi() as any;
-      const { mockCtx } = setupContext();
-      const haiku = { id: "claude-haiku-4-5", provider: "anthropic", api: "anthropic-messages" };
-      // biome-ignore lint/suspicious/noExplicitAny: test mock
-      mockCtx.modelRegistry.find = vi.fn(() => haiku as any);
-      await registerAll(mockPi);
-      await getCommandHandler(mockPi, "btw:model")(
-        "anthropic claude-haiku-4-5 anthropic-messages",
-        mockCtx,
-      );
-      await getCommandHandler(mockPi, "btw:model")("clear", mockCtx);
-      expect(mockCtx.ui.notify).toHaveBeenLastCalledWith(
-        expect.stringContaining("cleared"),
-        "info",
-      );
-    });
-
-    it("uses the override model for the side agent", async () => {
+  describe("global small model", () => {
+    it("uses the global small model instead of the active main model", async () => {
       setupTools();
       // biome-ignore lint/suspicious/noExplicitAny: test mock
-      vi.mocked(stream).mockReturnValue(makeEventStream(textDoneEvents("haiku says hi")) as any);
+      vi.mocked(stream).mockReturnValue(makeEventStream(textDoneEvents("small says hi")) as any);
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       const mockPi = createMockPi() as any;
       const { mockCtx } = setupContext();
-      const haiku = { id: "claude-haiku-4-5", provider: "anthropic", api: "anthropic-messages" };
-      // biome-ignore lint/suspicious/noExplicitAny: test mock
-      mockCtx.modelRegistry.find = vi.fn(() => haiku as any);
-      mockCtx.modelRegistry.getApiKeyAndHeaders = vi.fn(async () => ({
-        ok: true,
-        apiKey: "haiku-key",
-      }));
+      const activeModel = mockCtx.model;
+      const smallModel = {
+        ...activeModel,
+        id: "small-model",
+        provider: "small-provider",
+        reasoning: true,
+      };
+      vi.stubEnv("PI_SMALL_MODEL", "small-provider/small-model");
+      mockCtx.modelRegistry.find = vi.fn(() => smallModel);
       await registerAll(mockPi);
-      await getCommandHandler(mockPi, "btw:model")(
-        "anthropic claude-haiku-4-5 anthropic-messages",
-        mockCtx,
-      );
+
       await getCommandHandler(mockPi, "btw")("hi?", mockCtx);
       await flush();
-      const [usedModel] = vi.mocked(stream).mock.calls[0];
-      expect(usedModel).toMatchObject({ id: "claude-haiku-4-5" });
+
+      const [usedModel, , options] = vi.mocked(stream).mock.calls[0];
+      expect(usedModel).toBe(smallModel);
+      expect(options).toMatchObject({ apiKey: "test-key", reasoning: "minimal" });
+      expect(usedModel).not.toBe(activeModel);
     });
 
-    it("falls back to the main model and warns when override has no credentials", async () => {
-      setupTools();
-      vi.mocked(stream).mockReturnValue(
-        // biome-ignore lint/suspicious/noExplicitAny: test mock
-        makeEventStream(textDoneEvents("main model answered")) as any,
-      );
+    it("does not register a side-specific model command", async () => {
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       const mockPi = createMockPi() as any;
-      const { mockCtx } = setupContext();
-      const haiku = { id: "claude-haiku-4-5", provider: "anthropic", api: "anthropic-messages" };
-      const main = { id: "sonnet", provider: "anthropic", api: "anthropic-messages" };
-      // biome-ignore lint/suspicious/noExplicitAny: test mock
-      mockCtx.model = main as any;
-      // biome-ignore lint/suspicious/noExplicitAny: test mock
-      mockCtx.modelRegistry.find = vi.fn(() => haiku as any);
-      // Haiku has no key; main does.
-      // biome-ignore lint/suspicious/noExplicitAny: test mock
-      mockCtx.modelRegistry.getApiKeyAndHeaders = vi.fn(async (model: any) =>
-        model?.id === "claude-haiku-4-5"
-          ? { ok: false, error: "no key" }
-          : { ok: true, apiKey: "main-key" },
-      );
       await registerAll(mockPi);
-      await getCommandHandler(mockPi, "btw:model")(
-        "anthropic claude-haiku-4-5 anthropic-messages",
-        mockCtx,
-      );
-      await getCommandHandler(mockPi, "btw")("q?", mockCtx);
-      await flush();
-      const [usedModel] = vi.mocked(stream).mock.calls[0];
-      expect(usedModel).toMatchObject({ id: "sonnet" });
-      expect(mockCtx.ui.notify).toHaveBeenCalledWith(
-        expect.stringContaining("unavailable"),
-        "warning",
-      );
+
+      const commands = mockPi.registerCommand.mock.calls.map((call: unknown[]) => call[0]);
+      expect(commands).not.toContain("btw:model");
     });
   });
 
@@ -857,7 +796,7 @@ describe("btw-extension", () => {
 
   // §6/§10 — persistence & reconstruction
   describe("persistence and reconstruction", () => {
-    it("reconstructs the thread, mode, and overrides on session_start", async () => {
+    it("reconstructs the thread and ignores a legacy model override on session_start", async () => {
       setupTools();
       const persistedState = {
         mode: "tangent",
@@ -881,8 +820,6 @@ describe("btw-extension", () => {
       mockCtx.sessionManager.getBranch = vi.fn(() => [
         { type: "custom", customType: "btw-thread", data: { state: persistedState } },
       ]);
-      // biome-ignore lint/suspicious/noExplicitAny: test mock
-      mockCtx.modelRegistry.find = vi.fn(() => ({ id: "haiku" }) as any);
       await registerAll(mockPi);
       const handler = getEventHandler(mockPi, "session_start");
       await handler({ type: "session_start", reason: "resume" }, mockCtx);
@@ -893,38 +830,11 @@ describe("btw-extension", () => {
       expect(rendered).toContain("old question");
       expect(rendered).toContain("old answer");
       expect(rendered).toContain("tangent");
-    });
+      expect(rendered).toContain("test-provider/test-model");
 
-    it("drops an override that no longer resolves after a reload", async () => {
-      // biome-ignore lint/suspicious/noExplicitAny: test mock
-      const mockPi = createMockPi() as any;
-      const { mockCtx } = setupContext();
-      mockCtx.sessionManager.getBranch = vi.fn(() => [
-        {
-          type: "custom",
-          customType: "btw-thread",
-          data: {
-            state: {
-              mode: "contextual",
-              messages: [],
-              modelOverride: { provider: "anthropic", id: "gone", api: "anthropic-messages" },
-              thinkingOverride: null,
-            },
-          },
-        },
-      ]);
-      mockCtx.modelRegistry.find = vi.fn(() => undefined);
-      await registerAll(mockPi);
-      await getEventHandler(mockPi, "session_start")(
-        { type: "session_start", reason: "resume" },
-        mockCtx,
-      );
-
-      await getCommandHandler(mockPi, "btw:model")("", mockCtx);
-      expect(mockCtx.ui.notify).toHaveBeenLastCalledWith(
-        expect.stringContaining("inheriting main thread"),
-        "info",
-      );
+      await getCommandHandler(mockPi, "btw:thinking")("medium", mockCtx);
+      const persisted = mockPi.appendEntry.mock.calls.at(-1)?.[1] as Record<string, unknown>;
+      expect(JSON.stringify(persisted)).not.toContain("modelOverride");
     });
   });
 
@@ -1135,7 +1045,7 @@ describe("btw-extension", () => {
       expect(rendered).toContain("BTW");
       expect(rendered).toContain("contextual");
       expect(rendered).toContain("test-provider/test-model");
-      expect(rendered).toContain("thinking medium");
+      expect(rendered).toContain("thinking minimal");
       expect(rendered).toContain("1 exchange");
       expect(rendered).toContain("command output");
       expect(rendered).toContain("all set");
@@ -1157,26 +1067,27 @@ describe("btw-extension", () => {
       expect(rendered).not.toContain("contextual");
     });
 
-    it("reflects model and thinking overrides in the config line", async () => {
+    it("shows the global small model and side thinking override in the config line", async () => {
       setupTools();
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       vi.mocked(stream).mockReturnValue(makeEventStream(textDoneEvents("ans")) as any);
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       const mockPi = createMockPi() as any;
       const { mockCtx, overlays } = setupContext();
-      const haiku = { id: "claude-haiku-4-5", provider: "anthropic", api: "anthropic-messages" };
-      // biome-ignore lint/suspicious/noExplicitAny: test mock
-      mockCtx.modelRegistry.find = vi.fn(() => haiku as any);
+      const smallModel = {
+        ...mockCtx.model,
+        id: "small-model",
+        provider: "small-provider",
+        reasoning: true,
+      };
+      vi.stubEnv("PI_SMALL_MODEL", "small-provider/small-model");
+      mockCtx.modelRegistry.find = vi.fn(() => smallModel);
       await registerAll(mockPi);
-      await getCommandHandler(mockPi, "btw:model")(
-        "anthropic claude-haiku-4-5 anthropic-messages",
-        mockCtx,
-      );
       await getCommandHandler(mockPi, "btw:thinking")("high", mockCtx);
       await getCommandHandler(mockPi, "btw")("q?", mockCtx);
       await flush();
       const rendered = getOverlay(overlays).component.render(90).join("\n");
-      expect(rendered).toContain("anthropic/claude-haiku-4-5");
+      expect(rendered).toContain("small-provider/small-model");
       expect(rendered).toContain("thinking high");
     });
   });

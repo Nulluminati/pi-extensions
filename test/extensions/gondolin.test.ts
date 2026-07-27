@@ -1,3 +1,5 @@
+import { readdir } from "node:fs/promises";
+import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import gondolinExtension from "../../extensions/gondolin/gondolin.ts";
 import { createMockCommandContext } from "../mocks/context-mocks.ts";
@@ -50,6 +52,20 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
 describe("gondolin-extension", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+  });
+
+  describe("file structure", () => {
+    it("keeps one discoverable entrypoint and implementation modules under src", async () => {
+      const extensionDir = resolve(import.meta.dirname, "../../extensions/gondolin");
+      const rootEntries = await readdir(extensionDir, { withFileTypes: true });
+      const rootTypeScriptFiles = rootEntries
+        .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
+        .map((entry) => entry.name);
+      const sourceFiles = await readdir(resolve(extensionDir, "src"));
+
+      expect(rootTypeScriptFiles).toEqual(["gondolin.ts"]);
+      expect(sourceFiles.filter((file) => file.endsWith(".ts"))).toHaveLength(6);
+    });
   });
 
   it("registers the gondolin flag", async () => {

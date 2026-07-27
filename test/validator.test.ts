@@ -1,8 +1,8 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { validateFile } from "../lib/validate-extension.ts";
+import { findExtensionEntrypoints, validateFile } from "../lib/validate-extension.ts";
 
 const tempFiles: string[] = [];
 
@@ -28,6 +28,20 @@ afterEach(() => {
     }
   }
   tempFiles.length = 0;
+});
+
+describe("findExtensionEntrypoints", () => {
+  it("returns root entrypoints without treating src modules as extensions", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pi-ext-tree-test-"));
+    const extensionDir = join(dir, "example");
+    const sourceDir = join(extensionDir, "src");
+    mkdirSync(sourceDir, { recursive: true });
+    writeFileSync(join(extensionDir, "example.ts"), "export default async function example() {}\n");
+    writeFileSync(join(sourceDir, "helper.ts"), "export function helper() {}\n");
+    tempFiles.push(join(dir, "test.ts"));
+
+    expect(findExtensionEntrypoints(dir)).toEqual([join(extensionDir, "example.ts")]);
+  });
 });
 
 describe("validateFile", () => {

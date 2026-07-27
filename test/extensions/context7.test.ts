@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import context7Extension, { type DocCacheIndexEntry } from "../../extensions/context7/context7.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
@@ -213,6 +214,22 @@ describe("context7-extension", () => {
     vi.mocked(readFile).mockRejectedValue(new Error("ENOENT"));
   });
 
+  describe("file structure", () => {
+    it("keeps one discoverable entrypoint and implementation modules under src", async () => {
+      const { readdir: readActualDirectory } =
+        await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+      const extensionDir = resolve(import.meta.dirname, "../../extensions/context7");
+      const rootEntries = await readActualDirectory(extensionDir, { withFileTypes: true });
+      const rootTypeScriptFiles = rootEntries
+        .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
+        .map((entry) => entry.name);
+      const sourceFiles = await readActualDirectory(resolve(extensionDir, "src"));
+
+      expect(rootTypeScriptFiles).toEqual(["context7.ts"]);
+      expect(sourceFiles.filter((file) => file.endsWith(".ts"))).toHaveLength(9);
+    });
+  });
+
   // --- Registration ---
 
   it("registers all three context7 tools", async () => {
@@ -266,6 +283,9 @@ describe("context7-extension", () => {
 
       expect(result.content[0].text).toContain("React");
       expect(result.content[0].text).toContain("/facebook/react");
+      expect(result.content[0].text).toContain(
+        "Recommended library ID: /facebook/react\n- Title: React",
+      );
       expect(result.details.source).toBe("network");
       expect(result.details.recommendedLibraryId).toBe("/facebook/react");
       expect(result.details.ambiguous).toBe(false);
@@ -454,6 +474,7 @@ describe("context7-extension", () => {
       );
 
       expect(result.content[0].text).toContain("API Docs");
+      expect(result.content[0].text).toContain("Relevant documentation:\n\n# API Docs");
       expect(result.details.libraryId).toBe("/test/lib");
       expect(result.details.cacheStatus).toBe("refreshed");
       expect(result.details.curation).toBeDefined();

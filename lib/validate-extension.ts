@@ -1,5 +1,21 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import * as ts from "typescript";
+
+export function findExtensionEntrypoints(extensionsDir: string): string[] {
+  return readdirSync(extensionsDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .flatMap((entry) => {
+      const extensionDir = join(extensionsDir, entry.name);
+      return readdirSync(extensionDir, { withFileTypes: true })
+        .filter(
+          (file) =>
+            file.isFile() && file.name.endsWith(".ts") && !file.name.endsWith("_template.ts"),
+        )
+        .map((file) => join(extensionDir, file.name));
+    })
+    .sort();
+}
 
 export function validateFile(filePath: string): { passed: boolean; messages: string[] } {
   const messages: string[] = [];
