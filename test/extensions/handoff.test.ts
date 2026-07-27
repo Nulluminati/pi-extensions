@@ -1,3 +1,5 @@
+import { readdir } from "node:fs/promises";
+import { resolve } from "node:path";
 import type { ExtensionCommandContext } from "pi";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import handoffExtension, { STATUS_ICON } from "../../extensions/handoff/handoff.ts";
@@ -60,6 +62,20 @@ describe("handoff-extension", () => {
 
   afterEach(() => {
     vi.unstubAllEnvs();
+  });
+
+  describe("file structure", () => {
+    it("keeps one discoverable entrypoint and implementation modules under src", async () => {
+      const extensionDir = resolve(import.meta.dirname, "../../extensions/handoff");
+      const rootEntries = await readdir(extensionDir, { withFileTypes: true });
+      const rootTypeScriptFiles = rootEntries
+        .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
+        .map((entry) => entry.name);
+      const sourceFiles = await readdir(resolve(extensionDir, "src"));
+
+      expect(rootTypeScriptFiles).toEqual(["handoff.ts"]);
+      expect(sourceFiles.filter((file) => file.endsWith(".ts"))).toHaveLength(4);
+    });
   });
 
   it("registers /handoff command", async () => {

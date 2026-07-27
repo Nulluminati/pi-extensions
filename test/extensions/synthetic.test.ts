@@ -1,3 +1,5 @@
+import { readdir } from "node:fs/promises";
+import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import syntheticExtension, {
   MISSING_MODELS_MESSAGE,
@@ -28,6 +30,20 @@ const EXPECTED_MODEL_IDS = [
 ];
 
 describe("synthetic-extension", () => {
+  describe("file structure", () => {
+    it("keeps one discoverable entrypoint and implementation modules under src", async () => {
+      const extensionDir = resolve(import.meta.dirname, "../../extensions/synthetic");
+      const rootEntries = await readdir(extensionDir, { withFileTypes: true });
+      const rootTypeScriptFiles = rootEntries
+        .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
+        .map((entry) => entry.name);
+      const sourceFiles = await readdir(resolve(extensionDir, "src"));
+
+      expect(rootTypeScriptFiles).toEqual(["synthetic.ts"]);
+      expect(sourceFiles.filter((file) => file.endsWith(".ts"))).toHaveLength(6);
+    });
+  });
+
   let mockFetch: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {

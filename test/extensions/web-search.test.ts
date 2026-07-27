@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import webSearchExtension, {
   ICON_COLOR,
@@ -117,6 +118,22 @@ function withSyntheticKey(
 // ---------------------------------------------------------------------------
 
 describe("web-search-extension", () => {
+  describe("file structure", () => {
+    it("keeps one discoverable entrypoint and implementation modules under src", async () => {
+      const { readdir: readActualDirectory } =
+        await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+      const extensionDir = resolve(import.meta.dirname, "../../extensions/web-search");
+      const rootEntries = await readActualDirectory(extensionDir, { withFileTypes: true });
+      const rootTypeScriptFiles = rootEntries
+        .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
+        .map((entry) => entry.name);
+      const sourceFiles = await readActualDirectory(resolve(extensionDir, "src"));
+
+      expect(rootTypeScriptFiles).toEqual(["web-search.ts"]);
+      expect(sourceFiles.filter((file) => file.endsWith(".ts"))).toHaveLength(7);
+    });
+  });
+
   beforeEach(() => {
     vi.resetAllMocks();
     vi.unstubAllEnvs();

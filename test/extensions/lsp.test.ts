@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import lspExtension from "../../extensions/lsp/lsp.ts";
 import { createMockCommandContext } from "../mocks/context-mocks.ts";
@@ -127,6 +128,22 @@ describe("lsp-extension", () => {
     (execSync as ReturnType<typeof vi.fn>).mockImplementation(() => Buffer.from(""));
     // Default: no config files exist
     mockAccessPattern(false);
+  });
+
+  describe("file structure", () => {
+    it("keeps one discoverable entrypoint and implementation modules under src", async () => {
+      const { readdir: readActualDirectory } =
+        await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+      const extensionDir = resolve(import.meta.dirname, "../../extensions/lsp");
+      const rootEntries = await readActualDirectory(extensionDir, { withFileTypes: true });
+      const rootTypeScriptFiles = rootEntries
+        .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
+        .map((entry) => entry.name);
+      const sourceFiles = await readActualDirectory(resolve(extensionDir, "src"));
+
+      expect(rootTypeScriptFiles).toEqual(["lsp.ts"]);
+      expect(sourceFiles.filter((file) => file.endsWith(".ts"))).toHaveLength(9);
+    });
   });
 
   // --- Registration tests ---

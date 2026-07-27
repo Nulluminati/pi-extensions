@@ -1,3 +1,5 @@
+import { readdir } from "node:fs/promises";
+import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import neuralwattExtension, {
   MISSING_MODELS_MESSAGE,
@@ -42,6 +44,20 @@ describe("neuralwatt-extension", () => {
     vi.stubEnv("NEURALWATT_API_KEY", "nw_test_key_123");
     // Default: live public catalog in sync with the static list (no warning).
     mockFetch.mockResolvedValue(mockModelsResponse(STATIC_MODELS));
+  });
+
+  describe("file structure", () => {
+    it("keeps one discoverable entrypoint and implementation modules under src", async () => {
+      const extensionDir = resolve(import.meta.dirname, "../../extensions/neuralwatt");
+      const rootEntries = await readdir(extensionDir, { withFileTypes: true });
+      const rootTypeScriptFiles = rootEntries
+        .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
+        .map((entry) => entry.name);
+      const sourceFiles = await readdir(resolve(extensionDir, "src"));
+
+      expect(rootTypeScriptFiles).toEqual(["neuralwatt.ts"]);
+      expect(sourceFiles.filter((file) => file.endsWith(".ts"))).toHaveLength(6);
+    });
   });
 
   // --- static list ---

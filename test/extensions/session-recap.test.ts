@@ -1,3 +1,5 @@
+import { readdir } from "node:fs/promises";
+import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import sessionRecapExtension from "../../extensions/session-recap/session-recap.ts";
 import { createMockCommandContext } from "../mocks/context-mocks.ts";
@@ -107,6 +109,20 @@ describe("session-recap-extension", () => {
     vi.unstubAllEnvs();
     for (const restore of ttyRestores) restore();
     ttyRestores.length = 0;
+  });
+
+  describe("file structure", () => {
+    it("keeps one discoverable entrypoint and implementation modules under src", async () => {
+      const extensionDir = resolve(import.meta.dirname, "../../extensions/session-recap");
+      const rootEntries = await readdir(extensionDir, { withFileTypes: true });
+      const rootTypeScriptFiles = rootEntries
+        .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
+        .map((entry) => entry.name);
+      const sourceFiles = await readdir(resolve(extensionDir, "src"));
+
+      expect(rootTypeScriptFiles).toEqual(["session-recap.ts"]);
+      expect(sourceFiles.filter((file) => file.endsWith(".ts"))).toHaveLength(8);
+    });
   });
 
   it("registers all flags", async () => {

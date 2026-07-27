@@ -1,0 +1,327 @@
+import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
+import {
+  type SettingItem,
+  SettingsList,
+  truncateToWidth,
+  visibleWidth,
+} from "@earendil-works/pi-tui";
+import type { ExtensionCommandContext } from "pi";
+import { detectRecorders, hasTool } from "./audio.ts";
+import { resolveModelsDir, resolveSource } from "./config.ts";
+import {
+  DEFAULT_MODEL_ID,
+  DEFAULT_TTS_MODEL_ID,
+  KITTEN_VOICES,
+  SOURCE_ENV_VAR,
+} from "./constants.ts";
+import { getModel, MODELS, modelIsDownloaded, TTS_MODELS } from "./models.ts";
+import { resolveVadModel } from "./transcription.ts";
+import type { ModelDef, RecorderDeps, TtsModelDef } from "./types.ts";
+
+interface VoiceSettingsTheme {
+  fg(color: string, text: string): string;
+  bold(text: string): string;
+}
+
+interface VoiceSettingsOptions {
+  modelsDir?: string;
+  activeModelId?: string;
+  activeTtsModelId?: string;
+  activeSpeakerId?: number;
+  recorder?: RecorderDeps;
+  playbackReady?: boolean;
+  source?: string;
+  onModelSelect: (modelId: string) => void;
+  onTtsModelSelect: (modelId: string) => void;
+  onSpeakerSelect: (speakerId: number) => void;
+}
+
+function settingsFrameLine(theme: VoiceSettingsTheme, width: number, content: string): string {
+  const innerWidth = Math.max(1, width - 2);
+  const inner = truncateToWidth(content, innerWidth, "…", true);
+  return theme.fg("border", "│") + inner + theme.fg("border", "│");
+}
+
+function settingsRuleLine(theme: VoiceSettingsTheme, width: number): string {
+  const innerWidth = Math.max(1, width - 2);
+  return theme.fg("border", `├${"─".repeat(innerWidth)}┤`);
+}
+
+function settingsBorderLine(
+  theme: VoiceSettingsTheme,
+  width: number,
+  edge: "top" | "bottom",
+): string {
+  const innerWidth = Math.max(1, width - 2);
+  const left = edge === "top" ? "┌" : "└";
+  const right = edge === "top" ? "┐" : "┘";
+  return theme.fg("border", `${left}${"─".repeat(innerWidth)}${right}`);
+}
+
+function modelSettingValue(modelsDir: string, model: ModelDef | TtsModelDef): string {
+  const status = modelIsDownloaded(modelsDir, model) ? "Ready" : "Missing";
+  return `${model.displayName} · ${status}`;
+}
+
+function speakerSettingValue(speakerId: number): string {
+  const voice = KITTEN_VOICES[speakerId] ?? KITTEN_VOICES[0];
+  const match = voice.match(/expr-voice-(\d)-([mf])/);
+  if (!match) return voice;
+  return `Voice ${match[1]} · ${match[2] === "m" ? "Masculine" : "Feminine"}`;
+}
+
+export async function runVoiceSettings(
+  _args: string,
+  ctx: ExtensionCommandContext,
+  opts: VoiceSettingsOptions,
+): Promise<void> {
+  if (ctx.mode !== "tui") {
+    ctx.ui.notify("Voice settings require TUI mode.", "error");
+    return;
+  }
+
+  const modelsDir = opts.modelsDir ?? resolveModelsDir(process.env);
+  const recorder = opts.recorder ?? detectRecorders();
+  const playbackReady = opts.playbackReady ?? (hasTool("pw-play") || hasTool("ffplay"));
+  const source = opts.source ?? resolveSource(process.env);
+  let activeModelId = opts.activeModelId ?? DEFAULT_MODEL_ID;
+  let activeTtsModelId = opts.activeTtsModelId ?? DEFAULT_TTS_MODEL_ID;
+  let activeSpeakerId = opts.activeSpeakerId ?? 0;
+
+  const dictationValues = new Map(
+    MODELS.map((model) => [modelSettingValue(modelsDir, model), model] as const),
+  );
+  const speechValues = new Map(
+    TTS_MODELS.map((model) => [modelSettingValue(modelsDir, model), model] as const),
+  );
+  const speakerValues = new Map(
+    KITTEN_VOICES.map((_, speakerId) => [speakerSettingValue(speakerId), speakerId] as const),
+  );
+  const activeModel = getModel(activeModelId) ?? MODELS[0];
+  const activeTtsModel = TTS_MODELS.find((model) => model.id === activeTtsModelId) ?? TTS_MODELS[0];
+  if (!activeModel || !activeTtsModel) {
+    ctx.ui.notify("Voice model registry is empty.", "error");
+    return;
+  }
+  const activeModelValue = modelSettingValue(modelsDir, activeModel);
+  const activeTtsModelValue = modelSettingValue(modelsDir, activeTtsModel);
+  const selectableDictationValues = MODELS.filter((model) =>
+    modelIsDownloaded(modelsDir, model),
+  ).map((model) => modelSettingValue(modelsDir, model));
+  if (!selectableDictationValues.includes(activeModelValue)) {
+    selectableDictationValues.unshift(activeModelValue);
+  }
+  const selectableSpeechValues = TTS_MODELS.filter((model) =>
+    modelIsDownloaded(modelsDir, model),
+  ).map((model) => modelSettingValue(modelsDir, model));
+  if (!selectableSpeechValues.includes(activeTtsModelValue)) {
+    selectableSpeechValues.unshift(activeTtsModelValue);
+  }
+
+  const voiceItem: SettingItem = {
+    id: "voice",
+    label: "Local voice",
+    description:
+      activeTtsModel.backend === "kitten"
+        ? "Kitten provides eight local voices."
+        : `${activeTtsModel.displayName} uses one fixed voice.`,
+    currentValue:
+      activeTtsModel.backend === "kitten" ? speakerSettingValue(activeSpeakerId) : "Fixed voice",
+  };
+  if (activeTtsModel.backend === "kitten") voiceItem.values = [...speakerValues.keys()];
+
+  const items: SettingItem[] = [
+    {
+      id: "dictation-model",
+      label: "Dictation model",
+      description: `Turns microphone audio into text. ${[...dictationValues.keys()].join(" · ")}`,
+      currentValue: activeModelValue,
+      values: selectableDictationValues,
+    },
+    {
+      id: "speech-model",
+      label: "Speech model",
+      description: `Turns response summaries into local speech. ${[...speechValues.keys()].join(" · ")}`,
+      currentValue: activeTtsModelValue,
+      values: selectableSpeechValues,
+    },
+    voiceItem,
+    {
+      id: "recording-input",
+      label: "Recording input",
+      description: `Set a different source with ${SOURCE_ENV_VAR} before starting Pi.`,
+      currentValue: `${source} · ${recorder.hasFfmpeg || recorder.hasArecord ? "Ready" : "Not connected"}`,
+    },
+    {
+      id: "speech-output",
+      label: "Speech output",
+      description: "Playback requires pw-play or ffplay.",
+      currentValue: playbackReady ? "Ready" : "Not connected",
+    },
+    {
+      id: "voice-activity",
+      label: "Voice activity",
+      description: "Silero VAD removes silence before transcription.",
+      currentValue: resolveVadModel(modelsDir) ? "Ready" : "Missing (optional)",
+    },
+  ];
+
+  await ctx.ui.custom<void>(
+    (tui, theme, _keybindings, done) => {
+      const settingsTheme = getSettingsListTheme();
+      let settingsList: SettingsList;
+      settingsList = new SettingsList(
+        items,
+        items.length,
+        { ...settingsTheme, hint: () => "" },
+        (id, newValue) => {
+          if (id === "dictation-model") {
+            const previousValue = modelSettingValue(
+              modelsDir,
+              getModel(activeModelId) ?? activeModel,
+            );
+            const model = dictationValues.get(newValue);
+            if (!model || !modelIsDownloaded(modelsDir, model)) {
+              settingsList.updateValue(id, previousValue);
+              if (model) {
+                ctx.ui.notify(
+                  `${model.displayName} is not downloaded in ${modelsDir}. See the voice README for setup.`,
+                  "error",
+                );
+              }
+              return;
+            }
+            try {
+              opts.onModelSelect(model.id);
+            } catch (error) {
+              settingsList.updateValue(id, previousValue);
+              ctx.ui.notify(
+                `Could not save dictation model: ${error instanceof Error ? error.message : String(error)}`,
+                "error",
+              );
+              return;
+            }
+            activeModelId = model.id;
+            ctx.ui.notify(`Dictation model set to ${model.displayName}.`, "info");
+            return;
+          }
+
+          if (id === "speech-model") {
+            const previousModel =
+              TTS_MODELS.find((model) => model.id === activeTtsModelId) ?? activeTtsModel;
+            const previousValue = modelSettingValue(modelsDir, previousModel);
+            const model = speechValues.get(newValue);
+            if (!model || !modelIsDownloaded(modelsDir, model)) {
+              settingsList.updateValue(id, previousValue);
+              if (model) {
+                ctx.ui.notify(
+                  `${model.displayName} is not downloaded in ${modelsDir}. See the voice README for setup.`,
+                  "error",
+                );
+              }
+              return;
+            }
+            try {
+              opts.onTtsModelSelect(model.id);
+            } catch (error) {
+              settingsList.updateValue(id, previousValue);
+              ctx.ui.notify(
+                `Could not save speech model: ${error instanceof Error ? error.message : String(error)}`,
+                "error",
+              );
+              return;
+            }
+            activeTtsModelId = model.id;
+            if (model.backend === "kitten") {
+              voiceItem.currentValue = speakerSettingValue(activeSpeakerId);
+              voiceItem.values = [...speakerValues.keys()];
+              voiceItem.description = "Kitten provides eight local voices.";
+            } else {
+              voiceItem.currentValue = "Fixed voice";
+              delete voiceItem.values;
+              voiceItem.description = `${model.displayName} uses one fixed voice.`;
+            }
+            ctx.ui.notify(`Speech model set to ${model.displayName}.`, "info");
+            return;
+          }
+
+          if (id !== "voice") return;
+          const previousValue = speakerSettingValue(activeSpeakerId);
+          const speakerId = speakerValues.get(newValue);
+          if (speakerId === undefined) {
+            settingsList.updateValue(id, previousValue);
+            return;
+          }
+          try {
+            opts.onSpeakerSelect(speakerId);
+          } catch (error) {
+            settingsList.updateValue(id, previousValue);
+            ctx.ui.notify(
+              `Could not save local voice: ${error instanceof Error ? error.message : String(error)}`,
+              "error",
+            );
+            return;
+          }
+          activeSpeakerId = speakerId;
+          ctx.ui.notify(`Local voice set to ${newValue}.`, "info");
+        },
+        () => done(undefined),
+      );
+
+      const overlayTheme = theme as VoiceSettingsTheme;
+      return {
+        render: (width: number) => {
+          const frameWidth = Math.max(24, width);
+          const innerWidth = Math.max(22, frameWidth - 2);
+          const settingsLines = settingsList.render(innerWidth);
+          while (
+            settingsLines.length > 0 &&
+            visibleWidth(settingsLines[settingsLines.length - 1] ?? "") === 0
+          ) {
+            settingsLines.pop();
+          }
+
+          const lines = [
+            settingsBorderLine(overlayTheme, frameWidth, "top"),
+            settingsFrameLine(
+              overlayTheme,
+              frameWidth,
+              overlayTheme.fg("accent", overlayTheme.bold("VOICE")),
+            ),
+            settingsFrameLine(
+              overlayTheme,
+              frameWidth,
+              `${overlayTheme.fg("accent", "local audio")} · MIC → TEXT → SPEECH`,
+            ),
+            settingsRuleLine(overlayTheme, frameWidth),
+            ...settingsLines.map((line) => settingsFrameLine(overlayTheme, frameWidth, line)),
+            settingsRuleLine(overlayTheme, frameWidth),
+            settingsFrameLine(
+              overlayTheme,
+              frameWidth,
+              overlayTheme.fg("dim", "↑↓: navigate · enter/space: change · esc: dismiss"),
+            ),
+            settingsBorderLine(overlayTheme, frameWidth, "bottom"),
+          ];
+          return lines.map((line) => truncateToWidth(line, width, ""));
+        },
+        invalidate: () => settingsList.invalidate(),
+        handleInput: (data: string) => {
+          settingsList.handleInput(data);
+          tui.requestRender();
+        },
+      };
+    },
+    {
+      overlay: true,
+      overlayOptions: {
+        width: "78%",
+        minWidth: 72,
+        maxHeight: "78%",
+        anchor: "center",
+        margin: { top: 1, bottom: 1, left: 2, right: 2 },
+      },
+      onHandle: (handle) => handle.focus(),
+    },
+  );
+}

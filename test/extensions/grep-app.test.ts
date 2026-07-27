@@ -1,3 +1,5 @@
+import { readdir } from "node:fs/promises";
+import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import grepAppExtension from "../../extensions/grep-app/grep-app.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
@@ -78,6 +80,20 @@ describe("grep-app-extension", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     vi.unstubAllEnvs();
+  });
+
+  describe("file structure", () => {
+    it("keeps one discoverable entrypoint and implementation modules under src", async () => {
+      const extensionDir = resolve(import.meta.dirname, "../../extensions/grep-app");
+      const rootEntries = await readdir(extensionDir, { withFileTypes: true });
+      const rootTypeScriptFiles = rootEntries
+        .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
+        .map((entry) => entry.name);
+      const sourceFiles = await readdir(resolve(extensionDir, "src"));
+
+      expect(rootTypeScriptFiles).toEqual(["grep-app.ts"]);
+      expect(sourceFiles.filter((file) => file.endsWith(".ts"))).toHaveLength(6);
+    });
   });
 
   // --- Registration ---
