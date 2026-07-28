@@ -59,6 +59,8 @@ Prefer capability names such as:
 - `types.ts` only for types shared by multiple modules
 - `constants.ts` only for constants shared by multiple modules
 
+Check `lib/` before creating a new `src/` helper — modal frames, key hints, status lines, tool renderers, fuzzy pickers, transcript parsing, small-model resolution, and editor layering already exist there (see the `shared-helpers` skill). Extension `src/` modules import from `lib/`; they never duplicate it. Only patterns reused by two or more extensions belong in `lib/` itself.
+
 Keep a type, constant, and helper in its owning capability module when no other module needs it. Avoid turning `types.ts`, `constants.ts`, or `utils.ts` into dumping grounds.
 
 A module should have one primary reason to change. Split it when it contains multiple independently changing capabilities. Do not split a cohesive implementation merely to make files short.

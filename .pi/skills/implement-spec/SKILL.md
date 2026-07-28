@@ -37,6 +37,7 @@ Use `read` to load the full spec from `docs/specs/<name>.md`. Read it completely
 Also read these reference files (they define the conventions you must follow):
 
 - `AGENTS.md` — code conventions, naming, state management, testing rules
+- The `shared-helpers` skill — `lib/` provides ready-made status lines, modal frames, fuzzy pickers, tool renderers, transcript parsing, small-model resolution, and editor layering. If the spec calls for any of these, import the helper instead of inventing one.
 - `types/pi.d.ts` — existing type declarations; you must update this if the extension needs APIs not yet declared
 - `test/mocks/context-mocks.ts` — mock factory shapes for testing
 - `test/mocks/test-helpers.ts` — shared test helpers (`getEventHandler`, `getCommandHandler`)
