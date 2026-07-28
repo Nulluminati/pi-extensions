@@ -273,6 +273,24 @@ export const STATIC_MODELS: ProviderModelConfig[] = [
     maxTokens: 65536,
     compat: NEURALWATT_REASONING_COMPAT,
   },
+  // Kimi K2.7 Code with thinking disabled — the fast sibling of
+  // kimi-k2.7-code. Probed 2026-07: the gateway returns HTTP 200 for every
+  // reasoning_effort value but produces no reasoning_tokens and no thinking
+  // text block even at `high` on a reasoning prompt, confirming it is a
+  // non-reasoning model. Mirrors kimi-k2.6-fast: shares the reasoning sibling's
+  // pricing and context window, and carries no thinkingLevelMap (pi only offers
+  // `off` for non-reasoning models).
+  {
+    id: "kimi-k2.7-code-fast",
+    name: "Kimi K2.7 Code Fast",
+    api: "openai-completions",
+    reasoning: false,
+    input: ["text", "image"],
+    cost: { input: 0.95, output: 4.0, cacheRead: 0.2375, cacheWrite: 0 },
+    contextWindow: 262128,
+    maxTokens: 65536,
+    compat: NEURALWATT_COMPAT,
+  },
 
   // --- Qwen (Qwen) ---
   {

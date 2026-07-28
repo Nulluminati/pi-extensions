@@ -60,6 +60,7 @@ The catalog comes from Neuralwatt's `/v1/models` metadata. Pricing is per millio
 | kimi-k2.6 | 256K | yes | yes | $0.69 / $3.22 |
 | kimi-k2.6-fast | 256K | no | yes | $0.69 / $3.22 |
 | kimi-k2.7-code | 256K | yes | yes | $0.95 / $4.00 |
+| kimi-k2.7-code-fast | 256K | no | yes | $0.95 / $4.00 |
 | qwen3.5-397b | 256K | yes | — | $0.69 / $4.14 |
 | qwen3.5-397b-fast | 256K | no | — | $0.69 / $4.14 |
 | qwen3.6-35b | 128K | yes | yes | $0.29 / $1.15 |
