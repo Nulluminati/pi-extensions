@@ -101,6 +101,16 @@ export function createMockContext(): DeepMocked<ExtensionContext> {
 export function createMockCommandContext(): DeepMocked<ExtensionCommandContext> {
   return {
     ...createMockContext(),
+    getSystemPromptOptions: vi.fn(() => ({
+      cwd: "/home/test",
+      contextFiles: [],
+      toolSnippets: {
+        read: "Read file contents",
+        bash: "Execute shell commands",
+        edit: "Edit files using exact text replacements",
+        write: "Create or overwrite files",
+      },
+    })),
     waitForIdle: vi.fn(),
     newSession: vi.fn(() => Promise.resolve({ cancelled: false })),
     fork: vi.fn(),

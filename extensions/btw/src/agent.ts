@@ -10,7 +10,7 @@ import {
   createReadTool,
   createWriteTool,
 } from "@earendil-works/pi-coding-agent";
-import type { ExtensionAPI, ExtensionContext } from "pi";
+import type { ExtensionAPI, ExtensionCommandContext } from "pi";
 import { resolveSmallModel } from "../../../lib/small-model.ts";
 import { modelLabel, thinkingLevelToReasoning } from "./model.ts";
 import {
@@ -52,7 +52,7 @@ function assistantContentFromText(
  */
 export function requestSideTurn(
   pi: ExtensionAPI,
-  ctx: ExtensionContext,
+  ctx: ExtensionCommandContext,
   state: BtwLiveState,
   question: string,
 ): void {
@@ -73,7 +73,7 @@ export function requestSideTurn(
 
 async function runSideTurn(
   pi: ExtensionAPI,
-  ctx: ExtensionContext,
+  ctx: ExtensionCommandContext,
   state: BtwLiveState,
   question: string,
 ): Promise<void> {

@@ -33,6 +33,18 @@ export function isFocusShortcut(data: string): boolean {
   );
 }
 
+export const SIDE_SYSTEM_PROMPT =
+  "You are BTW, a coding assistant operating in a side-channel window inside pi. Use the available tools to answer focused questions about the current project.";
+
+export const SIDE_TOOL_NAMES = ["read", "bash", "edit", "write"] as const;
+
+export const SIDE_TOOL_SNIPPETS: Record<(typeof SIDE_TOOL_NAMES)[number], string> = {
+  read: "Read file contents",
+  bash: "Execute shell commands",
+  edit: "Edit files using exact text replacements",
+  write: "Create or overwrite files",
+};
+
 export const SIDE_GUIDANCE =
   "You are a side-channel agent: a parallel coding assistant that lives in a small overlay window while the user's main agent works on a separate task. Treat any main-session messages as background only. Focus on the user's side question. Be concise.";
 

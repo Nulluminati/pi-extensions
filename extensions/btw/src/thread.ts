@@ -1,5 +1,11 @@
-import type { ExtensionAPI, ExtensionContext } from "pi";
-import { SIDE_GUIDANCE, THREAD_CUSTOM_TYPE } from "./constants.ts";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "pi";
+import {
+  SIDE_GUIDANCE,
+  SIDE_SYSTEM_PROMPT,
+  SIDE_TOOL_NAMES,
+  SIDE_TOOL_SNIPPETS,
+  THREAD_CUSTOM_TYPE,
+} from "./constants.ts";
 import type { BtwLiveState, BtwMode, BtwStatus, BtwThreadState, StreamMessage } from "./types.ts";
 
 export function threadToStreamMessages(thread: BtwThreadState): StreamMessage[] {
@@ -131,13 +137,30 @@ function truncateForBackground(text: string): string {
 }
 
 export function buildSystemPrompt(
-  ctx: ExtensionContext,
+  ctx: ExtensionCommandContext,
   mode: BtwMode,
   mainBackground: string,
 ): string {
-  const base = ctx.getSystemPrompt();
-  const parts: string[] = [];
-  if (base.trim()) parts.push(base.trim());
+  const options = ctx.getSystemPromptOptions();
+  const toolSnippets = options.toolSnippets ?? {};
+  const toolsList = SIDE_TOOL_NAMES.map(
+    (name) => `- ${name}: ${toolSnippets[name] ?? SIDE_TOOL_SNIPPETS[name]}`,
+  ).join("\n");
+  const parts = [SIDE_SYSTEM_PROMPT, `Available tools:\n${toolsList}`];
+
+  if (options.contextFiles && options.contextFiles.length > 0) {
+    const contextFiles = options.contextFiles
+      .map(
+        ({ path, content }) =>
+          `<project_instructions path="${path}">\n${content}\n</project_instructions>`,
+      )
+      .join("\n\n");
+    parts.push(
+      `<project_context>\n\nProject-specific instructions and guidelines:\n\n${contextFiles}\n\n</project_context>`,
+    );
+  }
+
+  parts.push(`Current working directory: ${options.cwd.replace(/\\/g, "/")}`);
   parts.push(SIDE_GUIDANCE);
   if (mode === "contextual") {
     parts.push(

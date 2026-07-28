@@ -1,5 +1,5 @@
 import type { TextContent, ToolCall } from "@earendil-works/pi-ai";
-import type { ExtensionContext } from "pi";
+import type { ExtensionCommandContext } from "pi";
 
 // --- Types ---
 
@@ -80,7 +80,7 @@ export interface OverlaySession {
 }
 
 export interface PendingTurn {
-  ctx: ExtensionContext;
+  ctx: ExtensionCommandContext;
   question: string;
 }
 

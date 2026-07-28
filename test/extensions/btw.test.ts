@@ -389,6 +389,63 @@ describe("btw-extension", () => {
       expect(rendered).toContain("It is defined in route.ts.");
     });
 
+    it("rebuilds the side prompt with project context and only the side tools", async () => {
+      vi.mocked(stream).mockReturnValue(
+        // biome-ignore lint/suspicious/noExplicitAny: test mock
+        makeEventStream(textDoneEvents("Done.")) as any,
+      );
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      const mockPi = createMockPi() as any;
+      const { mockCtx } = setupContext();
+      mockCtx.getSystemPrompt.mockReturnValue(
+        "MAIN AGENT PROMPT\n\nAvailable tools:\n- web_search: Search the web",
+      );
+      mockCtx.getSystemPromptOptions.mockReturnValue({
+        cwd: "/work/project",
+        contextFiles: [
+          { path: "/home/test/.pi/agent/AGENTS.md", content: "Global agent instructions" },
+          { path: "/work/project/AGENTS.md", content: "Project agent instructions" },
+        ],
+        toolSnippets: {
+          read: "Read file contents",
+          bash: "Execute shell commands",
+          edit: "Edit files using exact text replacements",
+          write: "Create or overwrite files",
+          web_search: "Search the web",
+        },
+        skills: [{ name: "unused-skill" }],
+      });
+      mockCtx.sessionManager.getBranch = vi.fn(() => [
+        { type: "message", message: { role: "user", content: "main chat details" } },
+      ]);
+
+      await registerAll(mockPi);
+      await getCommandHandler(mockPi, "btw")("side question", mockCtx);
+      await flush();
+
+      const [, context] = vi.mocked(stream).mock.calls[0];
+      const prompt = context.systemPrompt;
+      expect(prompt).toContain(
+        "You are BTW, a coding assistant operating in a side-channel window inside pi.",
+      );
+      expect(prompt).toContain("- read: Read file contents");
+      expect(prompt).toContain("- bash: Execute shell commands");
+      expect(prompt).toContain("- edit: Edit files using exact text replacements");
+      expect(prompt).toContain("- write: Create or overwrite files");
+      expect(prompt).not.toContain("web_search");
+      expect(prompt).not.toContain("MAIN AGENT PROMPT");
+      expect(prompt).not.toContain("unused-skill");
+      expect(prompt).toContain(
+        '<project_instructions path="/home/test/.pi/agent/AGENTS.md">\nGlobal agent instructions',
+      );
+      expect(prompt).toContain(
+        '<project_instructions path="/work/project/AGENTS.md">\nProject agent instructions',
+      );
+      expect(prompt).toContain("Current working directory: /work/project");
+      expect(prompt).toContain("side-channel agent");
+      expect(prompt).toContain("main chat details");
+    });
+
     it("reflects streaming deltas into the transcript before completion", async () => {
       // Hand-build a stream that pauses mid-delta so we can observe the partial.
       let resolveDone: () => void = () => {};

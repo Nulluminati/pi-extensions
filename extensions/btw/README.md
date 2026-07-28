@@ -98,9 +98,9 @@ Mouse wheel, `↑`/`↓`, and `PgUp`/`PgDn` scroll the transcript. If the user s
 
 ### Side agent
 
-The side agent is a real second agent, not just a one-off LLM call. It runs on its own session with the same coding toolset (read, bash, edit, write) so it can actually open files and run commands to answer your questions. The side session is seeded with main-session context if you started the thread in **contextual** mode (the default), or with no context if you used `/btw:tangent`.
+The side agent is a real second agent, not just a one-off LLM call. It runs on its own session with read, bash, edit, and write, so it can open files and run commands to answer your questions. Its system prompt includes Pi's loaded AGENTS.md context files, but does not advertise the main agent's additional tools or loaded skills. The side session is seeded with main-session context in **contextual** mode (the default), or with no chat context when you use `/btw:tangent`.
 
-The side agent is told it's in an aside conversation — main-session messages are for context only, that work is being handled by another agent. This keeps it from racing the main thread.
+The side agent is told it's in an aside conversation. Main-session messages are background only because another agent is handling that work. This keeps it from racing the main thread.
 
 ### Context isolation
 
@@ -146,7 +146,7 @@ The overlay starts non-capturing, so the main editor keeps focus by default. Pre
 | `ctx.ui.notify()` | Status messages, model errors, and warnings |
 | `ctx.modelRegistry.find()` | Resolves the global small model |
 | `ctx.modelRegistry.getApiKeyAndHeaders()` | Resolves credentials for the global small model |
-| `ctx.getSystemPrompt()` | Seeds the side agent's system prompt |
+| `ctx.getSystemPromptOptions()` | Supplies loaded AGENTS.md files, tool snippets, and the working directory for the side prompt |
 
 ## Key Design Decisions
 

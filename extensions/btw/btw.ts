@@ -13,7 +13,7 @@
  * in the right order.
  */
 
-import type { ExtensionAPI, ExtensionContext } from "pi";
+import type { ExtensionAPI, ExtensionCommandContext } from "pi";
 import { requestSideTurn } from "./src/agent.ts";
 import {
   FOCUS_SHORTCUT_FALLBACK,
@@ -104,7 +104,7 @@ export default async function btwExtension(pi: ExtensionAPI) {
     handler: () => toggleOverlayFocus(),
   });
 
-  function ensureOverlayOpen(extraCtx: ExtensionContext): void {
+  function ensureOverlayOpen(extraCtx: ExtensionCommandContext): void {
     if (state.overlay) return;
     void openOverlay(extraCtx, state, async (text) => {
       requestSideTurn(pi, extraCtx, state, text);
