@@ -3,7 +3,13 @@ import type { ExtensionCommandContext } from "pi";
 import { resolveSmallModel } from "../../../lib/small-model.ts";
 import { formatStatusLine } from "../../../lib/ui-format.ts";
 import { resolveModelsDir } from "./config.ts";
-import { DEFAULT_TTS_MODEL_ID, TTS_STATUS_ICON, TTS_STATUS_KEY } from "./constants.ts";
+import {
+  DEFAULT_TTS_MODEL_ID,
+  ICON_COLOR,
+  TEXT_COLOR,
+  TTS_STATUS_ICON,
+  TTS_STATUS_KEY,
+} from "./constants.ts";
 import { modelIsDownloaded, TTS_MODELS } from "./models.ts";
 
 export function findLatestAssistantText(entries: unknown[]): string | undefined {
@@ -135,6 +141,8 @@ export async function runVoiceSpeak(
       icon: TTS_STATUS_ICON,
       prefix: "Voice",
       text: "preparing speech…",
+      iconColor: ICON_COLOR,
+      textColor: TEXT_COLOR,
     }),
   );
   try {
@@ -152,6 +160,8 @@ export async function runVoiceSpeak(
         icon: TTS_STATUS_ICON,
         prefix: "Voice",
         text: "speaking…",
+        iconColor: ICON_COLOR,
+        textColor: TEXT_COLOR,
       }),
     );
     await opts.speak(spokenText, opts.speakerId);

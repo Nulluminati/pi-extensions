@@ -41,7 +41,7 @@ import { clearRecap } from "./src/widget.ts";
 
 export { ICON_COLOR, STATUS_ICON, TEXT_COLOR };
 
-// --- Default export ---
+// --- Extension ---
 
 export default async function sessionRecapExtension(pi: ExtensionAPI) {
   pi.registerFlag("recap-idle-seconds", {

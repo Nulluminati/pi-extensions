@@ -33,7 +33,7 @@ import { fetchQuota, formatQuotaDisplay } from "./src/quota.ts";
 export type { NeuralwattModelsResponse, NeuralwattQuotaResponse } from "./src/types.ts";
 export { FLEX_EVENT, type FlexState, MISSING_MODELS_MESSAGE, STATIC_MODELS };
 
-// --- Default export ---
+// --- Extension ---
 
 export default async function neuralwattExtension(pi: ExtensionAPI) {
   // Flex state is per-instance (closure-scoped) so it never leaks across Pi

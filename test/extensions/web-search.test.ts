@@ -130,7 +130,7 @@ describe("web-search-extension", () => {
       const sourceFiles = await readActualDirectory(resolve(extensionDir, "src"));
 
       expect(rootTypeScriptFiles).toEqual(["web-search.ts"]);
-      expect(sourceFiles.filter((file) => file.endsWith(".ts"))).toHaveLength(7);
+      expect(sourceFiles.filter((file) => file.endsWith(".ts"))).toHaveLength(8);
     });
   });
 

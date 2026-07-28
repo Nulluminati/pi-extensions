@@ -23,12 +23,19 @@ import {
   buildResumePrompt,
   buildStartPrompt,
 } from "./src/prompts.ts";
+import { renderGoalCompleteResult } from "./src/renderer.ts";
 import { generateGoalId, reconstructState } from "./src/state.ts";
+import {
+  GOAL_COMPLETE_DESCRIPTION,
+  GOAL_COMPLETE_PARAMETERS,
+  GOAL_COMPLETE_PROMPT_GUIDELINES,
+  GOAL_COMPLETE_PROMPT_SNIPPET,
+} from "./src/tool.ts";
 import type { GoalState } from "./src/types.ts";
 
 export { ICON_COLOR, STATUS_ICON, TEXT_COLOR };
 
-// --- Extension factory ---
+// --- Extension ---
 
 export default async function goalExtension(pi: ExtensionAPI) {
   let state: GoalState | null = null;
@@ -208,23 +215,11 @@ export default async function goalExtension(pi: ExtensionAPI) {
   pi.registerTool({
     name: "goal_complete",
     label: "Goal Complete",
-    description:
-      "Call this tool when the current goal has been fully completed and verified. Provide a brief summary of what was accomplished.",
-    promptSnippet: "Mark the active /goal as complete after fully finishing and verifying it",
-    promptGuidelines: [
-      "When a /goal is active, keep working until the goal is complete; do not stop with only a plan or partial progress.",
-      "Before calling goal_complete, audit the active goal requirement by requirement against the current files, command output, tests, or external state.",
-      "Call goal_complete only after the requested goal is fully implemented, verified, and no known required work remains.",
-    ],
-    parameters: {
-      type: "object",
-      properties: {
-        summary: {
-          type: "string",
-          description: "Brief summary of what was accomplished",
-        },
-      },
-    },
+    description: GOAL_COMPLETE_DESCRIPTION,
+    promptSnippet: GOAL_COMPLETE_PROMPT_SNIPPET,
+    promptGuidelines: GOAL_COMPLETE_PROMPT_GUIDELINES,
+    parameters: GOAL_COMPLETE_PARAMETERS,
+    renderResult: renderGoalCompleteResult,
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       if (state?.status !== "active") {

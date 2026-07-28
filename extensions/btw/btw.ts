@@ -34,7 +34,7 @@ import {
 import { rebuildTranscriptFromThread, requestRender } from "./src/transcript.ts";
 import type { BtwLiveState } from "./src/types.ts";
 
-// --- Extension factory ---
+// --- Extension ---
 
 export default async function btwExtension(pi: ExtensionAPI) {
   const state: BtwLiveState = {

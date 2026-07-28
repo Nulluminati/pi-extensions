@@ -142,7 +142,7 @@ describe("lsp-extension", () => {
       const sourceFiles = await readActualDirectory(resolve(extensionDir, "src"));
 
       expect(rootTypeScriptFiles).toEqual(["lsp.ts"]);
-      expect(sourceFiles.filter((file) => file.endsWith(".ts"))).toHaveLength(9);
+      expect(sourceFiles.filter((file) => file.endsWith(".ts"))).toHaveLength(10);
     });
   });
 
@@ -1101,6 +1101,107 @@ describe("lsp-extension", () => {
 
       // Config should have loaded and merged properly
       expect(mockCtx.ui.notify).toHaveBeenCalled();
+    });
+  });
+
+  // --- renderResult ---
+
+  describe("renderResult", () => {
+    it("shows compact success line with operation and target", async () => {
+      const mockPi = createMockPi();
+      await lspExtension(mockPi);
+      const tool = getRegisteredTool(mockPi, "lsp");
+      const theme = { fg: (_c: string, text: string) => text };
+      const result = {
+        content: [{ type: "text", text: "string string" }],
+        details: {},
+      };
+      const component = (
+        tool.renderResult as (...args: unknown[]) => { render: (width: number) => string[] }
+      )(result, { expanded: false, isPartial: false }, theme, {
+        args: { operation: "hover", filePath: "src/foo.ts", line: 10, character: 5 },
+      });
+      const lines = component.render(80);
+      expect(lines[0]).toContain("hover");
+      expect(lines[0]).toContain("src/foo.ts");
+    });
+
+    it("shows diagnostic count for the diagnostics operation", async () => {
+      const mockPi = createMockPi();
+      await lspExtension(mockPi);
+      const tool = getRegisteredTool(mockPi, "lsp");
+      const theme = { fg: (_c: string, text: string) => text };
+      const result = {
+        content: [{ type: "text", text: "diagnostics output" }],
+        details: {
+          groups: [
+            { source: "eslint", count: 2 },
+            { source: "tsc", count: 1 },
+          ],
+        },
+      };
+      const component = (
+        tool.renderResult as (...args: unknown[]) => { render: (width: number) => string[] }
+      )(result, { expanded: false, isPartial: false }, theme, {
+        args: { operation: "diagnostics", filePath: "src/foo.ts" },
+      });
+      const lines = component.render(80);
+      expect(lines[0]).toContain("diagnostics");
+      expect(lines[0]).toContain("3 diagnostic");
+    });
+
+    it("shows compact error line", async () => {
+      const mockPi = createMockPi();
+      await lspExtension(mockPi);
+      const tool = getRegisteredTool(mockPi, "lsp");
+      const theme = { fg: (_c: string, text: string) => text };
+      const result = {
+        content: [{ type: "text", text: "No LSP server found" }],
+        details: {},
+      };
+      const component = (
+        tool.renderResult as (...args: unknown[]) => { render: (width: number) => string[] }
+      )(result, { expanded: false, isPartial: false }, theme, {
+        args: { operation: "hover", filePath: "x.ts" },
+        isError: true,
+      });
+      const lines = component.render(80);
+      expect(lines[0]).toContain("hover");
+      expect(lines[0]).toContain("No LSP server found");
+    });
+
+    it("shows loading state when isPartial", async () => {
+      const mockPi = createMockPi();
+      await lspExtension(mockPi);
+      const tool = getRegisteredTool(mockPi, "lsp");
+      const theme = { fg: (_c: string, text: string) => text };
+      const result = { content: [{ type: "text", text: "" }], details: {} };
+      const component = (
+        tool.renderResult as (...args: unknown[]) => { render: (width: number) => string[] }
+      )(result, { expanded: false, isPartial: true }, theme, {
+        args: { operation: "hover", filePath: "x.ts" },
+      });
+      const lines = component.render(80);
+      expect(lines[0]).toContain("hover");
+      expect(lines[0]).toContain("…");
+    });
+
+    it("shows content when expanded", async () => {
+      const mockPi = createMockPi();
+      await lspExtension(mockPi);
+      const tool = getRegisteredTool(mockPi, "lsp");
+      const theme = { fg: (_c: string, text: string) => text };
+      const result = {
+        content: [{ type: "text", text: "detailed hover output" }],
+        details: {},
+      };
+      const component = (
+        tool.renderResult as (...args: unknown[]) => { render: (width: number) => string[] }
+      )(result, { expanded: true, isPartial: false }, theme, {
+        args: { operation: "hover", filePath: "x.ts" },
+      });
+      const lines = component.render(80);
+      expect(lines.some((l: string) => l.includes("detailed hover output"))).toBe(true);
     });
   });
 });

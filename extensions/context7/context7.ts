@@ -28,7 +28,7 @@ import type {
 
 export type { DocCacheIndexEntry } from "./src/types.ts";
 
-// --- Extension export ---
+// --- Extension ---
 
 export default async function context7Extension(pi: ExtensionAPI) {
   pi.registerTool({

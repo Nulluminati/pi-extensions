@@ -10,6 +10,7 @@
 
 import type { ExtensionAPI } from "pi";
 import { ICON_COLOR, STATUS_ICON, TEXT_COLOR } from "./src/constants.ts";
+import { renderLspResult } from "./src/renderer.ts";
 import { createLspRuntime } from "./src/runtime.ts";
 import {
   LSP_TOOL_PARAMETERS,
@@ -20,7 +21,7 @@ import {
 
 export { ICON_COLOR, STATUS_ICON, TEXT_COLOR };
 
-// --- Default Export ---
+// --- Extension ---
 
 export default async function lspExtension(pi: ExtensionAPI) {
   const runtime = createLspRuntime();
@@ -51,6 +52,7 @@ export default async function lspExtension(pi: ExtensionAPI) {
       "Interact with LSP servers for code intelligence: definitions, references, hover, diagnostics, symbols, call hierarchy, code actions",
     promptGuidelines: PROMPT_GUIDELINES,
     parameters: LSP_TOOL_PARAMETERS,
+    renderResult: renderLspResult,
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
       return runtime.execute(params as LspToolParams);
     },

@@ -42,42 +42,11 @@ import {
   renderFetchResult,
   renderSearchResult,
 } from "./src/rendering.ts";
+import { WEB_FETCH_PARAMS, WEB_SEARCH_PARAMS } from "./src/schemas.ts";
 import { truncateWithSpill } from "./src/truncation.ts";
 import type { SearchProvider } from "./src/types.ts";
 
 export { ICON_COLOR, STATUS_ICON, TEXT_COLOR } from "./src/constants.ts";
-
-// --- Tool parameter schemas ---
-
-const WEB_SEARCH_PARAMS = {
-  type: "object",
-  properties: {
-    query: {
-      type: "string",
-      description: "Natural-language search query",
-    },
-    max_results: {
-      type: "number",
-      description: `Maximum number of results to return (${MIN_MAX_RESULTS}-${MAX_MAX_RESULTS}, default ${DEFAULT_MAX_RESULTS})`,
-    },
-  },
-  required: ["query"],
-};
-
-const WEB_FETCH_PARAMS = {
-  type: "object",
-  properties: {
-    url: {
-      type: "string",
-      description: "HTTP or HTTPS URL to fetch",
-    },
-    raw: {
-      type: "boolean",
-      description: "If true, return raw HTML. If false (default), strip HTML to text.",
-    },
-  },
-  required: ["url"],
-};
 
 // --- Extension ---
 

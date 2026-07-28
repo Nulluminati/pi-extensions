@@ -26,7 +26,7 @@ import { fetchQuota, formatQuotaDisplay } from "./src/quota.ts";
 export type { SyntheticModelsResponse } from "./src/types.ts";
 export { MISSING_MODELS_MESSAGE, STATIC_MODELS };
 
-// --- Default export ---
+// --- Extension ---
 
 export default async function syntheticExtension(pi: ExtensionAPI) {
   // Register the static catalog synchronously. No startup fetch blocks

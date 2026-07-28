@@ -19,7 +19,7 @@
 
 import type { ExtensionAPI, ExtensionCommandContext } from "pi";
 
-// --- Default export ---
+// --- Extension ---
 
 export default async function clearExtension(pi: ExtensionAPI) {
   pi.registerCommand("clear", {

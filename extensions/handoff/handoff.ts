@@ -32,7 +32,7 @@ interface HandoffReplacementContext {
   };
 }
 
-// --- Default export ---
+// --- Extension ---
 
 export default async function handoffExtension(pi: ExtensionAPI) {
   pi.registerCommand("handoff", {

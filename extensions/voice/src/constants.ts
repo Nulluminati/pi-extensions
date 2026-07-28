@@ -20,7 +20,15 @@ export const DEFAULT_TTS_MODEL_ID = "kitten-nano-en-v0_1-fp16";
 
 export const TTS_STATUS_KEY = "voice-speak";
 
-export const TTS_STATUS_ICON = "🔊";
+// Footer status indicator: a Nerd Font volume-high glyph in a distinct accent
+// hue with a greyed label, matching the cross-extension footer convention.
+// The codepoint is built explicitly so the PUA glyph survives transports
+// that strip literals.
+export const TTS_STATUS_ICON = String.fromCodePoint(0xf057e); // nf-md-volume-high
+
+export const ICON_COLOR = "accent";
+
+export const TEXT_COLOR = "muted";
 
 export const KITTEN_VOICES = [
   "expr-voice-2-m",

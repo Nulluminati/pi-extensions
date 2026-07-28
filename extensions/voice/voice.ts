@@ -112,7 +112,7 @@ export {
   vadSegment,
 } from "./src/transcription.ts";
 
-// --- Default export ---
+// --- Extension ---
 
 export default async function voiceExtension(pi: ExtensionAPI) {
   const voiceConfigPath = resolveVoiceConfigPath(process.env);

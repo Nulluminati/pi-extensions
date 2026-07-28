@@ -21,7 +21,7 @@ describe("goal-extension", () => {
       const sourceFiles = await readdir(resolve(extensionDir, "src"));
 
       expect(rootTypeScriptFiles).toEqual(["goal.ts"]);
-      expect(sourceFiles.filter((file) => file.endsWith(".ts"))).toHaveLength(6);
+      expect(sourceFiles.filter((file) => file.endsWith(".ts"))).toHaveLength(8);
     });
   });
 
@@ -1093,5 +1093,93 @@ describe("goal-extension", () => {
 
     expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("goal", undefined);
     vi.useRealTimers();
+  });
+
+  // --- renderResult ---
+
+  describe("renderResult", () => {
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
+    function getGoalCompleteTool(mockPi: any): any {
+      return mockPi.registerTool.mock.calls[0][0];
+    }
+
+    it("shows compact success line without a summary", async () => {
+      const mockPi = createMockPi();
+      await goalExtension(mockPi);
+      const tool = getGoalCompleteTool(mockPi);
+      const theme = { fg: (_c: string, text: string) => text };
+      const result = {
+        content: [{ type: "text", text: "Goal completed." }],
+        details: { status: "complete" },
+      };
+      const component = (
+        tool.renderResult as (...args: unknown[]) => { render: (width: number) => string[] }
+      )(result, { expanded: false, isPartial: false }, theme, { args: {} });
+      const lines = component.render(80);
+      expect(lines[0]).toContain("Goal");
+      expect(lines[0]).toContain("complete");
+    });
+
+    it("includes the summary when provided", async () => {
+      const mockPi = createMockPi();
+      await goalExtension(mockPi);
+      const tool = getGoalCompleteTool(mockPi);
+      const theme = { fg: (_c: string, text: string) => text };
+      const result = {
+        content: [{ type: "text", text: "Goal completed: shipped the feature" }],
+        details: { status: "complete", summary: "shipped the feature" },
+      };
+      const component = (
+        tool.renderResult as (...args: unknown[]) => { render: (width: number) => string[] }
+      )(result, { expanded: false, isPartial: false }, theme, { args: {} });
+      const lines = component.render(80);
+      expect(lines[0]).toContain("shipped the feature");
+    });
+
+    it("shows compact error line when details.error is set", async () => {
+      const mockPi = createMockPi();
+      await goalExtension(mockPi);
+      const tool = getGoalCompleteTool(mockPi);
+      const theme = { fg: (_c: string, text: string) => text };
+      const result = {
+        content: [{ type: "text", text: "No active goal to complete." }],
+        details: { error: "no_active_goal" },
+      };
+      const component = (
+        tool.renderResult as (...args: unknown[]) => { render: (width: number) => string[] }
+      )(result, { expanded: false, isPartial: false }, theme, { args: {} });
+      const lines = component.render(80);
+      expect(lines[0]).toContain("Goal");
+      expect(lines[0]).toContain("No active goal to complete.");
+    });
+
+    it("shows loading state when isPartial", async () => {
+      const mockPi = createMockPi();
+      await goalExtension(mockPi);
+      const tool = getGoalCompleteTool(mockPi);
+      const theme = { fg: (_c: string, text: string) => text };
+      const result = { content: [{ type: "text", text: "" }], details: {} };
+      const component = (
+        tool.renderResult as (...args: unknown[]) => { render: (width: number) => string[] }
+      )(result, { expanded: false, isPartial: true }, theme, { args: {} });
+      const lines = component.render(80);
+      expect(lines[0]).toContain("completing");
+    });
+
+    it("shows content when expanded", async () => {
+      const mockPi = createMockPi();
+      await goalExtension(mockPi);
+      const tool = getGoalCompleteTool(mockPi);
+      const theme = { fg: (_c: string, text: string) => text };
+      const result = {
+        content: [{ type: "text", text: "Goal completed: full summary text" }],
+        details: { status: "complete", summary: "full summary text" },
+      };
+      const component = (
+        tool.renderResult as (...args: unknown[]) => { render: (width: number) => string[] }
+      )(result, { expanded: true, isPartial: false }, theme, { args: {} });
+      const lines = component.render(80);
+      expect(lines.some((l: string) => l.includes("full summary text"))).toBe(true);
+    });
   });
 });

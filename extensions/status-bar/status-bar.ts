@@ -44,7 +44,7 @@ export {
   renderPolishedFrame,
 } from "./src/editor.ts";
 
-// --- Extension factory ---
+// --- Extension ---
 
 export default async function statusBarExtension(pi: ExtensionAPI) {
   const state: State = {

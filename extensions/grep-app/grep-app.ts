@@ -9,7 +9,7 @@ import type { ExtensionAPI } from "pi";
 import { renderGrepAppResult } from "./src/renderer.ts";
 import { executeGrepAppSearch, GREP_SEARCH_PARAMS } from "./src/search.ts";
 
-// --- Extension export ---
+// --- Extension ---
 
 export default async function grepAppExtension(pi: ExtensionAPI) {
   pi.registerTool({
