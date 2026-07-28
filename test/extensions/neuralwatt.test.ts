@@ -21,6 +21,20 @@ function mockModelsResponse(models: unknown[]): Response {
   return { ok: true, json: () => Promise.resolve({ data: models }) } as Response;
 }
 
+/** Minimal Model shape for overriding mockCtx.model with a specific id/provider. */
+function makeModel(id: string, provider = "neuralwatt") {
+  return {
+    id,
+    name: id,
+    provider,
+    api: {},
+    reasoning: false,
+    input: ["text"] as ("text" | "image")[],
+    contextWindow: 128_000,
+    maxTokens: 4096,
+  };
+}
+
 // Ids present in the static catalog. Startup check tests use these.
 const EXPECTED_MODEL_IDS = [
   "deepseek-v4-flash",
@@ -728,7 +742,7 @@ describe("neuralwatt flex integration", () => {
     capableIds: string[],
   ) {
     await neuralwattExtension(mockPi);
-    mockCtx.model = { id: modelId, name: modelId, provider: "neuralwatt" } as any;
+    mockCtx.model = makeModel(modelId);
     mockFetch.mockResolvedValue(flexCatalog(capableIds));
     const handler = getEventHandler(mockPi, "session_start");
     await handler({ type: "session_start", reason: "new" }, mockCtx);
@@ -749,7 +763,7 @@ describe("neuralwatt flex integration", () => {
     const mockCtx = createMockCommandContext();
     await neuralwattExtension(mockPi);
     // Non-Neuralwatt: do not run session_start's flex fetch.
-    mockCtx.model = { id: "gpt-4", name: "gpt-4", provider: "openai" } as any;
+    mockCtx.model = makeModel("gpt-4", "openai");
 
     const handler = getCommandHandler(mockPi, "neuralwatt:flex");
     await handler("", mockCtx);

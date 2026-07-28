@@ -895,7 +895,6 @@ describe("goal-extension", () => {
     const mockCtx = createMockCommandContext();
     await goalExtension(mockPi);
 
-    const newGoal = getCommandHandler(mockPi, "goal:new");
     await getCommandHandler(mockPi, "goal:budget")("100k", mockCtx);
 
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(
