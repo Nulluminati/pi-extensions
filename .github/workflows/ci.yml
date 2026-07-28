@@ -9,9 +9,12 @@ on:
   pull_request:
     branches: [main]
 
-# Read-only token is enough for both jobs below.
+# Read-only token is enough for both jobs below. pull-requests: read lets
+# gitleaks-action's ScanPullRequest mode fetch the PR's commits to scan just
+# the diff (it calls /pulls/{n}/commits, which 403s without this scope).
 permissions:
   contents: read
+  pull-requests: read
 
 # Cancel in-progress runs for the same ref so a force-push doesn't queue stale work.
 concurrency:
