@@ -4,6 +4,9 @@ import type { ExtensionCommandContext } from "pi";
 import {
   EDITOR_FRAME_COLOR,
   EDITOR_META_SEPARATOR,
+  FLEX_OFF_COLOR,
+  FLEX_ON_COLOR,
+  ICON_FLEX,
   ICON_THINKING,
   THINKING_THEME_COLOR,
 } from "./constants.ts";
@@ -17,15 +20,25 @@ export function getModelLabel(ctx: ExtensionCommandContext): string {
 /**
  * Build the metadata segments shown inside the editor frame: the model label
  * (accent) and the thinking level (color-coded per level, muted when off),
- * both always visible. Segments are pre-colored so the frame function stays a
- * pure layout concern.
+ * both always visible. When the current model is flex-capable, a flex badge is
+ * appended next to the thinking level, reading "on" (green) or "off" (dim).
+ * Segments are pre-colored so the frame function stays a pure layout concern.
  */
-function buildEditorMetaSegments(modelLabel: string, thinkingLevel: string, theme: any): string[] {
+export function buildEditorMetaSegments(
+  modelLabel: string,
+  thinkingLevel: string,
+  flex: { on: boolean; capable: boolean },
+  theme: any,
+): string[] {
   const segments: string[] = [];
   if (modelLabel) segments.push(theme.fg("accent", modelLabel));
   const level = thinkingLevel || "none";
   const color = THINKING_THEME_COLOR[level] ?? "muted";
   segments.push(theme.fg(color, `${ICON_THINKING} ${level}`));
+  if (flex.capable) {
+    const flexColor = flex.on ? FLEX_ON_COLOR : FLEX_OFF_COLOR;
+    segments.push(theme.fg(flexColor, `${ICON_FLEX} flex ${flex.on ? "on" : "off"}`));
+  }
   return segments;
 }
 
@@ -89,6 +102,7 @@ export class PolishedEditor extends CustomEditor {
   private readonly uiTheme: any;
   private readonly getModelLabel: () => string;
   private readonly getThinkingLevel: () => string;
+  private readonly getFlexState: () => { on: boolean; capable: boolean };
 
   constructor(
     tui: any,
@@ -97,11 +111,13 @@ export class PolishedEditor extends CustomEditor {
     uiTheme: any,
     getModelLabel: () => string,
     getThinkingLevel: () => string,
+    getFlexState: () => { on: boolean; capable: boolean },
   ) {
     super(tui, theme, keybindings, { paddingX: 0 });
     this.uiTheme = uiTheme;
     this.getModelLabel = getModelLabel;
     this.getThinkingLevel = getThinkingLevel;
+    this.getFlexState = getFlexState;
     // Hold the border grey so the input box never tracks the thinking level.
     this.borderColor = (str: string) => uiTheme.fg(EDITOR_FRAME_COLOR, str);
   }
@@ -120,6 +136,7 @@ export class PolishedEditor extends CustomEditor {
       metaSegments: buildEditorMetaSegments(
         this.getModelLabel(),
         this.getThinkingLevel(),
+        this.getFlexState(),
         this.uiTheme,
       ),
       theme: this.uiTheme,

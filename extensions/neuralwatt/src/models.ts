@@ -195,6 +195,25 @@ export const STATIC_MODELS: ProviderModelConfig[] = [
     compat: NEURALWATT_COMPAT,
   },
 
+  // --- DeepSeek V4 Flash (DeepSeek) ---
+  // Probed 2026-07: every effort (none/minimal/low/medium/high/xhigh/max)
+  // returns HTTP 200 and `none` produces no thinking, so thinking is
+  // disableable. minimal through xhigh all engage reasoning under the
+  // top-level `reasoning` field; the identity map through xhigh is correct.
+  // `max` is also accepted (deeper than xhigh) but is not a pi level.
+  {
+    id: "deepseek-v4-flash",
+    name: "DeepSeek V4 Flash",
+    api: "openai-completions",
+    reasoning: true,
+    thinkingLevelMap: DISABLEABLE_IDENTITY_MAP,
+    input: ["text"],
+    cost: { input: 0.104, output: 0.207, cacheRead: 0.026, cacheWrite: 0 },
+    contextWindow: 1048560,
+    maxTokens: 65536,
+    compat: NEURALWATT_REASONING_COMPAT,
+  },
+
   // --- Kimi K2.5 / K2.6 / K2.7 (MoonshotAI) ---
   {
     id: "moonshotai/Kimi-K2.5",

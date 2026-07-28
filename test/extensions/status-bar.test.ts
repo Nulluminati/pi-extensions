@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import statusBarExtension, {
+  buildEditorMetaSegments,
   renderPolishedFrame,
   STATUS_ICON,
 } from "../../extensions/status-bar/status-bar.ts";
@@ -1413,3 +1414,97 @@ function renderInstalledEditor(mockCtx: ReturnType<typeof createMockCommandConte
   const editor = factory({ requestRender() {} }, {}, {});
   return editor as { render(width: number): string[] };
 }
+
+/**
+ * Extract the Neuralwatt flex-state handler the status-bar registered on
+ * pi.events. Returns undefined if the status-bar never subscribed (the
+ * neuralwatt extension populates the real state; tests drive it directly).
+ */
+function getFlexHandler(mockPi: ReturnType<typeof createMockPi>) {
+  const calls = (mockPi.events.on as ReturnType<typeof vi.fn>).mock.calls;
+  for (const [event, handler] of calls) {
+    if (event === "neuralwatt:flex-change") return handler as (flex: any) => void;
+  }
+  return undefined;
+}
+
+describe("status-bar flex badge", () => {
+  function plainTheme() {
+    return { fg: vi.fn((_color: string, text: string) => text) };
+  }
+
+  it("buildEditorMetaSegments appends a flex-on badge when capable and on", () => {
+    const segments = buildEditorMetaSegments(
+      "neuralwatt/glm-5.2",
+      "high",
+      {
+        on: true,
+        capable: true,
+      },
+      plainTheme(),
+    );
+    expect(segments.some((s) => s.includes("flex"))).toBe(true);
+    expect(segments.some((s) => s.includes("on"))).toBe(true);
+  });
+
+  it("buildEditorMetaSegments appends a flex-off badge when capable and off", () => {
+    const segments = buildEditorMetaSegments(
+      "neuralwatt/glm-5.2",
+      "high",
+      {
+        on: false,
+        capable: true,
+      },
+      plainTheme(),
+    );
+    expect(segments.some((s) => s.includes("flex"))).toBe(true);
+    expect(segments.some((s) => s.includes("off"))).toBe(true);
+  });
+
+  it("buildEditorMetaSegments omits the flex badge when the model is not flex-capable", () => {
+    const segments = buildEditorMetaSegments(
+      "anthropic/claude-sonnet-4-6",
+      "high",
+      { on: true, capable: false },
+      plainTheme(),
+    );
+    expect(segments.some((s) => s.includes("flex"))).toBe(false);
+  });
+
+  it("installed editor renders the flex badge after a neuralwatt:flex-change event", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBar(mockPi, mockCtx);
+
+    const flexHandler = getFlexHandler(mockPi);
+    expect(flexHandler).toBeDefined();
+
+    flexHandler?.({ flexOn: true, flexCapable: true });
+
+    const editor = renderInstalledEditor(mockCtx);
+    const lines = editor.render(100);
+    const metaLine = lines.find((l) => l.includes("flex")) ?? "";
+    expect(metaLine).toContain("⚡");
+    expect(metaLine).toContain("on");
+  });
+
+  it("installed editor hides the flex badge when flexCapable is false", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBar(mockPi, mockCtx);
+
+    const flexHandler = getFlexHandler(mockPi);
+    flexHandler?.({ flexOn: false, flexCapable: false });
+
+    const editor = renderInstalledEditor(mockCtx);
+    const lines = editor.render(100);
+    expect(lines.some((l) => l.includes("flex"))).toBe(false);
+  });
+
+  it("status-bar subscribes to neuralwatt:flex-change on session_start", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBar(mockPi, mockCtx);
+    expect(getFlexHandler(mockPi)).toBeDefined();
+  });
+});

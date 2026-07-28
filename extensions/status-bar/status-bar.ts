@@ -24,14 +24,25 @@
  */
 
 import type { ExtensionAPI, ExtensionCommandContext } from "pi";
-import { EDITOR_MARKER, ICON_COLOR, STATUS_ICON, STATUS_KEY, TEXT_COLOR } from "./src/constants.ts";
+import {
+  EDITOR_MARKER,
+  FLEX_EVENT,
+  ICON_COLOR,
+  STATUS_ICON,
+  STATUS_KEY,
+  TEXT_COLOR,
+} from "./src/constants.ts";
 import { getModelLabel, PolishedEditor } from "./src/editor.ts";
 import { buildFooterLines } from "./src/footer.ts";
 import { parseGitStatus } from "./src/git.ts";
 import type { State } from "./src/types.ts";
 
 export { ICON_COLOR, STATUS_ICON, TEXT_COLOR } from "./src/constants.ts";
-export { type PolishedFrameInput, renderPolishedFrame } from "./src/editor.ts";
+export {
+  buildEditorMetaSegments,
+  type PolishedFrameInput,
+  renderPolishedFrame,
+} from "./src/editor.ts";
 
 // --- Extension factory ---
 
@@ -46,6 +57,8 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     gitStatus: null,
     tokenUsage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
     lastHandle: null,
+    flexOn: false,
+    flexCapable: false,
   };
 
   let getBranch: () => any[] = () => [];
@@ -113,6 +126,7 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
         ctx.ui.theme,
         () => getModelLabel(ctx),
         () => pi.getThinkingLevel() ?? "none",
+        () => ({ on: state.flexOn, capable: state.flexCapable }),
       );
     };
     (factory as any)[EDITOR_MARKER] = true;
@@ -229,6 +243,16 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
         if (current !== installedEditorFactory) installEditor(ctx as ExtensionCommandContext);
       }, 0);
     }
+
+    // Subscribe to Neuralwatt flex state changes to render the flex badge next
+    // to the thinking level. Keeps the metadata line in sync with the toggle
+    // without coupling the status-bar editor to Neuralwatt's internals.
+    pi.events.on(FLEX_EVENT, (flex: { flexOn: boolean; flexCapable: boolean }) => {
+      state.flexOn = flex.flexOn;
+      state.flexCapable = flex.flexCapable;
+      state.lastHandle?.requestRender();
+      editorRequestRender?.();
+    });
 
     await refreshGitStatus();
   });

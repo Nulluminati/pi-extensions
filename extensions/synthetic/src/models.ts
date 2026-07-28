@@ -46,6 +46,24 @@ const ALWAYS_ON_THINKING_MAP: ThinkingLevelMap = {
   xhigh: "xhigh",
 };
 
+/**
+ * Thinking map for Kimi-K3, whose gateway rejects the `medium` effort. Probed
+ * 2026-07: the inference backend reports `supported values are ['high', 'low',
+ * 'max']` and returns HTTP 500 for `medium`, so medium maps to null (hidden in
+ * pi). `none` disables thinking; minimal and low are accepted but do not
+ * engage thinking (the model decides whether lower tiers think, like GLM-5.2).
+ * high and xhigh both engage reasoning. `max` is also accepted but is not a pi
+ * level, so xhigh stays identity-mapped.
+ */
+const DISABLEABLE_NO_MEDIUM_MAP: ThinkingLevelMap = {
+  off: "none",
+  minimal: "minimal",
+  low: "low",
+  medium: null,
+  high: "high",
+  xhigh: "xhigh",
+};
+
 // --- Static model catalog ---
 
 /**
@@ -148,6 +166,18 @@ export const STATIC_MODELS: ProviderModelConfig[] = [
     input: ["text", "image"],
     cost: { input: 0.95, output: 4, cacheRead: 0.95, cacheWrite: 0 },
     contextWindow: 262144,
+    maxTokens: 65536,
+    compat: SYNTHETIC_COMPAT,
+  },
+  {
+    id: "hf:moonshotai/Kimi-K3",
+    name: "Kimi-K3",
+    api: "openai-completions",
+    reasoning: true,
+    thinkingLevelMap: DISABLEABLE_NO_MEDIUM_MAP,
+    input: ["text", "image"],
+    cost: { input: 3.0, output: 15.0, cacheRead: 3.0, cacheWrite: 0 },
+    contextWindow: 524288,
     maxTokens: 65536,
     compat: SYNTHETIC_COMPAT,
   },

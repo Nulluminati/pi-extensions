@@ -2,11 +2,17 @@ import { readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import neuralwattExtension, {
+  FLEX_EVENT,
   MISSING_MODELS_MESSAGE,
   type NeuralwattModelsResponse,
   type NeuralwattQuotaResponse,
   STATIC_MODELS,
 } from "../../extensions/neuralwatt/neuralwatt.ts";
+import {
+  computeFlexState,
+  fetchFlexCapableIds,
+  injectServiceTier,
+} from "../../extensions/neuralwatt/src/flex.ts";
 import { createMockCommandContext } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
 import { getCommandHandler, getEventHandler } from "../mocks/test-helpers.ts";
@@ -17,6 +23,7 @@ function mockModelsResponse(models: unknown[]): Response {
 
 // Ids present in the static catalog. Startup check tests use these.
 const EXPECTED_MODEL_IDS = [
+  "deepseek-v4-flash",
   "gemma-4-31b",
   "glm-5.2",
   "glm-5.2-fast",
@@ -56,7 +63,7 @@ describe("neuralwatt-extension", () => {
       const sourceFiles = await readdir(resolve(extensionDir, "src"));
 
       expect(rootTypeScriptFiles).toEqual(["neuralwatt.ts"]);
-      expect(sourceFiles.filter((file) => file.endsWith(".ts"))).toHaveLength(6);
+      expect(sourceFiles.filter((file) => file.endsWith(".ts"))).toHaveLength(7);
     });
   });
 
@@ -80,6 +87,21 @@ describe("neuralwatt-extension", () => {
         cost: { input: 0.144, output: 0.42, cacheRead: 0.036, cacheWrite: 0 },
         contextWindow: 262128,
         maxTokens: 16384,
+      }),
+    );
+  });
+
+  it("configures DeepSeek V4 Flash from live metadata and probed reasoning behavior", () => {
+    const model = STATIC_MODELS.find((candidate) => candidate.id === "deepseek-v4-flash");
+
+    expect(model).toEqual(
+      expect.objectContaining({
+        name: "DeepSeek V4 Flash",
+        reasoning: true,
+        input: ["text"],
+        cost: { input: 0.104, output: 0.207, cacheRead: 0.026, cacheWrite: 0 },
+        contextWindow: 1048560,
+        maxTokens: 65536,
       }),
     );
   });
@@ -137,6 +159,14 @@ describe("neuralwatt-extension", () => {
     const byId = Object.fromEntries(STATIC_MODELS.map((m) => [m.id, m]));
 
     // Disableable + accepts identity-mapped levels through xhigh.
+    expect(byId["deepseek-v4-flash"].thinkingLevelMap).toEqual({
+      off: "none",
+      minimal: "minimal",
+      low: "low",
+      medium: "medium",
+      high: "high",
+      xhigh: "xhigh",
+    });
     expect(byId["gemma-4-31b"].thinkingLevelMap).toEqual({
       off: "none",
       minimal: "minimal",
@@ -585,5 +615,245 @@ describe("neuralwatt-extension", () => {
   it("NeuralwattModelsResponse type import resolves at runtime", () => {
     const sample = { data: [] } satisfies NeuralwattModelsResponse;
     expect(sample.data).toEqual([]);
+  });
+});
+
+describe("neuralwatt flex helpers", () => {
+  let mockFetch: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.unstubAllEnvs();
+    mockFetch = vi.fn();
+    (globalThis as unknown as { fetch: ReturnType<typeof vi.fn> }).fetch = mockFetch;
+  });
+
+  it("fetchFlexCapableIds returns base ids that have a -flex sibling", async () => {
+    mockFetch.mockResolvedValue(
+      mockModelsResponse([
+        { id: "glm-5.2" },
+        { id: "glm-5.2-flex" },
+        { id: "kimi-k2.6" },
+        { id: "kimi-k2.6-flex" },
+        { id: "qwen3.6-35b" }, // no flex sibling
+      ]),
+    );
+    const capable = await fetchFlexCapableIds("key", undefined);
+    expect([...capable].sort()).toEqual(["glm-5.2", "kimi-k2.6"]);
+  });
+
+  it("fetchFlexCapableIds returns an empty set on a non-OK response", async () => {
+    const resp = { ok: false, json: () => Promise.resolve({ data: [] }) } as Response;
+    mockFetch.mockResolvedValue(resp);
+    const capable = await fetchFlexCapableIds("key", undefined);
+    expect([...capable]).toEqual([]);
+  });
+
+  it("fetchFlexCapableIds returns an empty set when fetch throws", async () => {
+    mockFetch.mockRejectedValue(new Error("network"));
+    const capable = await fetchFlexCapableIds("key", undefined);
+    expect([...capable]).toEqual([]);
+  });
+
+  it("computeFlexState reports capable only for a Neuralwatt model in the set", () => {
+    const capable = new Set(["glm-5.2"]);
+    const model = (id: string, provider = "neuralwatt") => ({ id, provider });
+    expect(computeFlexState(model("glm-5.2"), true, capable)).toEqual({
+      flexOn: true,
+      flexCapable: true,
+    });
+    expect(computeFlexState(model("glm-5.2"), false, capable)).toEqual({
+      flexOn: false,
+      flexCapable: true,
+    });
+    // Not flex-capable.
+    expect(computeFlexState(model("qwen3.6-35b"), true, capable)).toEqual({
+      flexOn: false,
+      flexCapable: false,
+    });
+    // Non-Neuralwatt provider is never capable even if the id matches.
+    expect(computeFlexState(model("glm-5.2", "openai"), true, capable)).toEqual({
+      flexOn: false,
+      flexCapable: false,
+    });
+    // No model selected.
+    expect(computeFlexState(undefined, true, capable)).toEqual({
+      flexOn: false,
+      flexCapable: false,
+    });
+  });
+
+  it("injectServiceTier injects service_tier only when toggled on and model is capable", () => {
+    const capable = new Set(["glm-5.2"]);
+    const out = injectServiceTier({ model: "glm-5.2", messages: [] }, true, capable);
+    expect(out).toEqual({ model: "glm-5.2", messages: [], service_tier: "flex" });
+
+    // Toggle off: no change.
+    expect(injectServiceTier({ model: "glm-5.2", messages: [] }, false, capable)).toBeUndefined();
+    // Toggled on but model not capable: no change.
+    expect(injectServiceTier({ model: "qwen3.6-35b" }, true, capable)).toBeUndefined();
+    // Non-string model: no change.
+    expect(injectServiceTier({ model: 123 }, true, capable)).toBeUndefined();
+    // Non-object payload: no change.
+    expect(injectServiceTier(null, true, capable)).toBeUndefined();
+    // Existing service_tier is preserved/overridden cleanly via spread.
+    const overridden = injectServiceTier({ model: "glm-5.2", service_tier: "auto" }, true, capable);
+    expect(overridden).toEqual({ model: "glm-5.2", service_tier: "flex" });
+  });
+});
+
+describe("neuralwatt flex integration", () => {
+  let mockFetch: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.unstubAllEnvs();
+    mockFetch = vi.fn();
+    (globalThis as unknown as { fetch: ReturnType<typeof vi.fn> }).fetch = mockFetch;
+    vi.stubEnv("NEURALWATT_API_KEY", "nw_test_key_123");
+    mockFetch.mockResolvedValue(mockModelsResponse(STATIC_MODELS));
+  });
+
+  /** Catalog response carrying `<id>-flex` siblings for the given base ids. */
+  function flexCatalog(baseIds: string[]): Response {
+    const data = baseIds.flatMap((id) => [{ id }, { id: `${id}-flex` }]);
+    return mockModelsResponse(data);
+  }
+
+  /** Boot the extension and run session_start with the given flex-capable ids. */
+  async function bootWithFlex(
+    mockPi: ReturnType<typeof createMockPi>,
+    mockCtx: ReturnType<typeof createMockCommandContext>,
+    modelId: string,
+    capableIds: string[],
+  ) {
+    await neuralwattExtension(mockPi);
+    mockCtx.model = { id: modelId, name: modelId, provider: "neuralwatt" } as any;
+    mockFetch.mockResolvedValue(flexCatalog(capableIds));
+    const handler = getEventHandler(mockPi, "session_start");
+    await handler({ type: "session_start", reason: "new" }, mockCtx);
+  }
+
+  it("session_start builds the flex-capable set and emits flex state", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await bootWithFlex(mockPi, mockCtx, "glm-5.2", ["glm-5.2", "kimi-k2.6"]);
+
+    const emits = mockPi.events.emit.mock.calls.filter((c) => c[0] === FLEX_EVENT);
+    expect(emits.length).toBeGreaterThan(0);
+    expect(emits[emits.length - 1][1]).toEqual({ flexOn: false, flexCapable: true });
+  });
+
+  it("/neuralwatt-flex errors when the current model is not a Neuralwatt model", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await neuralwattExtension(mockPi);
+    // Non-Neuralwatt: do not run session_start's flex fetch.
+    mockCtx.model = { id: "gpt-4", name: "gpt-4", provider: "openai" } as any;
+
+    const handler = getCommandHandler(mockPi, "neuralwatt-flex");
+    await handler("", mockCtx);
+
+    expect(mockCtx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("only applies to Neuralwatt"),
+      "error",
+    );
+  });
+
+  it("/neuralwatt-flex warns when the Neuralwatt model has no flex tier", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    // Build capable set that does NOT include the selected model.
+    await bootWithFlex(mockPi, mockCtx, "qwen3.6-35b", ["glm-5.2"]);
+
+    mockCtx.ui.notify.mockClear();
+    const handler = getCommandHandler(mockPi, "neuralwatt-flex");
+    await handler("", mockCtx);
+
+    expect(mockCtx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("no flex tier available"),
+      "warning",
+    );
+  });
+
+  it("/neuralwatt-flex toggles flex on/off and emits state for a capable model", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await bootWithFlex(mockPi, mockCtx, "glm-5.2", ["glm-5.2"]);
+
+    mockPi.events.emit.mockClear();
+    const handler = getCommandHandler(mockPi, "neuralwatt-flex");
+    await handler("", mockCtx); // enable
+
+    expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Flex enabled"), "info");
+    const enableEmit = mockPi.events.emit.mock.calls.find((c) => c[0] === FLEX_EVENT);
+    expect(enableEmit?.[1]).toEqual({ flexOn: true, flexCapable: true });
+
+    mockCtx.ui.notify.mockClear();
+    mockPi.events.emit.mockClear();
+    await handler("", mockCtx); // disable
+    expect(mockCtx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("Flex disabled"),
+      "info",
+    );
+    const disableEmit = mockPi.events.emit.mock.calls.find((c) => c[0] === FLEX_EVENT);
+    expect(disableEmit?.[1]).toEqual({ flexOn: false, flexCapable: true });
+  });
+
+  it("before_provider_request injects service_tier only when flex is on and the model is capable", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await bootWithFlex(mockPi, mockCtx, "glm-5.2", ["glm-5.2"]);
+
+    const providerHandler = getEventHandler(mockPi, "before_provider_request");
+
+    // Flex off by default: no injection.
+    let result = await providerHandler(
+      { type: "before_provider_request", payload: { model: "glm-5.2", messages: [] } },
+      mockCtx,
+    );
+    expect(result).toBeUndefined();
+
+    // Enable flex, then inject.
+    await getCommandHandler(mockPi, "neuralwatt-flex")("", mockCtx);
+    result = await providerHandler(
+      { type: "before_provider_request", payload: { model: "glm-5.2", messages: [] } },
+      mockCtx,
+    );
+    expect(result).toEqual({ model: "glm-5.2", messages: [], service_tier: "flex" });
+
+    // Capable toggle on but a non-capable model in the payload: no injection.
+    result = await providerHandler(
+      { type: "before_provider_request", payload: { model: "qwen3.6-35b" } },
+      mockCtx,
+    );
+    expect(result).toBeUndefined();
+  });
+
+  it("model_select emits flex state and notifies for Neuralwatt models", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await bootWithFlex(mockPi, mockCtx, "glm-5.2", ["glm-5.2", "kimi-k2.6"]);
+
+    mockPi.events.emit.mockClear();
+    mockCtx.ui.notify.mockClear();
+    const handler = getEventHandler(mockPi, "model_select");
+    await handler(
+      {
+        type: "model_select",
+        model: { id: "kimi-k2.6", name: "Kimi K2.6", provider: "neuralwatt" },
+        previousModel: undefined,
+        source: "set",
+      },
+      mockCtx,
+    );
+
+    expect(mockCtx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("Using Neuralwatt model"),
+      "info",
+    );
+    // kimi-k2.6 is capable too, so flexCapable stays true and flexOn false.
+    const emit = mockPi.events.emit.mock.calls.find((c) => c[0] === FLEX_EVENT);
+    expect(emit?.[1]).toEqual({ flexOn: false, flexCapable: true });
   });
 });

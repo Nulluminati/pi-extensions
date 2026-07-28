@@ -36,4 +36,10 @@ export interface State {
   gitStatus: GitStatus | null;
   tokenUsage: TokenUsage;
   lastHandle: { requestRender: () => void; close: () => void } | null;
+  // Flex tier indicator state, published by the Neuralwatt extension on the
+  // pi.events bus (see neuralwatt:flex-change). `flexCapable` is true for the
+  // current model only when it is a Neuralwatt model with a flex sibling; the
+  // badge is shown solely on that. `flexOn` drives the on/off label.
+  flexOn: boolean;
+  flexCapable: boolean;
 }

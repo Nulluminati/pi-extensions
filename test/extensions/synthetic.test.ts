@@ -22,6 +22,7 @@ const EXPECTED_MODEL_IDS = [
   "syn:small:vision",
   "hf:zai-org/GLM-5.2",
   "hf:moonshotai/Kimi-K2.7-Code",
+  "hf:moonshotai/Kimi-K3",
   "hf:Qwen/Qwen3.6-27B",
   "hf:MiniMaxAI/MiniMax-M3",
   "hf:zai-org/GLM-4.7-Flash",
@@ -114,6 +115,19 @@ describe("synthetic-extension", () => {
       const map = m.thinkingLevelMap;
       expect(map?.xhigh, `${m.id} should map xhigh to "xhigh"`).toBe("xhigh");
     }
+  });
+
+  it("hides medium for Kimi-K3 (gateway rejects it; supported values are high/low/max)", () => {
+    const kimi = STATIC_MODELS.find((m) => m.id === "hf:moonshotai/Kimi-K3");
+    expect(kimi).toBeDefined();
+    expect(kimi?.thinkingLevelMap).toEqual({
+      off: "none",
+      minimal: "minimal",
+      low: "low",
+      medium: null,
+      high: "high",
+      xhigh: "xhigh",
+    });
   });
 
   it("maps off to null for always-on reasoning models (thinking cannot be disabled)", () => {

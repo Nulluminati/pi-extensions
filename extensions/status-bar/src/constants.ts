@@ -28,6 +28,12 @@ export const ICON_GIT = String.fromCodePoint(0xf418);
 export const ICON_THINKING = String.fromCodePoint(0xf09d1);
 
 // nf-md-brain
+
+// Lightning bolt marks the Neuralwatt flex pricing tier, shown next to the
+// thinking level in the editor meta line when the selected model is flex-capable.
+export const ICON_FLEX = "⚡";
+export const FLEX_ON_COLOR = "success"; // green — the discounted tier is active
+export const FLEX_OFF_COLOR = "dim";
 export const ICON_TURN = "↻";
 
 export const ICON_TOOL_ACTIVE = "⚙";
@@ -78,5 +84,13 @@ export const TOKEN_COLORS = {
 export const EDITOR_FRAME_COLOR = "borderMuted";
 
 export const EDITOR_META_SEPARATOR = "  ";
+
+/**
+ * Event the Neuralwatt extension emits on pi.events to publish flex state for
+ * the current model. Defined here (not imported) so the status-bar extension
+ * stays self-contained; the Neuralwatt extension owns the contract and emits
+ * the same string.
+ */
+export const FLEX_EVENT = "neuralwatt:flex-change";
 
 export const EDITOR_MARKER = Symbol.for("pi-statusbar.editor-factory");

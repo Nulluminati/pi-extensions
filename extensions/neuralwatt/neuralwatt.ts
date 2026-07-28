@@ -20,15 +20,35 @@ import type { ExtensionAPI } from "pi";
 import { getResolvedApiKey } from "./src/auth.ts";
 import { fetchCatalog, findMissingModels, MISSING_MODELS_MESSAGE } from "./src/catalog.ts";
 import { NEURALWATT_API_BASE_URL, NEURALWATT_CLIENT_HEADERS } from "./src/constants.ts";
+import {
+  computeFlexState,
+  FLEX_EVENT,
+  type FlexState,
+  fetchFlexCapableIds,
+  injectServiceTier,
+} from "./src/flex.ts";
 import { formatModelList, STATIC_MODELS } from "./src/models.ts";
 import { fetchQuota, formatQuotaDisplay } from "./src/quota.ts";
 
 export type { NeuralwattModelsResponse, NeuralwattQuotaResponse } from "./src/types.ts";
-export { MISSING_MODELS_MESSAGE, STATIC_MODELS };
+export { FLEX_EVENT, type FlexState, MISSING_MODELS_MESSAGE, STATIC_MODELS };
 
 // --- Default export ---
 
 export default async function neuralwattExtension(pi: ExtensionAPI) {
+  // Flex state is per-instance (closure-scoped) so it never leaks across Pi
+  // instances or tests. `flexToggleOn` is the user's toggle; `flexCapableIds`
+  // is the set of Neuralwatt base model ids with a flex sibling, rebuilt from
+  // the authenticated catalog on session_start. An empty set (no key or fetch
+  // failure) hides the indicator and makes the toggle warn unavailable.
+  let flexToggleOn = false;
+  let flexCapableIds = new Set<string>();
+
+  function emitFlexState(model: { provider?: string; id: string } | undefined): void {
+    const state = computeFlexState(model, flexToggleOn, flexCapableIds);
+    pi.events.emit(FLEX_EVENT, state);
+  }
+
   // Register the static catalog synchronously. No startup fetch blocks
   // registration, and the list is available even without an API key.
   pi.registerProvider("neuralwatt", {
@@ -52,11 +72,65 @@ export default async function neuralwattExtension(pi: ExtensionAPI) {
     if (!apiKey) return;
     const catalog = await fetchCatalog(ctx.signal);
     const missing = findMissingModels(catalog);
-    if (missing.length === 0) return;
-    ctx.ui.notify(
-      `${MISSING_MODELS_MESSAGE}:\n${missing.map((id) => `  • ${id}`).join("\n")}`,
-      "warning",
-    );
+    if (missing.length > 0) {
+      ctx.ui.notify(
+        `${MISSING_MODELS_MESSAGE}:\n${missing.map((id) => `  • ${id}`).join("\n")}`,
+        "warning",
+      );
+    }
+
+    // Build the flex-capable set from the authenticated catalog (the public
+    // view omits `-flex` siblings). Reuses the key resolved above; silent on
+    // fetch error so the indicator and toggle just report flex as unavailable.
+    flexCapableIds = await fetchFlexCapableIds(apiKey, ctx.signal);
+    emitFlexState(ctx.model);
+  });
+
+  // Inject `service_tier: "flex"` on outgoing requests when the toggle is on
+  // and the request's model is flex-capable. Returns the modified payload to
+  // replace the original; undefined leaves it untouched.
+  pi.on("before_provider_request", async (event, _ctx) => {
+    return injectServiceTier((event as { payload: unknown }).payload, flexToggleOn, flexCapableIds);
+  });
+
+  // Re-publish flex state when the selected model changes so the status bar
+  // updates its badge (and hides it for non-Neuralwatt / non-capable models).
+  pi.on("model_select", async (event, ctx) => {
+    emitFlexState(event.model);
+    if (event.model.provider === "neuralwatt") {
+      const modelName = event.model.name || event.model.id;
+      ctx.ui.notify(`Using Neuralwatt model: ${modelName}`, "info");
+    }
+  });
+
+  // /neuralwatt-flex: toggle flex for the current Neuralwatt model. Only
+  // applies to Neuralwatt models, and only takes effect when the model has a
+  // flex tier available.
+  pi.registerCommand("neuralwatt-flex", {
+    description: "Toggle Neuralwatt flex pricing tier for the current model",
+    handler: async (_args, ctx) => {
+      if (!ctx.hasUI) return;
+      const model = ctx.model;
+      // biome-ignore lint/complexity/useOptionalChain: keep this as a guard so model narrows to non-null for the flexCapableIds/notify uses below; the optional-chain alternative would lose narrowing and require a non-null assertion.
+      if (!model || model.provider !== "neuralwatt") {
+        ctx.ui.notify("Flex only applies to Neuralwatt models.", "error");
+        return;
+      }
+      if (!flexCapableIds.has(model.id)) {
+        const available = [...flexCapableIds].sort().join(", ") || "(none loaded yet)";
+        ctx.ui.notify(
+          `${model.name || model.id} has no flex tier available. Flex-capable: ${available}`,
+          "warning",
+        );
+        return;
+      }
+      flexToggleOn = !flexToggleOn;
+      emitFlexState(model);
+      ctx.ui.notify(
+        `Flex ${flexToggleOn ? "enabled" : "disabled"} for ${model.name || model.id}`,
+        "info",
+      );
+    },
   });
 
   // /neuralwatt-models command
@@ -93,13 +167,5 @@ export default async function neuralwattExtension(pi: ExtensionAPI) {
         );
       }
     },
-  });
-
-  // Notify when a Neuralwatt model is selected
-  pi.on("model_select", async (event, ctx) => {
-    if (event.model.provider === "neuralwatt") {
-      const modelName = event.model.name || event.model.id;
-      ctx.ui.notify(`Using Neuralwatt model: ${modelName}`, "info");
-    }
   });
 }
