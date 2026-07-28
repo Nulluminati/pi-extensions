@@ -1,6 +1,14 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
-import { frameBorderLine, frameContentLine, frameRuleLine } from "../../lib/tui-frame.ts";
+import {
+  frameBorderLine,
+  frameContentLine,
+  frameRuleLine,
+  modalContentWidth,
+  renderModalFrame,
+} from "../../lib/tui-frame.ts";
+
+const ANSI_PATTERN = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
 
 const ANSI_THEME = {
   fg: (_color: string, text: string) => `\x1b[36m${text}\x1b[0m`,
@@ -15,6 +23,28 @@ describe("TUI frame helpers", () => {
     expect(visibleWidth(frameBorderLine(ANSI_THEME, 8, "top"))).toBe(8);
     expect(visibleWidth(frameRuleLine(ANSI_THEME, 8))).toBe(8);
     expect(visibleWidth(frameBorderLine(ANSI_THEME, 8, "bottom"))).toBe(8);
+  });
+
+  it("renders a padded Peon-style modal with an inline concise title", () => {
+    const lines = renderModalFrame(ANSI_THEME, 30, ["content"], { title: "Voice" });
+
+    expect(lines[0]?.replace(ANSI_PATTERN, "")).toContain("╭── Voice ");
+    expect(lines[1]?.replace(ANSI_PATTERN, "")).toContain("│");
+    expect(lines[2]?.replace(ANSI_PATTERN, "")).toContain("  content");
+    expect(lines.at(-1)?.replace(ANSI_PATTERN, "")).toContain("╰");
+    expect(lines.every((line) => visibleWidth(line) === 30)).toBe(true);
+    expect(modalContentWidth(30)).toBe(24);
+  });
+
+  it("replaces overflowing fixed-height content with an indicator", () => {
+    const lines = renderModalFrame(ANSI_THEME, 30, ["one", "two", "three"], {
+      title: "BTW",
+      paddingY: 0,
+      fixedBodyRows: 2,
+    });
+
+    expect(lines.join("\n")).toContain("↓ 2 more lines");
+    expect(lines.join("\n")).not.toContain("three");
   });
 
   it("clips long content by visible width", () => {

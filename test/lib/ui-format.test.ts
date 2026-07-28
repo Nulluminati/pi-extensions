@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatKeyHints, formatStatusLine } from "../../lib/ui-format.ts";
+import { formatKeyHints, formatStatusLine, formatStyledKeyHints } from "../../lib/ui-format.ts";
 
 const theme = {
   fg: (color: string, text: string) => `<${color}>${text}</${color}>`,
@@ -13,6 +13,17 @@ describe("UI formatting", () => {
         ["esc", "cancel"],
       ]),
     ).toBe("enter: select · esc: cancel");
+  });
+
+  it("styles hint keys separately from their actions", () => {
+    expect(
+      formatStyledKeyHints(theme, [
+        ["enter", "select"],
+        ["esc", "cancel"],
+      ]),
+    ).toBe(
+      "<accent>enter</accent><dim>: select</dim><dim> · </dim><accent>esc</accent><dim>: cancel</dim>",
+    );
   });
 
   it("formats prefixed status lines with consistent icon and text styling", () => {

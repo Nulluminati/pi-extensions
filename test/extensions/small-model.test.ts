@@ -101,9 +101,9 @@ describe("small-model extension", () => {
 
     await getCommandHandler(pi, "small-model")("", ctx);
 
-    expect(initialRender.split("\n")[0]).toBe(`╭${"─".repeat(98)}╮`);
+    expect(initialRender.split("\n")[0]).toContain("╭── Small Model ");
     expect(initialRender.split("\n").at(-1)).toBe(`╰${"─".repeat(98)}╯`);
-    expect(initialRender).toContain("Select Global Small Model");
+    expect(initialRender).not.toContain("Select Global Small Model");
     expect(initialRender).toContain("Search");
     expect(initialRender).toContain("synthetic/syn:small:text");
     expect(initialRender).not.toContain("(active)");

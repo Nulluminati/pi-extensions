@@ -885,13 +885,13 @@ describe("voice-extension", () => {
       });
       const renderedLines = component?.render(72) ?? [];
       const rendered = renderedLines.join("\n");
-      expect(renderedLines[0]).toBe(`╭${"─".repeat(70)}╮`);
+      expect(renderedLines[0]).toContain("╭── Voice ");
       expect(renderedLines.at(-1)).toBe(`╰${"─".repeat(70)}╯`);
       expect(renderedLines.every((line) => line.length === 72)).toBe(true);
       expect(rendered).not.toContain("FOCUSED");
-      expect(rendered).toContain("VOICE");
+      expect(rendered).toContain("Voice");
       expect(rendered).toContain("local audio · MIC → TEXT → SPEECH");
-      expect(rendered).toContain(`├${"─".repeat(70)}┤`);
+      expect(rendered).toContain("─".repeat(66));
       expect(rendered).toContain("Dictation model");
       expect(rendered).toContain("Moonshine Base · Ready");
       expect(rendered).toContain("Speech model");

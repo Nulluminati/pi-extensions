@@ -141,7 +141,7 @@ export default async function webSearchExtension(pi: ExtensionAPI) {
         keybindings,
         items,
         activeValue: activeProviderId,
-        title: "Select Web Search Provider",
+        title: "Web Search",
         maxVisible: 10,
         noMatchText: "No matching providers",
         onSelect: done,

@@ -46,7 +46,7 @@ async function selectModelWithSearch(
       keybindings,
       items,
       activeValue,
-      title: "Select Global Small Model",
+      title: "Small Model",
       maxVisible: 10,
       noMatchText: "No matching models",
       searchText: (item) => `${item.value} ${item.description ?? ""}`,

@@ -1,13 +1,8 @@
 import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
-import {
-  type SettingItem,
-  SettingsList,
-  truncateToWidth,
-  visibleWidth,
-} from "@earendil-works/pi-tui";
+import { type SettingItem, SettingsList, visibleWidth } from "@earendil-works/pi-tui";
 import type { ExtensionCommandContext } from "pi";
-import { frameBorderLine, frameContentLine, frameRuleLine } from "../../../lib/tui-frame.ts";
-import { formatKeyHints } from "../../../lib/ui-format.ts";
+import { modalContentWidth, renderModalFrame } from "../../../lib/tui-frame.ts";
+import { formatStyledKeyHints } from "../../../lib/ui-format.ts";
 import { detectRecorders, hasTool } from "./audio.ts";
 import { resolveModelsDir, resolveSource } from "./config.ts";
 import {
@@ -252,8 +247,8 @@ export async function runVoiceSettings(
       return {
         render: (width: number) => {
           const frameWidth = Math.max(24, width);
-          const innerWidth = Math.max(22, frameWidth - 2);
-          const settingsLines = settingsList.render(innerWidth);
+          const contentWidth = modalContentWidth(frameWidth);
+          const settingsLines = settingsList.render(contentWidth);
           while (
             settingsLines.length > 0 &&
             visibleWidth(settingsLines[settingsLines.length - 1] ?? "") === 0
@@ -261,36 +256,19 @@ export async function runVoiceSettings(
             settingsLines.pop();
           }
 
+          const divider = overlayTheme.fg("dim", "─".repeat(contentWidth));
           const lines = [
-            frameBorderLine(overlayTheme, frameWidth, "top"),
-            frameContentLine(
-              overlayTheme,
-              frameWidth,
-              overlayTheme.fg("accent", overlayTheme.bold("VOICE")),
-            ),
-            frameContentLine(
-              overlayTheme,
-              frameWidth,
-              `${overlayTheme.fg("accent", "local audio")} · MIC → TEXT → SPEECH`,
-            ),
-            frameRuleLine(overlayTheme, frameWidth),
-            ...settingsLines.map((line) => frameContentLine(overlayTheme, frameWidth, line)),
-            frameRuleLine(overlayTheme, frameWidth),
-            frameContentLine(
-              overlayTheme,
-              frameWidth,
-              overlayTheme.fg(
-                "dim",
-                formatKeyHints([
-                  ["↑↓", "navigate"],
-                  ["enter/space", "change"],
-                  ["esc", "cancel"],
-                ]),
-              ),
-            ),
-            frameBorderLine(overlayTheme, frameWidth, "bottom"),
+            `${overlayTheme.fg("accent", "local audio")} · MIC → TEXT → SPEECH`,
+            divider,
+            ...settingsLines,
+            divider,
+            formatStyledKeyHints(overlayTheme, [
+              ["↑↓", "navigate"],
+              ["enter/space", "change"],
+              ["esc", "cancel"],
+            ]),
           ];
-          return lines.map((line) => truncateToWidth(line, width, ""));
+          return renderModalFrame(overlayTheme, frameWidth, lines, { title: "Voice" });
         },
         invalidate: () => settingsList.invalidate(),
         handleInput: (data: string) => {

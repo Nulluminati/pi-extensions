@@ -18,6 +18,15 @@ export function formatKeyHints(hints: readonly KeyHint[]): string {
   return hints.map(([key, action]) => `${key.toLowerCase()}: ${action}`).join(" · ");
 }
 
+export function formatStyledKeyHints(theme: UiTheme, hints: readonly KeyHint[]): string {
+  return hints
+    .map(
+      ([key, action]) =>
+        `${theme.fg("accent", key.toLowerCase())}${theme.fg("dim", `: ${action}`)}`,
+    )
+    .join(theme.fg("dim", " · "));
+}
+
 export function formatStatusLine(theme: UiTheme, options: StatusLineOptions): string {
   const icon = theme.fg(options.iconColor ?? "accent", options.icon);
   const text = theme.fg(options.textColor ?? "muted", `${options.prefix}: ${options.text}`);

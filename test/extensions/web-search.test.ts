@@ -863,6 +863,8 @@ describe("web-search-extension", () => {
         vi.fn(),
       );
       const lines = component.render(80) as string[];
+      expect(lines[0]).toContain("╭── Web Search ");
+      expect(lines.join("\n")).not.toContain("Select Web Search Provider");
       expect(lines.some((l: string) => l.includes("not configured"))).toBe(true);
       expect(lines.some((l: string) => l.includes("active"))).toBe(false);
       expect(fg).toHaveBeenCalledWith("accent", "Synthetic (not configured)");

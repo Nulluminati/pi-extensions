@@ -9,8 +9,8 @@ import {
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import type { ExtensionContext } from "pi";
-import { frameBorderLine, frameContentLine, frameRuleLine } from "../../../lib/tui-frame.ts";
-import { formatKeyHints } from "../../../lib/ui-format.ts";
+import { modalContentWidth, renderModalFrame } from "../../../lib/tui-frame.ts";
+import { formatStyledKeyHints } from "../../../lib/ui-format.ts";
 import { isFocusShortcut, MAX_QUESTION_LENGTH } from "./constants.ts";
 import { globalSmallModelDisplay, resolveThinkingLevel } from "./model.ts";
 import { statusToText } from "./thread.ts";
@@ -130,15 +130,13 @@ class BtwOverlayComponent extends Container implements Focusable {
     return line;
   }
 
-  private inputFrame(width: number): string {
-    const innerWidth = Math.max(1, width - 2);
+  private inputLine(width: number): string {
     // Render the input UNFOCUSED so the CURSOR_MARKER doesn't skew
     // width calculation for this one row.
     const wasFocused = this.composer.focused;
     this.composer.focused = false;
     try {
-      const rendered = this.composer.render(innerWidth)[0] ?? "";
-      return frameContentLine(this.theme, width, rendered);
+      return this.composer.render(Math.max(1, width))[0] ?? "";
     } finally {
       this.composer.focused = wasFocused;
     }
@@ -162,10 +160,10 @@ class BtwOverlayComponent extends Container implements Focusable {
 
   override render(width: number): string[] {
     const w = Math.max(24, width);
-    const innerWidth = Math.max(22, w - 2);
+    const innerWidth = modalContentWidth(w);
     const dialogHeight = this.getDialogHeight();
-    // chrome = top border + title + config + summary + upper rule + lower rule + status + composer + hints + bottom border
-    const chrome = 10;
+    // frame + padding + config + summary + rules + status + composer + hints
+    const chrome = 11;
     const transcriptHeight = Math.max(6, dialogHeight - chrome);
     this.transcriptViewportHeight = transcriptHeight;
 
@@ -208,23 +206,13 @@ class BtwOverlayComponent extends Container implements Focusable {
       hiddenAbove || hiddenBelow ? ` · ↑${hiddenAbove} ↓${hiddenBelow}` : ""
     }`;
 
-    const out: string[] = [];
-    out.push(frameBorderLine(this.theme as unknown as ThemeLite, w, "top"));
-    out.push(
-      frameContentLine(
-        this.theme as unknown as ThemeLite,
-        w,
-        `${focusIndicator}  ${this.theme.fg("accent", this.theme.bold("BTW"))}`,
-      ),
-    );
-    out.push(frameContentLine(this.theme as unknown as ThemeLite, w, config));
-    out.push(frameContentLine(this.theme as unknown as ThemeLite, w, summary));
-    out.push(frameRuleLine(this.theme as unknown as ThemeLite, w));
+    const divider = this.theme.fg("dim", "─".repeat(innerWidth));
+    const out: string[] = [`${focusIndicator}  ${config}`, summary, divider];
     for (const line of wrapped.slice(
       this.transcriptScrollOffset,
       this.transcriptScrollOffset + transcriptHeight,
     )) {
-      out.push(frameContentLine(this.theme as unknown as ThemeLite, w, line));
+      out.push(line);
     }
     const pad = Math.max(
       0,
@@ -233,34 +221,22 @@ class BtwOverlayComponent extends Container implements Focusable {
           this.transcriptScrollOffset),
     );
     for (let i = 0; i < pad; i++) {
-      out.push(frameContentLine(this.theme as unknown as ThemeLite, w, ""));
+      out.push("");
     }
-    out.push(frameRuleLine(this.theme as unknown as ThemeLite, w));
+    out.push(divider);
+    out.push(this.theme.fg("warning", this.currentStatus));
+    out.push(this.inputLine(innerWidth));
     out.push(
-      frameContentLine(
-        this.theme as unknown as ThemeLite,
-        w,
-        this.theme.fg("warning", this.currentStatus),
-      ),
+      formatStyledKeyHints(this.theme, [
+        ["enter", "ask"],
+        ["esc", "cancel"],
+        ["mouse/↑↓/pgup/pgdn", "scroll"],
+        ["alt+/", "focus"],
+      ]),
     );
-    out.push(this.inputFrame(w));
-    out.push(
-      frameContentLine(
-        this.theme as unknown as ThemeLite,
-        w,
-        this.theme.fg(
-          "dim",
-          formatKeyHints([
-            ["enter", "ask"],
-            ["esc", "cancel"],
-            ["mouse/↑↓/pgup/pgdn", "scroll"],
-            ["alt+/", "focus"],
-          ]),
-        ),
-      ),
+    return renderModalFrame(this.theme, w, out, { title: "BTW" }).map((line) =>
+      this.fitLine(line, width),
     );
-    out.push(frameBorderLine(this.theme as unknown as ThemeLite, w, "bottom"));
-    return out.map((line) => this.fitLine(line, width));
   }
 
   private getMouseScrollDelta(data: string): number | null {

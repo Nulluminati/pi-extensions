@@ -117,7 +117,7 @@ describe("SearchableSelect", () => {
     });
 
     const lines = modal.render(20);
-    expect(lines[0]).toBe("╭──────────────────╮");
+    expect(lines[0]).toContain("╭── Select provid");
     expect(lines.at(-1)).toBe("╰──────────────────╯");
     expect(lines.slice(1, -1).every((line) => line.startsWith("│") && line.endsWith("│"))).toBe(
       true,

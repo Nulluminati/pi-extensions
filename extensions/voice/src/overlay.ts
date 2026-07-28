@@ -1,7 +1,7 @@
 import { matchesKey, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { ExtensionContext } from "pi";
-import { frameBorderLine, frameContentLine } from "../../../lib/tui-frame.ts";
-import { formatKeyHints } from "../../../lib/ui-format.ts";
+import { modalContentWidth, renderModalFrame } from "../../../lib/tui-frame.ts";
+import { formatStyledKeyHints } from "../../../lib/ui-format.ts";
 import { concatFloat32, detectRecorders, startStreamingRecorder } from "./audio.ts";
 import { resolveModelsDir, resolveSource } from "./config.ts";
 import {
@@ -50,17 +50,12 @@ function createVoiceOverlay(
   return {
     render(width: number): string[] {
       const w = Math.max(0, Math.floor(width));
-      const inner = Math.max(1, w - 2);
-      const out: string[] = [];
-      const bar = (content: string): string => frameContentLine(theme, w, content);
-      out.push(frameBorderLine(theme, w, "top"));
-      out.push(bar(`${theme.fg("accent", theme.bold("VOICE"))} ${theme.fg("dim", state.modelId)}`));
+      const inner = modalContentWidth(w);
+      const out: string[] = [theme.fg("dim", state.modelId)];
       const filled = Math.min(30, Math.round(state.level * 30));
       const eq = "\u2593".repeat(filled) + "\u2591".repeat(Math.max(0, 30 - filled));
-      out.push(
-        bar(`${theme.fg("accent", eq)} ${state.elapsedSec}s ${theme.fg("dim", state.status)}`),
-      );
-      out.push(bar(""));
+      out.push(`${theme.fg("accent", eq)} ${state.elapsedSec}s ${theme.fg("dim", state.status)}`);
+      out.push("");
       const lines: string[] = [];
       if (state.committed) {
         for (const chunk of state.committed.split(/(?<=\.)\s+/)) {
@@ -77,24 +72,18 @@ function createVoiceOverlay(
       const visible = lines.slice(-maxLines);
       for (const line of visible) {
         for (const wrapped of wrapTextWithAnsi(line, inner)) {
-          out.push(bar(wrapped));
+          out.push(wrapped);
         }
       }
       const padCount = Math.max(0, 2 - visible.length);
-      for (let i = 0; i < padCount; i++) out.push(bar(""));
+      for (let i = 0; i < padCount; i++) out.push("");
       out.push(
-        bar(
-          theme.fg(
-            "dim",
-            formatKeyHints([
-              ["enter", "paste"],
-              ["esc", "cancel"],
-            ]),
-          ),
-        ),
+        formatStyledKeyHints(theme, [
+          ["enter", "paste"],
+          ["esc", "cancel"],
+        ]),
       );
-      out.push(frameBorderLine(theme, w, "bottom"));
-      return out;
+      return renderModalFrame(theme, w, out, { title: "Voice" });
     },
     invalidate(): void {},
     handleInput(data: string): void {
