@@ -8,8 +8,8 @@ Registers the `neuralwatt` provider so you can use Neuralwatt's hosted open-sour
 
 1. Registers the provider at load time with a hardcoded catalog of public models, so Pi starts even when the API is unreachable or no key is configured.
 2. On `session_start`, fetches the public `/v1/models` view and warns when Neuralwatt publishes models the static list lacks.
-3. `/neuralwatt-models` lists every model with capabilities and pricing.
-4. `/neuralwatt-quota` shows credit balance, monthly usage (cost, requests, tokens, energy in kWh), and subscription or key-allowance details.
+3. `/neuralwatt:models` lists every model with capabilities and pricing.
+4. `/neuralwatt:quota` shows credit balance, monthly usage (cost, requests, tokens, energy in kWh), and subscription or key-allowance details.
 
 ## Usage
 
@@ -22,13 +22,13 @@ Select a model:
 List models:
 
 ```
-/neuralwatt-models
+/neuralwatt:models
 ```
 
 Check quota:
 
 ```
-/neuralwatt-quota
+/neuralwatt:quota
 ```
 
 ## How It Works
@@ -113,8 +113,9 @@ The probe checks `reasoning_content`, `reasoning`, and `reasoning_text`. Neuralw
 | API | Purpose |
 |-----|---------|
 | `pi.registerProvider("neuralwatt")` | Registers the provider and its models |
-| `pi.registerCommand("neuralwatt-models")` | Lists models with capabilities and pricing |
-| `pi.registerCommand("neuralwatt-quota")` | Displays quota and energy usage |
+| `pi.registerCommand("neuralwatt:flex")` | Toggles the flex pricing tier for the current model |
+| `pi.registerCommand("neuralwatt:models")` | Lists models with capabilities and pricing |
+| `pi.registerCommand("neuralwatt:quota")` | Displays quota and energy usage |
 | `pi.on("session_start")` | Public-catalog staleness check |
 | `pi.on("model_select")` | Notifies when a Neuralwatt model is selected |
 | `ctx.modelRegistry.getApiKeyForProvider()` | Auth resolution from Pi's credential store |

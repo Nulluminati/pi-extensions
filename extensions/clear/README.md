@@ -16,12 +16,13 @@ That's it. The session resets and the editor is ready for a new prompt.
 
 ## How It Works
 
-The extension calls `registerCommand("clear", …)` with a handler that delegates to `ctx.newSession()`. There's no state, no config, and no event handlers.
+The extension calls `registerCommand("clear", …)` with a handler that asks for confirmation (in UI mode) and then delegates to `ctx.newSession()`. There's no state, no config, and no event handlers.
 
 ## Key Design Decisions
 
 - **Single responsibility** — One command, one line of behavior. Anything more belongs in `/new`'s own logic, not in a shim.
-- **No state, no overrides** — Confirmation and any future `/new` semantics are inherited automatically because this extension just calls through.
+- **No state, no overrides** — Any future `/new` semantics are inherited automatically because this extension just calls through.
+- **Confirm first** — Ending the current session is destructive, so the handler runs `ctx.ui.confirm()` before calling through. The extra confirmation from the underlying `/new` behavior is unchanged.
 
 ## Pi APIs Used
 

@@ -4,22 +4,22 @@ Sets one global model for lightweight background tasks. Handoff summaries, BTW s
 
 ## Usage
 
-Run `/small-model` to choose from the authenticated text models registered with Pi. Each row shows the model name, context window, output limit, image support, and reasoning support. Type in the search bar to filter by provider, model ID, or model name:
+Run `/smallmodel` to choose from the authenticated text models registered with Pi. Each row shows the model name, context window, output limit, image support, and reasoning support. Type in the search bar to filter by provider, model ID, or model name:
 
 ```text
-/small-model
+/smallmodel
 ```
 
 Set one directly, with an optional thinking level:
 
 ```text
-/small-model synthetic/syn:small:text minimal
+/smallmodel synthetic/syn:small:text minimal
 ```
 
 Show the current setting:
 
 ```text
-/small-model show
+/smallmodel status
 ```
 
 The selection appears in the footer through `ctx.ui.setStatus()`. The bundled status bar displays it on its second line.
@@ -52,7 +52,7 @@ PI_SMALL_MODEL_THINKING=minimal \
 pi
 ```
 
-When `PI_SMALL_MODEL` is set, `/small-model` cannot replace it. Unset the variable first. `PI_SMALL_MODEL_CONFIG` can point at a different config file.
+When `PI_SMALL_MODEL` is set, `/smallmodel` cannot replace it. Unset the variable first. `PI_SMALL_MODEL_CONFIG` can point at a different config file.
 
 The extension watches the config directory. Changes made by another Pi process or a text editor update the status in running sessions.
 
@@ -64,7 +64,7 @@ Consumers do not fall back to the active chat model. A missing model or credenti
 
 | API | Purpose |
 |-----|---------|
-| `pi.registerCommand("small-model")` | Global model picker and direct configuration |
+| `pi.registerCommand("smallmodel")` | Global model picker and direct configuration |
 | `pi.on("session_start")` | Publishes status and starts the config watcher |
 | `pi.on("session_shutdown")` | Stops the watcher and clears status |
 | `ctx.modelRegistry.getAvailable()` | Lists authenticated text models |

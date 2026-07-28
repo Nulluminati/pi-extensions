@@ -22,7 +22,7 @@ The model is asked to produce a continuation prompt. You see a "Generating hando
 /handoff
 ```
 
-If you don't pass a goal, the command opens an input dialog: "What should the new session focus on?" Type a one-line goal and confirm.
+If you don't pass a goal, the command opens the shared framed input modal (`lib/input-modal.ts`, the same dialog `/goal:new` uses) with the prompt "What should the new session focus on?" Type a one-line goal and press Enter; Esc cancels.
 
 The goal is used to steer the summary (it tells the model what the next session should pick up) and to name the new session.
 
@@ -64,7 +64,7 @@ While the summary is generating, a Nerd Font swap icon with a "Generating handof
 |-----|---------|
 | `pi.registerCommand("handoff")` | The `/handoff` slash command |
 | `ctx.newSession({ parentSession, setup, withSession })` | Opens and names a parented session, then pre-fills its editor through the replacement context |
-| `ctx.ui.input(prompt, placeholder)` | Collects the goal when none is passed on the command line |
+| `promptText` (`lib/input-modal.ts`) | Collects the goal in a framed modal when none is passed on the command line |
 | `ctx.ui.editor(title, text)` | The review/edit step for the generated summary |
 | `ctx.ui.setStatus(key, text)` | The "Generating handoff summary…" status line |
 | `ctx.ui.notify(message, severity)` | Errors, cancellation, and the replacement-session ready notification |
@@ -75,4 +75,4 @@ While the summary is generating, a Nerd Font swap icon with a "Generating handof
 
 ## Configuration
 
-Set the shared model with `/small-model`. Handoff stops with an error if that model is missing or unauthenticated; it does not fall back to the active chat model.
+Set the shared model with `/smallmodel`. Handoff stops with an error if that model is missing or unauthenticated; it does not fall back to the active chat model.

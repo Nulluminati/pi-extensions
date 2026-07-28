@@ -145,7 +145,7 @@ export function createLspRuntime() {
     }
 
     throw new Error(
-      `No LSP server with '${capability}' capability found for ${filePath}. Check /lsp status.`,
+      `No LSP server with '${capability}' capability found for ${filePath}. Check /lsp:status.`,
     );
   }
 
@@ -329,7 +329,7 @@ export function createLspRuntime() {
 
     if (capableClients.length === 0) {
       throw new Error(
-        `No LSP server with '${capability}' capability found for ${filePath}. Check /lsp status.`,
+        `No LSP server with '${capability}' capability found for ${filePath}. Check /lsp:status.`,
       );
     }
 

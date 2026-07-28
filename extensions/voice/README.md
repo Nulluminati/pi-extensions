@@ -33,7 +33,7 @@ The extension prefers `ffmpeg` for recording when both recorders are installed. 
 
 ## Model setup
 
-Models are stored in `$PI_VOICE_MODELS`, or `~/.cache/pi-voice/models` when the variable is unset. Open `/voice` to check whether each selected model is ready or missing.
+Models are stored in `$PI_VOICE_MODELS`, or `~/.cache/pi-voice/models` when the variable is unset. Open `/voice:settings` to check whether each selected model is ready or missing.
 
 For the default setup, download Moonshine Base, Kitten Nano, and Silero VAD:
 
@@ -76,16 +76,17 @@ wget -O "$models_dir/inflect-micro-v2-onnx/decode.onnx" \
 | Command | Action |
 |---------|--------|
 | Hold Space for one second | Open the dictation overlay |
-| `/voice` | Open voice settings |
-| `/voice-speak` | Summarize and speak the latest assistant response |
-| `/voice-speak full` | Speak the cleaned response without cloud summarization |
-| `/voice-stop` | Stop current speech generation or playback |
+| `/voice` | Open the dictation overlay (same as holding Space) |
+| `/voice:settings` | Open voice settings |
+| `/voice:speak` | Summarize and speak the latest assistant response |
+| `/voice:speak full` | Speak the cleaned response without cloud summarization |
+| `/voice:stop` | Stop current speech generation or playback |
 
-The dictation model, speech model, and selected Kitten voice persist across restarts. Spoken summaries use the global small model configured by `/small-model`.
+The dictation model, speech model, and selected Kitten voice persist across restarts. Spoken summaries use the global small model configured by `/smallmodel`.
 
 ## Voice settings
 
-Run `/voice` to open the central settings modal. Use Up and Down to move, Enter or Space to change a setting, and Escape to close it.
+Run `/voice:settings` to open the central settings modal. Use Up and Down to move, Enter or Space to change a setting, and Escape to close it.
 
 The modal shows the complete local audio route:
 
@@ -94,11 +95,11 @@ The modal shows the complete local audio route:
 - Local voice. Kitten exposes eight choices; Inflect shows `Fixed voice` and disables this row.
 - Recording input, playback output, and Silero VAD status.
 
-A missing model stays visible but cannot be selected. Download it with the commands in [Model setup](#model-setup), then reopen `/voice`.
+A missing model stays visible but cannot be selected. Download it with the commands in [Model setup](#model-setup), then reopen `/voice:settings`.
 
 ## Dictation
 
-Hold Space for one second to dictate. A short Space press still inserts a normal space in the editor. `/voice` is reserved for settings.
+Hold Space for one second to dictate. A short Space press still inserts a normal space in the editor. `/voice` opens the same overlay directly.
 
 The overlay shows the input level, elapsed recording time, and a partial transcript. Use:
 
@@ -111,11 +112,11 @@ Hold-to-dictate requires Pi's interactive TUI. It supports terminals with key-re
 
 ## Spoken responses
 
-`/voice-speak` reads the latest assistant message from the active session branch. It asks the global small model for roughly 40 to 70 words of plain spoken prose, removes Markdown formatting, then generates audio with the selected local speech model.
+`/voice:speak` reads the latest assistant message from the active session branch. It asks the global small model for roughly 40 to 70 words of plain spoken prose, removes Markdown formatting, then generates audio with the selected local speech model.
 
-Choose the model with `/small-model`. Voice playback stops with an error if the configured model is missing or unauthenticated; it does not use the active chat model as a fallback.
+Choose the model with `/smallmodel`. Voice playback stops with an error if the configured model is missing or unauthenticated; it does not use the active chat model as a fallback.
 
-Use `/voice-speak full` when the response is already short or when no cloud model should receive it. This mode strips Markdown, links, and fenced code before local synthesis. A response made entirely of fenced code has no speakable text.
+Use `/voice:speak full` when the response is already short or when no cloud model should receive it. This mode strips Markdown, links, and fenced code before local synthesis. A response made entirely of fenced code has no speakable text.
 
 Model engines are loaded on first use and cached. This keeps them out of Pi's startup path. Audio is written to a temporary WAV file, played with `pw-play` or `ffplay`, and removed after playback.
 
@@ -212,7 +213,7 @@ Use `pactl list short sources` to find PipeWire/PulseAudio source names. Copy th
 
 The microphone stream never goes to a model provider. Transcription and Kitten speech synthesis use the local sherpa-onnx native addon. Inflect synthesis uses local ONNX Runtime and eSpeak-ng processes.
 
-`/voice-speak` sends the latest assistant response to the global small model. `/voice-speak full` does not make a summary request and keeps the speech path local.
+`/voice:speak` sends the latest assistant response to the global small model. `/voice:speak full` does not make a summary request and keeps the speech path local.
 
 ## Troubleshooting
 
@@ -250,7 +251,7 @@ Open `/voice` and compare the reported status with the expected extraction direc
 
 ### Spoken summaries fail before playback
 
-Run `/small-model` and choose an authenticated text model. `/voice-speak full` can still use local synthesis when the global small model is unavailable.
+Run `/smallmodel` and choose an authenticated text model. `/voice:speak full` can still use local synthesis when the global small model is unavailable.
 
 ## Pi APIs used
 

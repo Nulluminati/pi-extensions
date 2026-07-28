@@ -4,7 +4,7 @@ Goal-oriented auto-continuation mode — tell Pi what to accomplish and it keeps
 
 ## What It Does
 
-The `/goal` command activates a persistence mode where the agent autonomously continues working on an objective until it is fully complete and verified. Instead of stopping after a single turn, the agent is automatically continued with instructions to keep working from where it left off.
+The `/goal:*` commands activate a persistence mode where the agent autonomously continues working on an objective until it is fully complete and verified. Instead of stopping after a single turn, the agent is automatically continued with instructions to keep working from where it left off.
 
 A `goal_complete` tool is registered so the LLM can signal when it has finished, preventing infinite loops.
 
@@ -13,17 +13,18 @@ A `goal_complete` tool is registered so the LLM can signal when it has finished,
 ### Start a goal
 
 ```
-/goal implement a snake game in the terminal
-/goal --tokens 100k refactor the auth module
+/goal:new implement a snake game in the terminal
+/goal:new --tokens 100k refactor the auth module
 ```
 
-The `--tokens` flag sets a token budget. When the budget is reached, the goal pauses and you can resume or clear it.
+`/goal` is an alias for `/goal:new` — it starts a goal the same way.
+
+Running `/goal:new` with no objective opens the shared framed input modal (`lib/input-modal.ts`, the same dialog `/handoff` uses) so the objective can be typed interactively. The `--tokens` flag sets a token budget. When the budget is reached, the goal pauses and you can resume or reset it.
 
 ### Check status
 
 ```
-/goal
-/goal status
+/goal:status
 ```
 
 Shows the objective, status, elapsed time (or token usage), and iteration count.
@@ -31,33 +32,34 @@ Shows the objective, status, elapsed time (or token usage), and iteration count.
 ### Edit the objective
 
 ```
-/goal edit implement a tetris game instead
+/goal:edit implement a tetris game instead
+/goal:edit
 ```
 
-Updates the objective text without resetting usage counters. If the goal is active, a follow-up prompt is sent informing the agent of the change.
+Updates the objective text without resetting usage counters. With no inline objective, `/goal:edit` opens the input modal prefilled with the current objective. If the goal is active, a follow-up prompt is sent informing the agent of the change.
 
 ### Pause and resume
 
 ```
-/goal pause
-/goal resume
+/goal:pause
+/goal:resume
 ```
 
 Pausing stops auto-continuation. Resuming sends a follow-up prompt telling the agent to continue from where it left off.
 
-### Clear
+### Reset
 
 ```
-/goal clear
+/goal:reset
 ```
 
-Cancels the goal entirely, clears the status line, and resets all internal state.
+Cancels the goal entirely, clears the status line, and resets all internal state. Resetting is destructive, so it asks for confirmation first.
 
 ## How It Works
 
 ### Goal lifecycle
 
-1. **Start** — `/goal <objective>` creates a `GoalState` object and persists it via `appendEntry("goal-state", ...)`. A follow-up user message is sent with the objective and persistence rules.
+1. **Start** — `/goal:new <objective>` creates a `GoalState` object and persists it via `appendEntry("goal-state", ...)`. A follow-up user message is sent with the objective and persistence rules.
 
 2. **System prompt injection** — On every `before_agent_start`, if a goal is active, the extension appends a system prompt section with the objective and goal-mode rules. This reminds the agent to keep working.
 
@@ -88,13 +90,13 @@ The extension uses module-level variables (`state`, `goalCompleteCalled`, `conti
 - **`goal_complete` tool** — Without this, the agent would loop forever. The tool is described with `promptSnippet` and `promptGuidelines` so the LLM knows when to call it.
 - **`terminate: true`** — The `goal_complete` tool returns `terminate: true`, which ends the current agent turn after the tool result is processed.
 - **Confirmation on replacement** — Starting a new goal while one is active (and not complete) triggers a `ui.confirm()` dialog to prevent accidental replacement.
-- **Legacy cleanup** — `/goal clear` attempts to clean up an old file-based state format (`~/.pi/agent/pi-goal-state.json`). Errors are silently ignored.
+- **Reset confirmation** — `/goal:reset` wipes the objective and all usage counters, so it requires a `ui.confirm()` before proceeding.
 
 ## Pi APIs Used
 
 | API | Purpose |
 |-----|---------|
-| `pi.registerCommand("goal")` | Registers the `/goal` slash command |
+| `pi.registerCommand("goal", "goal:status", "goal:new", …)` | Registers the eight `/goal*` slash commands |
 | `pi.registerTool("goal_complete")` | LLM-callable tool to signal goal completion |
 | `pi.appendEntry("goal-state")` | Persists goal state to the session branch |
 | `pi.sendUserMessage()` | Sends start, resume, and continuation prompts |

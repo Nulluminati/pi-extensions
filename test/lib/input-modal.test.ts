@@ -1,0 +1,150 @@
+import { describe, expect, it, vi } from "vitest";
+import { createInputModal, promptText } from "../../lib/input-modal.ts";
+
+function createModal(
+  overrides: { onSubmit?: (value: string) => void; onCancel?: () => void } = {},
+) {
+  const requestRender = vi.fn();
+  const onSubmit = overrides.onSubmit ?? vi.fn();
+  const onCancel = overrides.onCancel ?? vi.fn();
+  const modal = createInputModal({
+    tui: { requestRender },
+    theme: {
+      fg: (_color, text) => text,
+      bold: (text) => text,
+    },
+    keybindings: { matches: matchesKey },
+    title: "Goal objective",
+    placeholder: "What should this run accomplish?",
+    onSubmit,
+    onCancel,
+  });
+  return { modal, requestRender, onSubmit, onCancel };
+}
+
+describe("createInputModal", () => {
+  it("renders inside the shared modal frame with title and key hints", () => {
+    const { modal } = createModal();
+    const rendered = modal.render(60).join("\n");
+
+    expect(rendered).toContain("╭── Goal objective ");
+    expect(rendered).toContain("enter: submit · esc: cancel");
+  });
+
+  it("seeds the input with initialValue for prefilled editing", () => {
+    const onSubmit = vi.fn();
+    const modal = createInputModal({
+      tui: { requestRender: vi.fn() },
+      theme: { fg: (_c, t) => t, bold: (t) => t },
+      keybindings: { matches: matchesKey },
+      title: "Edit goal objective",
+      placeholder: "objective",
+      initialValue: "implement snake game",
+      onSubmit,
+      onCancel: vi.fn(),
+    });
+
+    expect(modal.render(80).join("\n")).toContain("implement snake game");
+    modal.handleInput("\r");
+    expect(onSubmit).toHaveBeenCalledWith("implement snake game");
+  });
+
+  it("submits typed text on enter", () => {
+    const { modal, onSubmit } = createModal();
+    for (const character of "ship it") modal.handleInput(character);
+    modal.handleInput("\r");
+
+    expect(onSubmit).toHaveBeenCalledWith("ship it");
+  });
+
+  it("cancels on escape without submitting", () => {
+    const { modal, onSubmit, onCancel } = createModal();
+    modal.handleInput("a");
+    modal.handleInput("");
+
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("requests a render after each keystroke", () => {
+    const { modal, requestRender } = createModal();
+    modal.handleInput("a");
+    modal.handleInput("b");
+
+    expect(requestRender).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("promptText", () => {
+  it("resolves with the submitted value", async () => {
+    const ctx = createMockPromptContext();
+    ctx.ui.custom = vi.fn((factory: (...args: unknown[]) => unknown) => {
+      return new Promise((resolve) => {
+        const component = factory(
+          { requestRender: vi.fn() },
+          ctx.ui.theme,
+          { matches: matchesKey },
+          resolve,
+        ) as { handleInput(data: string): void };
+        for (const character of "my goal") component.handleInput(character);
+        component.handleInput("\r");
+      });
+    });
+
+    await expect(promptText(ctx, { title: "Goal", placeholder: "goal" })).resolves.toBe("my goal");
+  });
+
+  it("resolves undefined when cancelled", async () => {
+    const ctx = createMockPromptContext();
+    ctx.ui.custom = vi.fn((factory: (...args: unknown[]) => unknown) => {
+      return new Promise((resolve) => {
+        const component = factory(
+          { requestRender: vi.fn() },
+          ctx.ui.theme,
+          { matches: matchesKey },
+          resolve,
+        ) as { handleInput(data: string): void };
+        component.handleInput("");
+      });
+    });
+
+    await expect(promptText(ctx, { title: "Goal", placeholder: "goal" })).resolves.toBeUndefined();
+  });
+
+  it("falls back to ctx.ui.input outside TUI mode", async () => {
+    const ctx = createMockPromptContext();
+    ctx.mode = "rpc";
+    ctx.ui.input = vi.fn(() => Promise.resolve("typed inline"));
+
+    await expect(
+      promptText(ctx, { title: "Goal", placeholder: "goal", initialValue: "seed" }),
+    ).resolves.toBe("typed inline");
+    expect(ctx.ui.custom).not.toHaveBeenCalled();
+    expect(ctx.ui.input).toHaveBeenCalledWith("Goal", "seed");
+  });
+});
+
+function matchesKey(data: string, keybinding: string): boolean {
+  const keys: Record<string, string[]> = {
+    "tui.select.confirm": ["\r", "\n"],
+    "tui.select.cancel": ["", ""],
+  };
+  return keys[keybinding]?.includes(data) ?? false;
+}
+
+// Minimal stand-in for ExtensionCommandContext; only the pieces promptText touches.
+// biome-ignore lint/suspicious/noExplicitAny: test mock
+function createMockPromptContext(): any {
+  return {
+    hasUI: true,
+    mode: "tui",
+    ui: {
+      theme: {
+        fg: (_color: string, text: string) => text,
+        bold: (text: string) => text,
+      },
+      custom: vi.fn(),
+      input: vi.fn(),
+    },
+  };
+}

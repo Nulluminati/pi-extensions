@@ -168,6 +168,8 @@ function setupTools() {
 function setupContext() {
   const overlays: CapturedOverlay[] = [];
   const mockCtx = createMockCommandContext();
+  // Destructive commands (reset, inject, summarize) confirm first.
+  mockCtx.ui.confirm = vi.fn(() => Promise.resolve(true));
   // biome-ignore lint/suspicious/noExplicitAny: test mock
   mockCtx.ui.custom = vi.fn((factory: any, options?: any) => {
     const handle: FakeHandle = {
@@ -249,7 +251,7 @@ describe("btw-extension", () => {
           "btw",
           "btw:new",
           "btw:tangent",
-          "btw:clear",
+          "btw:reset",
           "btw:inject",
           "btw:summarize",
           "btw:thinking",
@@ -659,7 +661,14 @@ describe("btw-extension", () => {
       await getCommandHandler(mockPi, "btw")("what is 2+2?", mockCtx);
       await flush();
       mockPi.sendUserMessage.mockClear();
+      mockCtx.ui.confirm = vi.fn(() => Promise.resolve(false));
 
+      await getCommandHandler(mockPi, "btw:inject")("", mockCtx);
+      await flush();
+
+      expect(mockPi.sendUserMessage).not.toHaveBeenCalled();
+
+      mockCtx.ui.confirm = vi.fn(() => Promise.resolve(true));
       await getCommandHandler(mockPi, "btw:inject")("", mockCtx);
       await flush();
 
@@ -801,7 +810,10 @@ describe("btw-extension", () => {
       const { mockCtx } = setupContext();
       await registerAll(mockPi);
       await getCommandHandler(mockPi, "btw:thinking")("max", mockCtx);
-      expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Usage"), "warning");
+      expect(mockCtx.ui.notify).toHaveBeenCalledWith(
+        expect.stringContaining("Unknown thinking level"),
+        "error",
+      );
     });
 
     it("/btw:thinking clear resets the override", async () => {
@@ -818,21 +830,21 @@ describe("btw-extension", () => {
     });
   });
 
-  // §4/§10 — clear
-  describe("clear", () => {
-    it("/btw:clear with nothing shows info", async () => {
+  // §4/§10 — reset
+  describe("reset", () => {
+    it("/btw:reset with nothing shows info", async () => {
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       const mockPi = createMockPi() as any;
       const { mockCtx } = setupContext();
       await registerAll(mockPi);
-      await getCommandHandler(mockPi, "btw:clear")("", mockCtx);
+      await getCommandHandler(mockPi, "btw:reset")("", mockCtx);
       expect(mockCtx.ui.notify).toHaveBeenCalledWith(
-        expect.stringContaining("No side thread to clear"),
+        expect.stringContaining("No side thread to reset"),
         "info",
       );
     });
 
-    it("/btw:clear clears the thread, closes the overlay, and notifies", async () => {
+    it("/btw:reset clears the thread, closes the overlay, and notifies", async () => {
       setupTools();
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       vi.mocked(stream).mockReturnValue(makeEventStream(textDoneEvents("ans")) as any);
@@ -844,10 +856,10 @@ describe("btw-extension", () => {
       await flush();
       const overlay = getOverlay(overlays);
 
-      await getCommandHandler(mockPi, "btw:clear")("", mockCtx);
+      await getCommandHandler(mockPi, "btw:reset")("", mockCtx);
 
       expect(overlay.done).toHaveBeenCalled();
-      expect(mockCtx.ui.notify).toHaveBeenCalledWith("Side thread cleared.", "info");
+      expect(mockCtx.ui.notify).toHaveBeenCalledWith("Side thread reset.", "info");
     });
   });
 

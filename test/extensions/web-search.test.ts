@@ -155,23 +155,23 @@ describe("web-search-extension", () => {
     expect(names).toContain("web_fetch");
   });
 
-  it("registers /websearch command and session lifecycle hooks", async () => {
+  it("registers /websearch:select command and session lifecycle hooks", async () => {
     const mockPi = createMockPi();
     await webSearchExtension(mockPi);
 
     const commands = mockPi.registerCommand.mock.calls.map((c: unknown[]) => c[0] as string);
-    expect(commands).toContain("websearch");
+    expect(commands).toContain("websearch:select");
 
     const events = mockPi.on.mock.calls.map((c: unknown[]) => c[0] as string);
     expect(events).toEqual(expect.arrayContaining(["session_start", "session_shutdown"]));
   });
 
-  it("web_search description mentions configurable providers and /websearch", async () => {
+  it("web_search description mentions configurable providers and /websearch:select", async () => {
     const mockPi = createMockPi();
     await webSearchExtension(mockPi);
     const tool = getRegisteredTool(mockPi, "web_search");
     expect(tool.description).toContain("configured search provider");
-    expect(tool.description).toContain("/websearch");
+    expect(tool.description).toContain("/websearch:select");
   });
 
   // --- web_search via brave (default provider) ---
@@ -182,7 +182,7 @@ describe("web-search-extension", () => {
       await webSearchExtension(mockPi);
       // Brave is no longer the default provider; activate it explicitly so
       // these tests target the brave backend regardless of the configured default.
-      await getCommandHandler(mockPi, "websearch")("brave", createMockCommandContext());
+      await getCommandHandler(mockPi, "websearch:select")("brave", createMockCommandContext());
       return { mockPi, tool: getRegisteredTool(mockPi, "web_search") };
     }
 
@@ -195,10 +195,10 @@ describe("web-search-extension", () => {
       expect(result.details.isError).toBe(true);
     });
 
-    it("auth error mentions the /websearch switch", async () => {
+    it("auth error mentions the /websearch:select switch", async () => {
       const { tool } = await setupWithBraveActive();
       const result = await tool.execute("id-1", { query: "test" }, undefined, undefined, {});
-      expect(result.content[0].text).toContain("/websearch");
+      expect(result.content[0].text).toContain("/websearch:select");
     });
 
     it("returns error when query is empty", async () => {
@@ -390,7 +390,7 @@ describe("web-search-extension", () => {
       const mockCtx = withSyntheticKey(createMockCommandContext(), "syn-secret-key");
 
       // Switch active provider to synthetic via the command path.
-      const commandHandler = getCommandHandler(mockPi, "websearch");
+      const commandHandler = getCommandHandler(mockPi, "websearch:select");
       await commandHandler("synthetic", mockCtx);
 
       const tool = getRegisteredTool(mockPi, "web_search");
@@ -419,7 +419,7 @@ describe("web-search-extension", () => {
       const mockCtx = createMockCommandContext();
       mockCtx.modelRegistry.getApiKeyForProvider = vi.fn(() => Promise.resolve(undefined));
 
-      const commandHandler = getCommandHandler(mockPi, "websearch");
+      const commandHandler = getCommandHandler(mockPi, "websearch:select");
       await commandHandler("synthetic", mockCtx);
 
       mockFetch.mockResolvedValue(syntheticSearchResponse([]));
@@ -497,7 +497,7 @@ describe("web-search-extension", () => {
       const mockCtx = createMockCommandContext();
       mockCtx.modelRegistry.getApiKeyForProvider = vi.fn(() => Promise.resolve(undefined));
 
-      const commandHandler = getCommandHandler(mockPi, "websearch");
+      const commandHandler = getCommandHandler(mockPi, "websearch:select");
       await commandHandler("synthetic", mockCtx);
 
       const tool = getRegisteredTool(mockPi, "web_search");
@@ -505,7 +505,7 @@ describe("web-search-extension", () => {
 
       expect(result.details.isError).toBe(true);
       expect(result.content[0].text).toContain("Synthetic");
-      expect(result.content[0].text).toContain("/websearch");
+      expect(result.content[0].text).toContain("/websearch:select");
     });
 
     it("handles synthetic API errors", async () => {
@@ -541,7 +541,7 @@ describe("web-search-extension", () => {
       await webSearchExtension(mockPi);
       const mockCtx = createMockCommandContext();
 
-      const commandHandler = getCommandHandler(mockPi, "websearch");
+      const commandHandler = getCommandHandler(mockPi, "websearch:select");
       await commandHandler("searxng", mockCtx);
 
       const tool = getRegisteredTool(mockPi, "web_search");
@@ -555,7 +555,7 @@ describe("web-search-extension", () => {
       const mockCtx = createMockCommandContext();
       mockFetch.mockResolvedValue(searxngSearchResponse([]));
 
-      const commandHandler = getCommandHandler(mockPi, "websearch");
+      const commandHandler = getCommandHandler(mockPi, "websearch:select");
       await commandHandler("searxng", mockCtx);
 
       const tool = getRegisteredTool(mockPi, "web_search");
@@ -601,7 +601,7 @@ describe("web-search-extension", () => {
       const mockCtx = createMockCommandContext();
       mockFetch.mockResolvedValue(searxngSearchResponse([]));
 
-      const commandHandler = getCommandHandler(mockPi, "websearch");
+      const commandHandler = getCommandHandler(mockPi, "websearch:select");
       await commandHandler("searxng", mockCtx);
 
       const tool = getRegisteredTool(mockPi, "web_search");
@@ -620,7 +620,7 @@ describe("web-search-extension", () => {
       const mockCtx = createMockCommandContext();
       mockFetch.mockResolvedValue(searxngSearchResponse([]));
 
-      const commandHandler = getCommandHandler(mockPi, "websearch");
+      const commandHandler = getCommandHandler(mockPi, "websearch:select");
       await commandHandler("searxng", mockCtx);
 
       const tool = getRegisteredTool(mockPi, "web_search");
@@ -638,7 +638,7 @@ describe("web-search-extension", () => {
       const mockCtx = createMockCommandContext();
       mockFetch.mockResolvedValue(searxngSearchResponse([]));
 
-      const commandHandler = getCommandHandler(mockPi, "websearch");
+      const commandHandler = getCommandHandler(mockPi, "websearch:select");
       await commandHandler("searxng", mockCtx);
 
       const tool = getRegisteredTool(mockPi, "web_search");
@@ -706,7 +706,7 @@ describe("web-search-extension", () => {
       await webSearchExtension(mockPi);
       const mockCtx = createMockCommandContext();
 
-      const commandHandler = getCommandHandler(mockPi, "websearch");
+      const commandHandler = getCommandHandler(mockPi, "websearch:select");
       await commandHandler("searxng", mockCtx);
 
       const tool = getRegisteredTool(mockPi, "web_search");
@@ -714,7 +714,7 @@ describe("web-search-extension", () => {
 
       expect(result.details.isError).toBe(true);
       expect(result.content[0].text).toContain("SEARXNG_URL");
-      expect(result.content[0].text).toContain("/websearch");
+      expect(result.content[0].text).toContain("/websearch:select");
     });
 
     it("handles searxng API errors (403 when json format disabled)", async () => {
@@ -741,15 +741,15 @@ describe("web-search-extension", () => {
     });
   });
 
-  // --- /websearch command ---
+  // --- /websearch:select command ---
 
-  describe("/websearch command", () => {
-    it("/websearch <id> sets the active provider and persists it", async () => {
+  describe("/websearch:select command", () => {
+    it("/websearch:select <id> sets the active provider and persists it", async () => {
       const mockPi = createMockPi();
       await webSearchExtension(mockPi);
       const mockCtx = withSyntheticKey(createMockCommandContext(), "syn-key");
 
-      const handler = getCommandHandler(mockPi, "websearch");
+      const handler = getCommandHandler(mockPi, "websearch:select");
       await handler("synthetic", mockCtx);
 
       expect(mockPi.appendEntry).toHaveBeenCalledWith("web-search-provider", {
@@ -762,14 +762,28 @@ describe("web-search-extension", () => {
       expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Synthetic"), "info");
     });
 
-    it("/websearch <id> warns when the provider is not configured", async () => {
+    it("/websearch:select select <id> accepts the select subcommand alias", async () => {
+      const mockPi = createMockPi();
+      await webSearchExtension(mockPi);
+      const mockCtx = withSyntheticKey(createMockCommandContext(), "syn-key");
+
+      const handler = getCommandHandler(mockPi, "websearch:select");
+      await handler("select synthetic", mockCtx);
+
+      expect(mockPi.appendEntry).toHaveBeenCalledWith("web-search-provider", {
+        provider: "synthetic",
+      });
+      expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Synthetic"), "info");
+    });
+
+    it("/websearch:select <id> warns when the provider is not configured", async () => {
       vi.stubEnv("SYNTHETIC_API_KEY", "");
       const mockPi = createMockPi();
       await webSearchExtension(mockPi);
       const mockCtx = createMockCommandContext();
       mockCtx.modelRegistry.getApiKeyForProvider = vi.fn(() => Promise.resolve(undefined));
 
-      const handler = getCommandHandler(mockPi, "websearch");
+      const handler = getCommandHandler(mockPi, "websearch:select");
       await handler("synthetic", mockCtx);
 
       expect(mockCtx.ui.notify).toHaveBeenCalledWith(
@@ -778,12 +792,12 @@ describe("web-search-extension", () => {
       );
     });
 
-    it("/websearch <unknown> notifies an error and lists available providers", async () => {
+    it("/websearch:select <unknown> notifies an error and lists available providers", async () => {
       const mockPi = createMockPi();
       await webSearchExtension(mockPi);
       const mockCtx = createMockCommandContext();
 
-      const handler = getCommandHandler(mockPi, "websearch");
+      const handler = getCommandHandler(mockPi, "websearch:select");
       await handler("google", mockCtx);
 
       expect(mockCtx.ui.notify).toHaveBeenCalledWith(
@@ -797,7 +811,7 @@ describe("web-search-extension", () => {
       expect(mockPi.appendEntry).not.toHaveBeenCalled();
     });
 
-    it("/websearch with no args opens the selector and applies the choice", async () => {
+    it("/websearch:select with no args opens the selector and applies the choice", async () => {
       const mockPi = createMockPi();
       await webSearchExtension(mockPi);
       const mockCtx = withSyntheticKey(createMockCommandContext(), "syn-key");
@@ -814,7 +828,7 @@ describe("web-search-extension", () => {
         // biome-ignore lint/suspicious/noExplicitAny: test mock
       }) as any;
 
-      const handler = getCommandHandler(mockPi, "websearch");
+      const handler = getCommandHandler(mockPi, "websearch:select");
       await handler("", mockCtx);
 
       // Selector listed both providers with their labels.
@@ -852,7 +866,7 @@ describe("web-search-extension", () => {
         // biome-ignore lint/suspicious/noExplicitAny: test mock
       }) as any;
 
-      const handler = getCommandHandler(mockPi, "websearch");
+      const handler = getCommandHandler(mockPi, "websearch:select");
       await handler("", mockCtx);
 
       const fg = vi.fn((_color: string, text: string) => text);
@@ -884,7 +898,7 @@ describe("web-search-extension", () => {
         // biome-ignore lint/suspicious/noExplicitAny: test mock
       }) as any;
 
-      await getCommandHandler(mockPi, "websearch")("", mockCtx);
+      await getCommandHandler(mockPi, "websearch:select")("", mockCtx);
 
       const component = capturedFactory?.(
         { requestRender: vi.fn() },
@@ -905,7 +919,7 @@ describe("web-search-extension", () => {
       mockCtx.mode = "rpc";
       mockCtx.ui.select = vi.fn(async (_title, options) => options[1]);
 
-      await getCommandHandler(mockPi, "websearch")("", mockCtx);
+      await getCommandHandler(mockPi, "websearch:select")("", mockCtx);
 
       expect(mockCtx.ui.custom).not.toHaveBeenCalled();
       expect(mockCtx.ui.select).toHaveBeenCalledWith("Select Web Search Provider", [
@@ -918,14 +932,14 @@ describe("web-search-extension", () => {
       });
     });
 
-    it("/websearch with no args cancelled does not change provider", async () => {
+    it("/websearch:select with no args cancelled does not change provider", async () => {
       const mockPi = createMockPi();
       await webSearchExtension(mockPi);
       const mockCtx = createMockCommandContext();
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       mockCtx.ui.custom = vi.fn(() => Promise.resolve(null)) as any;
 
-      const handler = getCommandHandler(mockPi, "websearch");
+      const handler = getCommandHandler(mockPi, "websearch:select");
       await handler("", mockCtx);
 
       expect(mockPi.appendEntry).not.toHaveBeenCalled();

@@ -6,8 +6,9 @@
  */
 
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "pi";
+import { promptText } from "../../lib/input-modal.ts";
 import { formatStatusLine } from "../../lib/ui-format.ts";
-import { parseGoalArgs, validateObjective } from "./src/command-parser.ts";
+import { parseNewGoalArgs, parseTokenBudget, validateObjective } from "./src/command-parser.ts";
 import {
   COMPLETION_STATUS_DURATION,
   ICON_COLOR,
@@ -178,7 +179,7 @@ export default async function goalExtension(pi: ExtensionAPI) {
       updateStatusLine(ctx);
       disableGoalCompleteTool();
       ctx.ui.notify(
-        `Token budget reached (${formatTokens(state.tokensUsed)}/${formatTokens(state.tokenBudget)}). Use /goal budget <amount> to increase budget or /goal clear to cancel.`,
+        `Token budget reached (${formatTokens(state.tokensUsed)}/${formatTokens(state.tokenBudget)}). Use /goal:budget <amount> to increase budget or /goal:reset to cancel.`,
         "warning",
       );
       return;
@@ -266,208 +267,251 @@ export default async function goalExtension(pi: ExtensionAPI) {
     },
   });
 
-  // --- Command ---
+  // --- Commands ---
+
+  async function startGoal(args: string, ctx: ExtensionCommandContext) {
+    const parsed = parseNewGoalArgs(args);
+    if (parsed.error) {
+      ctx.ui.notify(parsed.error, "warning");
+      return;
+    }
+
+    let objective = parsed.objective;
+    if (!objective) {
+      // No inline objective — prompt for one in the shared framed input modal.
+      if (!ctx.hasUI) {
+        ctx.ui.notify("Usage: /goal:new <objective>", "warning");
+        return;
+      }
+      objective = (
+        await promptText(ctx, {
+          title: "Goal",
+          placeholder: "What should this run accomplish?",
+        })
+      )?.trim();
+      if (!objective) return;
+    }
+    const validationError = validateObjective(objective);
+    if (validationError) {
+      ctx.ui.notify(validationError, "warning");
+      return;
+    }
+
+    // Confirm replacement of unfinished goal
+    if (state && state.status !== "complete") {
+      const confirmed = await ctx.ui.confirm(
+        "Replace current goal?",
+        `Current goal: "${state.objective}"\nNew goal: "${objective}"\n\nThis will reset usage counters.`,
+      );
+      if (!confirmed) return;
+    }
+
+    const usage = ctx.getContextUsage();
+    state = {
+      id: generateGoalId(),
+      objective,
+      status: "active",
+      startTime: Date.now(),
+      elapsedMs: 0,
+      iteration: 0,
+      tokensUsed: 0,
+      baselineTokens: usage?.tokens ?? 0,
+      lastTurnTimestamp: Date.now(),
+    };
+    if (parsed.budget !== undefined) {
+      state.tokenBudget = parsed.budget;
+    }
+
+    clearCompletionStatus(ctx);
+    resetContinuationGuard();
+    persistState();
+    updateStatusLine(ctx);
+    enableGoalCompleteTool();
+
+    pi.sendUserMessage(buildStartPrompt(state), { deliverAs: "followUp" });
+
+    const budgetMsg = parsed.budget ? ` (budget: ${formatTokens(parsed.budget)})` : "";
+    ctx.ui.notify(`Goal started${budgetMsg}: ${objective}`, "info");
+  }
 
   pi.registerCommand("goal", {
-    description:
-      "Run a goal to completion: /goal [--tokens 100k] <objective> | /goal budget <amount> | /goal pause|resume|clear|edit|status",
-    handler: async (args: string, ctx: ExtensionCommandContext) => {
-      const parsed = parseGoalArgs(args);
+    description: "Start a goal and run it to completion (alias for /goal:new)",
+    handler: startGoal,
+  });
 
-      if (parsed.error) {
-        ctx.ui.notify(parsed.error, "warning");
+  pi.registerCommand("goal:status", {
+    description: "Show the active goal, status, elapsed time, budget, and iteration count",
+    handler: async (_args: string, ctx: ExtensionCommandContext) => {
+      if (!state) {
+        ctx.ui.notify("No active goal. Use /goal:new <objective> to start one.", "info");
+        return;
+      }
+      const elapsed = formatElapsed(getElapsedMs(state));
+      const budget = state.tokenBudget
+        ? ` | Budget: ${formatTokens(state.tokensUsed)}/${formatTokens(state.tokenBudget)}`
+        : "";
+      const iter = ` | Iterations: ${state.iteration}`;
+      ctx.ui.notify(
+        `Goal: ${state.objective} | Status: ${state.status} | Elapsed: ${elapsed}${budget}${iter}`,
+        "info",
+      );
+    },
+  });
+
+  pi.registerCommand("goal:new", {
+    description: "Start a goal and run it to completion: /goal:new [--tokens 100k] [objective]",
+    handler: startGoal,
+  });
+
+  pi.registerCommand("goal:edit", {
+    description: "Edit the current goal objective: /goal:edit [objective]",
+    handler: async (args: string, ctx: ExtensionCommandContext) => {
+      if (!state) {
+        ctx.ui.notify("No active goal to edit. Use /goal:new <objective> to start one.", "error");
+        return;
+      }
+      let objective = args.trim() || undefined;
+      if (!objective) {
+        // No inline objective — open the input modal prefilled with the
+        // current one so it can be tweaked in place.
+        objective = (
+          await promptText(ctx, {
+            title: "Goal",
+            placeholder: "Objective",
+            initialValue: state.objective,
+          })
+        )?.trim();
+        if (!objective) return;
+      }
+      const validationError = validateObjective(objective);
+      if (validationError) {
+        ctx.ui.notify(validationError, "warning");
         return;
       }
 
-      switch (parsed.subcommand) {
-        case "status": {
-          if (!state) {
-            ctx.ui.notify("No active goal. Use /goal <objective> to start one.", "info");
-            return;
-          }
-          const elapsed = formatElapsed(getElapsedMs(state));
-          const budget = state.tokenBudget
-            ? ` | Budget: ${formatTokens(state.tokensUsed)}/${formatTokens(state.tokenBudget)}`
-            : "";
-          const iter = ` | Iterations: ${state.iteration}`;
-          ctx.ui.notify(
-            `Goal: ${state.objective} | Status: ${state.status} | Elapsed: ${elapsed}${budget}${iter}`,
-            "info",
-          );
-          return;
-        }
+      state.objective = objective;
+      persistState();
+      updateStatusLine(ctx);
+      ctx.ui.notify(`Goal updated: ${objective}`, "info");
 
-        case "start": {
-          const objective = parsed.objective;
-          if (!objective) {
-            ctx.ui.notify("Please provide a goal objective.", "error");
-            return;
-          }
-          const validationError = validateObjective(objective);
-          if (validationError) {
-            ctx.ui.notify(validationError, "warning");
-            return;
-          }
-
-          // Confirm replacement of unfinished goal
-          if (state && state.status !== "complete") {
-            const confirmed = await ctx.ui.confirm(
-              "Replace current goal?",
-              `Current goal: "${state.objective}"\nNew goal: "${objective}"\n\nThis will reset usage counters.`,
-            );
-            if (!confirmed) return;
-          }
-
-          const usage = ctx.getContextUsage();
-          state = {
-            id: generateGoalId(),
-            objective,
-            status: "active",
-            startTime: Date.now(),
-            elapsedMs: 0,
-            iteration: 0,
-            tokensUsed: 0,
-            baselineTokens: usage?.tokens ?? 0,
-            lastTurnTimestamp: Date.now(),
-          };
-          if (parsed.budget !== undefined) {
-            state.tokenBudget = parsed.budget;
-          }
-
-          clearCompletionStatus(ctx);
-          resetContinuationGuard();
-          persistState();
-          updateStatusLine(ctx);
-          enableGoalCompleteTool();
-
-          pi.sendUserMessage(buildStartPrompt(state), { deliverAs: "followUp" });
-
-          const budgetMsg = parsed.budget ? ` (budget: ${formatTokens(parsed.budget)})` : "";
-          ctx.ui.notify(`Goal started${budgetMsg}: ${parsed.objective}`, "info");
-          return;
-        }
-
-        case "edit": {
-          const objective = parsed.objective;
-          if (!objective) {
-            ctx.ui.notify("Please provide an updated goal objective.", "error");
-            return;
-          }
-          const validationError = validateObjective(objective);
-          if (validationError) {
-            ctx.ui.notify(validationError, "warning");
-            return;
-          }
-          if (!state) {
-            ctx.ui.notify("No active goal to edit. Use /goal <objective> to start one.", "error");
-            return;
-          }
-
-          state.objective = objective;
-          persistState();
-          updateStatusLine(ctx);
-          ctx.ui.notify(`Goal updated: ${objective}`, "info");
-
-          if (state.status === "active") {
-            pi.sendUserMessage(buildObjectiveUpdatedPrompt(state), { deliverAs: "followUp" });
-          }
-          return;
-        }
-
-        case "pause": {
-          if (state?.status !== "active") {
-            ctx.ui.notify("No active goal to pause.", "info");
-            return;
-          }
-          state.status = "paused";
-          resetContinuationGuard();
-          persistState();
-          updateStatusLine(ctx);
-          disableGoalCompleteTool();
-          ctx.ui.notify("Goal paused. Use /goal resume to continue.", "info");
-          return;
-        }
-
-        case "resume": {
-          if (!state) {
-            ctx.ui.notify("No goal to resume. Use /goal <objective> to start one.", "info");
-            return;
-          }
-          if (state.status === "active") {
-            ctx.ui.notify("Goal is already active.", "info");
-            return;
-          }
-          if (state.status === "complete") {
-            ctx.ui.notify("Goal is already complete.", "info");
-            return;
-          }
-          if (state.tokenBudget && state.tokensUsed >= state.tokenBudget) {
-            ctx.ui.notify(
-              `Cannot resume: token budget reached (${formatTokens(state.tokensUsed)}/${formatTokens(state.tokenBudget)}). Use /goal budget <amount> to increase budget or /goal clear to cancel.`,
-              "warning",
-            );
-            return;
-          }
-
-          state.status = "active";
-          state.lastTurnTimestamp = Date.now();
-          clearCompletionStatus(ctx);
-          resetContinuationGuard();
-          persistState();
-          updateStatusLine(ctx);
-          enableGoalCompleteTool();
-
-          pi.sendUserMessage(buildResumePrompt(state), { deliverAs: "followUp" });
-
-          ctx.ui.notify("Goal resumed.", "info");
-          return;
-        }
-
-        case "budget": {
-          if (!state) {
-            ctx.ui.notify("No active goal. Use /goal <objective> to start one.", "info");
-            return;
-          }
-          const budget = parsed.budget;
-          if (budget === undefined) {
-            ctx.ui.notify("Usage: /goal budget <amount>", "warning");
-            return;
-          }
-          state.tokenBudget = budget;
-          persistState();
-          updateStatusLine(ctx);
-
-          if (state.status === "budget" && state.tokensUsed < budget) {
-            state.status = "active";
-            state.lastTurnTimestamp = Date.now();
-            resetContinuationGuard();
-            persistState();
-            enableGoalCompleteTool();
-            pi.sendUserMessage(buildResumePrompt(state), { deliverAs: "followUp" });
-            ctx.ui.notify(`Goal budget set to ${formatTokens(budget)}. Goal resumed.`, "info");
-          } else {
-            ctx.ui.notify(`Goal budget set to ${formatTokens(budget)}.`, "info");
-          }
-          return;
-        }
-
-        case "clear": {
-          if (!state) {
-            ctx.ui.notify("No goal to clear.", "info");
-            return;
-          }
-
-          state = null;
-          resetContinuationGuard();
-          persistState();
-          updateStatusLine(ctx);
-          clearCompletionStatus(ctx);
-          disableGoalCompleteTool();
-
-          ctx.ui.notify("Goal cleared.", "info");
-          return;
-        }
+      if (state.status === "active") {
+        pi.sendUserMessage(buildObjectiveUpdatedPrompt(state), { deliverAs: "followUp" });
       }
+    },
+  });
+
+  pi.registerCommand("goal:pause", {
+    description: "Pause auto-continuation for the active goal",
+    handler: async (_args: string, ctx: ExtensionCommandContext) => {
+      if (state?.status !== "active") {
+        ctx.ui.notify("No active goal to pause.", "info");
+        return;
+      }
+      state.status = "paused";
+      resetContinuationGuard();
+      persistState();
+      updateStatusLine(ctx);
+      disableGoalCompleteTool();
+      ctx.ui.notify("Goal paused. Use /goal:resume to continue.", "info");
+    },
+  });
+
+  pi.registerCommand("goal:resume", {
+    description: "Resume a paused or budget-stopped goal",
+    handler: async (_args: string, ctx: ExtensionCommandContext) => {
+      if (!state) {
+        ctx.ui.notify("No goal to resume. Use /goal:new <objective> to start one.", "info");
+        return;
+      }
+      if (state.status === "active") {
+        ctx.ui.notify("Goal is already active.", "info");
+        return;
+      }
+      if (state.status === "complete") {
+        ctx.ui.notify("Goal is already complete.", "info");
+        return;
+      }
+      if (state.tokenBudget && state.tokensUsed >= state.tokenBudget) {
+        ctx.ui.notify(
+          `Cannot resume: token budget reached (${formatTokens(state.tokensUsed)}/${formatTokens(state.tokenBudget)}). Use /goal:budget <amount> to increase budget or /goal:reset to cancel.`,
+          "warning",
+        );
+        return;
+      }
+
+      state.status = "active";
+      state.lastTurnTimestamp = Date.now();
+      clearCompletionStatus(ctx);
+      resetContinuationGuard();
+      persistState();
+      updateStatusLine(ctx);
+      enableGoalCompleteTool();
+
+      pi.sendUserMessage(buildResumePrompt(state), { deliverAs: "followUp" });
+
+      ctx.ui.notify("Goal resumed.", "info");
+    },
+  });
+
+  pi.registerCommand("goal:budget", {
+    description: "Set the goal token budget: /goal:budget <amount>",
+    handler: async (args: string, ctx: ExtensionCommandContext) => {
+      if (!state) {
+        ctx.ui.notify("No active goal. Use /goal:new <objective> to start one.", "info");
+        return;
+      }
+      const tokens = args.trim().split(/\s+/);
+      if (tokens.length !== 1) {
+        ctx.ui.notify("Usage: /goal:budget <amount>", "warning");
+        return;
+      }
+      const budget = parseTokenBudget(tokens[0] ?? "");
+      if (budget === undefined) {
+        ctx.ui.notify(`Invalid token budget: ${tokens[0]}`, "warning");
+        return;
+      }
+      state.tokenBudget = budget;
+      persistState();
+      updateStatusLine(ctx);
+
+      if (state.status === "budget" && state.tokensUsed < budget) {
+        state.status = "active";
+        state.lastTurnTimestamp = Date.now();
+        resetContinuationGuard();
+        persistState();
+        enableGoalCompleteTool();
+        pi.sendUserMessage(buildResumePrompt(state), { deliverAs: "followUp" });
+        ctx.ui.notify(`Goal budget set to ${formatTokens(budget)}. Goal resumed.`, "info");
+      } else {
+        ctx.ui.notify(`Goal budget set to ${formatTokens(budget)}.`, "info");
+      }
+    },
+  });
+
+  pi.registerCommand("goal:reset", {
+    description: "Cancel the current goal and reset usage counters (asks for confirmation)",
+    handler: async (_args: string, ctx: ExtensionCommandContext) => {
+      if (!state) {
+        ctx.ui.notify("No goal to reset.", "info");
+        return;
+      }
+
+      // Resetting discards the objective and all usage counters — confirm
+      // before wiping so a stray keystroke can't lose an active goal.
+      const confirmed = await ctx.ui.confirm(
+        "Reset current goal?",
+        `Goal: "${state.objective}"\n\nThis discards the goal and its usage counters.`,
+      );
+      if (!confirmed) return;
+
+      state = null;
+      resetContinuationGuard();
+      persistState();
+      updateStatusLine(ctx);
+      clearCompletionStatus(ctx);
+      disableGoalCompleteTool();
+
+      ctx.ui.notify("Goal reset.", "info");
     },
   });
 }

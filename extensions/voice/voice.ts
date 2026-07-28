@@ -7,9 +7,10 @@
  *
  * Commands:
  *   Hold Space for 1 second  Open the voice dictation overlay.
- *   /voice                    Open voice settings.
- *   /voice-speak [full]       Summarize and speak the latest assistant message.
- *   /voice-stop               Stop current speech generation or playback.
+ *   /voice                    Open the voice dictation overlay.
+ *   /voice:settings           Open voice settings.
+ *   /voice:speak [full]       Summarize and speak the latest assistant message.
+ *   /voice:stop               Stop current speech generation or playback.
  *
  * Models live in $PI_VOICE_MODELS (default ~/.cache/pi-voice/models).
  *
@@ -309,6 +310,13 @@ export default async function voiceExtension(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("voice", {
+    description: "Open the voice dictation overlay (same as holding Space)",
+    handler: async (_args, ctx: ExtensionCommandContext) => {
+      openVoice(ctx);
+    },
+  });
+
+  pi.registerCommand("voice:settings", {
     description: "Open voice model, voice, and connection settings",
     handler: async (args, ctx: ExtensionCommandContext) => {
       await runVoiceSettings(args, ctx, {
@@ -333,7 +341,7 @@ export default async function voiceExtension(pi: ExtensionAPI) {
     },
   });
 
-  pi.registerCommand("voice-speak", {
+  pi.registerCommand("voice:speak", {
     description: "Summarize and locally speak the latest assistant message",
     handler: async (args, ctx: ExtensionCommandContext) => {
       if (speechJob) stopSpeechJob(speechJob);
@@ -362,7 +370,7 @@ export default async function voiceExtension(pi: ExtensionAPI) {
     },
   });
 
-  pi.registerCommand("voice-stop", {
+  pi.registerCommand("voice:stop", {
     description: "Stop local voice generation or playback",
     handler: async (_args, ctx: ExtensionCommandContext) => {
       if (!speechJob) {

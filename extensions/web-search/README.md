@@ -1,6 +1,6 @@
 # Web Search Extension
 
-Web search and page fetch tools backed by a selectable search provider, with a `/websearch` picker for switching providers mid-session.
+Web search and page fetch tools backed by a selectable search provider, with a `/websearch:select` picker for switching providers mid-session.
 
 ## What It Does
 
@@ -9,7 +9,7 @@ Registers two LLM-callable tools:
 - **`web_search`** — Searches the web via the **currently selected provider** and returns results with titles, URLs, and snippets.
 - **`web_fetch`** — Fetches the text content of any HTTP/HTTPS URL, stripping HTML by default (or returning raw HTML if requested). Provider-independent.
 
-A `/websearch` command opens a fuzzy-filterable selector (the same `SelectList` component Pi's model picker uses) to choose the active provider. The choice persists across sessions and is shown in the footer.
+A `/websearch:select` command opens a fuzzy-filterable selector (the same `SelectList` component Pi's model picker uses) to choose the active provider. The choice persists across sessions and is shown in the footer.
 
 ### Providers
 
@@ -26,7 +26,7 @@ SearXNG is self-hosted, so you run your own instance (see **Local SearXNG setup*
 ### Switch providers
 
 ```
-/websearch
+/websearch:select
 ```
 
 Opens a selector listing every provider with its configured status. Pick one and it applies immediately to `web_search`.
@@ -34,9 +34,9 @@ Opens a selector listing every provider with its configured status. Pick one and
 Set one directly:
 
 ```
-/websearch synthetic
-/websearch brave
-/websearch searxng
+/websearch:select synthetic
+/websearch:select brave
+/websearch:select searxng
 ```
 
 ### web_search
@@ -85,13 +85,13 @@ The active provider is held in closure scope (per Pi instance) and is chosen on 
 1. **Restore** the persisted choice from the session branch (`web-search-provider` entry), if any.
 2. Otherwise **default to the first configured provider** (synthetic, then brave, then searxng).
 
-`/websearch` (or `/websearch <id>`) updates it, calls `appendEntry("web-search-provider", ...)` so it survives reloads/restarts, and refreshes the footer status (`🔍 brave` / `🔍 synthetic`).
+`/websearch:select` (or `/websearch:select <id>`) updates it, calls `appendEntry("web-search-provider", ...)` so it survives reloads/restarts, and refreshes the footer status (`🔍 brave` / `🔍 synthetic`).
 
 ### web_search
 
 1. **Resolve provider** — reads the active provider; falls back to the first registered.
 2. **Validation** — ensures the query is non-empty; clamps `max_results` to 1–10.
-3. **Config check** — if the active provider has no credentials, returns an error pointing at `authHint` and `/websearch`.
+3. **Config check** — if the active provider has no credentials, returns an error pointing at `authHint` and `/websearch:select`.
 4. **Search** — delegates to the provider (e.g. Brave `GET /res/v1/web/search` or Synthetic `POST /v2/search`).
 5. **Normalize + format** — builds `**Title**\nURL\nSnippet` per result. Synthetic excerpts are capped (~500 chars) and prefixed with their publish date.
 6. **Truncation** — output over 50,000 characters is truncated and spilled to a temp file.
@@ -112,7 +112,7 @@ Both tools use a shared `truncateWithSpill()` helper: output within the 50,000-c
 
 ## Key Design Decisions
 
-- **One tool, selectable backend** — A single `web_search` tool whose provider switches via `/websearch`, mirroring how Pi's model picker swaps the active model. This keeps the tool surface stable for the LLM while letting the user change sources.
+- **One tool, selectable backend** — A single `web_search` tool whose provider switches via `/websearch:select`, mirroring how Pi's model picker swaps the active model. This keeps the tool surface stable for the LLM while letting the user change sources.
 - **Closure-scoped active provider** — Each Pi instance (and each test) gets its own state, reset on factory invocation; no module-level leakage.
 - **Persisted across sessions** — The chosen provider is stored as a custom session entry and restored on `session_start`, so reloading keeps your preference.
 - **First-configured default** — When nothing is persisted, the first provider with credentials wins, so a fresh session just works without extra setup.
@@ -126,7 +126,7 @@ Both tools use a shared `truncateWithSpill()` helper: output within the 50,000-c
 |-----|---------|
 | `pi.registerTool("web_search")` | Web search tool (uses the active provider) |
 | `pi.registerTool("web_fetch")` | URL fetch + HTML-to-text tool |
-| `pi.registerCommand("websearch")` | Provider selector / direct switch |
+| `pi.registerCommand("websearch:select")` | Provider selector / direct switch |
 | `pi.on("session_start")` | Restore persisted provider or pick first configured |
 | `pi.on("session_shutdown")` | Clear footer status |
 | `pi.appendEntry("web-search-provider")` | Persist the active provider |
@@ -146,7 +146,7 @@ export SEARXNG_URL=http://localhost:8080     # your self-hosted instance
 export SEARXNG_API_KEY=...                   # optional; only for token-protected instances
 ```
 
-Then switch between them anytime with `/websearch`.
+Then switch between them anytime with `/websearch:select`.
 
 ## Local SearXNG setup
 
@@ -191,7 +191,7 @@ export SEARXNG_URL=http://localhost:8080
 Then in Pi:
 
 ```
-/websearch searxng
+/websearch:select searxng
 ```
 
 ### Optional: token auth

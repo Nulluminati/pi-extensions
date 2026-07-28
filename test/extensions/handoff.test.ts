@@ -53,6 +53,14 @@ async function runHandoff(
   await handler(args, mockCtx);
 }
 
+function matchesPromptKey(data: string, keybinding: string): boolean {
+  const keys: Record<string, string[]> = {
+    "tui.select.confirm": ["\r", "\n"],
+    "tui.select.cancel": ["\u001b", "\u0003"],
+  };
+  return keys[keybinding]?.includes(data) ?? false;
+}
+
 describe("handoff-extension", () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -94,7 +102,21 @@ describe("handoff-extension", () => {
   it("prompts for a goal when called without args in UI mode", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
-    mockCtx.ui.input = vi.fn(() => Promise.resolve("finish the refactor"));
+    // TUI mode uses the framed promptText modal; drive it through ui.custom.
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
+    mockCtx.ui.custom = vi.fn((factory: any) => {
+      return new Promise((resolve) => {
+        const component = factory(
+          { requestRender: vi.fn() },
+          mockCtx.ui.theme,
+          { matches: matchesPromptKey },
+          resolve,
+          // biome-ignore lint/suspicious/noExplicitAny: test mock
+        ) as any;
+        for (const character of "finish the refactor") component.handleInput(character);
+        component.handleInput("\r");
+      });
+    });
     mockCtx.sessionManager.getBranch = vi.fn(buildBranch);
     mockCtx.sessionManager.getSessionFile = vi.fn(() => "/sessions/old.json");
     mockCtx.ui.editor = vi.fn(() => Promise.resolve("edited summary"));
@@ -106,10 +128,7 @@ describe("handoff-extension", () => {
 
     await runHandoff(mockPi, mockCtx, "");
 
-    expect(mockCtx.ui.input).toHaveBeenCalledWith(
-      "Handoff goal",
-      "What should the new session focus on?",
-    );
+    expect(mockCtx.ui.custom).toHaveBeenCalledTimes(1);
     expect(mockCtx.newSession).toHaveBeenCalled();
   });
 

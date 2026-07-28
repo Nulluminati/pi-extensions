@@ -1,4 +1,5 @@
 import type { ExtensionCommandContext } from "pi";
+import { promptText } from "../../../lib/input-modal.ts";
 import { notify } from "./ui.ts";
 
 const GOAL_MAX_LENGTH = 4000;
@@ -33,7 +34,10 @@ export async function resolveGoal(
     return undefined;
   }
 
-  const goal = await ctx.ui.input("Handoff goal", "What should the new session focus on?");
+  const goal = await promptText(ctx, {
+    title: "Handoff",
+    placeholder: "What should the new session focus on?",
+  });
   if (!goal) return undefined;
 
   if (goal.length > GOAL_MAX_LENGTH) {

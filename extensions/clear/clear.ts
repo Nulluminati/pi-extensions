@@ -25,6 +25,13 @@ export default async function clearExtension(pi: ExtensionAPI) {
   pi.registerCommand("clear", {
     description: "Start a fresh Pi session (alias for /new)",
     handler: async (_args, ctx: ExtensionCommandContext) => {
+      if (ctx.hasUI) {
+        const confirmed = await ctx.ui.confirm(
+          "Start a fresh session?",
+          "This replaces the current session. The old session stays in your history.",
+        );
+        if (!confirmed) return;
+      }
       await ctx.newSession();
     },
   });

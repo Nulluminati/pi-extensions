@@ -54,8 +54,8 @@ export default async function syntheticExtension(pi: ExtensionAPI) {
     );
   });
 
-  // /synthetic-models command
-  pi.registerCommand("synthetic-models", {
+  // /synthetic:models command
+  pi.registerCommand("synthetic:models", {
     description: "Display all available Synthetic models with pricing and capabilities",
     handler: async (_args, ctx) => {
       if (!ctx.hasUI) return;
@@ -64,8 +64,8 @@ export default async function syntheticExtension(pi: ExtensionAPI) {
     },
   });
 
-  // /synthetic-quota command
-  pi.registerCommand("synthetic-quota", {
+  // /synthetic:quota command
+  pi.registerCommand("synthetic:quota", {
     description: "Display current Synthetic API quota usage",
     handler: async (_args, ctx) => {
       if (!ctx.hasUI) return;

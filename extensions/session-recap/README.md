@@ -114,7 +114,7 @@ All state is stored in a `WeakMap<ExtensionAPI, RecapState>` with the following 
 | `--recap-during-active` | boolean | `false` | Allow focus-triggered recaps while an agent turn is still running |
 | `--recap-disable` | boolean | `false` | Disable the automatic session recap entirely |
 
-Set the recap model with `/small-model`. Recap generation does not fall back to the active chat model.
+Set the recap model with `/smallmodel`. Recap generation does not fall back to the active chat model.
 
 Example:
 

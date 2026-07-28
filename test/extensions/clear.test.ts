@@ -23,20 +23,35 @@ describe("clear-extension", () => {
     );
   });
 
-  it("invokes newSession when /clear is run", async () => {
+  it("invokes newSession when /clear is confirmed", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
+    mockCtx.ui.confirm = vi.fn(() => Promise.resolve(true));
     await clearExtension(mockPi);
 
     const handler = getCommandHandler(mockPi, "clear");
     await handler("", mockCtx);
 
+    expect(mockCtx.ui.confirm).toHaveBeenCalledTimes(1);
     expect(mockCtx.newSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not start a new session when /clear is declined", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.ui.confirm = vi.fn(() => Promise.resolve(false));
+    await clearExtension(mockPi);
+
+    const handler = getCommandHandler(mockPi, "clear");
+    await handler("", mockCtx);
+
+    expect(mockCtx.newSession).not.toHaveBeenCalled();
   });
 
   it("ignores trailing arguments", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
+    mockCtx.ui.confirm = vi.fn(() => Promise.resolve(true));
     await clearExtension(mockPi);
 
     const handler = getCommandHandler(mockPi, "clear");
@@ -48,6 +63,7 @@ describe("clear-extension", () => {
   it("does not notify when the new session is cancelled", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
+    mockCtx.ui.confirm = vi.fn(() => Promise.resolve(true));
     mockCtx.newSession = vi.fn(() => Promise.resolve({ cancelled: true }));
     await clearExtension(mockPi);
 

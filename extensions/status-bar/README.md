@@ -26,7 +26,7 @@ The whole second line is omitted when there's nothing transient to show.
 The status bar is on by default. To toggle it:
 
 ```
-/statusbar
+/statusbar:toggle
 ```
 
 Disabling restores Pi's default footer and editor; re-enabling brings the polished versions back.
@@ -53,13 +53,13 @@ The right block has a usage bar, a `tokens/contextWindow` ratio, the token break
 
 The editor is a `CustomEditor` subclass that overrides only `render()`. The base editor draws its borders and content; the polished version strips the top and bottom borders, surrounds the content with a fixed-grey frame, and inserts a metadata line (model + thinking level) above the bottom border. Autocomplete dropdown lines from the base editor are preserved below the bottom border instead of being absorbed into the frame.
 
-On `session_start` the extension captures whatever editor factory is currently registered (typically undefined, meaning Pi's default) and installs its own. On `session_shutdown` it restores the captured factory. `/statusbar` does the same swap, on demand.
+On `session_start` the extension captures whatever editor factory is currently registered (typically undefined, meaning Pi's default) and installs its own. On `session_shutdown` it restores the captured factory. `/statusbar:toggle` does the same swap, on demand.
 
 The polished editor also re-checks on the next tick after `session_start` in case a later-loaded extension replaced the editor factory — if so, it re-installs.
 
 ### Footer and status indicator
 
-The footer is registered through `ctx.ui.setFooter()`. While the extension is enabled, a Nerd Font dock-bottom icon with a muted `statusbar` label sits in the footer line 2 area, matching the cross-extension convention. `/statusbar` flips both at once.
+The footer is registered through `ctx.ui.setFooter()`. While the extension is enabled, a Nerd Font dock-bottom icon with a muted `statusbar` label sits in the footer line 2 area, matching the cross-extension convention. `/statusbar:toggle` flips both at once.
 
 ## Key Design Decisions
 
@@ -75,7 +75,7 @@ The footer is registered through `ctx.ui.setFooter()`. While the extension is en
 
 | API | Purpose |
 |-----|---------|
-| `pi.registerCommand("statusbar")` | The toggle command |
+| `pi.registerCommand("statusbar:toggle")` | The toggle command |
 | `pi.on("session_start")` | Initializes state, installs the editor and footer, sets the status line |
 | `pi.on("session_shutdown")` | Disposes the footer, restores the editor factory |
 | `pi.on("turn_start")` | Increments the turn count, clears active tool list |
@@ -100,4 +100,4 @@ The footer is registered through `ctx.ui.setFooter()`. While the extension is en
 
 ## Configuration
 
-None. The status bar is on by default. Use `/statusbar` to toggle.
+None. The status bar is on by default. Use `/statusbar:toggle` to toggle.

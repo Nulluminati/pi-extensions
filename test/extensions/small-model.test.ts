@@ -38,7 +38,7 @@ describe("small-model extension", () => {
     await smallModelExtension(pi);
 
     expect(pi.registerCommand).toHaveBeenCalledWith(
-      "small-model",
+      "smallmodel",
       expect.objectContaining({ description: expect.any(String), handler: expect.any(Function) }),
     );
     expect(pi.on).toHaveBeenCalledWith("session_start", expect.any(Function));
@@ -99,7 +99,7 @@ describe("small-model extension", () => {
     );
     await smallModelExtension(pi);
 
-    await getCommandHandler(pi, "small-model")("", ctx);
+    await getCommandHandler(pi, "smallmodel")("", ctx);
 
     expect(initialRender.split("\n")[0]).toContain("╭── Small Model ");
     expect(initialRender.split("\n").at(-1)).toBe(`╰${"─".repeat(98)}╯`);
@@ -146,7 +146,7 @@ describe("small-model extension", () => {
     ctx.ui.select = vi.fn(async (_title, options) => options[0]);
     await smallModelExtension(pi);
 
-    await getCommandHandler(pi, "small-model")("", ctx);
+    await getCommandHandler(pi, "smallmodel")("", ctx);
 
     expect(ctx.ui.select).toHaveBeenCalledWith("Select Global Small Model", [
       "synthetic/syn:small:text",
@@ -174,7 +174,7 @@ describe("small-model extension", () => {
     ctx.modelRegistry.find = vi.fn(() => smallModel);
     await smallModelExtension(pi);
 
-    await getCommandHandler(pi, "small-model")("openrouter/google/gemini-flash low", ctx);
+    await getCommandHandler(pi, "smallmodel")("openrouter/google/gemini-flash low", ctx);
 
     expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
       provider: "openrouter",
@@ -196,7 +196,7 @@ describe("small-model extension", () => {
     ctx.modelRegistry.find = vi.fn(() => undefined);
     await smallModelExtension(pi);
 
-    await getCommandHandler(pi, "small-model")("missing/nope", ctx);
+    await getCommandHandler(pi, "smallmodel")("missing/nope", ctx);
 
     expect(ctx.ui.notify).toHaveBeenCalledWith(
       expect.stringContaining("Global small model not found: missing/nope"),
@@ -219,7 +219,7 @@ describe("small-model extension", () => {
     }));
     await smallModelExtension(pi);
 
-    await getCommandHandler(pi, "small-model")("openrouter/google/gemini-flash", ctx);
+    await getCommandHandler(pi, "smallmodel")("openrouter/google/gemini-flash", ctx);
 
     expect(ctx.ui.notify).toHaveBeenCalledWith(
       expect.stringContaining("PI_SMALL_MODEL is overriding"),

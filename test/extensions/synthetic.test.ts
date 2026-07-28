@@ -248,11 +248,11 @@ describe("synthetic-extension", () => {
 
   // --- commands ---
 
-  it("registers /synthetic-models command", async () => {
+  it("registers /synthetic:models command", async () => {
     const mockPi = createMockPi();
     await syntheticExtension(mockPi);
     expect(mockPi.registerCommand).toHaveBeenCalledWith(
-      "synthetic-models",
+      "synthetic:models",
       expect.objectContaining({
         description: expect.stringContaining("Synthetic models"),
         handler: expect.any(Function),
@@ -260,11 +260,11 @@ describe("synthetic-extension", () => {
     );
   });
 
-  it("registers /synthetic-quota command", async () => {
+  it("registers /synthetic:quota command", async () => {
     const mockPi = createMockPi();
     await syntheticExtension(mockPi);
     expect(mockPi.registerCommand).toHaveBeenCalledWith(
-      "synthetic-quota",
+      "synthetic:quota",
       expect.objectContaining({
         description: expect.stringContaining("quota"),
         handler: expect.any(Function),
@@ -272,12 +272,12 @@ describe("synthetic-extension", () => {
     );
   });
 
-  it("/synthetic-models displays the static list with capabilities and pricing", async () => {
+  it("/synthetic:models displays the static list with capabilities and pricing", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await syntheticExtension(mockPi);
 
-    const handler = getCommandHandler(mockPi, "synthetic-models");
+    const handler = getCommandHandler(mockPi, "synthetic:models");
     await handler("", mockCtx);
 
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("vision"), "info");
@@ -288,20 +288,20 @@ describe("synthetic-extension", () => {
     );
   });
 
-  it("/synthetic-models shows no fetch on subsequent calls (purely static)", async () => {
+  it("/synthetic:models shows no fetch on subsequent calls (purely static)", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await syntheticExtension(mockPi);
     const fetchesAfterInit = mockFetch.mock.calls.length;
 
-    const handler = getCommandHandler(mockPi, "synthetic-models");
+    const handler = getCommandHandler(mockPi, "synthetic:models");
     await handler("", mockCtx);
     await handler("", mockCtx);
 
     expect(mockFetch.mock.calls.length).toBe(fetchesAfterInit);
   });
 
-  it("/synthetic-quota fetches from v2/quotas endpoint", async () => {
+  it("/synthetic:quota fetches from v2/quotas endpoint", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await syntheticExtension(mockPi);
@@ -314,7 +314,7 @@ describe("synthetic-extension", () => {
         }),
     });
 
-    const handler = getCommandHandler(mockPi, "synthetic-quota");
+    const handler = getCommandHandler(mockPi, "synthetic:quota");
     await handler("", mockCtx);
 
     expect(mockFetch).toHaveBeenCalledWith(
@@ -326,13 +326,13 @@ describe("synthetic-extension", () => {
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Subscription"), "info");
   });
 
-  it("/synthetic-quota shows error when API key is missing", async () => {
+  it("/synthetic:quota shows error when API key is missing", async () => {
     vi.stubEnv("SYNTHETIC_API_KEY", undefined);
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await syntheticExtension(mockPi);
 
-    const handler = getCommandHandler(mockPi, "synthetic-quota");
+    const handler = getCommandHandler(mockPi, "synthetic:quota");
     await handler("", mockCtx);
 
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(
@@ -341,14 +341,14 @@ describe("synthetic-extension", () => {
     );
   });
 
-  it("/synthetic-quota handles fetch errors gracefully", async () => {
+  it("/synthetic:quota handles fetch errors gracefully", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await syntheticExtension(mockPi);
 
     mockFetch.mockRejectedValueOnce(new Error("Quota service down"));
 
-    const handler = getCommandHandler(mockPi, "synthetic-quota");
+    const handler = getCommandHandler(mockPi, "synthetic:quota");
     await handler("", mockCtx);
 
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(

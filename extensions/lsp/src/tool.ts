@@ -152,7 +152,7 @@ export const PROMPT_GUIDELINES = [
   "lsp `workspaceSymbol` may return empty results while the LSP server is still indexing. If it returns nothing, wait a few seconds and retry.",
   "lsp `diagnostics` relies on server-pushed notifications which may be slow for some servers. For compiled languages (Rust, Go, C++), prefer running the compiler directly (e.g. `cargo check`, `go build`) for reliable error checking.",
   "Use lsp for type info, macro-generated symbols, and cross-module navigation. Use rg for simple text search and file discovery — it is faster and needs no server.",
-  "lsp servers are auto-detected by file extension. Use /lsp to check status.",
+  "lsp servers are auto-detected by file extension. Use /lsp:status to check status.",
 ];
 
 export const LSP_TOOL_PARAMETERS = Type.Object({

@@ -153,20 +153,20 @@ describe("lsp-extension", () => {
     expect(mockPi.registerTool).toHaveBeenCalledWith(expect.objectContaining({ name: "lsp" }));
   });
 
-  it("registers /lsp command", async () => {
+  it("registers /lsp:status command", async () => {
     await lspExtension(mockPi);
     expect(mockPi.registerCommand).toHaveBeenCalledWith(
-      "lsp",
+      "lsp:status",
       expect.objectContaining({
         description: expect.stringContaining("LSP server status"),
       }),
     );
   });
 
-  it("registers /lsp-restart command", async () => {
+  it("registers /lsp:restart command", async () => {
     await lspExtension(mockPi);
     expect(mockPi.registerCommand).toHaveBeenCalledWith(
-      "lsp-restart",
+      "lsp:restart",
       expect.objectContaining({
         description: expect.stringContaining("Stop all LSP servers"),
       }),
@@ -307,7 +307,7 @@ describe("lsp-extension", () => {
   describe("/lsp command", () => {
     it("shows all servers disabled via config when globalDisabled", async () => {
       await lspExtension(mockPi);
-      const handler = getCommandHandler(mockPi, "lsp");
+      const handler = getCommandHandler(mockPi, "lsp:status");
 
       // Set up config with lsp: false
       mockAccessPattern(true);
@@ -323,7 +323,7 @@ describe("lsp-extension", () => {
 
     it("shows no servers configured when config has none", async () => {
       await lspExtension(mockPi);
-      const handler = getCommandHandler(mockPi, "lsp");
+      const handler = getCommandHandler(mockPi, "lsp:status");
 
       // Set up empty config
       mockAccessPattern(true);
@@ -348,7 +348,7 @@ describe("lsp-extension", () => {
 
     it("shows per-server status with extensions", async () => {
       await lspExtension(mockPi);
-      const handler = getCommandHandler(mockPi, "lsp");
+      const handler = getCommandHandler(mockPi, "lsp:status");
 
       mockAccessPattern(true);
       mockReadFile(JSON.stringify(SAMPLE_CONFIG));
@@ -360,7 +360,7 @@ describe("lsp-extension", () => {
 
     it("shows config errors when present", async () => {
       await lspExtension(mockPi);
-      const handler = getCommandHandler(mockPi, "lsp");
+      const handler = getCommandHandler(mockPi, "lsp:status");
 
       // Global config reads fine, project config exists but readFile throws
       (access as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
@@ -383,12 +383,12 @@ describe("lsp-extension", () => {
     });
   });
 
-  // --- /lsp-restart command tests ---
+  // --- /lsp:restart command tests ---
 
-  describe("/lsp-restart command", () => {
+  describe("/lsp:restart command", () => {
     it("shows restart notification", async () => {
       await lspExtension(mockPi);
-      const handler = getCommandHandler(mockPi, "lsp-restart");
+      const handler = getCommandHandler(mockPi, "lsp:restart");
 
       // Trigger session_start first to set rootPath
       const sessionStart = getEventHandler(mockPi, "session_start");
@@ -404,7 +404,7 @@ describe("lsp-extension", () => {
 
     it("clears clients and reloads config", async () => {
       await lspExtension(mockPi);
-      const handler = getCommandHandler(mockPi, "lsp-restart");
+      const handler = getCommandHandler(mockPi, "lsp:restart");
 
       const sessionStart = getEventHandler(mockPi, "session_start");
       await sessionStart({ type: "session_start", reason: "new" }, mockCtx);
@@ -571,7 +571,7 @@ describe("lsp-extension", () => {
       mockAccessPattern(true);
       mockReadFile(JSON.stringify(DISABLED_CONFIG));
 
-      const handler = getCommandHandler(mockPi, "lsp");
+      const handler = getCommandHandler(mockPi, "lsp:status");
       await handler("", mockCtx);
 
       expect(mockCtx.ui.setStatus).toHaveBeenCalledWith(
@@ -603,7 +603,7 @@ describe("lsp-extension", () => {
         mockReadFile(JSON.stringify(SAMPLE_CONFIG));
         (execSync as ReturnType<typeof vi.fn>).mockImplementation(() => Buffer.from(""));
 
-        const handler = getCommandHandler(mockPi, "lsp");
+        const handler = getCommandHandler(mockPi, "lsp:status");
         await handler("", mockCtx);
 
         expect(mockCtx.ui.setStatus).toHaveBeenCalledWith(
@@ -654,7 +654,7 @@ describe("lsp-extension", () => {
         return Promise.resolve("");
       });
 
-      const handler = getCommandHandler(mockPi, "lsp");
+      const handler = getCommandHandler(mockPi, "lsp:status");
       await handler("", mockCtx);
 
       // Both servers should appear in the status
@@ -694,7 +694,7 @@ describe("lsp-extension", () => {
         return Promise.resolve("");
       });
 
-      const handler = getCommandHandler(mockPi, "lsp");
+      const handler = getCommandHandler(mockPi, "lsp:status");
       await handler("", mockCtx);
 
       // Should not throw, config should load successfully
@@ -719,7 +719,7 @@ describe("lsp-extension", () => {
         throw new Error("not found");
       });
 
-      const handler = getCommandHandler(mockPi, "lsp");
+      const handler = getCommandHandler(mockPi, "lsp:status");
       await handler("", mockCtx);
 
       // python is disabled in SAMPLE_CONFIG, so only typescript should appear
@@ -737,7 +737,7 @@ describe("lsp-extension", () => {
         return Promise.resolve(JSON.stringify(SAMPLE_CONFIG));
       });
 
-      const handler = getCommandHandler(mockPi, "lsp");
+      const handler = getCommandHandler(mockPi, "lsp:status");
       await handler("", mockCtx);
 
       expect(mockCtx.ui.setStatus).toHaveBeenCalledWith(
@@ -752,7 +752,7 @@ describe("lsp-extension", () => {
       (access as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
       (readFile as ReturnType<typeof vi.fn>).mockResolvedValue("not valid json {{{");
 
-      const handler = getCommandHandler(mockPi, "lsp");
+      const handler = getCommandHandler(mockPi, "lsp:status");
       await handler("", mockCtx);
 
       // Should show config errors
@@ -793,7 +793,7 @@ describe("lsp-extension", () => {
         throw new Error("not found");
       });
 
-      const handler = getCommandHandler(mockPi, "lsp");
+      const handler = getCommandHandler(mockPi, "lsp:status");
       await handler("", mockCtx);
 
       expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("rust"), "info");
@@ -824,7 +824,7 @@ describe("lsp-extension", () => {
         throw new Error("not found");
       });
 
-      const handler = getCommandHandler(mockPi, "lsp");
+      const handler = getCommandHandler(mockPi, "lsp:status");
       await handler("", mockCtx);
 
       expect(mockCtx.ui.notify).toHaveBeenCalledWith(
@@ -834,12 +834,12 @@ describe("lsp-extension", () => {
     });
   });
 
-  // --- Command handler tests for /lsp-restart ---
+  // --- Command handler tests for /lsp:restart ---
 
-  describe("/lsp-restart command handler", () => {
+  describe("/lsp:restart command handler", () => {
     it("notifies user after restart", async () => {
       await lspExtension(mockPi);
-      const handler = getCommandHandler(mockPi, "lsp-restart");
+      const handler = getCommandHandler(mockPi, "lsp:restart");
 
       const sessionStart = getEventHandler(mockPi, "session_start");
       await sessionStart({ type: "session_start", reason: "new" }, mockCtx);
@@ -886,7 +886,7 @@ describe("lsp-extension", () => {
         "Use lsp for type info, macro-generated symbols, and cross-module navigation. Use rg for simple text search and file discovery — it is faster and needs no server.",
       );
       expect(guidelines[8]).toBe(
-        "lsp servers are auto-detected by file extension. Use /lsp to check status.",
+        "lsp servers are auto-detected by file extension. Use /lsp:status to check status.",
       );
     });
   });
@@ -1096,7 +1096,7 @@ describe("lsp-extension", () => {
         return Promise.resolve("");
       });
 
-      const handler = getCommandHandler(mockPi, "lsp");
+      const handler = getCommandHandler(mockPi, "lsp:status");
       await handler("", mockCtx);
 
       // Config should have loaded and merged properly

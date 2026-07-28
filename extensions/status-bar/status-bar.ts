@@ -303,7 +303,7 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
 
   // --- Command ---
 
-  pi.registerCommand("statusbar", {
+  pi.registerCommand("statusbar:toggle", {
     description: "Toggle the Starship-inspired status bar footer",
     handler: async (_args: string, ctx: ExtensionCommandContext) => {
       state.enabled = !state.enabled;

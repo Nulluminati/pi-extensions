@@ -121,7 +121,7 @@ export async function runVoiceOverlay(
   const model = getModel(modelId);
   if (!model || !modelIsDownloaded(modelsDir, model)) {
     ctx.ui.notify(
-      `Model "${modelId}" not found in ${modelsDir}. Open /voice or see the voice README for setup.`,
+      `Model "${modelId}" not found in ${modelsDir}. Open /voice:settings or see the voice README for setup.`,
       "error",
     );
     return;

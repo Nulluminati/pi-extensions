@@ -5,8 +5,9 @@
  * provider. Brave Search and Synthetic (synthetic.new) ship out of the box;
  * SearXNG and others can be added by extending the provider list below.
  *
- * Switch the active provider mid-session with `/websearch` (opens a selector)
- * or `/websearch <id>` (e.g. `/websearch synthetic`). The choice persists
+ * Switch the active provider mid-session with `/websearch:select` (opens a
+ * selector) or `/websearch:select <id>` (e.g. `/websearch:select synthetic`).
+ * The choice persists
  * across sessions and is shown in the footer.
  *
  * Provider auth:
@@ -155,7 +156,7 @@ export default async function webSearchExtension(pi: ExtensionAPI) {
     name: "web_search",
     label: "Web Search",
     description:
-      "Search the web using the configured search provider (Brave, Synthetic, etc.). Returns a list of results with titles, URLs, and snippets. Use this tool when you need current information from the internet. Switch providers with the /websearch command.",
+      "Search the web using the configured search provider (Brave, Synthetic, etc.). Returns a list of results with titles, URLs, and snippets. Use this tool when you need current information from the internet. Switch providers with the /websearch:select command.",
     promptSnippet: "Search the web for current information",
     promptGuidelines: [
       "Use web_search when the answer likely requires up-to-date information not in your training data.",
@@ -181,7 +182,7 @@ export default async function webSearchExtension(pi: ExtensionAPI) {
           content: [
             {
               type: "text",
-              text: `Error: ${provider.label} is not configured. ${provider.authHint} Switch providers with /websearch.`,
+              text: `Error: ${provider.label} is not configured. ${provider.authHint} Switch providers with /websearch:select.`,
             },
           ],
           details: { query, backend: provider.id, resultCount: 0, isError: true },
@@ -337,13 +338,13 @@ export default async function webSearchExtension(pi: ExtensionAPI) {
 
   // --- Command ---
 
-  pi.registerCommand("websearch", {
+  pi.registerCommand("websearch:select", {
     description:
-      "Select or switch the web search provider: /websearch | /websearch <brave|synthetic>",
+      "Select or switch the web search provider: /websearch:select | /websearch:select <brave|synthetic>",
     handler: async (args: string, ctx: ExtensionCommandContext) => {
       if (!ctx.hasUI) return;
 
-      const requested = args.trim();
+      const requested = args.trim().replace(/^select\s*/, "");
       if (requested) {
         const provider = getProvider(requested);
         if (!provider) {

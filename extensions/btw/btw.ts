@@ -174,13 +174,18 @@ export default async function btwExtension(pi: ExtensionAPI) {
     },
   });
 
-  pi.registerCommand("btw:clear", {
+  pi.registerCommand("btw:reset", {
     description: "Wipe the side thread and close the side window",
     handler: async (_args, ctx) => {
       if (state.thread.messages.length === 0) {
-        ctx.ui.notify("No side thread to clear.", "info");
+        ctx.ui.notify("No side thread to reset.", "info");
         return;
       }
+      const confirmed = await ctx.ui.confirm(
+        "Reset side thread?",
+        "This wipes the whole side conversation and closes the side window.",
+      );
+      if (!confirmed) return;
       state.thread = emptyThread("contextual");
       state.transcript = [];
       state.composer = "";
@@ -193,7 +198,7 @@ export default async function btwExtension(pi: ExtensionAPI) {
         state.overlay.done();
         state.overlay = null;
       }
-      ctx.ui.notify("Side thread cleared.", "info");
+      ctx.ui.notify("Side thread reset.", "info");
     },
   });
 
@@ -205,6 +210,11 @@ export default async function btwExtension(pi: ExtensionAPI) {
         return;
       }
       const instructions = args.trim();
+      const confirmed = await ctx.ui.confirm(
+        "Inject side thread?",
+        "The full side thread is handed to the main agent and the side thread is wiped.",
+      );
+      if (!confirmed) return;
       const content = buildHandoffContent(state.thread, instructions, "full", "");
       const idle = ctx.isIdle();
       if (idle) pi.sendUserMessage(content);
@@ -236,6 +246,11 @@ export default async function btwExtension(pi: ExtensionAPI) {
         return;
       }
       const instructions = args.trim();
+      const confirmed = await ctx.ui.confirm(
+        "Summarize and inject side thread?",
+        "The side thread is distilled, the summary is handed to the main agent, and the side thread is wiped.",
+      );
+      if (!confirmed) return;
       state.status = "summarizing";
       state.statusText = statusToText("summarizing", null);
       requestRender(state);
@@ -300,7 +315,10 @@ export default async function btwExtension(pi: ExtensionAPI) {
         return;
       }
       if (trimmed !== "low" && trimmed !== "medium" && trimmed !== "high" && trimmed !== "none") {
-        ctx.ui.notify("Usage: /btw:thinking <low|medium|high|none|clear>", "warning");
+        ctx.ui.notify(
+          `Unknown thinking level "${trimmed}". Usage: /btw:thinking <low|medium|high|none|clear>`,
+          "error",
+        );
         return;
       }
       state.thread.thinkingOverride = trimmed as "none" | "low" | "medium" | "high";

@@ -1,6 +1,6 @@
 ---
 name: shared-helpers
-description: Use the shared helper modules in lib/ when building or modifying Pi extensions in this repo. Covers session entry parsing (session-utils), cheap model resolution (small-model), modal frames (tui-frame), status lines and key hints (ui-format), tool result renderers (tool-renderer), searchable select modals (searchable-select), and editor factory layering (editor-factory). Use whenever an extension needs TUI rendering, a status line, a picker dialog, a custom editor wrapper, transcript parsing, or a cheap direct LLM call — import the lib/ helper instead of reimplementing the pattern.
+description: Use the shared helper modules in lib/ when building or modifying Pi extensions in this repo. Covers session entry parsing (session-utils), cheap model resolution (small-model), modal frames (tui-frame), single-line input modals (input-modal), status lines and key hints (ui-format), tool result renderers (tool-renderer), searchable select modals (searchable-select), and editor factory layering (editor-factory). Use whenever an extension needs TUI rendering, a status line, a picker dialog, a text prompt, a custom editor wrapper, transcript parsing, or a cheap direct LLM call — import the lib/ helper instead of reimplementing the pattern.
 ---
 
 # Shared Helpers in `lib/`
@@ -25,12 +25,13 @@ import { renderModalFrame } from "../../../lib/tui-frame.ts";
 |---|---|---|
 | Read text / tool calls / tool results from `sessionManager.getBranch()` entries | `extractText`, `extractToolCallBlocks`, `extractToolResultBlocks`, `parseContentBlocks` | `lib/session-utils.ts` |
 | Make a cheap one-off LLM call (summaries, side agents, recaps) | `resolveSmallModel` (+ `complete` / `completeSimple` from `@earendil-works/pi-ai`) | `lib/small-model.ts` |
-| Build a `/small-model`-style config command or read the user's saved small-model choice | `loadSmallModelConfig`, `saveSmallModelConfig`, `parseSmallModelSpec` | `lib/small-model.ts` |
+| Build a `/smallmodel`-style config command or read the user's saved small-model choice | `loadSmallModelConfig`, `saveSmallModelConfig`, `parseSmallModelSpec` | `lib/small-model.ts` |
 | Draw a bordered modal dialog with a title | `renderModalFrame`, `modalContentWidth` | `lib/tui-frame.ts` |
 | Show an icon + colored status in the footer/status area | `formatStatusLine` | `lib/ui-format.ts` |
 | Render a "key: action" hint bar inside a dialog | `formatStyledKeyHints`, `formatKeyHints` | `lib/ui-format.ts` |
 | Write a `renderResult` for a registered tool | `createToolStatus`, `wrapToolText` | `lib/tool-renderer.ts` |
 | Let the user fuzzy-pick from a list in a modal | `createSearchableSelectModal` | `lib/searchable-select.ts` |
+| Prompt for one line of text in a framed modal | `promptText`, `createInputModal` | `lib/input-modal.ts` |
 | Wrap/replace the editor component (`ctx.ui.setEditorComponent`) | `installEditorFactoryLayer`, `hasEditorFactoryLayer`, `removeEditorFactoryLayer` | `lib/editor-factory.ts` |
 
 ---
@@ -78,6 +79,21 @@ render(width: number): string[] {
 - Compute body width with `modalContentWidth(width)` and render your content into that narrower width; the frame adds the border and padding around it.
 - Small widths are handled: below 4 columns the frame degrades to truncated raw lines. You don't need width guards beyond the empty case.
 - Lower-level pieces (`frameBorderLine`, `frameRuleLine`, `frameContentLine`) exist for custom layouts, but prefer `renderModalFrame` so all dialogs share one visual language.
+
+## `lib/input-modal.ts` — framed text prompt
+
+A single-line `Input` from pi-tui wrapped in `renderModalFrame`, with the same border/title/key-hint styling as the searchable select. Use `promptText(ctx, { title, placeholder, initialValue? })` from a command handler instead of `ctx.ui.input` when you want the modal look (goal and handoff do); it falls back to `ctx.ui.input` outside TUI mode and resolves `undefined` on cancel:
+
+```typescript
+const objective = await promptText(ctx, {
+  title: "Goal",
+  placeholder: "What should this run accomplish?",
+  initialValue: state.objective, // prefilled for edits
+});
+if (!objective) return; // cancelled
+```
+
+Enter submits, Esc cancels. Use `createInputModal` directly only when embedding the input inside a larger custom component.
 
 ## `lib/searchable-select.ts` — fuzzy picker modal
 

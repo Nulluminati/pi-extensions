@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import goalExtension, { STATUS_ICON } from "../../extensions/goal/goal.ts";
 import { createMockCommandContext } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
-import { getEventHandler } from "../mocks/test-helpers.ts";
+import { getCommandHandler, getEventHandler } from "../mocks/test-helpers.ts";
 
 describe("goal-extension", () => {
   beforeEach(() => {
@@ -25,15 +25,24 @@ describe("goal-extension", () => {
     });
   });
 
-  it("registers /goal command", async () => {
+  it("registers the /goal commands", async () => {
     const mockPi = createMockPi();
     await goalExtension(mockPi);
-    expect(mockPi.registerCommand).toHaveBeenCalledTimes(1);
-    expect(mockPi.registerCommand).toHaveBeenCalledWith(
+    const commands = mockPi.registerCommand.mock.calls.map((call: unknown[]) => call[0]);
+    expect(commands).toEqual([
       "goal",
+      "goal:status",
+      "goal:new",
+      "goal:edit",
+      "goal:pause",
+      "goal:resume",
+      "goal:budget",
+      "goal:reset",
+    ]);
+    expect(mockPi.registerCommand).toHaveBeenCalledWith(
+      "goal:new",
       expect.objectContaining({
-        description:
-          "Run a goal to completion: /goal [--tokens 100k] <objective> | /goal budget <amount> | /goal pause|resume|clear|edit|status",
+        description: expect.stringContaining("/goal:new [--tokens 100k] [objective]"),
         handler: expect.any(Function),
       }),
     );
@@ -68,24 +77,75 @@ describe("goal-extension", () => {
     expect(mockPi.on).toHaveBeenCalledWith("message_end", expect.any(Function));
   });
 
-  it("/goal with no active goal shows status message", async () => {
+  it("/goal behaves like /goal:new", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.ui.custom = makePromptCustom(mockCtx, "implement snake game");
+    await goalExtension(mockPi);
+    await getCommandHandler(mockPi, "goal")("", mockCtx);
+    expect(mockPi.appendEntry).toHaveBeenCalledWith(
+      "goal-state",
+      expect.objectContaining({
+        goal: expect.objectContaining({ objective: "implement snake game", status: "active" }),
+      }),
+    );
+  });
+
+  it("/goal:status with no active goal shows status message", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await goalExtension(mockPi);
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
-    await handler("", mockCtx);
+    await getCommandHandler(mockPi, "goal:status")("", mockCtx);
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(
-      "No active goal. Use /goal <objective> to start one.",
+      "No active goal. Use /goal:new <objective> to start one.",
       "info",
     );
+  });
+
+  it("/goal with no args prompts for an objective and starts it", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.ui.custom = makePromptCustom(mockCtx, "implement snake game");
+    await goalExtension(mockPi);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("", mockCtx);
+    expect(mockCtx.ui.custom).toHaveBeenCalledTimes(1);
+    expect(mockPi.appendEntry).toHaveBeenCalledWith(
+      "goal-state",
+      expect.objectContaining({
+        goal: expect.objectContaining({ objective: "implement snake game", status: "active" }),
+      }),
+    );
+  });
+
+  it("/goal with no args does nothing when the prompt is cancelled", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.ui.custom = makePromptCustom(mockCtx, null);
+    await goalExtension(mockPi);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("", mockCtx);
+    expect(mockPi.appendEntry).not.toHaveBeenCalled();
+    expect(mockPi.sendUserMessage).not.toHaveBeenCalled();
+  });
+
+  it("/goal with no args in non-UI mode shows usage", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.hasUI = false;
+    await goalExtension(mockPi);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("", mockCtx);
+    expect(mockCtx.ui.custom).not.toHaveBeenCalled();
+    expect(mockCtx.ui.notify).toHaveBeenCalledWith("Usage: /goal:new <objective>", "warning");
   });
 
   it("/goal <objective> starts a new goal", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await goalExtension(mockPi);
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
-    await handler("implement snake game", mockCtx);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("implement snake game", mockCtx);
     expect(mockPi.appendEntry).toHaveBeenCalledWith(
       "goal-state",
       expect.objectContaining({
@@ -107,8 +167,8 @@ describe("goal-extension", () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await goalExtension(mockPi);
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
-    await handler("--tokens 100k fix the failing test", mockCtx);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("--tokens 100k fix the failing test", mockCtx);
     expect(mockPi.appendEntry).toHaveBeenCalledWith(
       "goal-state",
       expect.objectContaining({
@@ -129,8 +189,8 @@ describe("goal-extension", () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await goalExtension(mockPi);
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
-    await handler("x".repeat(4001), mockCtx);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("x".repeat(4001), mockCtx);
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("too long"), "warning");
   });
 
@@ -138,9 +198,9 @@ describe("goal-extension", () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await goalExtension(mockPi);
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
-    await handler("implement snake game", mockCtx);
-    await handler("pause", mockCtx);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("implement snake game", mockCtx);
+    await getCommandHandler(mockPi, "goal:pause")("", mockCtx);
     expect(mockPi.appendEntry).toHaveBeenLastCalledWith(
       "goal-state",
       expect.objectContaining({
@@ -148,7 +208,7 @@ describe("goal-extension", () => {
       }),
     );
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(
-      "Goal paused. Use /goal resume to continue.",
+      "Goal paused. Use /goal:resume to continue.",
       "info",
     );
   });
@@ -157,10 +217,10 @@ describe("goal-extension", () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await goalExtension(mockPi);
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
-    await handler("implement snake game", mockCtx);
-    await handler("pause", mockCtx);
-    await handler("resume", mockCtx);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("implement snake game", mockCtx);
+    await getCommandHandler(mockPi, "goal:pause")("", mockCtx);
+    await getCommandHandler(mockPi, "goal:resume")("", mockCtx);
     expect(mockPi.sendUserMessage).toHaveBeenCalledWith(
       expect.stringContaining("resumed the paused /goal"),
       { deliverAs: "followUp" },
@@ -168,24 +228,38 @@ describe("goal-extension", () => {
     expect(mockCtx.ui.notify).toHaveBeenCalledWith("Goal resumed.", "info");
   });
 
-  it("/goal clear cancels the goal", async () => {
+  it("/goal reset cancels the goal after confirmation", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
+    mockCtx.ui.confirm = vi.fn(() => Promise.resolve(true));
     await goalExtension(mockPi);
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
-    await handler("implement snake game", mockCtx);
-    await handler("clear", mockCtx);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("implement snake game", mockCtx);
+    await getCommandHandler(mockPi, "goal:reset")("", mockCtx);
+    expect(mockCtx.ui.confirm).toHaveBeenCalledTimes(1);
     expect(mockPi.appendEntry).toHaveBeenLastCalledWith("goal-state", { goal: null });
     expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("goal", undefined);
   });
 
-  it("/goal edit updates objective without resetting counters", async () => {
+  it("/goal reset declined keeps the goal", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.ui.confirm = vi.fn(() => Promise.resolve(false));
+    await goalExtension(mockPi);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("implement snake game", mockCtx);
+    mockPi.appendEntry.mockClear();
+    await getCommandHandler(mockPi, "goal:reset")("", mockCtx);
+    expect(mockPi.appendEntry).not.toHaveBeenCalled();
+  });
+
+  it("/goal edit <objective> updates objective without resetting counters", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await goalExtension(mockPi);
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
-    await handler("implement snake game", mockCtx);
-    await handler("edit implement tetris game", mockCtx);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("implement snake game", mockCtx);
+    await getCommandHandler(mockPi, "goal:edit")("implement tetris game", mockCtx);
     expect(mockPi.appendEntry).toHaveBeenLastCalledWith(
       "goal-state",
       expect.objectContaining({
@@ -207,7 +281,7 @@ describe("goal-extension", () => {
     await goalExtension(mockPi);
 
     // Start a goal first
-    const commandHandler = mockPi.registerCommand.mock.calls[0][1].handler;
+    const commandHandler = getCommandHandler(mockPi, "goal:new");
     await commandHandler("implement snake game", mockCtx);
 
     // Call goal_complete
@@ -248,8 +322,8 @@ describe("goal-extension", () => {
     await goalExtension(mockPi);
 
     // Start a goal
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
-    await handler("implement snake game", mockCtx);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("implement snake game", mockCtx);
 
     // Invoke before_agent_start
     const beforeStartHandler = getEventHandler(mockPi, "before_agent_start");
@@ -291,8 +365,8 @@ describe("goal-extension", () => {
     await goalExtension(mockPi);
 
     // Start a goal
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
-    await handler("implement snake game", mockCtx);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("implement snake game", mockCtx);
 
     // Invoke agent_end
     const agentEndHandler = getEventHandler(mockPi, "agent_end");
@@ -310,8 +384,8 @@ describe("goal-extension", () => {
     await goalExtension(mockPi);
 
     // Start and complete a goal
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
-    await handler("implement snake game", mockCtx);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("implement snake game", mockCtx);
     mockPi.sendUserMessage.mockClear();
     const toolDef = mockPi.registerTool.mock.calls[0][0];
     await toolDef.execute("call-1", {}, undefined, undefined, mockCtx);
@@ -329,8 +403,8 @@ describe("goal-extension", () => {
     await goalExtension(mockPi);
 
     // Start goal with budget
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
-    await handler("--tokens 10k implement snake game", mockCtx);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("--tokens 10k implement snake game", mockCtx);
 
     // Simulate high token usage via turn_end
     const turnEndHandler = getEventHandler(mockPi, "turn_end");
@@ -363,9 +437,9 @@ describe("goal-extension", () => {
     await goalExtension(mockPi);
 
     // Start a goal at 2000 baseline tokens
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
+    const newGoal = getCommandHandler(mockPi, "goal:new");
     mockCtx.getContextUsage = vi.fn(() => ({ tokens: 2000, contextWindow: 200_000, percent: 1 }));
-    await handler("implement snake game", mockCtx);
+    await newGoal("implement snake game", mockCtx);
 
     // Simulate turn end with 5000 total tokens (3000 delta)
     const turnEndHandler = getEventHandler(mockPi, "turn_end");
@@ -386,8 +460,8 @@ describe("goal-extension", () => {
     await goalExtension(mockPi);
 
     // Start a goal
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
-    await handler("implement snake game", mockCtx);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("implement snake game", mockCtx);
 
     // Simulate error message end
     const messageEndHandler = getEventHandler(mockPi, "message_end");
@@ -447,8 +521,8 @@ describe("goal-extension", () => {
     await goalExtension(mockPi);
 
     // Start a goal
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
-    await handler("implement snake game", mockCtx);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("implement snake game", mockCtx);
     mockPi.sendUserMessage.mockClear();
 
     // Queue continuation via agent_end
@@ -472,8 +546,8 @@ describe("goal-extension", () => {
     await goalExtension(mockPi);
 
     // Start a goal
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
-    await handler("implement snake game", mockCtx);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("implement snake game", mockCtx);
 
     // Shutdown
     const shutdownHandler = getEventHandler(mockPi, "session_shutdown");
@@ -492,8 +566,8 @@ describe("goal-extension", () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await goalExtension(mockPi);
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
-    await handler('"fix the auth bug"', mockCtx);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal('"fix the auth bug"', mockCtx);
     expect(mockPi.appendEntry).toHaveBeenCalledWith(
       "goal-state",
       expect.objectContaining({
@@ -502,14 +576,14 @@ describe("goal-extension", () => {
     );
   });
 
-  it("shows usage error for invalid command", async () => {
+  it("/goal:new --tokens with an invalid amount shows an error", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await goalExtension(mockPi);
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
-    await handler("pause extra-arg", mockCtx);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("--tokens abc fix things", mockCtx);
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(
-      expect.stringContaining("Usage: /goal pause"),
+      expect.stringContaining("Invalid token budget"),
       "warning",
     );
   });
@@ -520,14 +594,14 @@ describe("goal-extension", () => {
     await goalExtension(mockPi);
 
     // Goal A: start and complete
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
-    await handler("implement snake game", mockCtx);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("implement snake game", mockCtx);
     mockPi.sendUserMessage.mockClear();
     const toolDef = mockPi.registerTool.mock.calls[0][0];
     await toolDef.execute("call-1", {}, undefined, undefined, mockCtx);
 
     // Goal B: start new goal
-    await handler("implement tetris game", mockCtx);
+    await newGoal("implement tetris game", mockCtx);
     mockPi.sendUserMessage.mockClear();
 
     // First agent_end of Goal B should still queue continuation
@@ -545,8 +619,8 @@ describe("goal-extension", () => {
     await goalExtension(mockPi);
 
     // Start and complete a goal
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
-    await handler("implement snake game", mockCtx);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("implement snake game", mockCtx);
     const toolDef = mockPi.registerTool.mock.calls[0][0];
     await toolDef.execute("call-1", {}, undefined, undefined, mockCtx);
 
@@ -554,7 +628,7 @@ describe("goal-extension", () => {
     mockCtx.ui.setStatus.mockClear();
 
     // Start a new goal — should clear status first
-    await handler("implement tetris game", mockCtx);
+    await newGoal("implement tetris game", mockCtx);
 
     // First call after clear should be undefined (from clearCompletionStatus)
     expect(mockCtx.ui.setStatus).toHaveBeenNthCalledWith(1, "goal", undefined);
@@ -565,12 +639,12 @@ describe("goal-extension", () => {
     const mockCtx = createMockCommandContext();
     await goalExtension(mockPi);
 
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
-    await handler("implement snake game", mockCtx);
-    await handler("pause", mockCtx);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("implement snake game", mockCtx);
+    await getCommandHandler(mockPi, "goal:pause")("", mockCtx);
 
     mockCtx.ui.setStatus.mockClear();
-    await handler("resume", mockCtx);
+    await getCommandHandler(mockPi, "goal:resume")("", mockCtx);
 
     expect(mockCtx.ui.setStatus).toHaveBeenNthCalledWith(1, "goal", undefined);
   });
@@ -580,8 +654,8 @@ describe("goal-extension", () => {
     const mockCtx = createMockCommandContext();
     await goalExtension(mockPi);
 
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
-    await handler("implement snake game", mockCtx);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("implement snake game", mockCtx);
     const toolDef = mockPi.registerTool.mock.calls[0][0];
 
     // First call succeeds
@@ -630,8 +704,8 @@ describe("goal-extension", () => {
     const mockCtx = createMockCommandContext();
     await goalExtension(mockPi);
 
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
-    await handler("implement snake game", mockCtx);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("implement snake game", mockCtx);
 
     const messageEndHandler = getEventHandler(mockPi, "message_end");
     await messageEndHandler(
@@ -687,12 +761,12 @@ describe("goal-extension", () => {
     const mockCtx = createMockCommandContext();
     await goalExtension(mockPi);
 
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
-    await handler("implement snake game", mockCtx);
-    await handler("pause", mockCtx);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("implement snake game", mockCtx);
+    await getCommandHandler(mockPi, "goal:pause")("", mockCtx);
     mockPi.sendUserMessage.mockClear();
 
-    await handler("edit implement tetris game", mockCtx);
+    await getCommandHandler(mockPi, "goal:edit")("implement tetris game", mockCtx);
 
     expect(mockPi.appendEntry).toHaveBeenLastCalledWith(
       "goal-state",
@@ -712,8 +786,8 @@ describe("goal-extension", () => {
     const mockCtx = createMockCommandContext();
     await goalExtension(mockPi);
 
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
-    await handler("--tokens 10k implement snake game", mockCtx);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("--tokens 10k implement snake game", mockCtx);
 
     // Hit budget via turn_end
     const turnEndHandler = getEventHandler(mockPi, "turn_end");
@@ -737,7 +811,7 @@ describe("goal-extension", () => {
 
     // Try to resume
     mockCtx.ui.notify.mockClear();
-    await handler("resume", mockCtx);
+    await getCommandHandler(mockPi, "goal:resume")("", mockCtx);
 
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(
       expect.stringContaining("Cannot resume: token budget reached"),
@@ -756,11 +830,11 @@ describe("goal-extension", () => {
     const mockCtx = createMockCommandContext();
     await goalExtension(mockPi);
 
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
-    await handler("implement snake game", mockCtx);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("implement snake game", mockCtx);
     mockPi.appendEntry.mockClear();
 
-    await handler("budget 200k", mockCtx);
+    await getCommandHandler(mockPi, "goal:budget")("200k", mockCtx);
 
     expect(mockPi.appendEntry).toHaveBeenCalledWith(
       "goal-state",
@@ -779,8 +853,8 @@ describe("goal-extension", () => {
     const mockCtx = createMockCommandContext();
     await goalExtension(mockPi);
 
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
-    await handler("--tokens 10k implement snake game", mockCtx);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("--tokens 10k implement snake game", mockCtx);
 
     // Hit budget via turn_end
     const turnEndHandler = getEventHandler(mockPi, "turn_end");
@@ -798,7 +872,7 @@ describe("goal-extension", () => {
     mockPi.sendUserMessage.mockClear();
 
     // Increase budget to resume
-    await handler("budget 50k", mockCtx);
+    await getCommandHandler(mockPi, "goal:budget")("50k", mockCtx);
 
     expect(mockPi.appendEntry).toHaveBeenLastCalledWith(
       "goal-state",
@@ -821,11 +895,11 @@ describe("goal-extension", () => {
     const mockCtx = createMockCommandContext();
     await goalExtension(mockPi);
 
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
-    await handler("budget 100k", mockCtx);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await getCommandHandler(mockPi, "goal:budget")("100k", mockCtx);
 
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(
-      "No active goal. Use /goal <objective> to start one.",
+      "No active goal. Use /goal:new <objective> to start one.",
       "info",
     );
   });
@@ -835,9 +909,9 @@ describe("goal-extension", () => {
     const mockCtx = createMockCommandContext();
     await goalExtension(mockPi);
 
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
-    await handler("implement snake game", mockCtx);
-    await handler("budget abc", mockCtx);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("implement snake game", mockCtx);
+    await getCommandHandler(mockPi, "goal:budget")("abc", mockCtx);
 
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(
       expect.stringContaining("Invalid token budget"),
@@ -866,8 +940,8 @@ describe("goal-extension", () => {
     await goalExtension(mockPi);
     mockPi.setActiveTools.mockClear();
 
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
-    await handler("implement snake game", mockCtx);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("implement snake game", mockCtx);
 
     expect(mockPi.setActiveTools).toHaveBeenCalledWith(expect.arrayContaining(["goal_complete"]));
   });
@@ -877,11 +951,11 @@ describe("goal-extension", () => {
     const mockCtx = createMockCommandContext();
     await goalExtension(mockPi);
 
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
-    await handler("implement snake game", mockCtx);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("implement snake game", mockCtx);
     mockPi.setActiveTools.mockClear();
 
-    await handler("pause", mockCtx);
+    await getCommandHandler(mockPi, "goal:pause")("", mockCtx);
 
     expect(mockPi.setActiveTools).toHaveBeenCalledWith(
       expect.not.arrayContaining(["goal_complete"]),
@@ -893,12 +967,12 @@ describe("goal-extension", () => {
     const mockCtx = createMockCommandContext();
     await goalExtension(mockPi);
 
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
-    await handler("implement snake game", mockCtx);
-    await handler("pause", mockCtx);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("implement snake game", mockCtx);
+    await getCommandHandler(mockPi, "goal:pause")("", mockCtx);
     mockPi.setActiveTools.mockClear();
 
-    await handler("resume", mockCtx);
+    await getCommandHandler(mockPi, "goal:resume")("", mockCtx);
 
     expect(mockPi.setActiveTools).toHaveBeenCalledWith(expect.arrayContaining(["goal_complete"]));
   });
@@ -908,8 +982,8 @@ describe("goal-extension", () => {
     const mockCtx = createMockCommandContext();
     await goalExtension(mockPi);
 
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
-    await handler("implement snake game", mockCtx);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("implement snake game", mockCtx);
     mockPi.setActiveTools.mockClear();
 
     const toolDef = mockPi.registerTool.mock.calls[0][0];
@@ -923,13 +997,14 @@ describe("goal-extension", () => {
   it("clearing a goal disables goal_complete tool", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
+    mockCtx.ui.confirm = vi.fn(() => Promise.resolve(true));
     await goalExtension(mockPi);
 
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
-    await handler("implement snake game", mockCtx);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("implement snake game", mockCtx);
     mockPi.setActiveTools.mockClear();
 
-    await handler("clear", mockCtx);
+    await getCommandHandler(mockPi, "goal:reset")("", mockCtx);
 
     expect(mockPi.setActiveTools).toHaveBeenCalledWith(
       expect.not.arrayContaining(["goal_complete"]),
@@ -941,8 +1016,8 @@ describe("goal-extension", () => {
     const mockCtx = createMockCommandContext();
     await goalExtension(mockPi);
 
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
-    await handler("--tokens 10k implement snake game", mockCtx);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("--tokens 10k implement snake game", mockCtx);
 
     const turnEndHandler = getEventHandler(mockPi, "turn_end");
     mockCtx.getContextUsage = vi.fn(() => ({
@@ -966,8 +1041,8 @@ describe("goal-extension", () => {
     const mockCtx = createMockCommandContext();
     await goalExtension(mockPi);
 
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
-    await handler("--tokens 10k implement snake game", mockCtx);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("--tokens 10k implement snake game", mockCtx);
 
     const turnEndHandler = getEventHandler(mockPi, "turn_end");
     mockCtx.getContextUsage = vi.fn(() => ({
@@ -981,7 +1056,7 @@ describe("goal-extension", () => {
     await agentEndHandler({ type: "agent_end", messages: [] }, mockCtx);
 
     mockPi.setActiveTools.mockClear();
-    await handler("budget 50k", mockCtx);
+    await getCommandHandler(mockPi, "goal:budget")("50k", mockCtx);
 
     expect(mockPi.setActiveTools).toHaveBeenCalledWith(expect.arrayContaining(["goal_complete"]));
   });
@@ -991,8 +1066,8 @@ describe("goal-extension", () => {
     const mockCtx = createMockCommandContext();
     await goalExtension(mockPi);
 
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
-    await handler("implement snake game", mockCtx);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("implement snake game", mockCtx);
     mockPi.setActiveTools.mockClear();
 
     const messageEndHandler = getEventHandler(mockPi, "message_end");
@@ -1077,8 +1152,8 @@ describe("goal-extension", () => {
     const mockCtx = createMockCommandContext();
     await goalExtension(mockPi);
 
-    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
-    await handler("implement snake game", mockCtx);
+    const newGoal = getCommandHandler(mockPi, "goal:new");
+    await newGoal("implement snake game", mockCtx);
 
     const toolDef = mockPi.registerTool.mock.calls[0][0];
     await toolDef.execute("call-1", { summary: "done" }, undefined, undefined, mockCtx);
@@ -1183,3 +1258,36 @@ describe("goal-extension", () => {
     });
   });
 });
+
+// --- Helpers ---
+
+// Drives the framed promptText modal: types `typed` then Enter, or Esc when null.
+function makePromptCustom(
+  mockCtx: ReturnType<typeof createMockCommandContext>,
+  typed: string | null,
+) {
+  // biome-ignore lint/suspicious/noExplicitAny: test mock
+  return vi.fn((factory: any) => {
+    return new Promise((resolve) => {
+      const component = factory(
+        { requestRender: vi.fn() },
+        mockCtx.ui.theme,
+        {
+          matches: (data: string, keybinding: string) =>
+            ({
+              "tui.select.confirm": ["\r", "\n"],
+              "tui.select.cancel": ["\u001b", "\u0003"],
+            })[keybinding]?.includes(data) ?? false,
+        },
+        resolve,
+        // biome-ignore lint/suspicious/noExplicitAny: test mock
+      ) as any;
+      if (typed === null) {
+        component.handleInput("\u001b");
+      } else {
+        for (const character of typed) component.handleInput(character);
+        component.handleInput("\r");
+      }
+    });
+  });
+}

@@ -22,8 +22,8 @@ Registers a single LLM-callable tool — `lsp` — that wraps eleven standard LS
 
 Two slash commands are also registered:
 
-- `/lsp` — shows which servers are configured, which are running, and any config errors
-- `/lsp-restart` — stops every server; they reinitialize on the next tool call
+- `/lsp:status` — shows which servers are configured, which are running, and any config errors
+- `/lsp:restart` — stops every server; they reinitialize on the next tool call
 
 The extension is config-driven: it doesn't ship with any default servers. You tell it which binaries to run for which file types, and it spawns and manages them on demand.
 
@@ -42,7 +42,7 @@ If the requested file maps to a configured server, the extension spawns the serv
 ### Check status
 
 ```
-/lsp
+/lsp:status
 ```
 
 Reports the configured servers, their status (running vs available), the extensions each one handles, and any errors from the config files.
@@ -50,7 +50,7 @@ Reports the configured servers, their status (running vs available), the extensi
 ### Restart servers
 
 ```
-/lsp-restart
+/lsp:restart
 ```
 
 Shuts down every running server. The next tool call reinitializes whichever server is needed.
@@ -79,14 +79,14 @@ A global `lsp: false` disables all servers in a project without editing the glob
 }
 ```
 
-Per-server overrides let a project swap the global binary (for example, pinning a specific language server version) without losing the global file. Config errors don't crash — they're collected and surfaced through `/lsp`.
+Per-server overrides let a project swap the global binary (for example, pinning a specific language server version) without losing the global file. Config errors don't crash — they're collected and surfaced through `/lsp:status`.
 
 ### Server lifecycle
 
 1. **Cold start** — The first tool call for an operation on a file triggers server resolution. If the matching server isn't running, the extension spawns it (using `node:child_process.spawn`) and waits for the `initialize` handshake to complete.
 2. **Document open** — Before serving position-based operations, the extension opens the file with the server (`textDocument/didOpen`) and waits for any pending diagnostics to settle. Newer servers that ship native pull diagnostics are still worked with via a `resyncDocument` helper that triggers a publishDiagnostics cycle.
 3. **Reuse** — The running server is kept alive for the rest of the session. Subsequent calls for any of its operations reuse the same connection.
-4. **Restart** — `/lsp-restart` shuts down every server cleanly (sends `shutdown` and `exit` notifications, then kills the process). Next tool call reinitializes.
+4. **Restart** — `/lsp:restart` shuts down every server cleanly (sends `shutdown` and `exit` notifications, then kills the process). Next tool call reinitializes.
 5. **Session end** — `session_shutdown` disposes every connection with the same shutdown sequence.
 
 ### Operation dispatch
@@ -116,8 +116,8 @@ Diagnostics flow from `textDocument/publishDiagnostics` notifications into a per
 | API | Purpose |
 |-----|---------|
 | `pi.registerTool("lsp")` | The single LLM-callable tool covering all operations |
-| `pi.registerCommand("lsp")` | Status command |
-| `pi.registerCommand("lsp-restart")` | Restart command |
+| `pi.registerCommand("lsp:status")` | Status command |
+| `pi.registerCommand("lsp:restart")` | Restart command |
 | `pi.on("session_start")` | Loads config and surfaces the status line |
 | `pi.on("session_shutdown")` | Disposes every running server |
 | `ctx.ui.notify()` | Status, error, and restart feedback |

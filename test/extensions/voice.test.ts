@@ -268,7 +268,10 @@ describe("voice-extension", () => {
       vi.advanceTimersByTime(500);
 
       expect(ctx.ui.setEditorText).toHaveBeenCalledWith("prompt");
-      expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Open /voice"), "error");
+      expect(ctx.ui.notify).toHaveBeenCalledWith(
+        expect.stringContaining("Open /voice:settings"),
+        "error",
+      );
     });
 
     it("keeps holding across NX release-press repeat pairs", async () => {
@@ -294,7 +297,10 @@ describe("voice-extension", () => {
         vi.advanceTimersByTime(99);
       }
 
-      expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Open /voice"), "error");
+      expect(ctx.ui.notify).toHaveBeenCalledWith(
+        expect.stringContaining("Open /voice:settings"),
+        "error",
+      );
     });
 
     it("does not open voice after a single Space with no repeat", async () => {
@@ -341,7 +347,7 @@ describe("voice-extension", () => {
       const mockPi = createMockPi();
       await voiceExtension(mockPi);
       const names = mockPi.registerCommand.mock.calls.map((c: unknown[]) => c[0]);
-      expect(names).toEqual(["voice", "voice-speak", "voice-stop"]);
+      expect(names).toEqual(["voice", "voice:settings", "voice:speak", "voice:stop"]);
     });
 
     it("each command has a description and a handler", async () => {
@@ -1034,14 +1040,30 @@ describe("voice-extension", () => {
   });
 
   describe("handler wiring", () => {
-    it("/voice persists dictation, speech, and Kitten voice settings", async () => {
+    it("/voice opens the dictation overlay like holding Space", async () => {
+      const modelsDir = mkdtempSync(join(tmpdir(), "pi-voice-empty-models-"));
+      vi.stubEnv("PI_VOICE_MODELS", modelsDir);
+      const mockPi = createMockPi();
+      await voiceExtension(mockPi);
+      const ctx = createMockCommandContext();
+
+      await getCommandHandler(mockPi, "voice")("", ctx);
+
+      // No model is downloaded, so the overlay reports setup guidance and stops.
+      expect(ctx.ui.notify).toHaveBeenCalledWith(
+        expect.stringContaining("Open /voice:settings"),
+        "error",
+      );
+    });
+
+    it("/voice:settings persists dictation, speech, and Kitten voice settings", async () => {
       const configPath = join(mkdtempSync(join(tmpdir(), "pi-voice-config-")), "config.json");
       const modelsDir = createDownloadedVoiceModels(false);
       vi.stubEnv("PI_VOICE_CONFIG", configPath);
       vi.stubEnv("PI_VOICE_MODELS", modelsDir);
       const firstPi = createMockPi();
       await voiceExtension(firstPi);
-      const firstHandler = getCommandHandler(firstPi, "voice");
+      const firstHandler = getCommandHandler(firstPi, "voice:settings");
       const firstCtx = createMockCommandContext();
       const getFirstComponent = captureCustomComponent(firstCtx);
 
@@ -1063,7 +1085,7 @@ describe("voice-extension", () => {
 
       const restartedPi = createMockPi();
       await voiceExtension(restartedPi);
-      const restartedHandler = getCommandHandler(restartedPi, "voice");
+      const restartedHandler = getCommandHandler(restartedPi, "voice:settings");
       const restartedCtx = createMockCommandContext();
       const getRestartedComponent = captureCustomComponent(restartedCtx);
 
@@ -1085,14 +1107,14 @@ describe("voice-extension", () => {
           dictationModel: "unknown-dictation-model",
         }),
       ],
-    ])("/voice uses defaults for %s", async (_case, contents) => {
+    ])("/voice:settings uses defaults for %s", async (_case, contents) => {
       const configPath = join(mkdtempSync(join(tmpdir(), "pi-voice-config-")), "config.json");
       writeFileSync(configPath, contents);
       vi.stubEnv("PI_VOICE_CONFIG", configPath);
       vi.stubEnv("PI_VOICE_MODELS", mkdtempSync(join(tmpdir(), "pi-voice-empty-models-")));
       const mockPi = createMockPi();
       await voiceExtension(mockPi);
-      const handler = getCommandHandler(mockPi, "voice");
+      const handler = getCommandHandler(mockPi, "voice:settings");
       const ctx = createMockCommandContext();
       const getComponent = captureCustomComponent(ctx);
 
@@ -1104,14 +1126,14 @@ describe("voice-extension", () => {
       expect(rendered).toContain("Voice 2 · Masculine");
     });
 
-    it("/voice reports config write failures and restores the displayed value", async () => {
+    it("/voice:settings reports config write failures and restores the displayed value", async () => {
       const configDir = mkdtempSync(join(tmpdir(), "pi-voice-config-"));
       const blockingFile = join(configDir, "not-a-directory");
       writeFileSync(blockingFile, "blocked");
       vi.stubEnv("PI_VOICE_CONFIG", join(blockingFile, "config.json"));
       const mockPi = createMockPi();
       await voiceExtension(mockPi);
-      const handler = getCommandHandler(mockPi, "voice");
+      const handler = getCommandHandler(mockPi, "voice:settings");
       const ctx = createMockCommandContext();
       const getComponent = captureCustomComponent(ctx);
 
@@ -1136,10 +1158,10 @@ describe("voice-extension", () => {
       expect(names).not.toContain("voice-summary-model");
     });
 
-    it("/voice-stop reports when playback is already idle", async () => {
+    it("/voice:stop reports when playback is already idle", async () => {
       const mockPi = createMockPi();
       await voiceExtension(mockPi);
-      const handler = getCommandHandler(mockPi, "voice-stop");
+      const handler = getCommandHandler(mockPi, "voice:stop");
       const ctx = createMockCommandContext();
 
       await handler("", ctx);

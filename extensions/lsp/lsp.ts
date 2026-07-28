@@ -60,14 +60,14 @@ export default async function lspExtension(pi: ExtensionAPI) {
 
   // --- Commands ---
 
-  pi.registerCommand("lsp", {
+  pi.registerCommand("lsp:status", {
     description: "Show LSP server status, detected servers, and their extensions",
     handler: async (_args, ctx) => {
       await runtime.showStatus(ctx);
     },
   });
 
-  pi.registerCommand("lsp-restart", {
+  pi.registerCommand("lsp:restart", {
     description: "Stop all LSP servers (they reinitialize on next tool use)",
     handler: async (_args, ctx) => {
       await runtime.restart(ctx);

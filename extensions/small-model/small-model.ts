@@ -48,12 +48,12 @@ export default async function smallModelExtension(pi: ExtensionAPI) {
     });
   }
 
-  pi.registerCommand("small-model", {
+  pi.registerCommand("smallmodel", {
     description: "Select the global model used by lightweight extension tasks",
     handler: async (args, ctx) => {
       if (process.env[SMALL_MODEL_ENV_VAR]?.trim()) {
         ctx.ui.notify(
-          `${SMALL_MODEL_ENV_VAR} is overriding the global config. Unset it before using /small-model.`,
+          `${SMALL_MODEL_ENV_VAR} is overriding the global config. Unset it before using /smallmodel.`,
           "warning",
         );
         await updateStatus(ctx);
@@ -61,7 +61,7 @@ export default async function smallModelExtension(pi: ExtensionAPI) {
       }
 
       const trimmed = args.trim();
-      if (trimmed === "show") {
+      if (trimmed === "status") {
         try {
           const loaded = loadSmallModelConfig();
           ctx.ui.notify(
@@ -78,7 +78,7 @@ export default async function smallModelExtension(pi: ExtensionAPI) {
       if (!config) {
         if (trimmed) {
           ctx.ui.notify(
-            "Usage: /small-model [provider/model-id [off|minimal|low|medium|high|xhigh|max] | show]",
+            "Usage: /smallmodel [provider/model-id [off|minimal|low|medium|high|xhigh|max] | status]",
             "warning",
           );
         }

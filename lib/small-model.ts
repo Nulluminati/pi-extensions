@@ -95,7 +95,7 @@ export function loadSmallModelConfig(options: ConfigOptions = {}): {
   } catch (error) {
     if (isNodeError(error) && error.code === "ENOENT") {
       throw new Error(
-        `Global small model is not configured. Run /small-model to select one (${configPath}).`,
+        `Global small model is not configured. Run /smallmodel to select one (${configPath}).`,
       );
     }
     const message = error instanceof Error ? error.message : String(error);
@@ -155,10 +155,10 @@ export async function resolveSmallModelFromConfig(
   const label = `${config.provider}/${config.model}`;
   const model = ctx.modelRegistry.find(config.provider, config.model);
   if (!model)
-    throw new Error(`Global small model not found: ${label}. Run /small-model to replace it.`);
+    throw new Error(`Global small model not found: ${label}. Run /smallmodel to replace it.`);
   if (!model.input.includes("text")) {
     throw new Error(
-      `Global small model ${label} does not accept text. Run /small-model to replace it.`,
+      `Global small model ${label} does not accept text. Run /smallmodel to replace it.`,
     );
   }
 

@@ -94,11 +94,11 @@ describe("status-bar-extension", () => {
     vi.resetAllMocks();
   });
 
-  it("registers /statusbar command", async () => {
+  it("registers /statusbar:toggle command", async () => {
     const mockPi = createMockPi();
     await statusBarExtension(mockPi);
     expect(mockPi.registerCommand).toHaveBeenCalledWith(
-      "statusbar",
+      "statusbar:toggle",
       expect.objectContaining({
         description: expect.any(String),
         handler: expect.any(Function),
@@ -131,7 +131,7 @@ describe("status-bar-extension", () => {
     );
   });
 
-  it("/statusbar disables the footer when already enabled", async () => {
+  it("/statusbar:toggle disables the footer when already enabled", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await enableBar(mockPi, mockCtx);
@@ -144,7 +144,7 @@ describe("status-bar-extension", () => {
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("disabled"), "info");
   });
 
-  it("/statusbar re-enables the footer after being disabled", async () => {
+  it("/statusbar:toggle re-enables the footer after being disabled", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await enableBar(mockPi, mockCtx);
@@ -1329,7 +1329,7 @@ describe("status-bar editor install", () => {
     expect(mockCtx.ui.setEditorComponent).toHaveBeenLastCalledWith(undefined);
   });
 
-  it("/statusbar disable restores the default editor and re-enable reinstalls", async () => {
+  it("/statusbar:toggle disable restores the default editor and re-enable reinstalls", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await enableBar(mockPi, mockCtx);

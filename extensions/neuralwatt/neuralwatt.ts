@@ -7,7 +7,7 @@
  * session_start so newly published models can be added.
  *
  * Neuralwatt exposes per-model energy usage (kWh) alongside token pricing; the
- * /neuralwatt-quota command surfaces credits, monthly usage, and (when active)
+ * /neuralwatt:quota command surfaces credits, monthly usage, and (when active)
  * subscription energy quota.
  *
  * Auth (choose one):
@@ -103,10 +103,10 @@ export default async function neuralwattExtension(pi: ExtensionAPI) {
     }
   });
 
-  // /neuralwatt-flex: toggle flex for the current Neuralwatt model. Only
+  // /neuralwatt:flex: toggle flex for the current Neuralwatt model. Only
   // applies to Neuralwatt models, and only takes effect when the model has a
   // flex tier available.
-  pi.registerCommand("neuralwatt-flex", {
+  pi.registerCommand("neuralwatt:flex", {
     description: "Toggle Neuralwatt flex pricing tier for the current model",
     handler: async (_args, ctx) => {
       if (!ctx.hasUI) return;
@@ -133,8 +133,8 @@ export default async function neuralwattExtension(pi: ExtensionAPI) {
     },
   });
 
-  // /neuralwatt-models command
-  pi.registerCommand("neuralwatt-models", {
+  // /neuralwatt:models command
+  pi.registerCommand("neuralwatt:models", {
     description: "Display all available Neuralwatt models with pricing and capabilities",
     handler: async (_args, ctx) => {
       if (!ctx.hasUI) return;
@@ -143,8 +143,8 @@ export default async function neuralwattExtension(pi: ExtensionAPI) {
     },
   });
 
-  // /neuralwatt-quota command
-  pi.registerCommand("neuralwatt-quota", {
+  // /neuralwatt:quota command
+  pi.registerCommand("neuralwatt:quota", {
     description: "Display current Neuralwatt API quota usage",
     handler: async (_args, ctx) => {
       if (!ctx.hasUI) return;

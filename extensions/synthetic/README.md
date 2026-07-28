@@ -8,8 +8,8 @@ This extension registers the "synthetic" provider so you can use Synthetic's hos
 
 1. **Registers the provider** at load time with a static catalog of always-on models (so Pi can start even if the API is unavailable)
 2. **Checks for staleness** on `session_start` and notifies you when the live catalog exposes models the static list does not know about
-3. **Provides `/synthetic-models`** to list all available models with capabilities and pricing
-4. **Provides `/synthetic-quota`** to display current API quota usage
+3. **Provides `/synthetic:models`** to list all available models with capabilities and pricing
+4. **Provides `/synthetic:quota`** to display current API quota usage
 
 ## Usage
 
@@ -24,7 +24,7 @@ Or use Pi's model cycling (`Ctrl+M`) to cycle through available models.
 ### List models
 
 ```
-/synthetic-models
+/synthetic:models
 ```
 
 Displays all always-on models with their capabilities (vision, reasoning, tools) and per-million-token pricing.
@@ -32,7 +32,7 @@ Displays all always-on models with their capabilities (vision, reasoning, tools)
 ### Check quota
 
 ```
-/synthetic-quota
+/synthetic:quota
 ```
 
 Shows subscription usage, rolling 5-hour rate limits, weekly token remaining, search hourly limits, and free tool call counts.
@@ -73,7 +73,7 @@ The extension resolves the API key in order of priority:
 
 ### Model caching
 
-Fetched catalog data (for the staleness check) is requested fresh on `session_start`; `/synthetic-models` reads directly from the static list, so no caching is needed.
+Fetched catalog data (for the staleness check) is requested fresh on `session_start`; `/synthetic:models` reads directly from the static list, so no caching is needed.
 
 ## Key Design Decisions
 
@@ -87,8 +87,8 @@ Fetched catalog data (for the staleness check) is requested fresh on `session_st
 | API | Purpose |
 |-----|---------|
 | `pi.registerProvider("synthetic")` | Registers the provider and its models |
-| `pi.registerCommand("synthetic-models")` | Lists models with capabilities and pricing |
-| `pi.registerCommand("synthetic-quota")` | Displays API quota usage |
+| `pi.registerCommand("synthetic:models")` | Lists models with capabilities and pricing |
+| `pi.registerCommand("synthetic:quota")` | Displays API quota usage |
 | `pi.on("session_start")` | Startup staleness check against the live catalog |
 | `pi.on("model_select")` | Notifies when a Synthetic model is selected |
 | `ctx.modelRegistry.getApiKeyForProvider()` | Auth resolution from Pi's credential store |

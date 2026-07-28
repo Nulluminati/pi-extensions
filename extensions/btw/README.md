@@ -37,7 +37,7 @@ If you pass a question on the command line, the side turn starts immediately. Ot
 | `/btw:new` | Wipe the side thread back to empty, then open the overlay. |
 | `/btw:new "question"` | Wipe the side thread, open the overlay, ask the question. |
 | `/btw:tangent` | Same as `/btw` but the side agent has **no** main-session context. Useful for brainstorming from first principles. Open it with no question to start a fresh tangent thread. |
-| `/btw:clear` | Discard the side thread and close the overlay. |
+| `/btw:reset` | Discard the side thread and close the overlay (asks for confirmation). |
 
 ### Hand the result back to the main agent
 
@@ -48,11 +48,11 @@ If you pass a question on the command line, the side turn starts immediately. Ot
 /btw:summarize use the answer to refactor the auth module
 ```
 
-Inject pushes the full exchange (or your instructions plus the exchange) as a user message into the main agent. Summarize first distills the thread with a separate agent pass and hands the summary instead. Both clear the side thread afterwards.
+Inject pushes the full exchange (or your instructions plus the exchange) as a user message into the main agent. Summarize first distills the thread with a separate agent pass and hands the summary instead. Both wipe the side thread afterwards, so both ask for confirmation first.
 
 If the main agent is currently busy, the injection is queued as a follow-up so it lands at the end of the current turn rather than interrupting mid-stream.
 
-BTW uses the model selected by `/small-model`. It stops with an error if that model is unavailable rather than falling back to the active chat model.
+BTW uses the model selected by `/smallmodel`. It stops with an error if that model is unavailable rather than falling back to the active chat model.
 
 ### Adjust the thinking level for side questions
 
@@ -160,4 +160,4 @@ The overlay starts non-capturing, so the main editor keeps focus by default. Pre
 
 ## Configuration
 
-Set the shared model with `/small-model`. `/btw:thinking` can override its reasoning level for the current side thread; `/btw:thinking clear` returns to the global setting.
+Set the shared model with `/smallmodel`. `/btw:thinking` can override its reasoning level for the current side thread; `/btw:thinking clear` returns to the global setting.

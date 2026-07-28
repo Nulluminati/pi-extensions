@@ -410,11 +410,11 @@ describe("neuralwatt-extension", () => {
 
   // --- commands ---
 
-  it("registers /neuralwatt-models command", async () => {
+  it("registers /neuralwatt:models command", async () => {
     const mockPi = createMockPi();
     await neuralwattExtension(mockPi);
     expect(mockPi.registerCommand).toHaveBeenCalledWith(
-      "neuralwatt-models",
+      "neuralwatt:models",
       expect.objectContaining({
         description: expect.stringContaining("Neuralwatt models"),
         handler: expect.any(Function),
@@ -422,11 +422,11 @@ describe("neuralwatt-extension", () => {
     );
   });
 
-  it("registers /neuralwatt-quota command", async () => {
+  it("registers /neuralwatt:quota command", async () => {
     const mockPi = createMockPi();
     await neuralwattExtension(mockPi);
     expect(mockPi.registerCommand).toHaveBeenCalledWith(
-      "neuralwatt-quota",
+      "neuralwatt:quota",
       expect.objectContaining({
         description: expect.stringContaining("quota"),
         handler: expect.any(Function),
@@ -434,12 +434,12 @@ describe("neuralwatt-extension", () => {
     );
   });
 
-  it("/neuralwatt-models displays the static list with capabilities and pricing", async () => {
+  it("/neuralwatt:models displays the static list with capabilities and pricing", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await neuralwattExtension(mockPi);
 
-    const handler = getCommandHandler(mockPi, "neuralwatt-models");
+    const handler = getCommandHandler(mockPi, "neuralwatt:models");
     await handler("", mockCtx);
 
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("vision"), "info");
@@ -447,20 +447,20 @@ describe("neuralwatt-extension", () => {
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("glm-5.2"), "info");
   });
 
-  it("/neuralwatt-models shows no fetch on subsequent calls (purely static)", async () => {
+  it("/neuralwatt:models shows no fetch on subsequent calls (purely static)", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await neuralwattExtension(mockPi);
     const fetchesAfterInit = mockFetch.mock.calls.length;
 
-    const handler = getCommandHandler(mockPi, "neuralwatt-models");
+    const handler = getCommandHandler(mockPi, "neuralwatt:models");
     await handler("", mockCtx);
     await handler("", mockCtx);
 
     expect(mockFetch.mock.calls.length).toBe(fetchesAfterInit);
   });
 
-  it("/neuralwatt-quota fetches from /v1/quota endpoint with auth", async () => {
+  it("/neuralwatt:quota fetches from /v1/quota endpoint with auth", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await neuralwattExtension(mockPi);
@@ -478,7 +478,7 @@ describe("neuralwatt-extension", () => {
     };
     mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(quota) });
 
-    const handler = getCommandHandler(mockPi, "neuralwatt-quota");
+    const handler = getCommandHandler(mockPi, "neuralwatt:quota");
     await handler("", mockCtx);
 
     expect(mockFetch).toHaveBeenCalledWith(
@@ -492,7 +492,7 @@ describe("neuralwatt-extension", () => {
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Energy"), "info");
   });
 
-  it("/neuralwatt-quota renders subscription and key allowance when present", async () => {
+  it("/neuralwatt:quota renders subscription and key allowance when present", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await neuralwattExtension(mockPi);
@@ -519,7 +519,7 @@ describe("neuralwatt-extension", () => {
     };
     mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(quota) });
 
-    const handler = getCommandHandler(mockPi, "neuralwatt-quota");
+    const handler = getCommandHandler(mockPi, "neuralwatt:quota");
     await handler("", mockCtx);
 
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Subscription"), "info");
@@ -530,13 +530,13 @@ describe("neuralwatt-extension", () => {
     );
   });
 
-  it("/neuralwatt-quota shows error when API key is missing", async () => {
+  it("/neuralwatt:quota shows error when API key is missing", async () => {
     vi.stubEnv("NEURALWATT_API_KEY", undefined);
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await neuralwattExtension(mockPi);
 
-    const handler = getCommandHandler(mockPi, "neuralwatt-quota");
+    const handler = getCommandHandler(mockPi, "neuralwatt:quota");
     await handler("", mockCtx);
 
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(
@@ -545,14 +545,14 @@ describe("neuralwatt-extension", () => {
     );
   });
 
-  it("/neuralwatt-quota handles fetch errors gracefully", async () => {
+  it("/neuralwatt:quota handles fetch errors gracefully", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await neuralwattExtension(mockPi);
 
     mockFetch.mockRejectedValueOnce(new Error("Quota service down"));
 
-    const handler = getCommandHandler(mockPi, "neuralwatt-quota");
+    const handler = getCommandHandler(mockPi, "neuralwatt:quota");
     await handler("", mockCtx);
 
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(
@@ -744,14 +744,14 @@ describe("neuralwatt flex integration", () => {
     expect(emits[emits.length - 1][1]).toEqual({ flexOn: false, flexCapable: true });
   });
 
-  it("/neuralwatt-flex errors when the current model is not a Neuralwatt model", async () => {
+  it("/neuralwatt:flex errors when the current model is not a Neuralwatt model", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await neuralwattExtension(mockPi);
     // Non-Neuralwatt: do not run session_start's flex fetch.
     mockCtx.model = { id: "gpt-4", name: "gpt-4", provider: "openai" } as any;
 
-    const handler = getCommandHandler(mockPi, "neuralwatt-flex");
+    const handler = getCommandHandler(mockPi, "neuralwatt:flex");
     await handler("", mockCtx);
 
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(
@@ -760,14 +760,14 @@ describe("neuralwatt flex integration", () => {
     );
   });
 
-  it("/neuralwatt-flex warns when the Neuralwatt model has no flex tier", async () => {
+  it("/neuralwatt:flex warns when the Neuralwatt model has no flex tier", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     // Build capable set that does NOT include the selected model.
     await bootWithFlex(mockPi, mockCtx, "qwen3.6-35b", ["glm-5.2"]);
 
     mockCtx.ui.notify.mockClear();
-    const handler = getCommandHandler(mockPi, "neuralwatt-flex");
+    const handler = getCommandHandler(mockPi, "neuralwatt:flex");
     await handler("", mockCtx);
 
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(
@@ -776,13 +776,13 @@ describe("neuralwatt flex integration", () => {
     );
   });
 
-  it("/neuralwatt-flex toggles flex on/off and emits state for a capable model", async () => {
+  it("/neuralwatt:flex toggles flex on/off and emits state for a capable model", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await bootWithFlex(mockPi, mockCtx, "glm-5.2", ["glm-5.2"]);
 
     mockPi.events.emit.mockClear();
-    const handler = getCommandHandler(mockPi, "neuralwatt-flex");
+    const handler = getCommandHandler(mockPi, "neuralwatt:flex");
     await handler("", mockCtx); // enable
 
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Flex enabled"), "info");
@@ -815,7 +815,7 @@ describe("neuralwatt flex integration", () => {
     expect(result).toBeUndefined();
 
     // Enable flex, then inject.
-    await getCommandHandler(mockPi, "neuralwatt-flex")("", mockCtx);
+    await getCommandHandler(mockPi, "neuralwatt:flex")("", mockCtx);
     result = await providerHandler(
       { type: "before_provider_request", payload: { model: "glm-5.2", messages: [] } },
       mockCtx,

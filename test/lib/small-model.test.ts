@@ -92,7 +92,7 @@ describe("small-model config", () => {
   it("reports a missing config with an actionable error", () => {
     const path = temporaryConfigPath();
 
-    expect(() => loadSmallModelConfig({ configPath: path, env: {} })).toThrow("Run /small-model");
+    expect(() => loadSmallModelConfig({ configPath: path, env: {} })).toThrow("Run /smallmodel");
   });
 
   it("rejects malformed config without silently falling back", () => {
