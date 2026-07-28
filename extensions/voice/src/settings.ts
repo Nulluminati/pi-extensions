@@ -6,6 +6,8 @@ import {
   visibleWidth,
 } from "@earendil-works/pi-tui";
 import type { ExtensionCommandContext } from "pi";
+import { frameBorderLine, frameContentLine, frameRuleLine } from "../../../lib/tui-frame.ts";
+import { formatKeyHints } from "../../../lib/ui-format.ts";
 import { detectRecorders, hasTool } from "./audio.ts";
 import { resolveModelsDir, resolveSource } from "./config.ts";
 import {
@@ -34,28 +36,6 @@ interface VoiceSettingsOptions {
   onModelSelect: (modelId: string) => void;
   onTtsModelSelect: (modelId: string) => void;
   onSpeakerSelect: (speakerId: number) => void;
-}
-
-function settingsFrameLine(theme: VoiceSettingsTheme, width: number, content: string): string {
-  const innerWidth = Math.max(1, width - 2);
-  const inner = truncateToWidth(content, innerWidth, "…", true);
-  return theme.fg("border", "│") + inner + theme.fg("border", "│");
-}
-
-function settingsRuleLine(theme: VoiceSettingsTheme, width: number): string {
-  const innerWidth = Math.max(1, width - 2);
-  return theme.fg("border", `├${"─".repeat(innerWidth)}┤`);
-}
-
-function settingsBorderLine(
-  theme: VoiceSettingsTheme,
-  width: number,
-  edge: "top" | "bottom",
-): string {
-  const innerWidth = Math.max(1, width - 2);
-  const left = edge === "top" ? "┌" : "└";
-  const right = edge === "top" ? "┐" : "┘";
-  return theme.fg("border", `${left}${"─".repeat(innerWidth)}${right}`);
 }
 
 function modelSettingValue(modelsDir: string, model: ModelDef | TtsModelDef): string {
@@ -282,26 +262,33 @@ export async function runVoiceSettings(
           }
 
           const lines = [
-            settingsBorderLine(overlayTheme, frameWidth, "top"),
-            settingsFrameLine(
+            frameBorderLine(overlayTheme, frameWidth, "top"),
+            frameContentLine(
               overlayTheme,
               frameWidth,
               overlayTheme.fg("accent", overlayTheme.bold("VOICE")),
             ),
-            settingsFrameLine(
+            frameContentLine(
               overlayTheme,
               frameWidth,
               `${overlayTheme.fg("accent", "local audio")} · MIC → TEXT → SPEECH`,
             ),
-            settingsRuleLine(overlayTheme, frameWidth),
-            ...settingsLines.map((line) => settingsFrameLine(overlayTheme, frameWidth, line)),
-            settingsRuleLine(overlayTheme, frameWidth),
-            settingsFrameLine(
+            frameRuleLine(overlayTheme, frameWidth),
+            ...settingsLines.map((line) => frameContentLine(overlayTheme, frameWidth, line)),
+            frameRuleLine(overlayTheme, frameWidth),
+            frameContentLine(
               overlayTheme,
               frameWidth,
-              overlayTheme.fg("dim", "↑↓: navigate · enter/space: change · esc: dismiss"),
+              overlayTheme.fg(
+                "dim",
+                formatKeyHints([
+                  ["↑↓", "navigate"],
+                  ["enter/space", "change"],
+                  ["esc", "cancel"],
+                ]),
+              ),
             ),
-            settingsBorderLine(overlayTheme, frameWidth, "bottom"),
+            frameBorderLine(overlayTheme, frameWidth, "bottom"),
           ];
           return lines.map((line) => truncateToWidth(line, width, ""));
         },

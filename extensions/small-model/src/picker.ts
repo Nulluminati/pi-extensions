@@ -1,13 +1,11 @@
-import {
-  fuzzyFilter,
-  Input,
-  type SelectItem,
-  SelectList,
-  truncateToWidth,
-  visibleWidth,
-} from "@earendil-works/pi-tui";
+import type { SelectItem } from "@earendil-works/pi-tui";
 import type { ExtensionCommandContext } from "pi";
-import { parseSmallModelSpec, type SmallModelConfig } from "../../../lib/small-model.ts";
+import { createSearchableSelectModal } from "../../../lib/searchable-select.ts";
+import {
+  loadSmallModelConfig,
+  parseSmallModelSpec,
+  type SmallModelConfig,
+} from "../../../lib/small-model.ts";
 import { currentThinkingLevel } from "./config.ts";
 
 interface ModelMetadata {
@@ -39,91 +37,23 @@ function formatModelDescription(model: ModelMetadata): string {
 async function selectModelWithSearch(
   ctx: ExtensionCommandContext,
   items: SelectItem[],
+  activeValue: string | undefined,
 ): Promise<string | undefined> {
-  return ctx.ui.custom<string | undefined>((tui, theme, keybindings, done) => {
-    const searchInput = new Input();
-    let filteredItems = items;
-    let selectedIndex = 0;
-    let focused = false;
-
-    const listTheme = {
-      selectedPrefix: (text: string) => theme.fg("accent", text),
-      selectedText: (text: string) => theme.fg("accent", text),
-      description: (text: string) => theme.fg("muted", text),
-      scrollInfo: (text: string) => theme.fg("dim", text),
-      noMatch: (_text: string) => theme.fg("warning", "  No matching models"),
-    };
-    let selectList = new SelectList(filteredItems, Math.min(items.length, 12), listTheme);
-
-    function refreshFilter(): void {
-      const query = searchInput.getValue().trim();
-      filteredItems = query
-        ? fuzzyFilter(items, query, (item) => `${item.value} ${item.description ?? ""}`)
-        : items;
-      selectedIndex = 0;
-      selectList = new SelectList(
-        filteredItems,
-        Math.min(Math.max(filteredItems.length, 1), 12),
-        listTheme,
-      );
-    }
-
-    function moveSelection(offset: number): void {
-      if (filteredItems.length === 0) return;
-      selectedIndex = (selectedIndex + offset + filteredItems.length) % filteredItems.length;
-      selectList.setSelectedIndex(selectedIndex);
-    }
-
-    return {
-      get focused(): boolean {
-        return focused;
-      },
-      set focused(value: boolean) {
-        focused = value;
-        searchInput.focused = value;
-      },
-      render(width: number): string[] {
-        const safeWidth = Math.max(width, 1);
-        const searchPrefix = theme.fg("muted", "Search: ");
-        const inputWidth = Math.max(safeWidth - visibleWidth(searchPrefix), 1);
-        const inputLine = searchInput.render(inputWidth)[0] ?? "";
-        return [
-          truncateToWidth(
-            theme.fg("accent", theme.bold("Select global small model")),
-            safeWidth,
-            "",
-          ),
-          truncateToWidth(`${searchPrefix}${inputLine}`, safeWidth, ""),
-          ...selectList.render(safeWidth),
-          truncateToWidth(
-            theme.fg("dim", "type to search · ↑↓ navigate · enter select · esc cancel"),
-            safeWidth,
-            "",
-          ),
-        ];
-      },
-      invalidate(): void {
-        searchInput.invalidate();
-        selectList.invalidate();
-      },
-      handleInput(data: string): void {
-        if (keybindings.matches(data, "tui.select.up")) {
-          moveSelection(-1);
-        } else if (keybindings.matches(data, "tui.select.down")) {
-          moveSelection(1);
-        } else if (keybindings.matches(data, "tui.select.confirm")) {
-          const selected = filteredItems[selectedIndex];
-          if (selected) done(selected.value);
-        } else if (keybindings.matches(data, "tui.select.cancel")) {
-          done(undefined);
-        } else {
-          searchInput.handleInput(data);
-          refreshFilter();
-        }
-        tui.requestRender();
-      },
-    };
-  });
+  return ctx.ui.custom<string | undefined>((tui, theme, keybindings, done) =>
+    createSearchableSelectModal({
+      tui,
+      theme,
+      keybindings,
+      items,
+      activeValue,
+      title: "Select Global Small Model",
+      maxVisible: 10,
+      noMatchText: "No matching models",
+      searchText: (item) => `${item.value} ${item.description ?? ""}`,
+      onSelect: done,
+      onCancel: () => done(undefined),
+    }),
+  );
 }
 
 export async function selectModel(
@@ -133,6 +63,14 @@ export async function selectModel(
     .getAvailable()
     .filter((model) => model.provider && model.input.includes("text"))
     .sort((a, b) => `${a.provider}/${a.id}`.localeCompare(`${b.provider}/${b.id}`));
+  let activeValue: string | undefined;
+  try {
+    const active = loadSmallModelConfig().config;
+    activeValue = `${active.provider}/${active.model}`;
+  } catch {
+    activeValue = undefined;
+  }
+
   const items: SelectItem[] = models.map((model) => {
     const value = `${model.provider}/${model.id}`;
     return { value, label: value, description: formatModelDescription(model) };
@@ -144,9 +82,9 @@ export async function selectModel(
 
   const selected =
     ctx.mode === "tui"
-      ? await selectModelWithSearch(ctx, items)
+      ? await selectModelWithSearch(ctx, items, activeValue)
       : await ctx.ui.select(
-          "Select global small model",
+          "Select Global Small Model",
           items.map((item) => item.value),
         );
   if (!selected) return undefined;

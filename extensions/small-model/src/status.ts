@@ -1,10 +1,15 @@
 import type { ExtensionContext, ThinkingLevel } from "pi";
 import { resolveSmallModel } from "../../../lib/small-model.ts";
+import { formatStatusLine } from "../../../lib/ui-format.ts";
 import { STATUS_ICON, STATUS_KEY } from "./constants.ts";
 
 function formatStatus(ctx: ExtensionContext, label: string, thinkingLevel?: ThinkingLevel): string {
   const suffix = thinkingLevel ? ` · ${thinkingLevel}` : "";
-  return `${ctx.ui.theme.fg("accent", STATUS_ICON)} ${ctx.ui.theme.fg("muted", `small ${label}${suffix}`)}`;
+  return formatStatusLine(ctx.ui.theme, {
+    icon: STATUS_ICON,
+    prefix: "Small Model",
+    text: `${label}${suffix}`,
+  });
 }
 
 export async function updateStatus(ctx: ExtensionContext): Promise<void> {

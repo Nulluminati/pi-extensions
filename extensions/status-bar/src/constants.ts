@@ -92,5 +92,3 @@ export const EDITOR_META_SEPARATOR = "  ";
  * the same string.
  */
 export const FLEX_EVENT = "neuralwatt:flex-change";
-
-export const EDITOR_MARKER = Symbol.for("pi-statusbar.editor-factory");

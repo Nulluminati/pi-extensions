@@ -6,6 +6,7 @@
  */
 
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "pi";
+import { formatStatusLine } from "../../lib/ui-format.ts";
 import { parseGoalArgs, validateObjective } from "./src/command-parser.ts";
 import {
   COMPLETION_STATUS_DURATION,
@@ -51,7 +52,13 @@ export default async function goalExtension(pi: ExtensionAPI) {
       STATUS_KEY,
       text === undefined
         ? undefined
-        : `${ctx.ui.theme.fg(ICON_COLOR, STATUS_ICON)} ${ctx.ui.theme.fg(TEXT_COLOR, text)}`,
+        : formatStatusLine(ctx.ui.theme, {
+            icon: STATUS_ICON,
+            prefix: "Goal",
+            text,
+            iconColor: ICON_COLOR,
+            textColor: TEXT_COLOR,
+          }),
     );
   }
 
@@ -238,7 +245,13 @@ export default async function goalExtension(pi: ExtensionAPI) {
 
       ctx.ui.setStatus(
         STATUS_KEY,
-        `${ctx.ui.theme.fg(ICON_COLOR, STATUS_ICON)} ${ctx.ui.theme.fg(TEXT_COLOR, "complete")}`,
+        formatStatusLine(ctx.ui.theme, {
+          icon: STATUS_ICON,
+          prefix: "Goal",
+          text: "complete",
+          iconColor: ICON_COLOR,
+          textColor: TEXT_COLOR,
+        }),
       );
       completionStatusTimer = setTimeout(() => {
         completionStatusTimer = undefined;

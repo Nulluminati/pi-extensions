@@ -1,5 +1,7 @@
-import { matchesKey, visibleWidth } from "@earendil-works/pi-tui";
+import { matchesKey, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { ExtensionContext } from "pi";
+import { frameBorderLine, frameContentLine } from "../../../lib/tui-frame.ts";
+import { formatKeyHints } from "../../../lib/ui-format.ts";
 import { concatFloat32, detectRecorders, startStreamingRecorder } from "./audio.ts";
 import { resolveModelsDir, resolveSource } from "./config.ts";
 import {
@@ -47,17 +49,11 @@ function createVoiceOverlay(
 ): OverlayComponent {
   return {
     render(width: number): string[] {
-      const w = Math.max(40, width);
+      const w = Math.max(0, Math.floor(width));
       const inner = Math.max(1, w - 2);
       const out: string[] = [];
-      // pad to inner width, using visibleWidth so ANSI codes and wide chars don't skew it
-      const bar = (s: string): string => {
-        const vw = visibleWidth(s);
-        const pad = Math.max(0, inner - vw);
-        const trunc = vw > inner ? s.slice(0, inner) : s;
-        return `│${trunc}${" ".repeat(pad)}│`;
-      };
-      out.push(`┌${"─".repeat(inner)}┐`);
+      const bar = (content: string): string => frameContentLine(theme, w, content);
+      out.push(frameBorderLine(theme, w, "top"));
       out.push(bar(`${theme.fg("accent", theme.bold("VOICE"))} ${theme.fg("dim", state.modelId)}`));
       const filled = Math.min(30, Math.round(state.level * 30));
       const eq = "\u2593".repeat(filled) + "\u2591".repeat(Math.max(0, 30 - filled));
@@ -80,14 +76,24 @@ function createVoiceOverlay(
       const maxLines = 5;
       const visible = lines.slice(-maxLines);
       for (const line of visible) {
-        for (const wrapped of wrapAnsi(line, inner)) {
+        for (const wrapped of wrapTextWithAnsi(line, inner)) {
           out.push(bar(wrapped));
         }
       }
       const padCount = Math.max(0, 2 - visible.length);
       for (let i = 0; i < padCount; i++) out.push(bar(""));
-      out.push(bar(theme.fg("dim", "enter: paste  ctrl+x: cancel")));
-      out.push(`└${"─".repeat(inner)}┘`);
+      out.push(
+        bar(
+          theme.fg(
+            "dim",
+            formatKeyHints([
+              ["enter", "paste"],
+              ["esc", "cancel"],
+            ]),
+          ),
+        ),
+      );
+      out.push(frameBorderLine(theme, w, "bottom"));
       return out;
     },
     invalidate(): void {},
@@ -101,32 +107,6 @@ function createVoiceOverlay(
         onCancel();
     },
   };
-}
-
-/** Word-wrap text that may contain ANSI codes, preserving visual width. */
-function wrapAnsi(text: string, width: number): string[] {
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape stripping
-  const stripped = text.replace(/\x1b\[[0-9;]*m/g, "");
-  if (stripped.length <= width) return [text];
-  // Find the ANSI prefix/suffix so we can re-apply colors on each wrapped line.
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape matching
-  const prefixMatch = text.match(/^(\x1b\[[0-9;]*m)*/);
-  const prefix = prefixMatch ? (prefixMatch[0] ?? "") : "";
-  const reset = "\x1b[0m";
-  const body = stripped;
-  const out: string[] = [];
-  let current = "";
-  for (const word of body.split(/\s+/)) {
-    if (word.length === 0) continue;
-    if (`${current} ${word}`.trim().length > width) {
-      if (current.trim()) out.push(`${prefix}${current.trim()}${reset}`);
-      current = word;
-    } else {
-      current = current ? `${current} ${word}` : word;
-    }
-  }
-  if (current.trim()) out.push(`${prefix}${current.trim()}${reset}`);
-  return out;
 }
 
 // 0.5s

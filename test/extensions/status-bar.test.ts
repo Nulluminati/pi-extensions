@@ -7,6 +7,11 @@ import statusBarExtension, {
   renderPolishedFrame,
   STATUS_ICON,
 } from "../../extensions/status-bar/status-bar.ts";
+import {
+  type EditorFactory,
+  hasEditorFactoryLayer,
+  installEditorFactoryLayer,
+} from "../../lib/editor-factory.ts";
 import { createMockCommandContext } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
 import { getEventHandler } from "../mocks/test-helpers.ts";
@@ -122,7 +127,7 @@ describe("status-bar-extension", () => {
     expect(mockCtx.ui.setFooter).toHaveBeenCalledWith(expect.any(Function));
     expect(mockCtx.ui.setStatus).toHaveBeenCalledWith(
       "status-bar",
-      expect.stringContaining("statusbar"),
+      expect.stringContaining("Status Bar: enabled"),
     );
   });
 
@@ -1337,6 +1342,38 @@ describe("status-bar editor install", () => {
     expect(mockCtx.ui.setEditorComponent).toHaveBeenLastCalledWith(expect.any(Function));
   });
 
+  it("preserves an outer editor behavior when enabled and disabled", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    const outerFactory = installEditorFactoryLayer(
+      undefined,
+      "test-outer-behavior",
+      100,
+      (parent, tui, theme, keybindings) => {
+        const editor = (parent?.(tui, theme, keybindings) ?? {}) as { outer?: boolean };
+        editor.outer = true;
+        return editor;
+      },
+    );
+    mockCtx.ui.setEditorComponent(outerFactory);
+    mockCtx.ui.setEditorComponent.mockClear();
+
+    await enableBar(mockPi, mockCtx);
+
+    const installed = mockCtx.ui.getEditorComponent() as EditorFactory;
+    expect(hasEditorFactoryLayer(installed, "status-bar")).toBe(true);
+    expect(hasEditorFactoryLayer(installed, "test-outer-behavior")).toBe(true);
+    expect((installed({}, {}, {}) as { outer?: boolean }).outer).toBe(true);
+
+    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
+    await handler("", mockCtx);
+
+    const restored = mockCtx.ui.getEditorComponent() as EditorFactory;
+    expect(hasEditorFactoryLayer(restored, "status-bar")).toBe(false);
+    expect(hasEditorFactoryLayer(restored, "test-outer-behavior")).toBe(true);
+    expect((restored({}, {}, {}) as { outer?: boolean }).outer).toBe(true);
+  });
+
   it("installs a factory marked as the status-bar editor (idempotent)", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
@@ -1423,7 +1460,9 @@ function renderInstalledEditor(mockCtx: ReturnType<typeof createMockCommandConte
 function getFlexHandler(mockPi: ReturnType<typeof createMockPi>) {
   const calls = (mockPi.events.on as ReturnType<typeof vi.fn>).mock.calls;
   for (const [event, handler] of calls) {
-    if (event === "neuralwatt:flex-change") return handler as (flex: any) => void;
+    if (event === "neuralwatt:flex-change") {
+      return handler as (flex: { flexOn: boolean; flexCapable: boolean }) => void;
+    }
   }
   return undefined;
 }

@@ -1,20 +1,8 @@
-import { truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { AgentToolResult, Theme, ToolRenderContext, ToolRenderResultOptions } from "pi";
+import { createToolStatus, wrapToolText } from "../../../lib/tool-renderer.ts";
 import type { GrepAppSearchDetails, GrepAppSearchParams } from "./types.ts";
 
 const EXPANDED_PREVIEW_RESULT_LIMIT = 5;
-
-function wrapMultilineText(text: string, width: number): string[] {
-  const lines: string[] = [];
-  for (const paragraph of text.split("\n")) {
-    if (paragraph === "") {
-      lines.push("");
-    } else {
-      lines.push(...wrapTextWithAnsi(paragraph, width));
-    }
-  }
-  return lines;
-}
 
 export function renderGrepAppResult(
   result: AgentToolResult<GrepAppSearchDetails>,
@@ -29,21 +17,11 @@ export function renderGrepAppResult(
 
   if (isError) {
     const errorText = result.content[0]?.type === "text" ? result.content[0].text : "";
-    return {
-      render: (width: number) => [
-        truncateToWidth(theme.fg("error", `✗ Grep: "${query}" — ${errorText}`), width),
-      ],
-      invalidate: () => {},
-    };
+    return createToolStatus(theme, "error", `✗ Grep: "${query}" — ${errorText}`);
   }
 
   if (options.isPartial) {
-    return {
-      render: (width: number) => [
-        truncateToWidth(theme.fg("warning", `🔍 Grep: "${query}"...`), width),
-      ],
-      invalidate: () => {},
-    };
+    return createToolStatus(theme, "warning", `🔍 Grep: "${query}"...`);
   }
 
   if (options.expanded) {
@@ -59,13 +37,13 @@ export function renderGrepAppResult(
         text += theme.fg("muted", `... and ${results.length - limit} more repositories`);
       }
       return {
-        render: (width: number) => wrapMultilineText(text.trimEnd(), width),
+        render: (width: number) => wrapToolText(text.trimEnd(), width),
         invalidate: () => {},
       };
     }
     const text = result.content[0]?.type === "text" ? result.content[0].text : "";
     return {
-      render: (width: number) => wrapMultilineText(text, width),
+      render: (width: number) => wrapToolText(text, width),
       invalidate: () => {},
     };
   }
@@ -78,10 +56,5 @@ export function renderGrepAppResult(
       ? "no results"
       : `${totalResults.toLocaleString()} match${totalResults !== 1 ? "es" : ""} in ${repositoriesFound} repo${repositoriesFound !== 1 ? "s" : ""} (${resultsShown} shown)`;
 
-  return {
-    render: (width: number) => [
-      truncateToWidth(theme.fg("success", `🔍 Grep: "${query}" — ${label}`), width),
-    ],
-    invalidate: () => {},
-  };
+  return createToolStatus(theme, "success", `🔍 Grep: "${query}" — ${label}`);
 }

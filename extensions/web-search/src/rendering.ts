@@ -1,5 +1,5 @@
-import { truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { AgentToolResult, Theme, ToolRenderResultOptions } from "pi";
+import { createToolStatus, wrapToolText } from "../../../lib/tool-renderer.ts";
 import { FETCH_PREVIEW_LINE_LIMIT, SEARCH_PREVIEW_RESULT_LIMIT } from "./constants.ts";
 import type { SearchResult } from "./types.ts";
 
@@ -16,17 +16,7 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
 
-export function wrapMultilineText(text: string, width: number): string[] {
-  const lines: string[] = [];
-  for (const paragraph of text.split("\n")) {
-    if (paragraph === "") {
-      lines.push("");
-    } else {
-      lines.push(...wrapTextWithAnsi(paragraph, width));
-    }
-  }
-  return lines;
-}
+export const wrapMultilineText = wrapToolText;
 
 export function renderSearchResult(
   result: AgentToolResult,
@@ -43,20 +33,10 @@ export function renderSearchResult(
       : ""
     : "";
   if (isError) {
-    return {
-      render: (width: number) => [
-        truncateToWidth(theme.fg("error", `✗ Search: "${query}" — ${errorText}`), width),
-      ],
-      invalidate: () => {},
-    };
+    return createToolStatus(theme, "error", `✗ Search: "${query}" — ${errorText}`);
   }
   if (options.isPartial) {
-    return {
-      render: (width: number) => [
-        truncateToWidth(theme.fg("warning", `🔍 Searching: "${query}"...`), width),
-      ],
-      invalidate: () => {},
-    };
+    return createToolStatus(theme, "warning", `🔍 Searching: "${query}"...`);
   }
   if (options.expanded) {
     const results = details?.results as SearchResult[] | undefined;
@@ -82,12 +62,7 @@ export function renderSearchResult(
     };
   }
   const label = count === 0 ? "no results" : `${count} result${count !== 1 ? "s" : ""}`;
-  return {
-    render: (width: number) => [
-      truncateToWidth(theme.fg("success", `🔍 Search: "${query}" — ${label}`), width),
-    ],
-    invalidate: () => {},
-  };
+  return createToolStatus(theme, "success", `🔍 Search: "${query}" — ${label}`);
 }
 
 export function renderFetchResult(
@@ -104,20 +79,10 @@ export function renderFetchResult(
       : ""
     : "";
   if (isError) {
-    return {
-      render: (width: number) => [
-        truncateToWidth(theme.fg("error", `✗ Fetch: ${url} — ${errorText}`), width),
-      ],
-      invalidate: () => {},
-    };
+    return createToolStatus(theme, "error", `✗ Fetch: ${url} — ${errorText}`);
   }
   if (options.isPartial) {
-    return {
-      render: (width: number) => [
-        truncateToWidth(theme.fg("warning", `📄 Fetching: ${url}...`), width),
-      ],
-      invalidate: () => {},
-    };
+    return createToolStatus(theme, "warning", `📄 Fetching: ${url}...`);
   }
   if (options.expanded) {
     const text = result.content[0]?.type === "text" ? result.content[0].text : "";
@@ -144,10 +109,5 @@ export function renderFetchResult(
   const title = details?.title ? ` — ${details.title}` : "";
   const contentLength = details?.contentLength as number | undefined;
   const size = contentLength != null ? ` (${formatBytes(contentLength)})` : "";
-  return {
-    render: (width: number) => [
-      truncateToWidth(theme.fg("success", `📄 Fetch: ${url}${title}${size}`), width),
-    ],
-    invalidate: () => {},
-  };
+  return createToolStatus(theme, "success", `📄 Fetch: ${url}${title}${size}`);
 }

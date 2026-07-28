@@ -9,6 +9,8 @@ import {
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import type { ExtensionContext } from "pi";
+import { frameBorderLine, frameContentLine, frameRuleLine } from "../../../lib/tui-frame.ts";
+import { formatKeyHints } from "../../../lib/ui-format.ts";
 import { isFocusShortcut, MAX_QUESTION_LENGTH } from "./constants.ts";
 import { globalSmallModelDisplay, resolveThinkingLevel } from "./model.ts";
 import { statusToText } from "./thread.ts";
@@ -31,29 +33,6 @@ function overlayDimensions(): { width: number; height: number } {
 }
 
 // --- Overlay component (Container + Input, framed manually) ---
-
-/**
- * Single bordered line: `│<inner>│` with visible width exactly `width`.
- * `truncateToWidth(..., pad=true)` clips AND pads by visible width, so
- * ANSI escapes don't throw off the alignment.
- */
-function frameLine(theme: ThemeLite, width: number, content: string): string {
-  const innerWidth = Math.max(1, width - 2);
-  const inner = truncateToWidth(content, innerWidth, "…", true);
-  return theme.fg("border", "│") + inner + theme.fg("border", "│");
-}
-
-function ruleLine(theme: ThemeLite, width: number): string {
-  const innerWidth = Math.max(1, width - 2);
-  return theme.fg("border", `├${"─".repeat(innerWidth)}┤`);
-}
-
-function borderLine(theme: ThemeLite, width: number, edge: "top" | "bottom"): string {
-  const innerWidth = Math.max(1, width - 2);
-  const left = edge === "top" ? "┌" : "└";
-  const right = edge === "top" ? "┐" : "┘";
-  return theme.fg("border", `${left}${"─".repeat(innerWidth)}${right}`);
-}
 
 /**
  * The bordered overlay. The transcript is laid out as pre-built string
@@ -159,7 +138,7 @@ class BtwOverlayComponent extends Container implements Focusable {
     this.composer.focused = false;
     try {
       const rendered = this.composer.render(innerWidth)[0] ?? "";
-      return frameLine(this.theme, width, rendered);
+      return frameContentLine(this.theme, width, rendered);
     } finally {
       this.composer.focused = wasFocused;
     }
@@ -230,22 +209,22 @@ class BtwOverlayComponent extends Container implements Focusable {
     }`;
 
     const out: string[] = [];
-    out.push(borderLine(this.theme as unknown as ThemeLite, w, "top"));
+    out.push(frameBorderLine(this.theme as unknown as ThemeLite, w, "top"));
     out.push(
-      frameLine(
+      frameContentLine(
         this.theme as unknown as ThemeLite,
         w,
         `${focusIndicator}  ${this.theme.fg("accent", this.theme.bold("BTW"))}`,
       ),
     );
-    out.push(frameLine(this.theme as unknown as ThemeLite, w, config));
-    out.push(frameLine(this.theme as unknown as ThemeLite, w, summary));
-    out.push(ruleLine(this.theme as unknown as ThemeLite, w));
+    out.push(frameContentLine(this.theme as unknown as ThemeLite, w, config));
+    out.push(frameContentLine(this.theme as unknown as ThemeLite, w, summary));
+    out.push(frameRuleLine(this.theme as unknown as ThemeLite, w));
     for (const line of wrapped.slice(
       this.transcriptScrollOffset,
       this.transcriptScrollOffset + transcriptHeight,
     )) {
-      out.push(frameLine(this.theme as unknown as ThemeLite, w, line));
+      out.push(frameContentLine(this.theme as unknown as ThemeLite, w, line));
     }
     const pad = Math.max(
       0,
@@ -254,11 +233,11 @@ class BtwOverlayComponent extends Container implements Focusable {
           this.transcriptScrollOffset),
     );
     for (let i = 0; i < pad; i++) {
-      out.push(frameLine(this.theme as unknown as ThemeLite, w, ""));
+      out.push(frameContentLine(this.theme as unknown as ThemeLite, w, ""));
     }
-    out.push(ruleLine(this.theme as unknown as ThemeLite, w));
+    out.push(frameRuleLine(this.theme as unknown as ThemeLite, w));
     out.push(
-      frameLine(
+      frameContentLine(
         this.theme as unknown as ThemeLite,
         w,
         this.theme.fg("warning", this.currentStatus),
@@ -266,13 +245,21 @@ class BtwOverlayComponent extends Container implements Focusable {
     );
     out.push(this.inputFrame(w));
     out.push(
-      frameLine(
+      frameContentLine(
         this.theme as unknown as ThemeLite,
         w,
-        this.theme.fg("dim", "enter · esc: dismiss · mouse/↑↓/pgup/pgdn: scroll · alt+/: focus"),
+        this.theme.fg(
+          "dim",
+          formatKeyHints([
+            ["enter", "ask"],
+            ["esc", "cancel"],
+            ["mouse/↑↓/pgup/pgdn", "scroll"],
+            ["alt+/", "focus"],
+          ]),
+        ),
       ),
     );
-    out.push(borderLine(this.theme as unknown as ThemeLite, w, "bottom"));
+    out.push(frameBorderLine(this.theme as unknown as ThemeLite, w, "bottom"));
     return out.map((line) => this.fitLine(line, width));
   }
 

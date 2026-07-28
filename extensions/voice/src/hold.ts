@@ -130,14 +130,16 @@ export function addHoldToVoice<T extends HoldToVoiceEditor>(
       return;
     }
 
-    if (!space) {
-      originalHandleInput(data);
+    if (deps.isRelease(data)) {
+      if (space) {
+        clearHoldTimer();
+        if (!triggered) originalHandleInput(" ");
+        triggered = false;
+      }
       return;
     }
-    if (deps.isRelease(data)) {
-      clearHoldTimer();
-      if (!triggered) originalHandleInput(" ");
-      triggered = false;
+    if (!space) {
+      originalHandleInput(data);
       return;
     }
     if (deps.isRepeat(data)) return;

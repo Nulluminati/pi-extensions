@@ -183,7 +183,7 @@ describe("handoff-extension", () => {
     );
     expect(mockCtx.ui.setStatus).toHaveBeenCalledWith(
       "handoff",
-      expect.stringContaining("Generating handoff summary…"),
+      expect.stringContaining("Handoff: generating summary…"),
     );
     expect(mockCtx.ui.setStatus).toHaveBeenLastCalledWith("handoff", undefined);
   });

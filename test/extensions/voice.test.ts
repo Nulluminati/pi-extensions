@@ -31,6 +31,11 @@ import voiceExtension, {
   TTS_MODELS,
   transcribeFile,
 } from "../../extensions/voice/voice.ts";
+import {
+  type EditorFactory,
+  hasEditorFactoryLayer,
+  installEditorFactoryLayer,
+} from "../../lib/editor-factory.ts";
 import { createMockCommandContext } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
 import { getCommandHandler, getEventHandler } from "../mocks/test-helpers.ts";
@@ -87,6 +92,22 @@ describe("voice-extension", () => {
       expect(handleInput).not.toHaveBeenCalled();
       editor.handleInput("release");
       expect(handleInput).not.toHaveBeenCalled();
+    });
+
+    it("does not forward non-Space key releases to the editor", () => {
+      const handleInput = vi.fn();
+      const editor = addHoldToVoice({ handleInput }, vi.fn(), {
+        isSupported: () => true,
+        isSpace: () => false,
+        isRelease: (data) => data === "a-release",
+        isRepeat: () => false,
+      });
+
+      editor.handleInput("a-press");
+      editor.handleInput("a-release");
+
+      expect(handleInput).toHaveBeenCalledOnce();
+      expect(handleInput).toHaveBeenCalledWith("a-press");
     });
 
     it("inserts a normal space when released before the hold threshold", () => {
@@ -199,6 +220,31 @@ describe("voice-extension", () => {
       const sessionShutdown = getEventHandler(mockPi, "session_shutdown");
       await sessionShutdown({ type: "session_shutdown", reason: "quit" }, ctx);
       expect(ctx.ui.setEditorComponent).toHaveBeenLastCalledWith(previousFactory);
+    });
+
+    it("removes hold-to-voice from around a later inner editor layer on shutdown", async () => {
+      const mockPi = createMockPi();
+      const ctx = createMockCommandContext();
+      await voiceExtension(mockPi);
+
+      const sessionStart = getEventHandler(mockPi, "session_start");
+      await sessionStart({ type: "session_start", reason: "startup" }, ctx);
+      const voiceFactory = ctx.ui.getEditorComponent() as EditorFactory;
+      expect(hasEditorFactoryLayer(voiceFactory, "voice-hold")).toBe(true);
+      const withVisualLayer = installEditorFactoryLayer(
+        voiceFactory,
+        "test-visual-layer",
+        0,
+        (parent, tui, theme, keybindings) => parent?.(tui, theme, keybindings),
+      );
+      ctx.ui.setEditorComponent(withVisualLayer);
+
+      const sessionShutdown = getEventHandler(mockPi, "session_shutdown");
+      await sessionShutdown({ type: "session_shutdown", reason: "quit" }, ctx);
+
+      const restored = ctx.ui.getEditorComponent() as EditorFactory;
+      expect(hasEditorFactoryLayer(restored, "voice-hold")).toBe(false);
+      expect(hasEditorFactoryLayer(restored, "test-visual-layer")).toBe(true);
     });
 
     it("opens voice from the global terminal hook when the editor misses Space", async () => {
@@ -839,8 +885,8 @@ describe("voice-extension", () => {
       });
       const renderedLines = component?.render(72) ?? [];
       const rendered = renderedLines.join("\n");
-      expect(renderedLines[0]).toBe(`┌${"─".repeat(70)}┐`);
-      expect(renderedLines.at(-1)).toBe(`└${"─".repeat(70)}┘`);
+      expect(renderedLines[0]).toBe(`╭${"─".repeat(70)}╮`);
+      expect(renderedLines.at(-1)).toBe(`╰${"─".repeat(70)}╯`);
       expect(renderedLines.every((line) => line.length === 72)).toBe(true);
       expect(rendered).not.toContain("FOCUSED");
       expect(rendered).toContain("VOICE");

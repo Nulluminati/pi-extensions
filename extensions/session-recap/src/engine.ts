@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "pi";
+import { formatStatusLine } from "../../../lib/ui-format.ts";
 import {
   DEFAULT_FOCUS_MIN_SECONDS,
   DEFAULT_IDLE_SECONDS,
@@ -100,7 +101,13 @@ export async function generateAndShow(
   if (showStatus && ctx.hasUI) {
     ctx.ui.setStatus(
       STATUS_KEY,
-      `${ctx.ui.theme.fg(ICON_COLOR, STATUS_ICON)} ${ctx.ui.theme.fg(TEXT_COLOR, "drafting recap…")}`,
+      formatStatusLine(ctx.ui.theme, {
+        icon: STATUS_ICON,
+        prefix: "Session Recap",
+        text: "drafting…",
+        iconColor: ICON_COLOR,
+        textColor: TEXT_COLOR,
+      }),
     );
   }
 

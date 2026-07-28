@@ -1,8 +1,9 @@
 import { completeSimple } from "@earendil-works/pi-ai";
 import type { ExtensionCommandContext } from "pi";
 import { resolveSmallModel } from "../../../lib/small-model.ts";
+import { formatStatusLine } from "../../../lib/ui-format.ts";
 import { resolveModelsDir } from "./config.ts";
-import { DEFAULT_TTS_MODEL_ID, TTS_STATUS_KEY } from "./constants.ts";
+import { DEFAULT_TTS_MODEL_ID, TTS_STATUS_ICON, TTS_STATUS_KEY } from "./constants.ts";
 import { modelIsDownloaded, TTS_MODELS } from "./models.ts";
 
 export function findLatestAssistantText(entries: unknown[]): string | undefined {
@@ -128,7 +129,14 @@ export async function runVoiceSpeak(
     return;
   }
 
-  ctx.ui.setStatus(TTS_STATUS_KEY, "preparing speech…");
+  ctx.ui.setStatus(
+    TTS_STATUS_KEY,
+    formatStatusLine(ctx.ui.theme, {
+      icon: TTS_STATUS_ICON,
+      prefix: "Voice",
+      text: "preparing speech…",
+    }),
+  );
   try {
     const full = args.trim().toLowerCase() === "full";
     const spokenText = full
@@ -138,7 +146,14 @@ export async function runVoiceSpeak(
       ctx.ui.notify("The assistant message has no speakable text.", "warning");
       return;
     }
-    ctx.ui.setStatus(TTS_STATUS_KEY, "speaking…");
+    ctx.ui.setStatus(
+      TTS_STATUS_KEY,
+      formatStatusLine(ctx.ui.theme, {
+        icon: TTS_STATUS_ICON,
+        prefix: "Voice",
+        text: "speaking…",
+      }),
+    );
     await opts.speak(spokenText, opts.speakerId);
   } catch (error) {
     ctx.ui.notify(

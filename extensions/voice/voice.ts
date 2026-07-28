@@ -29,6 +29,12 @@ import {
 } from "@earendil-works/pi-tui";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "pi";
 import {
+  type EditorFactory,
+  hasEditorFactoryLayer,
+  installEditorFactoryLayer,
+  removeEditorFactoryLayer,
+} from "../../lib/editor-factory.ts";
+import {
   loadActiveModelId,
   loadActiveSpeakerId,
   loadActiveTtsModelId,
@@ -118,7 +124,6 @@ export default async function voiceExtension(pi: ExtensionAPI) {
   let ttsEnginePromise: Promise<OfflineTtsInstance> | null = null;
   let onnxRuntime: OnnxRuntime | null = null;
   const inflectEnginePromises = new Map<string, Promise<InflectTtsEngineType>>();
-  let previousEditorFactory: ReturnType<ExtensionContext["ui"]["getEditorComponent"]>;
 
   async function getInflectEngine(
     model: TtsModelDef,
@@ -152,7 +157,7 @@ export default async function voiceExtension(pi: ExtensionAPI) {
       throw error;
     }
   }
-  let holdEditorFactory: ReturnType<ExtensionContext["ui"]["getEditorComponent"]>;
+  const holdEditorLayerId = "voice-hold";
   let holdEditorInstalled = false;
   let editorRecheckTimer: ReturnType<typeof setTimeout> | null = null;
   let terminalInputUnsubscribe: (() => void) | null = null;
@@ -252,17 +257,27 @@ export default async function voiceExtension(pi: ExtensionAPI) {
   };
 
   const installHoldEditor = (ctx: ExtensionContext): void => {
-    previousEditorFactory = ctx.ui.getEditorComponent();
-    holdEditorFactory = (
-      tui: ConstructorParameters<typeof CustomEditor>[0],
-      theme: ConstructorParameters<typeof CustomEditor>[1],
-      keybindings: ConstructorParameters<typeof CustomEditor>[2],
-    ) => {
-      const editor =
-        previousEditorFactory?.(tui, theme, keybindings) ??
-        new CustomEditor(tui, theme, keybindings);
-      return addHoldToVoice(editor, () => openVoice(ctx));
-    };
+    const current = ctx.ui.getEditorComponent() as EditorFactory | undefined;
+    if (hasEditorFactoryLayer(current, holdEditorLayerId)) {
+      holdEditorInstalled = true;
+      return;
+    }
+
+    const holdEditorFactory = installEditorFactoryLayer(
+      current,
+      holdEditorLayerId,
+      100,
+      (parent, tui, theme, keybindings) => {
+        const editor =
+          (parent?.(tui, theme, keybindings) as InstanceType<typeof CustomEditor> | undefined) ??
+          new CustomEditor(
+            tui as ConstructorParameters<typeof CustomEditor>[0],
+            theme as ConstructorParameters<typeof CustomEditor>[1],
+            keybindings as ConstructorParameters<typeof CustomEditor>[2],
+          );
+        return addHoldToVoice(editor, () => openVoice(ctx));
+      },
+    );
     ctx.ui.setEditorComponent(holdEditorFactory);
     holdEditorInstalled = true;
   };
@@ -273,7 +288,8 @@ export default async function voiceExtension(pi: ExtensionAPI) {
     installHoldEditor(ctx);
     editorRecheckTimer = setTimeout(() => {
       editorRecheckTimer = null;
-      if (ctx.ui.getEditorComponent() !== holdEditorFactory) installHoldEditor(ctx);
+      const current = ctx.ui.getEditorComponent() as EditorFactory | undefined;
+      if (!hasEditorFactoryLayer(current, holdEditorLayerId)) installHoldEditor(ctx);
     }, 0);
   });
 
@@ -286,9 +302,9 @@ export default async function voiceExtension(pi: ExtensionAPI) {
     terminalInputUnsubscribe?.();
     terminalInputUnsubscribe = null;
     if (!holdEditorInstalled) return;
-    if (ctx.ui.getEditorComponent() === holdEditorFactory) {
-      ctx.ui.setEditorComponent(previousEditorFactory);
-    }
+    const current = ctx.ui.getEditorComponent() as EditorFactory | undefined;
+    const restored = removeEditorFactoryLayer(current, holdEditorLayerId);
+    if (restored !== current) ctx.ui.setEditorComponent(restored);
     holdEditorInstalled = false;
   });
 

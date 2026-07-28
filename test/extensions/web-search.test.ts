@@ -755,7 +755,10 @@ describe("web-search-extension", () => {
       expect(mockPi.appendEntry).toHaveBeenCalledWith("web-search-provider", {
         provider: "synthetic",
       });
-      expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("web-search", `${STATUS_ICON} synthetic`);
+      expect(mockCtx.ui.setStatus).toHaveBeenCalledWith(
+        "web-search",
+        `${STATUS_ICON} Web Search: synthetic`,
+      );
       expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Synthetic"), "info");
     });
 
@@ -826,7 +829,10 @@ describe("web-search-extension", () => {
       expect(mockPi.appendEntry).toHaveBeenCalledWith("web-search-provider", {
         provider: "synthetic",
       });
-      expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("web-search", `${STATUS_ICON} synthetic`);
+      expect(mockCtx.ui.setStatus).toHaveBeenCalledWith(
+        "web-search",
+        `${STATUS_ICON} Web Search: synthetic`,
+      );
     });
 
     it("selector marks unconfigured providers", async () => {
@@ -849,9 +855,65 @@ describe("web-search-extension", () => {
       const handler = getCommandHandler(mockPi, "websearch");
       await handler("", mockCtx);
 
-      const component = capturedFactory?.({ requestRender: vi.fn() }, THEME, null, vi.fn());
+      const fg = vi.fn((_color: string, text: string) => text);
+      const component = capturedFactory?.(
+        { requestRender: vi.fn() },
+        { ...THEME, fg },
+        null,
+        vi.fn(),
+      );
       const lines = component.render(80) as string[];
       expect(lines.some((l: string) => l.includes("not configured"))).toBe(true);
+      expect(lines.some((l: string) => l.includes("active"))).toBe(false);
+      expect(fg).toHaveBeenCalledWith("accent", "Synthetic (not configured)");
+    });
+
+    it("selector filters providers by description text", async () => {
+      const mockPi = createMockPi();
+      await webSearchExtension(mockPi);
+      const mockCtx = createMockCommandContext();
+      vi.stubEnv("BRAVE_API_KEY", "brave-key");
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      let capturedFactory: ((tui: any, theme: any, kb: any, done: any) => any) | undefined;
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      mockCtx.ui.custom = vi.fn((factory: any) => {
+        capturedFactory = factory;
+        return Promise.resolve(null);
+        // biome-ignore lint/suspicious/noExplicitAny: test mock
+      }) as any;
+
+      await getCommandHandler(mockPi, "websearch")("", mockCtx);
+
+      const component = capturedFactory?.(
+        { requestRender: vi.fn() },
+        THEME,
+        { matches: matchesPickerKey },
+        vi.fn(),
+      );
+      for (const character of "independent") component.handleInput(character);
+      const rendered = component.render(80).join("\n");
+      expect(rendered).toContain("Brave Search");
+      expect(rendered).not.toContain("Synthetic");
+    });
+
+    it("uses the standard selector in RPC mode", async () => {
+      const mockPi = createMockPi();
+      await webSearchExtension(mockPi);
+      const mockCtx = createMockCommandContext();
+      mockCtx.mode = "rpc";
+      mockCtx.ui.select = vi.fn(async (_title, options) => options[1]);
+
+      await getCommandHandler(mockPi, "websearch")("", mockCtx);
+
+      expect(mockCtx.ui.custom).not.toHaveBeenCalled();
+      expect(mockCtx.ui.select).toHaveBeenCalledWith("Select Web Search Provider", [
+        "synthetic",
+        "brave",
+        "searxng",
+      ]);
+      expect(mockPi.appendEntry).toHaveBeenCalledWith("web-search-provider", {
+        provider: "brave",
+      });
     });
 
     it("/websearch with no args cancelled does not change provider", async () => {
@@ -883,7 +945,10 @@ describe("web-search-extension", () => {
       const handler = getEventHandler(mockPi, "session_start");
       await handler({ type: "session_start", reason: "resume" }, mockCtx);
 
-      expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("web-search", `${STATUS_ICON} synthetic`);
+      expect(mockCtx.ui.setStatus).toHaveBeenCalledWith(
+        "web-search",
+        `${STATUS_ICON} Web Search: synthetic`,
+      );
     });
 
     it("defaults to synthetic when both brave and synthetic are configured", async () => {
@@ -895,7 +960,10 @@ describe("web-search-extension", () => {
       const handler = getEventHandler(mockPi, "session_start");
       await handler({ type: "session_start", reason: "new" }, mockCtx);
 
-      expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("web-search", `${STATUS_ICON} synthetic`);
+      expect(mockCtx.ui.setStatus).toHaveBeenCalledWith(
+        "web-search",
+        `${STATUS_ICON} Web Search: synthetic`,
+      );
     });
 
     it("ignores a persisted unknown provider id", async () => {
@@ -912,7 +980,10 @@ describe("web-search-extension", () => {
       await handler({ type: "session_start", reason: "resume" }, mockCtx);
 
       // Falls back to the first configured provider since kagi is not registered.
-      expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("web-search", `${STATUS_ICON} brave`);
+      expect(mockCtx.ui.setStatus).toHaveBeenCalledWith(
+        "web-search",
+        `${STATUS_ICON} Web Search: brave`,
+      );
     });
 
     it("falls back to brave when only brave is configured", async () => {
@@ -924,7 +995,10 @@ describe("web-search-extension", () => {
       const handler = getEventHandler(mockPi, "session_start");
       await handler({ type: "session_start", reason: "new" }, mockCtx);
 
-      expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("web-search", `${STATUS_ICON} brave`);
+      expect(mockCtx.ui.setStatus).toHaveBeenCalledWith(
+        "web-search",
+        `${STATUS_ICON} Web Search: brave`,
+      );
     });
 
     it("falls back to synthetic when brave is unconfigured but synthetic is", async () => {
@@ -936,7 +1010,10 @@ describe("web-search-extension", () => {
       const handler = getEventHandler(mockPi, "session_start");
       await handler({ type: "session_start", reason: "new" }, mockCtx);
 
-      expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("web-search", `${STATUS_ICON} synthetic`);
+      expect(mockCtx.ui.setStatus).toHaveBeenCalledWith(
+        "web-search",
+        `${STATUS_ICON} Web Search: synthetic`,
+      );
     });
 
     it("clears status on session_shutdown", async () => {
@@ -1552,3 +1629,13 @@ describe("web-search-extension", () => {
     });
   });
 });
+
+function matchesPickerKey(data: string, keybinding: string): boolean {
+  const keys: Record<string, string> = {
+    "tui.select.up": "up",
+    "tui.select.down": "down",
+    "tui.select.confirm": "enter",
+    "tui.select.cancel": "escape",
+  };
+  return keys[keybinding] === data;
+}

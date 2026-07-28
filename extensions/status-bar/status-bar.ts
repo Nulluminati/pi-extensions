@@ -25,13 +25,13 @@
 
 import type { ExtensionAPI, ExtensionCommandContext } from "pi";
 import {
-  EDITOR_MARKER,
-  FLEX_EVENT,
-  ICON_COLOR,
-  STATUS_ICON,
-  STATUS_KEY,
-  TEXT_COLOR,
-} from "./src/constants.ts";
+  type EditorFactory,
+  hasEditorFactoryLayer,
+  installEditorFactoryLayer,
+  removeEditorFactoryLayer,
+} from "../../lib/editor-factory.ts";
+import { formatStatusLine } from "../../lib/ui-format.ts";
+import { FLEX_EVENT, ICON_COLOR, STATUS_ICON, STATUS_KEY, TEXT_COLOR } from "./src/constants.ts";
 import { getModelLabel, PolishedEditor } from "./src/editor.ts";
 import { buildFooterLines } from "./src/footer.ts";
 import { parseGitStatus } from "./src/git.ts";
@@ -107,52 +107,42 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     ctx.ui.setFooter(undefined);
   }
 
-  // --- Editor: wrap Pi's input editor in a neutral grey frame with the model
-  // and thinking level shown inside. State is per-invocation (fresh per Pi
-  // instance / test) — declared here, not at module scope, to avoid leaking.
-  let baseEditorFactory: any;
-  let installedEditorFactory: any;
+  // --- Editor: install the visual frame below behavior layers such as voice
+  // input handling, so either extension can be enabled or removed independently.
+  const editorLayerId = "status-bar";
   let editorRequestRender: (() => void) | undefined;
-
-  function makePolishedFactory(
-    ctx: ExtensionCommandContext,
-  ): (tui: any, theme: any, kb: any) => any {
-    const factory = (tui: any, theme: any, kb: any) => {
-      editorRequestRender = () => tui.requestRender();
-      return new PolishedEditor(
-        tui,
-        theme,
-        kb,
-        ctx.ui.theme,
-        () => getModelLabel(ctx),
-        () => pi.getThinkingLevel() ?? "none",
-        () => ({ on: state.flexOn, capable: state.flexCapable }),
-      );
-    };
-    (factory as any)[EDITOR_MARKER] = true;
-    return factory as any;
-  }
 
   function installEditor(ctx: ExtensionCommandContext): void {
     if (!ctx.hasUI) return;
-    const current = ctx.ui.getEditorComponent();
-    if (current && (current as any)[EDITOR_MARKER]) {
-      installedEditorFactory = current;
-      return; // already ours
-    }
-    baseEditorFactory = current; // capture Pi's default (undefined) or another extension's
-    installedEditorFactory = makePolishedFactory(ctx);
+    const current = ctx.ui.getEditorComponent() as EditorFactory | undefined;
+    if (hasEditorFactoryLayer(current, editorLayerId)) return;
+
+    const installedEditorFactory = installEditorFactoryLayer(
+      current,
+      editorLayerId,
+      0,
+      (_parent, tui, theme, keybindings) => {
+        const editorTui = tui as ConstructorParameters<typeof PolishedEditor>[0];
+        editorRequestRender = () => editorTui.requestRender();
+        return new PolishedEditor(
+          editorTui,
+          theme,
+          keybindings,
+          ctx.ui.theme,
+          () => getModelLabel(ctx),
+          () => pi.getThinkingLevel() ?? "none",
+          () => ({ on: state.flexOn, capable: state.flexCapable }),
+        );
+      },
+    );
     ctx.ui.setEditorComponent(installedEditorFactory);
   }
 
   function restoreEditor(ctx: ExtensionCommandContext): void {
     if (!ctx.hasUI) return;
-    const current = ctx.ui.getEditorComponent();
-    if (current && (current as any)[EDITOR_MARKER]) {
-      // undefined restores Pi's default editor; a captured factory restores another extension's.
-      ctx.ui.setEditorComponent(baseEditorFactory ?? undefined);
-    }
-    installedEditorFactory = undefined;
+    const current = ctx.ui.getEditorComponent() as EditorFactory | undefined;
+    const restored = removeEditorFactoryLayer(current, editorLayerId);
+    if (restored !== current) ctx.ui.setEditorComponent(restored);
     editorRequestRender = undefined;
   }
 
@@ -233,14 +223,24 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
       installEditor(ctx as ExtensionCommandContext);
       ctx.ui.setStatus(
         STATUS_KEY,
-        `${ctx.ui.theme.fg(ICON_COLOR, STATUS_ICON)} ${ctx.ui.theme.fg(TEXT_COLOR, "statusbar")}`,
+        formatStatusLine(ctx.ui.theme, {
+          icon: STATUS_ICON,
+          prefix: "Status Bar",
+          text: "enabled",
+          iconColor: ICON_COLOR,
+          textColor: TEXT_COLOR,
+        }),
       );
       // Re-check after a tick: another extension that loads later may replace
       // our editor. If so, re-install so the frame stays in place.
       setTimeout(() => {
         if (!state.enabled) return;
-        const current = (ctx as ExtensionCommandContext).ui.getEditorComponent();
-        if (current !== installedEditorFactory) installEditor(ctx as ExtensionCommandContext);
+        const current = (ctx as ExtensionCommandContext).ui.getEditorComponent() as
+          | EditorFactory
+          | undefined;
+        if (!hasEditorFactoryLayer(current, editorLayerId)) {
+          installEditor(ctx as ExtensionCommandContext);
+        }
       }, 0);
     }
 
@@ -318,7 +318,13 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
         installEditor(ctx);
         ctx.ui.setStatus(
           STATUS_KEY,
-          `${ctx.ui.theme.fg(ICON_COLOR, STATUS_ICON)} ${ctx.ui.theme.fg(TEXT_COLOR, "statusbar")}`,
+          formatStatusLine(ctx.ui.theme, {
+            icon: STATUS_ICON,
+            prefix: "Status Bar",
+            text: "enabled",
+            iconColor: ICON_COLOR,
+            textColor: TEXT_COLOR,
+          }),
         );
         ctx.ui.notify("Status bar enabled", "info");
       } else {

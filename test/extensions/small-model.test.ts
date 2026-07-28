@@ -49,6 +49,14 @@ describe("small-model extension", () => {
     const path = configPath();
     vi.stubEnv("PI_SMALL_MODEL_CONFIG", path);
     vi.stubEnv("PI_SMALL_MODEL", "");
+    writeFileSync(
+      path,
+      JSON.stringify({
+        provider: "synthetic",
+        model: "syn:small:text",
+        thinkingLevel: "minimal",
+      }),
+    );
     const pi = createMockPi();
     const ctx = createMockCommandContext();
     const syntheticModel = {
@@ -93,8 +101,13 @@ describe("small-model extension", () => {
 
     await getCommandHandler(pi, "small-model")("", ctx);
 
+    expect(initialRender.split("\n")[0]).toBe(`╭${"─".repeat(98)}╮`);
+    expect(initialRender.split("\n").at(-1)).toBe(`╰${"─".repeat(98)}╯`);
+    expect(initialRender).toContain("Select Global Small Model");
     expect(initialRender).toContain("Search");
     expect(initialRender).toContain("synthetic/syn:small:text");
+    expect(initialRender).not.toContain("(active)");
+    expect(ctx.ui.theme.fg).toHaveBeenCalledWith("accent", "synthetic/syn:small:text");
     expect(initialRender).toContain("anthropic/claude-haiku-4-5");
     expect(initialRender).toContain("Claude Haiku 4.5 · 200k ctx · 64k out · image · reasoning");
     expect(filteredRender).toContain("anthropic/claude-haiku-4-5");
@@ -135,7 +148,7 @@ describe("small-model extension", () => {
 
     await getCommandHandler(pi, "small-model")("", ctx);
 
-    expect(ctx.ui.select).toHaveBeenCalledWith("Select global small model", [
+    expect(ctx.ui.select).toHaveBeenCalledWith("Select Global Small Model", [
       "synthetic/syn:small:text",
     ]);
     expect(ctx.ui.custom).not.toHaveBeenCalled();

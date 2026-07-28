@@ -23,6 +23,7 @@ import {
   createWriteTool,
 } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext } from "pi";
+import { formatStatusLine } from "../../lib/ui-format.ts";
 import { createGondolinBashOps } from "./src/bash.ts";
 import { GUEST_WORKSPACE, ICON_COLOR, STATUS_ICON, TEXT_COLOR } from "./src/constants.ts";
 import {
@@ -59,7 +60,13 @@ export default async function gondolinExtension(pi: ExtensionAPI) {
   async function startVm(ctx?: ExtensionContext): Promise<VM> {
     ctx?.ui.setStatus(
       "gondolin",
-      `${ctx.ui.theme.fg(ICON_COLOR, STATUS_ICON)} ${ctx.ui.theme.fg(TEXT_COLOR, `Gondolin: starting ${GUEST_WORKSPACE}`)}`,
+      formatStatusLine(ctx.ui.theme, {
+        icon: STATUS_ICON,
+        prefix: "Gondolin",
+        text: `starting ${GUEST_WORKSPACE}`,
+        iconColor: ICON_COLOR,
+        textColor: TEXT_COLOR,
+      }),
     );
     const created = await VM.create({
       sessionLabel: `pi ${path.basename(localCwd)}`,
@@ -74,7 +81,13 @@ export default async function gondolinExtension(pi: ExtensionAPI) {
     vm = created;
     ctx?.ui.setStatus(
       "gondolin",
-      `${ctx.ui.theme.fg(ICON_COLOR, STATUS_ICON)} ${ctx.ui.theme.fg(TEXT_COLOR, `Gondolin: ${created.id.slice(0, 8)} (${GUEST_WORKSPACE})`)}`,
+      formatStatusLine(ctx.ui.theme, {
+        icon: STATUS_ICON,
+        prefix: "Gondolin",
+        text: `${created.id.slice(0, 8)} (${GUEST_WORKSPACE})`,
+        iconColor: ICON_COLOR,
+        textColor: TEXT_COLOR,
+      }),
     );
     ctx?.ui.notify(`Gondolin VM ready. ${localCwd} is mounted at ${GUEST_WORKSPACE}.`, "info");
     return created;
@@ -108,7 +121,13 @@ export default async function gondolinExtension(pi: ExtensionAPI) {
     if (!activeVm) return;
     ctx.ui.setStatus(
       "gondolin",
-      `${ctx.ui.theme.fg(ICON_COLOR, STATUS_ICON)} ${ctx.ui.theme.fg(TEXT_COLOR, "Gondolin: stopping")}`,
+      formatStatusLine(ctx.ui.theme, {
+        icon: STATUS_ICON,
+        prefix: "Gondolin",
+        text: "stopping",
+        iconColor: ICON_COLOR,
+        textColor: TEXT_COLOR,
+      }),
     );
     try {
       await activeVm.close();

@@ -16,9 +16,10 @@
  *                synthetic model provider extension).
  */
 
-import { DynamicBorder } from "@earendil-works/pi-coding-agent";
-import { Container, type SelectItem, SelectList, Text } from "@earendil-works/pi-tui";
+import type { SelectItem } from "@earendil-works/pi-tui";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "pi";
+import { createSearchableSelectModal } from "../../lib/searchable-select.ts";
+import { formatStatusLine } from "../../lib/ui-format.ts";
 import {
   DEFAULT_MAX_RESULTS,
   DEFAULT_PROVIDER_ID,
@@ -101,7 +102,13 @@ export default async function webSearchExtension(pi: ExtensionAPI) {
     const provider = activeProvider();
     ctx.ui.setStatus(
       STATUS_KEY,
-      `${ctx.ui.theme.fg(ICON_COLOR, STATUS_ICON)} ${ctx.ui.theme.fg(TEXT_COLOR, provider.id)}`,
+      formatStatusLine(ctx.ui.theme, {
+        icon: STATUS_ICON,
+        prefix: "Web Search",
+        text: provider.id,
+        iconColor: ICON_COLOR,
+        textColor: TEXT_COLOR,
+      }),
     );
   }
 
@@ -109,49 +116,38 @@ export default async function webSearchExtension(pi: ExtensionAPI) {
     const items: SelectItem[] = [];
     for (const provider of PROVIDERS) {
       const configured = await provider.isConfigured(ctx);
-      const isActive = provider.id === activeProviderId;
       const description = configured
         ? provider.description
         : `${provider.description} — not configured (${provider.authHint})`;
       items.push({
         value: provider.id,
-        label: isActive ? `${provider.label} (active)` : provider.label,
+        label: configured ? provider.label : `${provider.label} (not configured)`,
         description,
       });
     }
 
-    const selectedId = await ctx.ui.custom<string | null>((tui, theme, _kb, done) => {
-      const container = new Container();
-      container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
-      container.addChild(
-        new Text(theme.fg("accent", theme.bold("Select Web Search Provider")), 1, 0),
+    if (ctx.mode !== "tui") {
+      const selectedId = await ctx.ui.select(
+        "Select Web Search Provider",
+        items.map((item) => item.value),
       );
+      return getProvider(selectedId) ?? null;
+    }
 
-      const selectList = new SelectList(items, Math.min(items.length, 10), {
-        selectedPrefix: (t) => theme.fg("accent", t),
-        selectedText: (t) => theme.fg("accent", t),
-        description: (t) => theme.fg("muted", t),
-        scrollInfo: (t) => theme.fg("dim", t),
-        noMatch: (t) => theme.fg("warning", t),
-      });
-      selectList.onSelect = (item) => done(item.value);
-      selectList.onCancel = () => done(null);
-      container.addChild(selectList);
-
-      container.addChild(
-        new Text(theme.fg("dim", "↑↓ navigate • type to filter • enter select • esc cancel"), 1, 0),
-      );
-      container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
-
-      return {
-        render: (w: number) => container.render(w),
-        invalidate: () => container.invalidate(),
-        handleInput: (data: string) => {
-          selectList.handleInput(data);
-          tui.requestRender();
-        },
-      };
-    });
+    const selectedId = await ctx.ui.custom<string | null>((tui, theme, keybindings, done) =>
+      createSearchableSelectModal({
+        tui,
+        theme,
+        keybindings,
+        items,
+        activeValue: activeProviderId,
+        title: "Select Web Search Provider",
+        maxVisible: 10,
+        noMatchText: "No matching providers",
+        onSelect: done,
+        onCancel: () => done(null),
+      }),
+    );
 
     return getProvider(selectedId ?? undefined) ?? null;
   }

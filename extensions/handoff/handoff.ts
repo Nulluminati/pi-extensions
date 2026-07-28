@@ -11,6 +11,7 @@
  */
 
 import type { ExtensionAPI } from "pi";
+import { formatStatusLine } from "../../lib/ui-format.ts";
 import { formatGoalForSessionName, resolveGoal } from "./src/goal.ts";
 import { generateSummary } from "./src/summary.ts";
 import { buildTranscript, type HandoffEntry } from "./src/transcript.ts";
@@ -50,7 +51,13 @@ export default async function handoffExtension(pi: ExtensionAPI) {
       if (ctx.hasUI) {
         ctx.ui.setStatus(
           STATUS_KEY,
-          `${ctx.ui.theme.fg(ICON_COLOR, STATUS_ICON)} ${ctx.ui.theme.fg(TEXT_COLOR, "Generating handoff summary…")}`,
+          formatStatusLine(ctx.ui.theme, {
+            icon: STATUS_ICON,
+            prefix: "Handoff",
+            text: "generating summary…",
+            iconColor: ICON_COLOR,
+            textColor: TEXT_COLOR,
+          }),
         );
       }
 

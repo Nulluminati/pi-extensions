@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionCommandContext, ExtensionContext } from "pi";
+import { formatStatusLine } from "../../../lib/ui-format.ts";
 import { LspClient } from "./client.ts";
 import {
   fileExists,
@@ -53,17 +54,23 @@ export function createLspRuntime() {
 
   function refreshStatus(ui: ExtensionContext["ui"]): void {
     const line = (text: string) =>
-      `${ui.theme.fg(ICON_COLOR, STATUS_ICON)} ${ui.theme.fg(TEXT_COLOR, text)}`;
+      formatStatusLine(ui.theme, {
+        icon: STATUS_ICON,
+        prefix: "LSP",
+        text,
+        iconColor: ICON_COLOR,
+        textColor: TEXT_COLOR,
+      });
     if (!config) {
-      ui.setStatus(STATUS_KEY, line("LSP: no servers detected"));
+      ui.setStatus(STATUS_KEY, line("no servers detected"));
       return;
     }
     if (config.globalDisabled) {
-      ui.setStatus(STATUS_KEY, line("LSP: disabled"));
+      ui.setStatus(STATUS_KEY, line("disabled"));
       return;
     }
     if (config.servers.length === 0) {
-      ui.setStatus(STATUS_KEY, line("LSP: no servers detected"));
+      ui.setStatus(STATUS_KEY, line("no servers detected"));
       return;
     }
 
@@ -78,9 +85,9 @@ export function createLspRuntime() {
     }
 
     if (runningNames.length > 0) {
-      ui.setStatus(STATUS_KEY, line(`LSP: ${runningNames.join(", ")} (running)`));
+      ui.setStatus(STATUS_KEY, line(`${runningNames.join(", ")} (running)`));
     } else {
-      ui.setStatus(STATUS_KEY, line(`LSP: ${allNames.join(", ")}`));
+      ui.setStatus(STATUS_KEY, line(allNames.join(", ")));
     }
   }
 

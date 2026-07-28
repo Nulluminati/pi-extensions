@@ -20,6 +20,8 @@ export const DEFAULT_TTS_MODEL_ID = "kitten-nano-en-v0_1-fp16";
 
 export const TTS_STATUS_KEY = "voice-speak";
 
+export const TTS_STATUS_ICON = "🔊";
+
 export const KITTEN_VOICES = [
   "expr-voice-2-m",
   "expr-voice-2-f",

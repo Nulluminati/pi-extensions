@@ -1,22 +1,11 @@
-import { truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { truncateToWidth } from "@earendil-works/pi-tui";
+import { wrapToolText as wrapMultilineText } from "../../../lib/tool-renderer.ts";
 import type {
   CacheSearchSelector,
   GetLibraryDocsParams,
   ResolveLibraryParams,
   SearchResult,
 } from "./types.ts";
-
-function wrapMultilineText(text: string, width: number): string[] {
-  const lines: string[] = [];
-  for (const paragraph of text.split("\n")) {
-    if (paragraph === "") {
-      lines.push("");
-    } else {
-      lines.push(...wrapTextWithAnsi(paragraph, width));
-    }
-  }
-  return lines;
-}
 
 export function createResolveRenderResult() {
   return (result: any, options: any, theme: any, context: any) => {
