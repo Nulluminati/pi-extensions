@@ -167,6 +167,7 @@ class MockSettingsList {
 const MockKey = {
   space: "space",
   alt: (k: string) => `alt+${k}`,
+  shift: (k: string) => `shift+${k}`,
   ctrlAlt: (k: string) => `ctrl+alt+${k}`,
   up: "up",
   down: "down",
@@ -177,6 +178,7 @@ const MockKey = {
 /** Mock `matchesKey` — recognizes a few key sequences. */
 function mockMatchesKey(data: string, keyId: string): boolean {
   if (keyId === "space") return data === " " || data === "space-release";
+  if (keyId === "shift+tab") return data === "\x1b[Z" || data === "\x1b[9;2u";
   if (keyId === "up") return data === "\x1b[A" || data === "\x1bOA";
   if (keyId === "down") return data === "\x1b[B" || data === "\x1bOB";
   if (keyId === "pageUp") return data === "\x1b[5~" || data === "\x1b[[5~";

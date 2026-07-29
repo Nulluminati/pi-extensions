@@ -591,7 +591,7 @@ declare module "typebox" {
     Boolean(options?: any): any;
     Integer(options?: any): any;
     Optional<T>(schema: T): T;
-    Array<T>(items: T): any;
+    Array<T>(items: T, options?: any): any;
     Union<T extends any[]>(schemas: [...T]): any;
     Literal<T extends string | number | boolean>(value: T): any;
     Enum<T extends Record<string, string | number>>(values: T): any;
@@ -739,11 +739,12 @@ declare module "@earendil-works/pi-tui" {
     terminal?: { write?(data: string): void };
   }
 
-  // Key descriptor helpers. Alt-prefixed sequences are the only modifier
-  // combos that resolve reliably across terminal emulators.
+  // Key descriptor helpers used with matchesKey so both legacy and modern
+  // terminal keyboard protocols resolve consistently.
   export const Key: {
     space: string;
     alt(key: string): string;
+    shift(key: string): string;
     ctrlAlt(key: string): string;
   };
 
