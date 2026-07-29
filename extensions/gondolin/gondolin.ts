@@ -12,7 +12,7 @@
  */
 
 import path from "node:path";
-import { RealFSProvider, VM } from "@earendil-works/gondolin";
+import type { VM } from "@earendil-works/gondolin";
 import {
   createBashTool,
   createEditTool,
@@ -66,6 +66,9 @@ export default async function gondolinExtension(pi: ExtensionAPI) {
   let shellPath = "/bin/sh";
 
   async function startVm(ctx?: ExtensionContext): Promise<VM> {
+    // Lazy-load the native addon so the ~36 MB krun runner only maps into the
+    // process when a VM is actually started, not at extension import.
+    const { VM, RealFSProvider } = await import("@earendil-works/gondolin");
     ctx?.ui.setStatus(
       STATUS_KEY,
       formatStatusLine(ctx.ui.theme, {
