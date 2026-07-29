@@ -42,7 +42,7 @@ This repo is a **published collection of Pi extensions** — standalone TypeScri
 
 ### File structure
 
-Every extension file should follow this order:
+Every extension file should follow this order. Sections are marked with `// --- Name ---` banner comments; small files may only need the `// --- Extension ---` banner before the default export.
 
 ```typescript
 /**
@@ -51,26 +51,26 @@ Every extension file should follow this order:
  * Short description of what this extension does.
  */
 
-// 1. Imports
+// --- Imports ---
 import type { ExtensionAPI, ExtensionCommandContext } from "pi";
 // External runtime modules (if needed):
 // import { something } from "@earendil-works/pi-ai";
 
-// 2. Constants (UPPER_SNAKE_CASE)
+// --- Constants ---
 const MAX_LENGTH = 2000;
 const WIDGET_KEY = "my-ext";
 
-// 3. Types (PascalCase, prefixed with domain if ambiguous)
+// --- Types ---
 interface MyExtState {
   active: boolean;
 }
 
-// 4. Pure utility functions
+// --- Helpers ---
 function helper(value: string): string {
   return value.trim();
 }
 
-// 5. Default export (async function)
+// --- Extension ---
 export default async function myExtension(pi: ExtensionAPI) {
   // Implementation
 }
@@ -92,6 +92,8 @@ export default async function myExtension(pi: ExtensionAPI) {
 | File name | `kebab-case` matching extension name | `btw.ts`, `goal.ts` |
 | Widget keys | `kebab-case` | `"btw"`, `"goal"` |
 | Custom entry types | `kebab-case` | `"goal-state"`, `"btw-question"` |
+
+Slash commands use the extension name with subcommands namespaced by a colon (`goal:new`, `btw:inject`, `voice:settings`). The command prefix may drop hyphens for typeability (`web-search` → `/websearch:select`, `status-bar` → `/statusbar:toggle`, `small-model` → `/smallmodel`) or use a shorter verb when the extension name is long (`session-recap` → `/recap`). New extensions should prefer the full extension name as the prefix unless it is awkward to type.
 
 ### Error handling
 
@@ -485,7 +487,8 @@ Checks run on every extension:
 pi-extensions/
 ├── extensions/         # Extension files
 │   ├── <name>/
-│   │   └── <name>.ts
+│   │   ├── <name>.ts   # Root entrypoint (default export)
+│   │   └── src/        # Implementation modules (omit for trivial single-purpose extensions like clear)
 │   └── ...
 ├── lib/                # Shared validation logic
 ├── scripts/            # CLI entry points

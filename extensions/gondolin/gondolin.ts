@@ -43,6 +43,8 @@ import { createGondolinFindOps } from "./src/traversal.ts";
 
 export { ICON_COLOR, STATUS_ICON, TEXT_COLOR };
 
+// --- Extension ---
+
 export default async function gondolinExtension(pi: ExtensionAPI) {
   pi.registerFlag("gondolin", {
     description: "Enable Gondolin sandbox VM for isolated file operations",

@@ -20,6 +20,8 @@ import { updateStatus } from "./src/status.ts";
 
 export { STATUS_ICON };
 
+// --- Extension ---
+
 export default async function smallModelExtension(pi: ExtensionAPI) {
   let configWatcher: FSWatcher | undefined;
   let watcherDebounce: ReturnType<typeof setTimeout> | undefined;
