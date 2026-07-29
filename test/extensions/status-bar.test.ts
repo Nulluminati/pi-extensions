@@ -1,10 +1,11 @@
-import { readdir } from "node:fs/promises";
-import { resolve } from "node:path";
+import { mkdtemp, readdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import statusBarExtension, {
   buildEditorMetaSegments,
-  renderPolishedFrame,
+  renderEditorModalFrame,
   STATUS_ICON,
 } from "../../extensions/status-bar/status-bar.ts";
 import {
@@ -12,9 +13,26 @@ import {
   hasEditorFactoryLayer,
   installEditorFactoryLayer,
 } from "../../lib/editor-factory.ts";
+import { loadSmallModelConfig, resolveSmallModelConfigPath } from "../../lib/small-model.ts";
 import { createMockCommandContext } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
 import { getEventHandler } from "../mocks/test-helpers.ts";
+
+vi.mock("../../lib/small-model.ts", () => ({
+  loadSmallModelConfig: vi.fn(),
+  resolveSmallModelConfigPath: vi.fn(() => "/agent/small-model.json"),
+}));
+
+/**
+ * Default the small-model config mock to "not configured" so the editor meta
+ * line omits the small model segment unless a test opts in. Called after
+ * vi.resetAllMocks() in each beforeEach, since resetting wipes the impl.
+ */
+function unconfigureSmallModel(): void {
+  vi.mocked(loadSmallModelConfig).mockImplementation(() => {
+    throw new Error("not configured");
+  });
+}
 
 /**
  * Helper: enable the status bar via session_start (the natural activation path).
@@ -92,6 +110,7 @@ describe("status-bar-extension", () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
+    unconfigureSmallModel();
   });
 
   it("registers /statusbar:toggle command", async () => {
@@ -963,7 +982,8 @@ describe("status-bar-extension", () => {
 
     expect(lines.length).toBe(2);
     expect(lines[1]).toContain("🎯 active");
-    expect(lines[1]).toContain("small synthetic/syn:small:text · minimal");
+    // The small model lives in the editor meta line, so it is suppressed here.
+    expect(lines[1]).not.toContain("small synthetic/syn:small:text · minimal");
     expect(lines[1]).toContain("some status");
     // Model lives in the editor box, not the footer.
     expect(lines[0]).not.toContain("test-model");
@@ -1182,118 +1202,120 @@ describe("status-bar-extension", () => {
   });
 });
 
-// === Polished editor frame (pure layout) ===
+// === Editor modal frame (pure layout) ===
 
 describe("status-bar editor frame", () => {
   function plainTheme() {
     return { fg: vi.fn((_c: string, t: string) => t) };
   }
 
-  /** Simulate the base editor's render output: top border, content, bottom border. */
-  function baseOutput(content: string[], width = 40): string[] {
+  /** Simulate the base editor's render output at the modal content width: top
+   * border, content, bottom border. */
+  function baseOutput(content: string[], width = 34): string[] {
     return ["─".repeat(width), ...content, "─".repeat(width)];
   }
 
-  it("draws a full-width grey top and bottom border", () => {
-    const lines = renderPolishedFrame({
+  it("draws a rounded top border carrying the title", () => {
+    const lines = renderEditorModalFrame({
       baseRendered: baseOutput(["hello"]),
       autocompleteCount: 0,
       width: 40,
-      metaSegments: ["anthropic/claude"],
+      title: "anthropic/claude",
       theme: plainTheme(),
     });
-    expect(lines[0]).toBe("─".repeat(40));
-    expect(lines[lines.length - 1]).toBe("─".repeat(40));
+    expect(lines[0].startsWith("╭")).toBe(true);
+    expect(lines[0].endsWith("╮")).toBe(true);
+    expect(lines[0]).toContain("anthropic/claude");
   });
 
-  it("strips the base editor's own borders so there is no double border", () => {
-    const lines = renderPolishedFrame({
-      baseRendered: baseOutput(["hello", "world"]),
+  it("draws a rounded bottom border", () => {
+    const lines = renderEditorModalFrame({
+      baseRendered: baseOutput(["hello"]),
       autocompleteCount: 0,
       width: 40,
-      metaSegments: ["anthropic/claude"],
+      title: "anthropic/claude",
       theme: plainTheme(),
     });
-    // First and last lines are the frame borders; the base's borders were
-    // stripped, so the content lines appear exactly once in the frame.
+    expect(lines[lines.length - 1].startsWith("╰")).toBe(true);
+    expect(lines[lines.length - 1].endsWith("╯")).toBe(true);
+  });
+
+  it("wraps content inside side borders with padding", () => {
+    const lines = renderEditorModalFrame({
+      baseRendered: baseOutput(["hello"]),
+      autocompleteCount: 0,
+      width: 40,
+      title: "anthropic/claude",
+      theme: plainTheme(),
+    });
+    const contentLine = lines.find((l) => l.includes("hello"));
+    expect(contentLine).toBeDefined();
+    expect(contentLine?.startsWith("│")).toBe(true);
+    expect(contentLine?.endsWith("│")).toBe(true);
+    // The base editor's own borders are stripped — content appears once.
     expect(lines.filter((l) => l.includes("hello"))).toHaveLength(1);
-    expect(lines.filter((l) => l.includes("world"))).toHaveLength(1);
   });
 
-  it("renders model and thinking segments on a metadata line inside the frame", () => {
-    const lines = renderPolishedFrame({
-      baseRendered: baseOutput(["hello"]),
-      autocompleteCount: 0,
-      width: 60,
-      metaSegments: ["anthropic/claude-sonnet-4-6", " high"],
-      theme: plainTheme(),
-    });
-    // The meta line is the last railed line before the bottom border.
-    const metaLine = lines[lines.length - 2];
-    expect(metaLine).toContain("anthropic/claude-sonnet-4-6");
-    expect(metaLine).toContain("high");
-  });
-
-  it("adds a blank gap so the box is taller than the base editor", () => {
-    const base = baseOutput(["hello"]);
-    const lines = renderPolishedFrame({
-      baseRendered: base,
-      autocompleteCount: 0,
-      width: 40,
-      metaSegments: ["anthropic/claude"],
-      theme: plainTheme(),
-    });
-    // base = [border, hello, border] (3 lines).
-    // frame = [border, hello, blank, meta, border] (5 lines): +2 taller.
-    expect(lines.length).toBe(base.length + 2);
-  });
-
-  it("places autocomplete lines below the bottom border", () => {
+  it("places autocomplete below the box", () => {
     const ac1 = "  cmd1  description";
     const ac2 = "  cmd2  description";
-    const lines = renderPolishedFrame({
+    const lines = renderEditorModalFrame({
       baseRendered: [...baseOutput(["hello"]), ac1, ac2],
       autocompleteCount: 2,
       width: 40,
-      metaSegments: ["anthropic/claude"],
+      title: "anthropic/claude",
       theme: plainTheme(),
     });
-    // Bottom border is the last frame line; autocomplete follows it.
-    const bottomIdx = lines.lastIndexOf("─".repeat(40));
+    // The box's bottom border sits just above the autocomplete lines.
+    const bottomIdx = lines.length - 3;
+    expect(lines[bottomIdx].startsWith("╰")).toBe(true);
     expect(lines[bottomIdx + 1]).toBe(ac1);
     expect(lines[bottomIdx + 2]).toBe(ac2);
   });
 
   it("never exceeds the given width on any line", () => {
-    const lines = renderPolishedFrame({
+    const lines = renderEditorModalFrame({
       baseRendered: baseOutput(["a".repeat(80)]),
       autocompleteCount: 0,
       width: 40,
-      metaSegments: ["anthropic/claude-sonnet-4-6", "high"],
+      title: "anthropic/claude-sonnet-4-6  high",
       theme: plainTheme(),
     });
     for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(40);
   });
 
-  it("uses the borderMuted color for the frame", () => {
+  it("uses the borderAccent color for the frame", () => {
     const fgMock = vi.fn((_c: string, t: string) => t);
-    renderPolishedFrame({
+    renderEditorModalFrame({
       baseRendered: baseOutput(["hello"]),
       autocompleteCount: 0,
       width: 40,
-      metaSegments: ["anthropic/claude"],
+      title: "anthropic/claude",
       theme: { fg: fgMock },
     });
-    expect(fgMock).toHaveBeenCalledWith("borderMuted", expect.any(String));
+    expect(fgMock).toHaveBeenCalledWith("borderAccent", expect.any(String));
+  });
+
+  it("renders the title raw (pre-colored), not re-wrapped in accent", () => {
+    const fgMock = vi.fn((c: string, t: string) => (c === "accent" ? `⟧${t}⟧` : t));
+    const lines = renderEditorModalFrame({
+      baseRendered: baseOutput(["hello"]),
+      autocompleteCount: 0,
+      width: 40,
+      title: "anthropic/claude",
+      theme: { fg: fgMock },
+    });
+    expect(lines[0]).toContain("anthropic/claude");
+    expect(lines[0]).not.toContain("⟧");
   });
 
   it("falls back to truncated base output when width is too small to frame", () => {
     const base = baseOutput(["hello"], 10);
-    const lines = renderPolishedFrame({
+    const lines = renderEditorModalFrame({
       baseRendered: base,
       autocompleteCount: 0,
       width: 2,
-      metaSegments: ["anthropic/claude"],
+      title: "anthropic/claude",
       theme: plainTheme(),
     });
     // Fallback: no frame added — same line count as the base, just truncated.
@@ -1307,6 +1329,7 @@ describe("status-bar editor frame", () => {
 describe("status-bar editor install", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    unconfigureSmallModel();
   });
 
   it("session_start installs a custom editor factory", async () => {
@@ -1442,6 +1465,95 @@ describe("status-bar editor install", () => {
     expect(lines.some((l) => l.includes("my-model"))).toBe(true);
     expect(lines.some((l) => l.includes("undefined/"))).toBe(false);
   });
+
+  it("installed editor renders the small label after a slash separator", async () => {
+    vi.mocked(loadSmallModelConfig).mockReturnValue({
+      config: { provider: "synthetic", model: "haiku", thinkingLevel: "minimal" },
+      source: "config",
+    });
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
+    mockCtx.model = { id: "sonnet-4", provider: "anthropic" } as any;
+    await enableBar(mockPi, mockCtx);
+
+    const editor = renderInstalledEditor(mockCtx);
+    const lines = editor.render(100);
+    const metaLine = lines.find((l) => l.includes("synthetic/haiku")) ?? "";
+
+    expect(metaLine).toContain("synthetic/haiku");
+    // No prefix, no separate thinking level for the small model.
+    expect(metaLine).not.toMatch(/\bsmall\b/);
+    expect(metaLine).not.toContain("minimal");
+    // Slash separator sits between the main model and the small label.
+    const mainIdx = metaLine.indexOf("anthropic/sonnet-4");
+    const slashIdx = metaLine.indexOf("  /  ");
+    const smallIdx = metaLine.indexOf("synthetic/haiku");
+    expect(mainIdx).toBeGreaterThan(-1);
+    expect(slashIdx).toBeGreaterThan(mainIdx);
+    expect(smallIdx).toBeGreaterThan(slashIdx);
+    expect(loadSmallModelConfig).toHaveBeenCalled();
+  });
+
+  it("installed editor renders the small label grey with no italic", async () => {
+    vi.mocked(loadSmallModelConfig).mockReturnValue({
+      config: { provider: "synthetic", model: "haiku", thinkingLevel: "minimal" },
+      source: "config",
+    });
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
+    mockCtx.model = { id: "sonnet-4", provider: "anthropic" } as any;
+    await enableBar(mockPi, mockCtx);
+
+    const fgMock = vi.fn((_c: string, t: string) => t);
+    const italicMock = vi.fn((t: string) => t);
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
+    (mockCtx.ui as any).theme = { fg: fgMock, italic: italicMock };
+    const editor = renderInstalledEditor(mockCtx);
+    editor.render(100);
+
+    expect(fgMock).toHaveBeenCalledWith("dim", "/");
+    expect(fgMock).toHaveBeenCalledWith("dim", "synthetic/haiku");
+    expect(italicMock).not.toHaveBeenCalled();
+  });
+
+  it("installed editor omits the slash and small label when none is configured", async () => {
+    // Default mock throws → label cleared.
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
+    mockCtx.model = { id: "sonnet-4", provider: "anthropic" } as any;
+    await enableBar(mockPi, mockCtx);
+
+    const editor = renderInstalledEditor(mockCtx);
+    const lines = editor.render(100);
+    const metaLine = lines.find((l) => l.includes("anthropic/sonnet-4")) ?? "";
+
+    expect(metaLine).not.toContain("haiku");
+    expect(metaLine).not.toContain("  /  ");
+  });
+
+  it("turn_start refreshes the small model label", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
+    mockCtx.model = { id: "sonnet-4", provider: "anthropic" } as any;
+    await enableBar(mockPi, mockCtx);
+
+    let editor = renderInstalledEditor(mockCtx);
+    expect(editor.render(100).some((l) => l.includes("synthetic/haiku"))).toBe(false);
+
+    vi.mocked(loadSmallModelConfig).mockReturnValue({
+      config: { provider: "synthetic", model: "haiku", thinkingLevel: "minimal" },
+      source: "config",
+    });
+    const turnStartHandler = getEventHandler(mockPi, "turn_start");
+    await turnStartHandler({ type: "turn_start", turnIndex: 0, timestamp: Date.now() }, mockCtx);
+
+    editor = renderInstalledEditor(mockCtx);
+    expect(editor.render(100).some((l) => l.includes("synthetic/haiku"))).toBe(true);
+  });
 });
 
 /** Invoke the installed editor factory and return the editor instance. */
@@ -1480,6 +1592,7 @@ describe("status-bar flex badge", () => {
         on: true,
         capable: true,
       },
+      "",
       plainTheme(),
     );
     expect(segments.some((s) => s.includes("flex"))).toBe(true);
@@ -1494,6 +1607,7 @@ describe("status-bar flex badge", () => {
         on: false,
         capable: true,
       },
+      "",
       plainTheme(),
     );
     expect(segments.some((s) => s.includes("flex"))).toBe(true);
@@ -1505,6 +1619,7 @@ describe("status-bar flex badge", () => {
       "anthropic/claude-sonnet-4-6",
       "high",
       { on: true, capable: false },
+      "",
       plainTheme(),
     );
     expect(segments.some((s) => s.includes("flex"))).toBe(false);
@@ -1545,5 +1660,142 @@ describe("status-bar flex badge", () => {
     const mockCtx = createMockCommandContext();
     await enableBar(mockPi, mockCtx);
     expect(getFlexHandler(mockPi)).toBeDefined();
+  });
+});
+
+describe("status-bar small model segment", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    unconfigureSmallModel();
+  });
+
+  function plainTheme() {
+    return { fg: vi.fn((_color: string, text: string) => text) };
+  }
+
+  it("buildEditorMetaSegments lays out main group, slash, then small label", () => {
+    const segments = buildEditorMetaSegments(
+      "anthropic/sonnet-4",
+      "high",
+      { on: false, capable: false },
+      "synthetic/haiku",
+      plainTheme(),
+    );
+
+    // Order: main model, main thinking, slash, small label.
+    const mainIdx = segments.findIndex((s) => s.includes("anthropic/sonnet-4"));
+    const thinkingIdx = segments.findIndex((s) => /\bhigh\b/.test(s));
+    const slashIdx = segments.findIndex((s) => s.trim() === "/");
+    const smallIdx = segments.findIndex((s) => s.includes("synthetic/haiku"));
+    expect(mainIdx).toBeGreaterThanOrEqual(0);
+    expect(thinkingIdx).toBe(mainIdx + 1);
+    expect(slashIdx).toBe(thinkingIdx + 1);
+    expect(smallIdx).toBe(slashIdx + 1);
+    // No separate thinking level for the small model.
+    expect(segments.length).toBe(smallIdx + 1);
+  });
+
+  it("renders the small label grey with a dim slash, no prefix or italic", () => {
+    const fgMock = vi.fn((_color: string, text: string) => text);
+    const italicMock = vi.fn((text: string) => text);
+    buildEditorMetaSegments(
+      "anthropic/sonnet-4",
+      "high",
+      { on: false, capable: false },
+      "synthetic/haiku",
+      { fg: fgMock, italic: italicMock },
+    );
+
+    expect(fgMock).toHaveBeenCalledWith("dim", "/");
+    expect(fgMock).toHaveBeenCalledWith("dim", "synthetic/haiku");
+    // No "small" prefix and no italicization.
+    expect(fgMock).not.toHaveBeenCalledWith("dim", expect.stringContaining("small "));
+    expect(italicMock).not.toHaveBeenCalled();
+  });
+
+  it("the main model label stays accent (not grey)", () => {
+    const fgMock = vi.fn((_color: string, text: string) => text);
+    buildEditorMetaSegments(
+      "anthropic/sonnet-4",
+      "high",
+      { on: false, capable: false },
+      "synthetic/haiku",
+      { fg: fgMock, italic: vi.fn((t: string) => t) },
+    );
+    expect(fgMock).toHaveBeenCalledWith("accent", "anthropic/sonnet-4");
+  });
+
+  it("buildEditorMetaSegments omits the slash and small label when unconfigured", () => {
+    const segments = buildEditorMetaSegments(
+      "anthropic/sonnet-4",
+      "high",
+      { on: false, capable: false },
+      "",
+      plainTheme(),
+    );
+    expect(segments.some((s) => s.includes("synthetic/haiku"))).toBe(false);
+    expect(segments.some((s) => s.trim() === "/")).toBe(false);
+    // Main model and thinking level remain.
+    expect(segments.some((s) => s.includes("anthropic/sonnet-4"))).toBe(true);
+    expect(segments.some((s) => /\bhigh\b/.test(s))).toBe(true);
+  });
+
+  it("footer line 2 suppresses the small-model status even alongside other statuses", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBar(mockPi, mockCtx);
+
+    const component = getFooterFactory(mockCtx)(
+      { requestRender: vi.fn() },
+      plainTheme(),
+      footerData({
+        statuses: new Map([
+          ["small-model", "small synthetic/haiku · minimal"],
+          ["goal", "🎯 active"],
+        ]),
+      }),
+    );
+    const lines = component.render(120);
+
+    // Line 2 still renders for the goal status, but small-model is gone.
+    expect(lines.length).toBe(2);
+    expect(lines[1]).toContain("🎯 active");
+    expect(lines[1]).not.toContain("small synthetic/haiku");
+  });
+
+  it("updates the small model label immediately when the config file changes", async () => {
+    // Point the watcher at a real temp file so fs.watch fires on write.
+    const tmp = await mkdtemp(join(tmpdir(), "status-bar-small-model-"));
+    const configPath = join(tmp, "small-model.json");
+    await writeFile(configPath, "{}");
+    vi.mocked(resolveSmallModelConfigPath).mockReturnValue(configPath);
+
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
+    mockCtx.model = { id: "sonnet-4", provider: "anthropic" } as any;
+    await enableBar(mockPi, mockCtx);
+
+    // Initially unconfigured → no small label in the title.
+    expect(
+      renderInstalledEditor(mockCtx)
+        .render(100)
+        .some((l) => l.includes("synthetic/haiku")),
+    ).toBe(false);
+
+    // Select a small model and touch the config file to fire the watcher.
+    vi.mocked(loadSmallModelConfig).mockReturnValue({
+      config: { provider: "synthetic", model: "haiku", thinkingLevel: "minimal" },
+      source: "config",
+    });
+    await writeFile(configPath, '{"changed":true}');
+
+    await vi.waitFor(() => {
+      expect(
+        renderInstalledEditor(mockCtx)
+          .render(100)
+          .some((l) => l.includes("synthetic/haiku")),
+      ).toBe(true);
+    });
   });
 });

@@ -30,6 +30,10 @@ export interface State {
   enabled: boolean;
   turnCount: number;
   thinkingLevel: string;
+  // Label of the global small model ("provider/model"), shown in the editor
+  // meta line after a "/" separator, beside the main model. Empty when no
+  // small model is configured.
+  smallModelLabel: string;
   activeTools: ToolExecution[];
   completedToolCount: number;
   gitBranch: string | null;

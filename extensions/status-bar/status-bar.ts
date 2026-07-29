@@ -2,8 +2,9 @@
  * Status Bar Extension
  *
  * A Starship-inspired two-line footer that replaces the default Pi footer,
- * plus a polished input editor that frames the prompt box in grey and shows
- * the model + thinking level inside the frame (Opencode/zentui-style).
+ * plus an input editor wrapped in the same rounded accent modal frame the
+ * voice/handoff overlays use, with the model + thinking level shown in the
+ * title (top border).
  *
  *  Footer line 1 (static session info):
  *    model/provider, thinking level (color-coded, with a live activity dot),
@@ -16,13 +17,16 @@
  *    statuses published via ctx.ui.setStatus(). Omitted entirely when empty.
  *
  *  Editor:
- *    The default Pi editor is wrapped in a neutral grey frame with a metadata
- *    line (model + thinking level) inside, and the border is held grey so it
- *    never tracks the thinking level.
+ *    The default Pi editor is wrapped in a rounded accent modal frame
+ *    (renderModalFrame, shared with the voice/handoff overlays). The title
+ *    (top border) shows the main model + thinking level (+ flex badge when
+ *    capable), then a "/" separator and the small model label in grey.
  *
  * Toggle: /statusbar
  */
 
+import { type FSWatcher, watch } from "node:fs";
+import { basename, dirname } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext } from "pi";
 import {
   type EditorFactory,
@@ -30,6 +34,7 @@ import {
   installEditorFactoryLayer,
   removeEditorFactoryLayer,
 } from "../../lib/editor-factory.ts";
+import { loadSmallModelConfig, resolveSmallModelConfigPath } from "../../lib/small-model.ts";
 import { formatStatusLine } from "../../lib/ui-format.ts";
 import { FLEX_EVENT, ICON_COLOR, STATUS_ICON, STATUS_KEY, TEXT_COLOR } from "./src/constants.ts";
 import { getModelLabel, PolishedEditor } from "./src/editor.ts";
@@ -40,8 +45,8 @@ import type { State } from "./src/types.ts";
 export { ICON_COLOR, STATUS_ICON, TEXT_COLOR } from "./src/constants.ts";
 export {
   buildEditorMetaSegments,
-  type PolishedFrameInput,
-  renderPolishedFrame,
+  type EditorModalFrameInput,
+  renderEditorModalFrame,
 } from "./src/editor.ts";
 
 // --- Extension ---
@@ -51,6 +56,7 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     enabled: true,
     turnCount: 0,
     thinkingLevel: "none",
+    smallModelLabel: "",
     activeTools: [],
     completedToolCount: 0,
     gitBranch: null,
@@ -63,6 +69,8 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
 
   let getBranch: () => any[] = () => [];
   let currentCwd = "";
+  let smallModelWatcher: FSWatcher | undefined;
+  let smallModelWatchDebounce: ReturnType<typeof setTimeout> | undefined;
 
   function setFooter(ctx: ExtensionCommandContext): void {
     if (!ctx.hasUI) return;
@@ -130,6 +138,7 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
           keybindings,
           ctx.ui.theme,
           () => getModelLabel(ctx),
+          () => state.smallModelLabel,
           () => pi.getThinkingLevel() ?? "none",
           () => ({ on: state.flexOn, capable: state.flexCapable }),
         );
@@ -149,6 +158,59 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
   function resetTurnState(): void {
     state.activeTools = [];
     state.completedToolCount = 0;
+  }
+
+  /**
+   * Read the global small model config and cache its "provider/model" label for
+   * the editor meta line. Cleared when no small model is configured. Read on
+   * session_start and turn_start; the small model rarely changes, and a fresh
+   * read each turn picks up `/smallmodel` changes without a file watcher.
+   */
+  function refreshSmallModel(): void {
+    try {
+      const loaded = loadSmallModelConfig();
+      state.smallModelLabel = `${loaded.config.provider}/${loaded.config.model}`;
+    } catch {
+      state.smallModelLabel = "";
+    }
+  }
+
+  /**
+   * Watch the global small-model config file so the editor title updates the
+   * instant `/smallmodel` (or an external edit) changes it — without waiting
+   * for the next turn. Mirrors the small-model extension's own watcher.
+   */
+  function startSmallModelWatch(): void {
+    stopSmallModelWatch();
+    let configPath: string;
+    try {
+      configPath = resolveSmallModelConfigPath();
+    } catch {
+      return;
+    }
+    const configDirectory = dirname(configPath);
+    try {
+      smallModelWatcher = watch(configDirectory, (_event, filename) => {
+        if (filename && filename.toString() !== basename(configPath)) return;
+        if (smallModelWatchDebounce) clearTimeout(smallModelWatchDebounce);
+        smallModelWatchDebounce = setTimeout(() => {
+          smallModelWatchDebounce = undefined;
+          refreshSmallModel();
+          editorRequestRender?.();
+        }, 25);
+      });
+    } catch {
+      smallModelWatcher = undefined;
+    }
+  }
+
+  function stopSmallModelWatch(): void {
+    if (smallModelWatchDebounce) {
+      clearTimeout(smallModelWatchDebounce);
+      smallModelWatchDebounce = undefined;
+    }
+    smallModelWatcher?.close();
+    smallModelWatcher = undefined;
   }
 
   function accumulateTokenUsage(): void {
@@ -213,6 +275,7 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     getBranch = () => ctx.sessionManager.getBranch();
     resetTurnState();
     accumulateTokenUsage();
+    refreshSmallModel();
 
     // Install the UI components synchronously, before any async work, so the
     // polished editor frame and footer are present for the first paint. Git
@@ -254,10 +317,15 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
       editorRequestRender?.();
     });
 
+    // Watch the small-model config so the editor title reflects `/smallmodel`
+    // changes immediately rather than on the next turn.
+    startSmallModelWatch();
+
     await refreshGitStatus();
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
+    stopSmallModelWatch();
     clearFooter(ctx as ExtensionCommandContext);
     restoreEditor(ctx as ExtensionCommandContext);
   });
@@ -265,7 +333,9 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
   pi.on("turn_start", async (_event, _ctx) => {
     state.turnCount++;
     resetTurnState();
+    refreshSmallModel();
     if (state.lastHandle) state.lastHandle.requestRender();
+    editorRequestRender?.();
   });
 
   pi.on("turn_end", async (_event, _ctx) => {
@@ -313,6 +383,7 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
         currentCwd = ctx.cwd;
         getBranch = () => ctx.sessionManager.getBranch();
         accumulateTokenUsage();
+        refreshSmallModel();
         await refreshGitStatus();
         setFooter(ctx);
         installEditor(ctx);

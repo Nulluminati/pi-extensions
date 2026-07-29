@@ -1,13 +1,15 @@
 import { CustomEditor } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { truncateToWidth } from "@earendil-works/pi-tui";
 import type { ExtensionCommandContext } from "pi";
+import { modalContentWidth, renderModalFrame } from "../../../lib/tui-frame.ts";
 import {
-  EDITOR_FRAME_COLOR,
   EDITOR_META_SEPARATOR,
   FLEX_OFF_COLOR,
   FLEX_ON_COLOR,
   ICON_FLEX,
   ICON_THINKING,
+  MODAL_PADDING_X,
+  MODAL_PADDING_Y,
   THINKING_THEME_COLOR,
 } from "./constants.ts";
 
@@ -18,16 +20,18 @@ export function getModelLabel(ctx: ExtensionCommandContext): string {
 }
 
 /**
- * Build the metadata segments shown inside the editor frame: the model label
- * (accent) and the thinking level (color-coded per level, muted when off),
- * both always visible. When the current model is flex-capable, a flex badge is
- * appended next to the thinking level, reading "on" (green) or "off" (dim).
- * Segments are pre-colored so the frame function stays a pure layout concern.
+ * Build the title segments shown in the editor's top border. The main group
+ * comes first — model (accent), thinking level (color-coded per level, muted
+ * when off), and a flex badge when the model is flex-capable. When a small
+ * model is configured, a dim "/" introduces its label, rendered grey to read
+ * as subordinate to the main model. Segments are pre-colored so the frame
+ * function stays a pure layout concern.
  */
 export function buildEditorMetaSegments(
   modelLabel: string,
   thinkingLevel: string,
   flex: { on: boolean; capable: boolean },
+  smallModelLabel: string,
   theme: any,
 ): string[] {
   const segments: string[] = [];
@@ -39,68 +43,70 @@ export function buildEditorMetaSegments(
     const flexColor = flex.on ? FLEX_ON_COLOR : FLEX_OFF_COLOR;
     segments.push(theme.fg(flexColor, `${ICON_FLEX} flex ${flex.on ? "on" : "off"}`));
   }
+  if (smallModelLabel) {
+    // The small model label sits after a dim "/" separator, grey to read as
+    // subordinate to the main model.
+    segments.push(theme.fg("dim", "/"));
+    segments.push(theme.fg("dim", smallModelLabel));
+  }
   return segments;
 }
 
-export interface PolishedFrameInput {
-  /** Raw lines produced by the base editor's render(). */
+export interface EditorModalFrameInput {
+  /** Raw lines produced by the base editor's render(), rendered at the modal's
+   * inner content width. */
   baseRendered: string[];
   /** Number of trailing lines that belong to the autocomplete dropdown. */
   autocompleteCount: number;
   width: number;
-  /** Pre-colored metadata segments (model, thinking) for the meta line. */
-  metaSegments: string[];
+  /** Pre-colored title string shown in the top border (model + thinking). */
+  title: string;
   theme: any;
 }
 
 /**
- * Wrap the base editor's rendered output in a neutral grey frame with a
- * metadata line (model + thinking level) inside, adding padding lines so the
- * box is taller. The base editor's own top/bottom borders are stripped (the
- * frame supplies its own); autocomplete lines are preserved below the bottom
- * border. Pure — tested directly with synthetic base output.
+ * Wrap the base editor's rendered output in the same rounded accent modal
+ * frame the voice/handoff overlays use (renderModalFrame), with the model and
+ * thinking level shown in the title (top border). The base editor's own
+ * top/bottom borders are stripped (the modal supplies its own); autocomplete
+ * lines are preserved below the box. Pure — tested directly with synthetic
+ * base output.
  */
-export function renderPolishedFrame(input: PolishedFrameInput): string[] {
-  const { baseRendered, autocompleteCount, width, metaSegments, theme } = input;
+export function renderEditorModalFrame(input: EditorModalFrameInput): string[] {
+  const { baseRendered, autocompleteCount, width, title, theme } = input;
   const fallback = () => baseRendered.map((line) => truncateToWidth(line, Math.max(0, width), ""));
-  if (width <= 2 || baseRendered.length < 2) return fallback();
+  if (width < 4 || baseRendered.length < 2) return fallback();
 
   const acCount =
     autocompleteCount > 0 && autocompleteCount < baseRendered.length ? autocompleteCount : 0;
   const frame = acCount > 0 ? baseRendered.slice(0, -acCount) : baseRendered;
   if (frame.length < 2) return fallback();
 
-  // Strip the base editor's own top and bottom border rows.
+  // Strip the base editor's own top and bottom border rows; the modal frame
+  // supplies its own. Autocomplete lines are preserved below the box.
   const contentLines = frame.slice(1, -1);
   const autocompleteLines = acCount > 0 ? baseRendered.slice(-acCount) : [];
 
-  const grey = (text: string) => theme.fg(EDITOR_FRAME_COLOR, text);
-  const innerWidth = Math.max(0, width);
-  const fill = (text: string) => {
-    const truncated = truncateToWidth(text, innerWidth, "");
-    return `${truncated}${" ".repeat(Math.max(0, innerWidth - visibleWidth(truncated)))}`;
-  };
-  const border = grey("─".repeat(width));
-  const meta = metaSegments.filter(Boolean).join(grey(EDITOR_META_SEPARATOR));
-
-  const lines: string[] = [border];
-  for (const content of contentLines) lines.push(fill(content));
-  lines.push(fill(""));
-  if (meta) lines.push(fill(meta));
-  lines.push(border);
-  for (const ac of autocompleteLines) lines.push(truncateToWidth(ac, width, ""));
-  return lines;
+  const modalLines = renderModalFrame(theme, width, contentLines, {
+    title,
+    rawTitle: true,
+    paddingX: MODAL_PADDING_X,
+    paddingY: MODAL_PADDING_Y,
+  });
+  return [...modalLines, ...autocompleteLines.map((line) => truncateToWidth(line, width, ""))];
 }
 
 /**
- * The default Pi editor, framed in a neutral grey box with the model and
- * thinking level shown on a metadata line inside. Subclasses CustomEditor so
- * all text handling, keybindings, autocomplete, and history are inherited;
- * only render() is overridden to add the frame.
+ * The default Pi editor, framed in the same rounded accent modal box the
+ * voice/handoff overlays use, with the model and thinking level shown in the
+ * title (top border). Subclasses CustomEditor so all text handling,
+ * keybindings, autocomplete, and history are inherited; only render() is
+ * overridden to add the frame.
  */
 export class PolishedEditor extends CustomEditor {
   private readonly uiTheme: any;
   private readonly getModelLabel: () => string;
+  private readonly getSmallModelLabel: () => string;
   private readonly getThinkingLevel: () => string;
   private readonly getFlexState: () => { on: boolean; capable: boolean };
 
@@ -110,37 +116,47 @@ export class PolishedEditor extends CustomEditor {
     keybindings: any,
     uiTheme: any,
     getModelLabel: () => string,
+    getSmallModelLabel: () => string,
     getThinkingLevel: () => string,
     getFlexState: () => { on: boolean; capable: boolean },
   ) {
     super(tui, theme, keybindings, { paddingX: 0 });
     this.uiTheme = uiTheme;
     this.getModelLabel = getModelLabel;
+    this.getSmallModelLabel = getSmallModelLabel;
     this.getThinkingLevel = getThinkingLevel;
     this.getFlexState = getFlexState;
-    // Hold the border grey so the input box never tracks the thinking level.
-    this.borderColor = (str: string) => uiTheme.fg(EDITOR_FRAME_COLOR, str);
+    // The base editor's own borders are discarded by render(); the modal frame
+    // supplies its own borderAccent border, so no borderColor override needed.
   }
 
   render(width: number): string[] {
-    if (width <= 2) return super.render(width);
-    // No left rail: the base editor renders at the full width and the frame
-    // pads its content lines out to match.
-    const innerWidth = Math.max(1, width);
-    const baseRendered = super.render(innerWidth);
-    const autocompleteCount = this.computeAutocompleteCount(innerWidth);
-    return renderPolishedFrame({
+    if (width < 4) return super.render(width);
+    // Render the base editor at the modal's inner content width so its text
+    // (and autocomplete) fit inside the side borders + padding.
+    const contentWidth = modalContentWidth(width, MODAL_PADDING_X);
+    const baseRendered = super.render(contentWidth);
+    const autocompleteCount = this.computeAutocompleteCount(contentWidth);
+    return renderEditorModalFrame({
       baseRendered,
       autocompleteCount,
       width,
-      metaSegments: buildEditorMetaSegments(
-        this.getModelLabel(),
-        this.getThinkingLevel(),
-        this.getFlexState(),
-        this.uiTheme,
-      ),
+      title: this.buildTitle(),
       theme: this.uiTheme,
     });
+  }
+
+  /** Join the model/thinking/small-model segments into the title string. */
+  private buildTitle(): string {
+    return buildEditorMetaSegments(
+      this.getModelLabel(),
+      this.getThinkingLevel(),
+      this.getFlexState(),
+      this.getSmallModelLabel(),
+      this.uiTheme,
+    )
+      .filter(Boolean)
+      .join(EDITOR_META_SEPARATOR);
   }
 
   /**

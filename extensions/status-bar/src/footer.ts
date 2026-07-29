@@ -19,6 +19,7 @@ import {
   ICON_TYPECHANGED,
   ICON_UNTRACKED,
   MAX_TOOL_NAME,
+  SMALL_MODEL_STATUS_KEY,
   STATUS_KEY,
   TOKEN_COLORS,
 } from "./constants.ts";
@@ -220,7 +221,9 @@ export function buildFooterLines(
   const extStatuses = footerData?.getExtensionStatuses?.();
   if (extStatuses) {
     for (const [key, text] of extStatuses) {
-      if (key !== STATUS_KEY && text) line2Segments.push(text);
+      // Skip our own indicator and the small-model status: the small model is
+      // shown in the editor meta line, not the footer.
+      if (key !== STATUS_KEY && key !== SMALL_MODEL_STATUS_KEY && text) line2Segments.push(text);
     }
   }
 

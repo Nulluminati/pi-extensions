@@ -1,4 +1,4 @@
-import { truncateToWidth } from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 export interface FrameTheme {
   fg(color: string, text: string): string;
@@ -6,6 +6,10 @@ export interface FrameTheme {
 
 export interface ModalFrameOptions {
   title: string;
+  /** When true, the title is rendered as-is (already colored) instead of being
+   * wrapped in the accent color. Title-cell sizing still uses visible width, so
+   * embedded ANSI escapes don't corrupt the border layout. */
+  rawTitle?: boolean;
   paddingX?: number;
   paddingY?: number;
   fixedBodyRows?: number;
@@ -63,9 +67,11 @@ export function renderModalFrame(
   const border = (text: string) => theme.fg("borderAccent", text);
   const title = truncateToWidth(options.title, Math.max(1, innerWidth - 4), "…");
   const titleCell = ` ${title} `;
-  const leftRuleWidth = Math.min(2, Math.max(0, innerWidth - titleCell.length));
-  const rightRuleWidth = Math.max(0, innerWidth - leftRuleWidth - titleCell.length);
-  const top = `${border("╭")}${border("─".repeat(leftRuleWidth))}${theme.fg("accent", titleCell)}${border("─".repeat(rightRuleWidth))}${border("╮")}`;
+  const styledTitleCell = options.rawTitle ? titleCell : theme.fg("accent", titleCell);
+  const titleCellWidth = visibleWidth(titleCell);
+  const leftRuleWidth = Math.min(2, Math.max(0, innerWidth - titleCellWidth));
+  const rightRuleWidth = Math.max(0, innerWidth - leftRuleWidth - titleCellWidth);
+  const top = `${border("╭")}${border("─".repeat(leftRuleWidth))}${styledTitleCell}${border("─".repeat(rightRuleWidth))}${border("╮")}`;
   const blank = `${border("│")}${" ".repeat(innerWidth)}${border("│")}`;
 
   let body = [...lines];

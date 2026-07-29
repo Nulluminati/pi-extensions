@@ -68,6 +68,24 @@ describe("TUI frame helpers", () => {
     expect(visibleWidth(line)).toBe(9);
   });
 
+  it("renders a raw (pre-colored) title without re-wrapping it in accent", () => {
+    // rawTitle must size the border by visible width (ignoring ANSI) and emit
+    // the title verbatim instead of wrapping it in fg("accent", …).
+    const theme = {
+      fg: (color: string, text: string) =>
+        color === "accent" ? `\x1b[35m${text}\x1b[0m` : `\x1b[36m${text}\x1b[0m`,
+    };
+    const coloredTitle = `${theme.fg("accent", "synthetic")}/haiku`;
+    const lines = renderModalFrame(theme, 30, ["content"], {
+      title: coloredTitle,
+      rawTitle: true,
+    });
+
+    // The raw title bytes survive intact, and the top border still fits 30 cols.
+    expect(lines[0]).toContain(coloredTitle);
+    expect(lines.every((line) => visibleWidth(line) === 30)).toBe(true);
+  });
+
   it("keeps every frame primitive within narrow widths", () => {
     for (const width of [0, 1, 2, 3]) {
       const lines = [

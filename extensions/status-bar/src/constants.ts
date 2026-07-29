@@ -79,11 +79,23 @@ export const TOKEN_COLORS = {
   cacheWrite: "thinkingHigh", // ↘ purple
 } as const;
 
-// Neutral grey used for the polished editor frame. Held constant so the input
-// box never tracks the thinking-level border color.
-export const EDITOR_FRAME_COLOR = "borderMuted";
+// Padding inside the input-box modal frame, matching the voice/handoff
+// modals so the prompt box reads as the same chrome.
+export const MODAL_PADDING_X = 2;
 
+export const MODAL_PADDING_Y = 1;
+
+// Gap between pre-colored title segments (model, thinking, small model) in the
+// input-box top border.
 export const EDITOR_META_SEPARATOR = "  ";
+
+/**
+ * Status key the small-model extension publishes under. Defined locally (not
+ * imported) so the status-bar extension stays self-contained; the small-model
+ * extension owns the contract and uses the same string. Suppressed from footer
+ * line 2 because the small model is shown in the editor meta line instead.
+ */
+export const SMALL_MODEL_STATUS_KEY = "small-model";
 
 /**
  * Event the Neuralwatt extension emits on pi.events to publish flex state for
