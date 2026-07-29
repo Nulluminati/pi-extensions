@@ -2,10 +2,8 @@ import { vi } from "vitest";
 
 /**
  * Mock `@earendil-works/pi-coding-agent` — the package is a peer dependency
- * not installed in the local node_modules, so tests stub it. Only the surface
- * the status-bar extension imports is needed: `CustomEditor`, which the
- * polished editor subclasses. The class is never instantiated in tests (the
- * editor factory is registered but not invoked), so stub methods are placeholders.
+ * not installed in the local node_modules, so tests stub the component surface
+ * used by extensions in this repository.
  */
 vi.mock("@earendil-works/pi-coding-agent", () => {
   class CustomEditor {
@@ -39,9 +37,37 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
       return [this.color ? this.color(bar) : bar];
     }
   }
+  class RenderedComponent {
+    lines = ["", "content"];
+    renderedWidth = 0;
+    render(width: number): string[] {
+      this.renderedWidth = width;
+      return this.lines.map((line) => line.slice(0, Math.max(0, width)));
+    }
+  }
+  class Theme {
+    bg(color: string, text: string): string {
+      return `<theme-bg:${color}>${text}</theme-bg:${color}>`;
+    }
+    getBgAnsi(color: string): string {
+      return `<theme-bg:${color}>`;
+    }
+  }
+  class ToolExecutionComponent extends RenderedComponent {
+    isPartial = true;
+    result?: { isError?: boolean };
+  }
+  class BashExecutionComponent extends RenderedComponent {
+    status: "running" | "complete" | "error" | "cancelled" = "running";
+  }
+  class CustomMessageComponent extends RenderedComponent {}
   return {
+    BashExecutionComponent,
     CustomEditor,
+    CustomMessageComponent,
     DynamicBorder,
+    Theme,
+    ToolExecutionComponent,
     getAgentDir: vi.fn(() => "/home/test/.pi/agent"),
     getSettingsListTheme: vi.fn(() => ({
       label: (text: string) => text,

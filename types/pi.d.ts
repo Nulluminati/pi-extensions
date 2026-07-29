@@ -754,6 +754,23 @@ declare module "@earendil-works/pi-tui" {
 declare module "@earendil-works/pi-coding-agent" {
   export function getAgentDir(): string;
   export function getSettingsListTheme(): any;
+
+  export class Theme {
+    bg(color: string, text: string): string;
+    getBgAnsi(color: string): string;
+  }
+
+  export class ToolExecutionComponent {
+    render(width: number): string[];
+  }
+
+  export class BashExecutionComponent {
+    render(width: number): string[];
+  }
+
+  export class CustomMessageComponent {
+    render(width: number): string[];
+  }
 }
 
 declare module "@earendil-works/pi-ai" {
