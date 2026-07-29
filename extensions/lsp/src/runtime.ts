@@ -11,7 +11,7 @@ import {
   PROJECT_CONFIG_PATH,
   scaffoldStarterConfig,
 } from "./config.ts";
-import { ICON_COLOR, STATUS_ICON, TEXT_COLOR } from "./constants.ts";
+import { ICON_COLOR, STATUS_ICON, STATUS_KEY, TEXT_COLOR } from "./constants.ts";
 import {
   formatCallHierarchy,
   formatCodeActions,
@@ -38,7 +38,6 @@ import type { CallHierarchyItem, Diagnostic, LoadedConfig, Range } from "./types
 
 const RETRY_MAX_ATTEMPTS = 2;
 const RETRY_DELAY = 2_000;
-const STATUS_KEY = "lsp";
 const CODEACTIONS_END_CHAR = Number.MAX_SAFE_INTEGER;
 
 function sleep(ms: number): Promise<void> {

@@ -360,6 +360,19 @@ describe("voice-extension", () => {
         expect(typeof opts.handler).toBe("function");
       }
     });
+
+    it("voice commands do nothing in non-UI mode", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      mockCtx.hasUI = false;
+      await voiceExtension(mockPi);
+      for (const command of ["voice", "voice:settings", "voice:speak", "voice:stop"]) {
+        await getCommandHandler(mockPi, command)("", mockCtx);
+      }
+      expect(mockCtx.ui.custom).not.toHaveBeenCalled();
+      expect(mockCtx.ui.notify).not.toHaveBeenCalled();
+      expect(mockCtx.ui.setStatus).not.toHaveBeenCalled();
+    });
   });
 
   describe("spoken summaries", () => {

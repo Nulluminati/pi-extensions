@@ -345,6 +345,28 @@ describe("btw-extension", () => {
       expect(mockCtx.ui.notify).toHaveBeenCalledWith("Started a new side thread.", "info");
     });
 
+    it("/btw commands do nothing in non-UI mode", async () => {
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      const mockPi = createMockPi() as any;
+      const { mockCtx, overlays } = setupContext();
+      mockCtx.hasUI = false;
+      await registerAll(mockPi);
+      for (const command of [
+        "btw",
+        "btw:new",
+        "btw:tangent",
+        "btw:reset",
+        "btw:inject",
+        "btw:summarize",
+        "btw:thinking",
+      ]) {
+        await getCommandHandler(mockPi, command)("some args", mockCtx);
+      }
+      expect(mockCtx.ui.custom).not.toHaveBeenCalled();
+      expect(mockCtx.ui.notify).not.toHaveBeenCalled();
+      expect(overlays.length).toBe(0);
+    });
+
     it("/btw:tangent with no question resets to tangent and opens the overlay", async () => {
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       const mockPi = createMockPi() as any;

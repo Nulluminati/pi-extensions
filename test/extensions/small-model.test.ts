@@ -17,7 +17,7 @@ afterEach(() => {
   temporaryDirectories.length = 0;
 });
 
-describe("small-model extension", () => {
+describe("small-model-extension", () => {
   describe("file structure", () => {
     it("keeps one discoverable entrypoint and implementation modules under src", async () => {
       const extensionDir = resolve(import.meta.dirname, "../../extensions/small-model");

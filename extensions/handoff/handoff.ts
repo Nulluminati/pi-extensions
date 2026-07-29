@@ -12,10 +12,10 @@
 
 import type { ExtensionAPI } from "pi";
 import { formatStatusLine } from "../../lib/ui-format.ts";
+import { ICON_COLOR, STATUS_ICON, STATUS_KEY, TEXT_COLOR } from "./src/constants.ts";
 import { formatGoalForSessionName, resolveGoal } from "./src/goal.ts";
 import { generateSummary } from "./src/summary.ts";
 import { buildTranscript, type HandoffEntry } from "./src/transcript.ts";
-import { ICON_COLOR, notify, STATUS_ICON, STATUS_KEY, TEXT_COLOR } from "./src/ui.ts";
 
 export { ICON_COLOR, STATUS_ICON, TEXT_COLOR };
 
@@ -44,7 +44,9 @@ export default async function handoffExtension(pi: ExtensionAPI) {
       const entries = ctx.sessionManager.getBranch() as HandoffEntry[];
       const transcript = buildTranscript(entries);
       if (!transcript.trim()) {
-        notify(ctx, "No conversation to hand off.", "error");
+        if (ctx.hasUI) {
+          ctx.ui.notify("No conversation to hand off.", "error");
+        }
         return;
       }
 
@@ -68,7 +70,11 @@ export default async function handoffExtension(pi: ExtensionAPI) {
       }
 
       if (!summary.ok) {
-        notify(ctx, summary.error, "error");
+        if (ctx.hasUI) {
+          ctx.ui.notify(summary.error, "error");
+        } else {
+          console.error(summary.error);
+        }
         return;
       }
 
@@ -80,7 +86,7 @@ export default async function handoffExtension(pi: ExtensionAPI) {
 
       const editedSummary = await ctx.ui.editor("Review handoff prompt", summary.text);
       if (editedSummary === undefined) {
-        notify(ctx, "Handoff cancelled.", "info");
+        ctx.ui.notify("Handoff cancelled.", "info");
         return;
       }
 
@@ -107,7 +113,7 @@ export default async function handoffExtension(pi: ExtensionAPI) {
       const result = await ctx.newSession(newSessionOptions);
 
       if (result.cancelled) {
-        notify(ctx, "New session cancelled.", "info");
+        ctx.ui.notify("New session cancelled.", "info");
       }
     },
   });

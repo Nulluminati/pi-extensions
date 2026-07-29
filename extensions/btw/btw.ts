@@ -114,6 +114,7 @@ export default async function btwExtension(pi: ExtensionAPI) {
   pi.registerCommand("btw", {
     description: "Open the side window and (optionally) ask a question: /btw [question]",
     handler: async (args, ctx) => {
+      if (!ctx.hasUI) return;
       const question = args.trim();
       // No question — just open the overlay. The user can type into the
       // composer and press Enter to start a side turn.
@@ -136,6 +137,7 @@ export default async function btwExtension(pi: ExtensionAPI) {
   pi.registerCommand("btw:new", {
     description: "Reset the side thread and open the window: /btw:new [question]",
     handler: async (args, ctx) => {
+      if (!ctx.hasUI) return;
       const question = args.trim();
       // Reset the thread regardless of whether a question was passed.
       state.thread = emptyThread("contextual");
@@ -157,6 +159,7 @@ export default async function btwExtension(pi: ExtensionAPI) {
   pi.registerCommand("btw:tangent", {
     description: "Open a contextless tangent: /btw:tangent [question]",
     handler: async (args, ctx) => {
+      if (!ctx.hasUI) return;
       const question = args.trim();
       state.thread = emptyThread("tangent");
       state.transcript = [];
@@ -177,6 +180,7 @@ export default async function btwExtension(pi: ExtensionAPI) {
   pi.registerCommand("btw:reset", {
     description: "Wipe the side thread and close the side window",
     handler: async (_args, ctx) => {
+      if (!ctx.hasUI) return;
       if (state.thread.messages.length === 0) {
         ctx.ui.notify("No side thread to reset.", "info");
         return;
@@ -205,6 +209,7 @@ export default async function btwExtension(pi: ExtensionAPI) {
   pi.registerCommand("btw:inject", {
     description: "Hand the full side thread back to the main agent: /btw:inject [instructions]",
     handler: async (args, ctx) => {
+      if (!ctx.hasUI) return;
       if (state.thread.messages.length === 0) {
         ctx.ui.notify("Nothing to hand off — the side thread is empty.", "warning");
         return;
@@ -241,6 +246,7 @@ export default async function btwExtension(pi: ExtensionAPI) {
   pi.registerCommand("btw:summarize", {
     description: "Distill the side thread and hand a summary back: /btw:summarize [instructions]",
     handler: async (args, ctx) => {
+      if (!ctx.hasUI) return;
       if (state.thread.messages.length === 0) {
         ctx.ui.notify("Nothing to hand off — the side thread is empty.", "warning");
         return;
@@ -292,6 +298,7 @@ export default async function btwExtension(pi: ExtensionAPI) {
   pi.registerCommand("btw:thinking", {
     description: "Show or set the side thinking level: /btw:thinking [low|medium|high|none|clear]",
     handler: async (args, ctx) => {
+      if (!ctx.hasUI) return;
       const trimmed = args.trim();
       if (!trimmed) {
         const ov = state.thread.thinkingOverride;

@@ -99,6 +99,7 @@ export default async function myExtension(pi: ExtensionAPI) {
 - **Use `ctx.ui.notify(message, "error")` for user-visible errors.**
 - **For async errors in `ui.custom` factories, pass the error string to `done()` so the user sees it in the dialog.**
 - **Validate preconditions early** (empty args, missing model, no UI) and return before doing work.
+- **Guard TUI-only command handlers with `if (!ctx.hasUI) return;` at the top of the handler.** Do not wrap `ctx.ui.notify` in a helper that falls back to `console.*` — in `rpc`/`json`/`print` mode a command that cannot work should do nothing, explicitly.
 
 ---
 

@@ -10,4 +10,6 @@ export const ICON_COLOR = "thinkingHigh";
 
 export const TEXT_COLOR = "muted";
 
+export const STATUS_KEY = "gondolin";
+
 export const GUEST_WORKSPACE = "/workspace";

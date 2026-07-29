@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import gondolinExtension from "../../extensions/gondolin/gondolin.ts";
 import { createMockCommandContext } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
+import { getCommandHandler, getEventHandler } from "../mocks/test-helpers.ts";
 
 const mockVm = {
   id: "test-vm-id",
@@ -100,6 +101,19 @@ describe("gondolin-extension", () => {
     await handler("", mockCtx);
 
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("not running"), "info");
+  });
+
+  it("/gondolin command does nothing in non-UI mode", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.hasUI = false;
+    mockPi.getFlag = vi.fn(() => false);
+    await gondolinExtension(mockPi);
+
+    const handler = getCommandHandler(mockPi, "gondolin");
+    await handler("", mockCtx);
+
+    expect(mockCtx.ui.notify).not.toHaveBeenCalled();
   });
 
   it("when disabled, session_start does not start the VM", async () => {
@@ -237,13 +251,13 @@ describe("gondolin-extension", () => {
     await sessionStart({ type: "session_start", reason: "new" }, mockCtx);
 
     const beforeAgentStart = getEventHandler(mockPi, "before_agent_start");
-    const result = await beforeAgentStart(
+    const result = (await beforeAgentStart(
       {
         type: "before_agent_start",
         systemPrompt: "Current working directory: /home/user/project",
       },
       mockCtx,
-    );
+    )) as { systemPrompt: string };
 
     expect(result.systemPrompt).toContain("/workspace");
     expect(result.systemPrompt).toContain("Gondolin VM");
@@ -274,7 +288,7 @@ describe("gondolin-extension", () => {
     await sessionStart({ type: "session_start", reason: "new" }, mockCtx);
 
     const userBash = getEventHandler(mockPi, "user_bash");
-    const result = await userBash(
+    const result = (await userBash(
       {
         type: "user_bash",
         command: "ls",
@@ -282,7 +296,7 @@ describe("gondolin-extension", () => {
         cwd: "/home/user/project",
       },
       mockCtx,
-    );
+    )) as { operations: Record<string, unknown> };
 
     expect(result).toHaveProperty("operations");
     expect(result.operations).toHaveProperty("exec");
@@ -314,24 +328,6 @@ describe("gondolin-extension", () => {
     );
   });
 });
-
-// biome-ignore lint/suspicious/noExplicitAny: test mock
-function getEventHandler(mockPi: any, eventType: string): (...args: any[]) => any {
-  const calls = mockPi.on.mock.calls;
-  for (const call of calls) {
-    if (call[0] === eventType) return call[1];
-  }
-  throw new Error(`Handler for ${eventType} not found`);
-}
-
-// biome-ignore lint/suspicious/noExplicitAny: test mock
-function getCommandHandler(mockPi: any, commandName: string): (...args: any[]) => any {
-  const calls = mockPi.registerCommand.mock.calls;
-  for (const call of calls) {
-    if (call[0] === commandName) return call[1].handler;
-  }
-  throw new Error(`Handler for ${commandName} not found`);
-}
 
 // biome-ignore lint/suspicious/noExplicitAny: test mock
 function getToolByName(mockPi: any, toolName: string): any {

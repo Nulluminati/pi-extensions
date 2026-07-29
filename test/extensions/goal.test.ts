@@ -129,7 +129,7 @@ describe("goal-extension", () => {
     expect(mockPi.sendUserMessage).not.toHaveBeenCalled();
   });
 
-  it("/goal with no args in non-UI mode shows usage", async () => {
+  it("/goal:new does nothing in non-UI mode", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     mockCtx.hasUI = false;
@@ -137,7 +137,31 @@ describe("goal-extension", () => {
     const newGoal = getCommandHandler(mockPi, "goal:new");
     await newGoal("", mockCtx);
     expect(mockCtx.ui.custom).not.toHaveBeenCalled();
-    expect(mockCtx.ui.notify).toHaveBeenCalledWith("Usage: /goal:new <objective>", "warning");
+    expect(mockCtx.ui.notify).not.toHaveBeenCalled();
+    expect(mockPi.appendEntry).not.toHaveBeenCalled();
+  });
+
+  it("goal commands do nothing in non-UI mode", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.hasUI = false;
+    await goalExtension(mockPi);
+    for (const command of [
+      "goal",
+      "goal:new",
+      "goal:status",
+      "goal:edit",
+      "goal:pause",
+      "goal:resume",
+      "goal:budget",
+      "goal:reset",
+    ]) {
+      await getCommandHandler(mockPi, command)("some args", mockCtx);
+    }
+    expect(mockCtx.ui.notify).not.toHaveBeenCalled();
+    expect(mockCtx.ui.confirm).not.toHaveBeenCalled();
+    expect(mockPi.appendEntry).not.toHaveBeenCalled();
+    expect(mockPi.sendUserMessage).not.toHaveBeenCalled();
   });
 
   it("/goal <objective> starts a new goal", async () => {

@@ -4,3 +4,4 @@
 export const STATUS_ICON = String.fromCodePoint(0xf0169); // nf-md-code-braces
 export const ICON_COLOR = "mdLink";
 export const TEXT_COLOR = "muted";
+export const STATUS_KEY = "lsp";

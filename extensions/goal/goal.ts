@@ -270,6 +270,7 @@ export default async function goalExtension(pi: ExtensionAPI) {
   // --- Commands ---
 
   async function startGoal(args: string, ctx: ExtensionCommandContext) {
+    if (!ctx.hasUI) return;
     const parsed = parseNewGoalArgs(args);
     if (parsed.error) {
       ctx.ui.notify(parsed.error, "warning");
@@ -279,10 +280,6 @@ export default async function goalExtension(pi: ExtensionAPI) {
     let objective = parsed.objective;
     if (!objective) {
       // No inline objective — prompt for one in the shared framed input modal.
-      if (!ctx.hasUI) {
-        ctx.ui.notify("Usage: /goal:new <objective>", "warning");
-        return;
-      }
       objective = (
         await promptText(ctx, {
           title: "Goal",
@@ -342,6 +339,7 @@ export default async function goalExtension(pi: ExtensionAPI) {
   pi.registerCommand("goal:status", {
     description: "Show the active goal, status, elapsed time, budget, and iteration count",
     handler: async (_args: string, ctx: ExtensionCommandContext) => {
+      if (!ctx.hasUI) return;
       if (!state) {
         ctx.ui.notify("No active goal. Use /goal:new <objective> to start one.", "info");
         return;
@@ -366,6 +364,7 @@ export default async function goalExtension(pi: ExtensionAPI) {
   pi.registerCommand("goal:edit", {
     description: "Edit the current goal objective: /goal:edit [objective]",
     handler: async (args: string, ctx: ExtensionCommandContext) => {
+      if (!ctx.hasUI) return;
       if (!state) {
         ctx.ui.notify("No active goal to edit. Use /goal:new <objective> to start one.", "error");
         return;
@@ -403,6 +402,7 @@ export default async function goalExtension(pi: ExtensionAPI) {
   pi.registerCommand("goal:pause", {
     description: "Pause auto-continuation for the active goal",
     handler: async (_args: string, ctx: ExtensionCommandContext) => {
+      if (!ctx.hasUI) return;
       if (state?.status !== "active") {
         ctx.ui.notify("No active goal to pause.", "info");
         return;
@@ -419,6 +419,7 @@ export default async function goalExtension(pi: ExtensionAPI) {
   pi.registerCommand("goal:resume", {
     description: "Resume a paused or budget-stopped goal",
     handler: async (_args: string, ctx: ExtensionCommandContext) => {
+      if (!ctx.hasUI) return;
       if (!state) {
         ctx.ui.notify("No goal to resume. Use /goal:new <objective> to start one.", "info");
         return;
@@ -456,6 +457,7 @@ export default async function goalExtension(pi: ExtensionAPI) {
   pi.registerCommand("goal:budget", {
     description: "Set the goal token budget: /goal:budget <amount>",
     handler: async (args: string, ctx: ExtensionCommandContext) => {
+      if (!ctx.hasUI) return;
       if (!state) {
         ctx.ui.notify("No active goal. Use /goal:new <objective> to start one.", "info");
         return;
@@ -491,6 +493,7 @@ export default async function goalExtension(pi: ExtensionAPI) {
   pi.registerCommand("goal:reset", {
     description: "Cancel the current goal and reset usage counters (asks for confirmation)",
     handler: async (_args: string, ctx: ExtensionCommandContext) => {
+      if (!ctx.hasUI) return;
       if (!state) {
         ctx.ui.notify("No goal to reset.", "info");
         return;

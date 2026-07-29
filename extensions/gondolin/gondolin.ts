@@ -25,7 +25,13 @@ import {
 import type { ExtensionAPI, ExtensionContext } from "pi";
 import { formatStatusLine } from "../../lib/ui-format.ts";
 import { createGondolinBashOps } from "./src/bash.ts";
-import { GUEST_WORKSPACE, ICON_COLOR, STATUS_ICON, TEXT_COLOR } from "./src/constants.ts";
+import {
+  GUEST_WORKSPACE,
+  ICON_COLOR,
+  STATUS_ICON,
+  STATUS_KEY,
+  TEXT_COLOR,
+} from "./src/constants.ts";
 import {
   createGondolinEditOps,
   createGondolinLsOps,
@@ -59,7 +65,7 @@ export default async function gondolinExtension(pi: ExtensionAPI) {
 
   async function startVm(ctx?: ExtensionContext): Promise<VM> {
     ctx?.ui.setStatus(
-      "gondolin",
+      STATUS_KEY,
       formatStatusLine(ctx.ui.theme, {
         icon: STATUS_ICON,
         prefix: "Gondolin",
@@ -80,7 +86,7 @@ export default async function gondolinExtension(pi: ExtensionAPI) {
     shellPath = bashProbe.stdout.trim() || "/bin/sh";
     vm = created;
     ctx?.ui.setStatus(
-      "gondolin",
+      STATUS_KEY,
       formatStatusLine(ctx.ui.theme, {
         icon: STATUS_ICON,
         prefix: "Gondolin",
@@ -120,7 +126,7 @@ export default async function gondolinExtension(pi: ExtensionAPI) {
     vmStarting = undefined;
     if (!activeVm) return;
     ctx.ui.setStatus(
-      "gondolin",
+      STATUS_KEY,
       formatStatusLine(ctx.ui.theme, {
         icon: STATUS_ICON,
         prefix: "Gondolin",
@@ -132,13 +138,14 @@ export default async function gondolinExtension(pi: ExtensionAPI) {
     try {
       await activeVm.close();
     } finally {
-      ctx.ui.setStatus("gondolin", undefined);
+      ctx.ui.setStatus(STATUS_KEY, undefined);
     }
   });
 
   pi.registerCommand("gondolin", {
     description: "Show Gondolin VM status",
     handler: async (_args, ctx) => {
+      if (!ctx.hasUI) return;
       const activeVm = vm;
       if (!activeVm) {
         ctx.ui.notify("Gondolin is not running. Enable it with the --gondolin flag.", "info");

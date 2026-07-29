@@ -312,6 +312,7 @@ export default async function voiceExtension(pi: ExtensionAPI) {
   pi.registerCommand("voice", {
     description: "Open the voice dictation overlay (same as holding Space)",
     handler: async (_args, ctx: ExtensionCommandContext) => {
+      if (!ctx.hasUI) return;
       openVoice(ctx);
     },
   });
@@ -319,6 +320,7 @@ export default async function voiceExtension(pi: ExtensionAPI) {
   pi.registerCommand("voice:settings", {
     description: "Open voice model, voice, and connection settings",
     handler: async (args, ctx: ExtensionCommandContext) => {
+      if (!ctx.hasUI) return;
       await runVoiceSettings(args, ctx, {
         activeModelId,
         activeTtsModelId,
@@ -344,6 +346,7 @@ export default async function voiceExtension(pi: ExtensionAPI) {
   pi.registerCommand("voice:speak", {
     description: "Summarize and locally speak the latest assistant message",
     handler: async (args, ctx: ExtensionCommandContext) => {
+      if (!ctx.hasUI) return;
       if (speechJob) stopSpeechJob(speechJob);
       const job = createSpeechJob();
       speechJob = job;
@@ -373,6 +376,7 @@ export default async function voiceExtension(pi: ExtensionAPI) {
   pi.registerCommand("voice:stop", {
     description: "Stop local voice generation or playback",
     handler: async (_args, ctx: ExtensionCommandContext) => {
+      if (!ctx.hasUI) return;
       if (!speechJob) {
         ctx.ui.notify("No voice playback is active.", "info");
         return;

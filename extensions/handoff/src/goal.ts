@@ -1,6 +1,5 @@
 import type { ExtensionCommandContext } from "pi";
 import { promptText } from "../../../lib/input-modal.ts";
-import { notify } from "./ui.ts";
 
 const GOAL_MAX_LENGTH = 4000;
 
@@ -19,18 +18,19 @@ export async function resolveGoal(
   const trimmed = args.trim();
   if (trimmed) {
     if (trimmed.length > GOAL_MAX_LENGTH) {
-      notify(
-        ctx,
-        `Goal is too long (${trimmed.length}/${GOAL_MAX_LENGTH} characters). Shorten it or put details in a file and reference it.`,
-        "warning",
-      );
+      if (ctx.hasUI) {
+        ctx.ui.notify(
+          `Goal is too long (${trimmed.length}/${GOAL_MAX_LENGTH} characters). Shorten it or put details in a file and reference it.`,
+          "warning",
+        );
+      }
       return undefined;
     }
     return trimmed;
   }
 
   if (!ctx.hasUI) {
-    notify(ctx, "Usage: /handoff <goal>", "warning");
+    console.warn("Usage: /handoff <goal>");
     return undefined;
   }
 
@@ -41,8 +41,7 @@ export async function resolveGoal(
   if (!goal) return undefined;
 
   if (goal.length > GOAL_MAX_LENGTH) {
-    notify(
-      ctx,
+    ctx.ui.notify(
       `Goal is too long (${goal.length}/${GOAL_MAX_LENGTH} characters). Shorten it or put details in a file and reference it.`,
       "warning",
     );
