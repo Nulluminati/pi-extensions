@@ -63,9 +63,9 @@ export default async function neuralwattExtension(pi: ExtensionAPI) {
   // session_start: best-effort staleness check against the public catalog.
   // Warns (once per session) when Neuralwatt publishes models the static list
   // does not include. Gated on a configured key so non-Neuralwatt users do not
-  // pay a startup fetch; uses the unauthenticated /v1/models view so hidden /
-  // opt-in models never produce false positives. Silent on network error; never
-  // blocks.
+  // pay a startup fetch; uses the unauthenticated /v1/models view and ignores
+  // flex siblings represented by the service-tier toggle. Silent on network
+  // error; never blocks.
   pi.on("session_start", async (_event, ctx) => {
     if (!ctx.hasUI) return;
     const apiKey = await getResolvedApiKey(ctx);
@@ -79,9 +79,9 @@ export default async function neuralwattExtension(pi: ExtensionAPI) {
       );
     }
 
-    // Build the flex-capable set from the authenticated catalog (the public
-    // view omits `-flex` siblings). Reuses the key resolved above; silent on
-    // fetch error so the indicator and toggle just report flex as unavailable.
+    // Build the flex-capable set from the authenticated catalog. Reuses the key
+    // resolved above; silent on fetch error so the indicator and toggle just
+    // report flex as unavailable.
     flexCapableIds = await fetchFlexCapableIds(apiKey, ctx.signal);
     emitFlexState(ctx.model);
   });

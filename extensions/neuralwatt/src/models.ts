@@ -53,7 +53,8 @@ const NEURALWATT_REASONING_COMPAT = {
  * high are also accepted and engage thinking, so they are exposed here.
  */
 
-// Disableable with identity mapping through xhigh (gemma-4-31b).
+// Disableable with identity mapping through xhigh (DeepSeek V4 Flash,
+// gemma-4-31b, kimi-k3).
 const DISABLEABLE_IDENTITY_MAP: ThinkingLevelMap = {
   off: "none",
   minimal: "minimal",
@@ -200,7 +201,7 @@ export const STATIC_MODELS: ProviderModelConfig[] = [
   // returns HTTP 200 and `none` produces no thinking, so thinking is
   // disableable. minimal through xhigh all engage reasoning under the
   // top-level `reasoning` field; the identity map through xhigh is correct.
-  // `max` is also accepted (deeper than xhigh) but is not a pi level.
+  // Neuralwatt publishes both ids for the same 0731 checkpoint.
   {
     id: "deepseek-v4-flash",
     name: "DeepSeek V4 Flash",
@@ -208,13 +209,25 @@ export const STATIC_MODELS: ProviderModelConfig[] = [
     reasoning: true,
     thinkingLevelMap: DISABLEABLE_IDENTITY_MAP,
     input: ["text"],
-    cost: { input: 0.104, output: 0.207, cacheRead: 0.026, cacheWrite: 0 },
+    cost: { input: 0.14, output: 0.28, cacheRead: 0.028, cacheWrite: 0 },
+    contextWindow: 1048560,
+    maxTokens: 65536,
+    compat: NEURALWATT_REASONING_COMPAT,
+  },
+  {
+    id: "deepseek-ai/DeepSeek-V4-Flash",
+    name: "DeepSeek V4 Flash 0731 (Canary)",
+    api: "openai-completions",
+    reasoning: true,
+    thinkingLevelMap: DISABLEABLE_IDENTITY_MAP,
+    input: ["text"],
+    cost: { input: 0.14, output: 0.28, cacheRead: 0.028, cacheWrite: 0 },
     contextWindow: 1048560,
     maxTokens: 65536,
     compat: NEURALWATT_REASONING_COMPAT,
   },
 
-  // --- Kimi K2.5 / K2.6 / K2.7 (MoonshotAI) ---
+  // --- Kimi K2.5 / K2.6 / K2.7 / K3 (MoonshotAI) ---
   {
     id: "moonshotai/Kimi-K2.5",
     name: "Kimi K2.5",
@@ -288,6 +301,33 @@ export const STATIC_MODELS: ProviderModelConfig[] = [
     input: ["text", "image"],
     cost: { input: 0.95, output: 4.0, cacheRead: 0.2375, cacheWrite: 0 },
     contextWindow: 262128,
+    maxTokens: 65536,
+    compat: NEURALWATT_COMPAT,
+  },
+  // Probed 2026-07: none disables thinking and minimal through xhigh all
+  // return HTTP 200 with reasoning output, so the identity map is correct.
+  // The fast sibling produced no reasoning at high and follows its catalog's
+  // reasoning:false metadata.
+  {
+    id: "kimi-k3",
+    name: "Kimi K3",
+    api: "openai-completions",
+    reasoning: true,
+    thinkingLevelMap: DISABLEABLE_IDENTITY_MAP,
+    input: ["text", "image"],
+    cost: { input: 3.0, output: 15.0, cacheRead: 0.3, cacheWrite: 0 },
+    contextWindow: 1048560,
+    maxTokens: 65536,
+    compat: NEURALWATT_REASONING_COMPAT,
+  },
+  {
+    id: "kimi-k3-fast",
+    name: "Kimi K3 Fast",
+    api: "openai-completions",
+    reasoning: false,
+    input: ["text", "image"],
+    cost: { input: 3.0, output: 15.0, cacheRead: 0.3, cacheWrite: 0 },
+    contextWindow: 1048560,
     maxTokens: 65536,
     compat: NEURALWATT_COMPAT,
   },

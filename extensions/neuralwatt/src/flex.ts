@@ -24,11 +24,10 @@ export interface FlexState {
 
 /**
  * Fetch the authenticated /v1/models list and return the set of base model ids
- * that have a Flex sibling. Neuralwatt only exposes `<id>-flex` variants to
- * authenticated requests (the public catalog omits them), so this requires a
- * key. Returns an empty set on missing key, transport error, or non-OK
- * response — the caller then surfaces no flex indicator and the toggle warns
- * that no flex-capable models were found.
+ * that have a Flex sibling. The caller requires a configured key before it
+ * exposes provider-specific availability. Returns an empty set on missing key,
+ * transport error, or non-OK response; the caller then surfaces no flex
+ * indicator and the toggle warns that no flex-capable models were found.
  */
 export async function fetchFlexCapableIds(
   apiKey: string,

@@ -4,7 +4,7 @@ Registers [Neuralwatt](https://neuralwatt.com) as a Pi model provider using thei
 
 ## What It Does
 
-Registers the `neuralwatt` provider so you can use Neuralwatt's hosted open-source models (Gemma 4, GLM-5.2, Kimi K2.5/K2.6/K2.7, and Qwen3.5/3.6) in Pi. It:
+Registers the `neuralwatt` provider so you can use Neuralwatt's hosted open-source models (DeepSeek V4 Flash, Gemma 4, GLM-5.2, Kimi K2.5/K2.6/K2.7/K3, and Qwen3.5/3.6) in Pi. It:
 
 1. Registers the provider at load time with a hardcoded catalog of public models, so Pi starts even when the API is unreachable or no key is configured.
 2. On `session_start`, fetches the public `/v1/models` view and warns when Neuralwatt publishes models the static list lacks.
@@ -50,6 +50,8 @@ The catalog comes from Neuralwatt's `/v1/models` metadata. Pricing is per millio
 
 | Model | Context | Reasoning | Vision | In / Out (per 1M) |
 |-------|---------|-----------|--------|--------------------|
+| deepseek-v4-flash | 1M | yes | — | $0.14 / $0.28 |
+| deepseek-ai/DeepSeek-V4-Flash | 1M | yes | — | $0.14 / $0.28 |
 | gemma-4-31b | 256K | yes* | yes | $0.144 / $0.42 |
 | glm-5.2 | 1M | yes | — | $1.45 / $4.50 |
 | glm-5.2-fast | 1M | no | — | $1.45 / $4.50 |
@@ -61,16 +63,18 @@ The catalog comes from Neuralwatt's `/v1/models` metadata. Pricing is per millio
 | kimi-k2.6-fast | 256K | no | yes | $0.69 / $3.22 |
 | kimi-k2.7-code | 256K | yes | yes | $0.95 / $4.00 |
 | kimi-k2.7-code-fast | 256K | no | yes | $0.95 / $4.00 |
+| kimi-k3 | 1M | yes | yes | $3.00 / $15.00 |
+| kimi-k3-fast | 1M | no | yes | $3.00 / $15.00 |
 | qwen3.5-397b | 256K | yes | — | $0.69 / $4.14 |
 | qwen3.5-397b-fast | 256K | no | — | $0.69 / $4.14 |
 | qwen3.6-35b | 128K | yes | yes | $0.29 / $1.15 |
 | qwen3.6-35b-fast | 128K | no | yes | $0.29 / $1.15 |
 
-The GLM, Kimi, and Qwen reasoning models pair with `-fast` non-reasoning variants that share pricing. Gemma has no listed fast variant. Its catalog metadata says reasoning is unsupported, but direct probes found that levels through `xhigh` are accepted, enabled levels emit reasoning, and `none` disables it. Legacy ids (for example `glm-5.1`, `moonshotai/Kimi-K2.6`) are not included; add them as aliases if you need backwards compatibility.
+The GLM, Kimi, and Qwen reasoning models pair with `-fast` non-reasoning variants that share pricing. Neuralwatt publishes both DeepSeek ids for the same 0731 checkpoint. Gemma has no listed fast variant. Its catalog metadata says reasoning is unsupported, but direct probes found that levels through `xhigh` are accepted, enabled levels emit reasoning, and `none` disables it. Flex siblings are not separate entries because `/neuralwatt:flex` selects that service tier without changing the model id. Legacy ids (for example `glm-5.1`, `moonshotai/Kimi-K2.6`) are not included; add them as aliases if you need backwards compatibility.
 
 ### Startup staleness check
 
-On `session_start`, if a Neuralwatt key is configured, the extension fetches the unauthenticated `/v1/models` view. That view returns only public models, so hidden or opt-in models never produce false warnings. When the live catalog contains models the static list lacks, Pi shows a warning once per session. The check is silent on network error and never blocks.
+On `session_start`, if a Neuralwatt key is configured, the extension fetches the unauthenticated `/v1/models` view. When the live catalog contains selectable models the static list lacks, Pi shows a warning once per session. `-flex` siblings are ignored because the flex toggle already represents them. The check is silent on network error and never blocks.
 
 ### Auth resolution
 
@@ -89,12 +93,15 @@ Reasoning models carry per-model `thinkingLevelMap` values verified by probing t
 
 | Model | off | minimal | low | medium | high | xhigh |
 |-------|-----|---------|-----|--------|------|-------|
+| deepseek-v4-flash | none | minimal | low | medium | high | xhigh |
+| deepseek-ai/DeepSeek-V4-Flash | none | minimal | low | medium | high | xhigh |
 | gemma-4-31b | none | minimal | low | medium | high | xhigh |
 | glm-5.2 | none | minimal | low | medium | high | max |
 | glm-5.2-short | none | minimal | low | medium | high | max |
 | qwen3.5-397b | none | minimal | low | medium | high | max |
 | kimi-k2.6 | (hidden) | minimal | low | medium | high | max |
 | kimi-k2.7-code | (hidden) | minimal | low | medium | high | max |
+| kimi-k3 | none | minimal | low | medium | high | xhigh |
 | moonshotai/Kimi-K2.5 | (hidden) | minimal | low | medium | high | xhigh |
 | qwen3.6-35b | (hidden) | (hidden) | low | medium | high | (hidden) |
 

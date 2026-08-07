@@ -37,6 +37,7 @@ function makeModel(id: string, provider = "neuralwatt") {
 
 // Ids present in the static catalog. Startup check tests use these.
 const EXPECTED_MODEL_IDS = [
+  "deepseek-ai/DeepSeek-V4-Flash",
   "deepseek-v4-flash",
   "gemma-4-31b",
   "glm-5.2",
@@ -48,6 +49,8 @@ const EXPECTED_MODEL_IDS = [
   "kimi-k2.6",
   "kimi-k2.6-fast",
   "kimi-k2.7-code",
+  "kimi-k3",
+  "kimi-k3-fast",
   "qwen3.5-397b",
   "qwen3.5-397b-fast",
   "qwen3.6-35b",
@@ -106,14 +109,41 @@ describe("neuralwatt-extension", () => {
   });
 
   it("configures DeepSeek V4 Flash from live metadata and probed reasoning behavior", () => {
-    const model = STATIC_MODELS.find((candidate) => candidate.id === "deepseek-v4-flash");
+    const model = STATIC_MODELS.find(
+      (candidate) => candidate.id === "deepseek-ai/DeepSeek-V4-Flash",
+    );
 
     expect(model).toEqual(
       expect.objectContaining({
-        name: "DeepSeek V4 Flash",
+        name: "DeepSeek V4 Flash 0731 (Canary)",
         reasoning: true,
         input: ["text"],
-        cost: { input: 0.104, output: 0.207, cacheRead: 0.026, cacheWrite: 0 },
+        cost: { input: 0.14, output: 0.28, cacheRead: 0.028, cacheWrite: 0 },
+        contextWindow: 1048560,
+        maxTokens: 65536,
+      }),
+    );
+  });
+
+  it("configures Kimi K3 and its fast variant from live metadata", () => {
+    const byId = Object.fromEntries(STATIC_MODELS.map((model) => [model.id, model]));
+
+    expect(byId["kimi-k3"]).toEqual(
+      expect.objectContaining({
+        name: "Kimi K3",
+        reasoning: true,
+        input: ["text", "image"],
+        cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 0 },
+        contextWindow: 1048560,
+        maxTokens: 65536,
+      }),
+    );
+    expect(byId["kimi-k3-fast"]).toEqual(
+      expect.objectContaining({
+        name: "Kimi K3 Fast",
+        reasoning: false,
+        input: ["text", "image"],
+        cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 0 },
         contextWindow: 1048560,
         maxTokens: 65536,
       }),
@@ -173,6 +203,14 @@ describe("neuralwatt-extension", () => {
     const byId = Object.fromEntries(STATIC_MODELS.map((m) => [m.id, m]));
 
     // Disableable + accepts identity-mapped levels through xhigh.
+    expect(byId["deepseek-ai/DeepSeek-V4-Flash"].thinkingLevelMap).toEqual({
+      off: "none",
+      minimal: "minimal",
+      low: "low",
+      medium: "medium",
+      high: "high",
+      xhigh: "xhigh",
+    });
     expect(byId["deepseek-v4-flash"].thinkingLevelMap).toEqual({
       off: "none",
       minimal: "minimal",
@@ -182,6 +220,14 @@ describe("neuralwatt-extension", () => {
       xhigh: "xhigh",
     });
     expect(byId["gemma-4-31b"].thinkingLevelMap).toEqual({
+      off: "none",
+      minimal: "minimal",
+      low: "low",
+      medium: "medium",
+      high: "high",
+      xhigh: "xhigh",
+    });
+    expect(byId["kimi-k3"].thinkingLevelMap).toEqual({
       off: "none",
       minimal: "minimal",
       low: "low",
@@ -344,6 +390,27 @@ describe("neuralwatt-extension", () => {
       expect.stringContaining("qwen4-720b"),
       "warning",
     );
+  });
+
+  it("startup check ignores flex siblings represented by the flex toggle", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await neuralwattExtension(mockPi);
+
+    const live = [
+      ...STATIC_MODELS.map((m) => ({ id: m.id })),
+      { id: "glm-5.2-flex" },
+      { id: "glm-5.2-short-flex" },
+      { id: "glm-5.2-short-fast-flex" },
+      { id: "kimi-k2.7-code-flex" },
+    ];
+    mockFetch.mockResolvedValueOnce(mockModelsResponse(live));
+
+    const handler = getEventHandler(mockPi, "session_start");
+    await handler({ type: "session_start", reason: "new" }, mockCtx);
+
+    const warnings = mockCtx.ui.notify.mock.calls.filter((call) => call[1] === "warning");
+    expect(warnings).toEqual([]);
   });
 
   it("startup check skips deprecated and pricing-tbd models", async () => {
