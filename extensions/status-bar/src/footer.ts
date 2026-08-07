@@ -182,10 +182,12 @@ export function buildFooterLines(
 
   // Right block: context usage bar + window, token breakdown, cost. Shed in
   // tiers when narrow (see rightBlockVariants) so the static left block wins.
+  // Reads the cached snapshot (refreshed on message boundaries) so a render —
+  // which fires on every keystroke — never recomputes O(conversation) usage.
   let barStr = "";
   let windowStr = "";
 
-  const usage = ctx.getContextUsage();
+  const usage = state.contextUsage;
   if (usage && usage.tokens !== null && usage.contextWindow > 0) {
     const pct = usage.percent ?? (usage.tokens / usage.contextWindow) * 100;
     barStr = buildUsageBar(pct, theme);

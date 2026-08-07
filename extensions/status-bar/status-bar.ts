@@ -62,6 +62,7 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     gitBranch: null,
     gitStatus: null,
     tokenUsage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
+    contextUsage: undefined,
     lastHandle: null,
     flexOn: false,
     flexCapable: false,
@@ -158,6 +159,17 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
   function resetTurnState(): void {
     state.activeTools = [];
     state.completedToolCount = 0;
+  }
+
+  /**
+   * Snapshot context-window usage into state. O(conversation) to compute, so
+   * the footer render reads the cache instead of calling ctx.getContextUsage()
+   * on every keystroke. Refreshed on session start, turn boundaries, new
+   * messages, and model switches (a new model can change the context window
+   * and thus the percentage).
+   */
+  function refreshContextUsage(ctx: ExtensionCommandContext): void {
+    state.contextUsage = ctx.getContextUsage();
   }
 
   /**
@@ -276,6 +288,7 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     resetTurnState();
     accumulateTokenUsage();
     refreshSmallModel();
+    refreshContextUsage(ctx as ExtensionCommandContext);
 
     // Install the UI components synchronously, before any async work, so the
     // polished editor frame and footer are present for the first paint. Git
@@ -330,26 +343,30 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     restoreEditor(ctx as ExtensionCommandContext);
   });
 
-  pi.on("turn_start", async (_event, _ctx) => {
+  pi.on("turn_start", async (_event, ctx) => {
     state.turnCount++;
     resetTurnState();
     refreshSmallModel();
+    refreshContextUsage(ctx as ExtensionCommandContext);
     if (state.lastHandle) state.lastHandle.requestRender();
     editorRequestRender?.();
   });
 
-  pi.on("turn_end", async (_event, _ctx) => {
+  pi.on("turn_end", async (_event, ctx) => {
     accumulateTokenUsage();
     await refreshGitStatus();
+    refreshContextUsage(ctx as ExtensionCommandContext);
     if (state.lastHandle) state.lastHandle.requestRender();
   });
 
-  pi.on("message_end", async (_event, _ctx) => {
+  pi.on("message_end", async (_event, ctx) => {
     accumulateTokenUsage();
+    refreshContextUsage(ctx as ExtensionCommandContext);
     if (state.lastHandle) state.lastHandle.requestRender();
   });
 
-  pi.on("model_select", async (_event, _ctx) => {
+  pi.on("model_select", async (_event, ctx) => {
+    refreshContextUsage(ctx as ExtensionCommandContext);
     if (state.lastHandle) state.lastHandle.requestRender();
     editorRequestRender?.();
   });
@@ -384,6 +401,7 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
         getBranch = () => ctx.sessionManager.getBranch();
         accumulateTokenUsage();
         refreshSmallModel();
+        refreshContextUsage(ctx);
         await refreshGitStatus();
         setFooter(ctx);
         installEditor(ctx);

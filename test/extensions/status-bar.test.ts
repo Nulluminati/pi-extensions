@@ -372,6 +372,65 @@ describe("status-bar-extension", () => {
     expect(lines[0]).toContain("[██████████]");
   });
 
+  it("does not re-query context usage on every render (cached, refreshed on events)", async () => {
+    // Context usage is O(conversation) to compute; the footer must cache it and
+    // refresh only when messages land, not call ctx.getContextUsage() per render.
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.getContextUsage = vi.fn(() => ({
+      tokens: 50000,
+      contextWindow: 200000,
+      percent: 25,
+    }));
+    await enableBar(mockPi, mockCtx);
+    const component = getFooterFactory(mockCtx)(
+      { requestRender: vi.fn() },
+      plainTheme(),
+      footerData(),
+    );
+
+    // session_start refreshed the cache once; renders must not re-query.
+    mockCtx.getContextUsage.mockClear();
+    component.render(120);
+    component.render(120);
+    component.render(120);
+    expect(mockCtx.getContextUsage).not.toHaveBeenCalled();
+
+    // The cached value still renders.
+    expect(component.render(120)[0]).toContain("50.0k/200.0k");
+  });
+
+  it("refreshes cached context usage when a message lands", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.getContextUsage = vi.fn(() => ({
+      tokens: 1000,
+      contextWindow: 200000,
+      percent: 1,
+    }));
+    await enableBar(mockPi, mockCtx);
+    const component = getFooterFactory(mockCtx)(
+      { requestRender: vi.fn() },
+      plainTheme(),
+      footerData(),
+    );
+    expect(component.render(120)[0]).toContain("1.0k/200.0k");
+
+    // A new assistant message grows the context; the cache must refresh.
+    mockCtx.getContextUsage = vi.fn(() => ({
+      tokens: 80000,
+      contextWindow: 200000,
+      percent: 40,
+    }));
+    const messageEnd = getEventHandler(mockPi, "message_end");
+    await messageEnd({ type: "message_end", message: { role: "assistant" } }, mockCtx);
+
+    expect(component.render(120)[0]).toContain("80.0k/200.0k");
+    mockCtx.getContextUsage.mockClear();
+    component.render(120);
+    expect(mockCtx.getContextUsage).not.toHaveBeenCalled();
+  });
+
   it("token indicators use distinct colors per bucket", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();

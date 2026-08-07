@@ -13,6 +13,16 @@ export interface TokenUsage {
   cost: number;
 }
 
+/** Snapshot of context-window usage. `tokens`/`percent` are null when the
+ * estimate is unavailable (e.g. right after a compaction with no post-
+ * compaction assistant usage yet). Cached and refreshed on message
+ * boundaries so the footer render never recomputes it per keystroke. */
+export interface ContextUsage {
+  tokens: number | null;
+  contextWindow: number;
+  percent: number | null;
+}
+
 export interface GitStatus {
   ahead: number;
   behind: number;
@@ -39,6 +49,7 @@ export interface State {
   gitBranch: string | null;
   gitStatus: GitStatus | null;
   tokenUsage: TokenUsage;
+  contextUsage: ContextUsage | undefined;
   lastHandle: { requestRender: () => void; close: () => void } | null;
   // Flex tier indicator state, published by the Neuralwatt extension on the
   // pi.events bus (see neuralwatt:flex-change). `flexCapable` is true for the
