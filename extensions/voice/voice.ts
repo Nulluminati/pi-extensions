@@ -47,6 +47,7 @@ import {
 } from "./src/config.ts";
 import {
   HOLD_RELEASE_DEBOUNCE_MS,
+  HOLD_REPEAT_GAP_MS,
   HOLD_TO_VOICE_MS,
   KITTEN_VOICES,
   TTS_STATUS_KEY,
@@ -166,6 +167,11 @@ export default async function voiceExtension(pi: ExtensionAPI) {
   let terminalReleaseTimer: ReturnType<typeof setTimeout> | null = null;
   let terminalRepeatCount = 0;
   let voiceOpen = false;
+  // True once a Space hold has opened the overlay, until the key is released.
+  // Prevents the same hold from reopening the overlay after it closes. The
+  // terminal input listener (which sees every keystroke) clears it on release.
+  let spaceConsumed = false;
+  let holdReleaseTimer: ReturnType<typeof setTimeout> | null = null;
 
   const openVoice = (ctx: ExtensionContext): void => {
     if (voiceOpen) return;
@@ -188,6 +194,19 @@ export default async function voiceExtension(pi: ExtensionAPI) {
     terminalRepeatCount = 0;
   };
 
+  const clearHoldRelease = (): void => {
+    if (holdReleaseTimer) clearTimeout(holdReleaseTimer);
+    holdReleaseTimer = null;
+  };
+
+  const scheduleHoldRelease = (): void => {
+    clearHoldRelease();
+    holdReleaseTimer = setTimeout(() => {
+      holdReleaseTimer = null;
+      spaceConsumed = false;
+    }, HOLD_REPEAT_GAP_MS);
+  };
+
   const removeHeldSpaces = (ctx: ExtensionContext): void => {
     const text = ctx.ui.getEditorText();
     let removeCount = 0;
@@ -200,6 +219,7 @@ export default async function voiceExtension(pi: ExtensionAPI) {
   const triggerTerminalVoice = (ctx: ExtensionContext): void => {
     removeHeldSpaces(ctx);
     resetTerminalRepeat();
+    if (!isKittyProtocolActive()) spaceConsumed = true;
     openVoice(ctx);
   };
 
@@ -218,8 +238,33 @@ export default async function voiceExtension(pi: ExtensionAPI) {
       const space = data === " " || matchesKey(data, Key.space);
       const release = isKeyRelease(data);
       const repeat = isKeyRepeat(data);
+      const kitty = isKittyProtocolActive();
+
+      // This listener fires for every keystroke regardless of focus, so it is
+      // the only handler that can observe Space release while the overlay is
+      // open (the editor is unfocused then and misses it). Re-arm hold-to-voice
+      // only after the key is released, so a single hold can't reopen it.
+      if (!kitty) {
+        if (space) {
+          scheduleHoldRelease();
+        } else {
+          const codePoint = data.length === 1 ? data.codePointAt(0) : undefined;
+          const userInput =
+            data === "\r" ||
+            data === "\n" ||
+            data === "\x7f" ||
+            (codePoint !== undefined && codePoint >= 32);
+          if (userInput) {
+            clearHoldRelease();
+            spaceConsumed = false;
+          }
+        }
+      }
+
       if (voiceOpen) return;
-      if (isKittyProtocolActive()) {
+      if (spaceConsumed) return;
+
+      if (kitty) {
         if (!space) return;
         if (release) {
           if (terminalReleaseTimer) clearTimeout(terminalReleaseTimer);
@@ -276,7 +321,14 @@ export default async function voiceExtension(pi: ExtensionAPI) {
             theme as ConstructorParameters<typeof CustomEditor>[1],
             keybindings as ConstructorParameters<typeof CustomEditor>[2],
           );
-        return addHoldToVoice(editor, () => openVoice(ctx));
+        return addHoldToVoice(
+          editor,
+          () => {
+            if (!isKittyProtocolActive()) spaceConsumed = true;
+            openVoice(ctx);
+          },
+          { isSuppressed: () => spaceConsumed },
+        );
       },
     );
     ctx.ui.setEditorComponent(holdEditorFactory);
@@ -299,6 +351,8 @@ export default async function voiceExtension(pi: ExtensionAPI) {
     speechJob = null;
     if (editorRecheckTimer) clearTimeout(editorRecheckTimer);
     editorRecheckTimer = null;
+    clearHoldRelease();
+    spaceConsumed = false;
     resetTerminalRepeat();
     terminalInputUnsubscribe?.();
     terminalInputUnsubscribe = null;

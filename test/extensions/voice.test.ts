@@ -182,6 +182,48 @@ describe("voice-extension", () => {
 
       expect(onHold).toHaveBeenCalledTimes(1);
     });
+
+    it("does not re-trigger from the same hold while suppressed (e.g. overlay still tied to it)", () => {
+      vi.useFakeTimers();
+      let suppressed = false;
+      const handleInput = vi.fn();
+      // Simulate the extension marking the hold consumed when it opens the overlay.
+      const onHold = vi.fn(() => {
+        suppressed = true;
+      });
+      const editor = addHoldToVoice({ handleInput }, onHold, {
+        isSupported: () => false,
+        isSpace: (data) => data === " ",
+        isRelease: () => false,
+        isRepeat: () => false,
+        isSuppressed: () => suppressed,
+      });
+
+      const hold = (): void => {
+        editor.handleInput(" ");
+        vi.advanceTimersByTime(500);
+        for (let elapsed = 500; elapsed < 1000; elapsed += 100) {
+          editor.handleInput(" ");
+          vi.advanceTimersByTime(100);
+        }
+      };
+
+      hold();
+      expect(onHold).toHaveBeenCalledTimes(1);
+
+      // Overlay opens then closes (editor receives nothing); Space is still held.
+      vi.advanceTimersByTime(2000);
+      for (let i = 0; i < 10; i++) {
+        editor.handleInput(" ");
+        vi.advanceTimersByTime(100);
+      }
+      expect(onHold).toHaveBeenCalledTimes(1);
+
+      // Once the key is released (suppression clears) a fresh hold fires again.
+      suppressed = false;
+      hold();
+      expect(onHold).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe("editor lifecycle", () => {
@@ -317,6 +359,45 @@ describe("voice-extension", () => {
       vi.advanceTimersByTime(1000);
 
       expect(ctx.ui.notify).not.toHaveBeenCalled();
+    });
+
+    it("does not reopen the overlay from a held Space after it closes", async () => {
+      vi.useFakeTimers();
+      const modelsDir = mkdtempSync(join(tmpdir(), "pi-voice-holdreopen-"));
+      vi.stubEnv("PI_VOICE_MODELS", modelsDir);
+      const mockPi = createMockPi();
+      const ctx = createMockCommandContext();
+      ctx.ui.getEditorText = vi.fn(() => "  ");
+      await voiceExtension(mockPi);
+      const sessionStart = getEventHandler(mockPi, "session_start");
+      await sessionStart({ type: "session_start", reason: "startup" }, ctx);
+      const inputHandler = ctx.ui.onTerminalInput.mock.calls[0]?.[0];
+      if (!inputHandler) throw new Error("Terminal input handler was not installed");
+      const flush = async (): Promise<void> => {
+        for (let i = 0; i < 4; i++) await Promise.resolve();
+      };
+
+      // Hold Space long enough to fire (model is missing -> notify + overlay).
+      inputHandler(" ");
+      inputHandler(" ");
+      vi.advanceTimersByTime(1000);
+      await flush();
+      expect(ctx.ui.notify).toHaveBeenCalledTimes(1);
+
+      // Overlay has closed. Keep holding Space: must NOT reopen.
+      inputHandler(" ");
+      inputHandler(" ");
+      vi.advanceTimersByTime(1000);
+      await flush();
+      expect(ctx.ui.notify).toHaveBeenCalledTimes(1);
+
+      // After release (gap with no Space) a fresh hold fires again.
+      vi.advanceTimersByTime(1200);
+      inputHandler(" ");
+      inputHandler(" ");
+      vi.advanceTimersByTime(1000);
+      await flush();
+      expect(ctx.ui.notify).toHaveBeenCalledTimes(2);
     });
 
     it("re-wraps an editor installed by another extension during startup", async () => {
