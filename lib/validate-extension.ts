@@ -1,6 +1,7 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import * as ts from "typescript";
+import { existsSync, readdirSync } from "node:fs";
+import { join, resolve } from "node:path";
+import * as ts from "typescript/unstable/ast";
+import { API } from "typescript/unstable/sync";
 
 export function findExtensionEntrypoints(extensionsDir: string): string[] {
   return readdirSync(extensionsDir, { withFileTypes: true })
@@ -15,6 +16,31 @@ export function findExtensionEntrypoints(extensionsDir: string): string[] {
         .map((file) => join(extensionDir, file.name));
     })
     .sort();
+}
+
+// TypeScript 7 moved source parsing behind a native compiler server: the
+// `typescript` package's default export is now just a version stub, and the
+// old `ts.createSourceFile(text)` one-liner is gone. The server is synchronous
+// but costly to spawn (~100 ms), so a single instance is reused across files
+// for a validation run. The validator is a short-lived CLI; the spawned child
+// is reclaimed when the process exits, so an explicit close adds coupling for
+// no benefit.
+let compiler: API | undefined;
+function getCompiler(): API {
+  compiler ??= new API();
+  return compiler;
+}
+
+/** Parse a file into a TypeScript AST via the TS 7 native compiler. */
+export function parseSourceFile(filePath: string): ts.SourceFile | undefined {
+  try {
+    const abs = resolve(filePath);
+    const snapshot = getCompiler().updateSnapshot({ openFiles: [abs] });
+    const project = snapshot.getDefaultProjectForFile(abs);
+    return project?.program?.getSourceFile(abs);
+  } catch {
+    return undefined;
+  }
 }
 
 export function validateFile(filePath: string): { passed: boolean; messages: string[] } {
@@ -34,15 +60,17 @@ export function validateFile(filePath: string): { passed: boolean; messages: str
     return { passed: false, messages: [`File not found: ${filePath}`] };
   }
 
-  const source = readFileSync(filePath, "utf-8");
-  const sourceFile = ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest, true);
+  const sourceFile = parseSourceFile(filePath);
+  if (!sourceFile) {
+    return { passed: false, messages: [`Failed to parse: ${filePath}`] };
+  }
 
   let hasDefaultExport = false;
   let defaultExportIsAsyncFunction = false;
   const disallowedImports: string[] = [];
   let hasPiApi = false;
 
-  function visit(node: ts.Node) {
+  const visit = (node: ts.Node): void => {
     // Export default function declaration (e.g. export default async function foo() {})
     if (ts.isFunctionDeclaration(node) && node.modifiers) {
       const hasExport = node.modifiers.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
@@ -65,7 +93,7 @@ export function validateFile(filePath: string): { passed: boolean; messages: str
         }
       } else if (ts.isIdentifier(node.expression)) {
         const name = node.expression.text;
-        ts.forEachChild(sourceFile, function findDecl(n: ts.Node) {
+        sourceFile.forEachChild(function findDecl(n: ts.Node) {
           if (ts.isFunctionDeclaration(n) && n.name?.text === name) {
             if (n.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword)) {
               defaultExportIsAsyncFunction = true;
@@ -84,7 +112,7 @@ export function validateFile(filePath: string): { passed: boolean; messages: str
               }
             }
           }
-          ts.forEachChild(n, findDecl);
+          n.forEachChild(findDecl);
         });
       }
     }
@@ -200,8 +228,8 @@ export function validateFile(filePath: string): { passed: boolean; messages: str
       }
     }
 
-    ts.forEachChild(node, visit);
-  }
+    node.forEachChild(visit);
+  };
 
   visit(sourceFile);
 

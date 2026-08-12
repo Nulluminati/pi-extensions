@@ -4,7 +4,8 @@
  * Run: tsx scripts/sync-pi-types.ts
  */
 import { readFileSync } from "node:fs";
-import * as ts from "typescript";
+import * as ts from "typescript/unstable/ast";
+import { parseSourceFile } from "../lib/validate-extension.ts";
 
 const PI_TYPES_PATH =
   "/home/natekift/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/types.d.ts";
@@ -17,13 +18,14 @@ interface MemberInfo {
 
 function extractInterfaceMembers(filePath: string, interfaceName: string): MemberInfo[] {
   const source = readFileSync(filePath, "utf-8");
-  const sourceFile = ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest, true);
+  const sourceFile = parseSourceFile(filePath);
+  if (!sourceFile) return [];
   const members: MemberInfo[] = [];
 
   function visit(node: ts.Node) {
     if (ts.isInterfaceDeclaration(node) && node.name.text === interfaceName) {
       for (const member of node.members) {
-        if (ts.isMethodSignature(member) || ts.isPropertySignature(member)) {
+        if (ts.isMethodSignatureDeclaration(member) || ts.isPropertySignatureDeclaration(member)) {
           const memberName = member.name;
           if (!memberName) continue;
           const name = memberName.getText(sourceFile);
@@ -34,7 +36,7 @@ function extractInterfaceMembers(filePath: string, interfaceName: string): Membe
         }
       }
     }
-    ts.forEachChild(node, visit);
+    node.forEachChild(visit);
   }
   visit(sourceFile);
   return members;
@@ -84,8 +86,7 @@ console.log("Mock Coverage Check: createMockPi()");
 console.log("=".repeat(60));
 
 const piApi = extractInterfaceMembers(PI_TYPES_PATH, "ExtensionAPI");
-const mockSource = readFileSync("./test/mocks/pi-mocks.ts", "utf-8");
-const mockFile = ts.createSourceFile("pi-mocks.ts", mockSource, ts.ScriptTarget.Latest, true);
+const mockFile = parseSourceFile("./test/mocks/pi-mocks.ts");
 const mockProps = new Set<string>();
 
 function visitMock(node: ts.Node) {
@@ -96,9 +97,9 @@ function visitMock(node: ts.Node) {
       }
     }
   }
-  ts.forEachChild(node, visitMock);
+  node.forEachChild(visitMock);
 }
-visitMock(mockFile);
+if (mockFile) visitMock(mockFile);
 
 const missingMocks = piApi.filter((m) => !mockProps.has(m.name));
 if (missingMocks.length) {
