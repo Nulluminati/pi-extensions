@@ -662,6 +662,10 @@ describe("isSafeBashCommand", () => {
       "npm view pi version",
       "ps aux | grep node",
       "node --version",
+      "ls /usr/bin/install",
+      "grep -rn install /home/user/.bun/install/global/node_modules",
+      "git status 2>&1 | head -5",
+      "cat package.json 2>&1",
     ];
     for (const command of safe) {
       expect(isSafeBashCommand(command), command).toBe(true);
@@ -701,6 +705,9 @@ describe("isSafeBashCommand", () => {
       "cat file; rm file",
       "curl --version",
       "wget --version",
+      "install -m 644 file",
+      "cat a; install b",
+      "echo x 2> err.txt",
     ];
     for (const command of blocked) {
       expect(isSafeBashCommand(command), command).toBe(false);

@@ -31,12 +31,12 @@ const DESTRUCTIVE_PATTERNS = [
   /\btruncate\b/i,
   /\bdd\b/i,
   /\bshred\b/i,
-  /\binstall\b/i,
+  /(^|[;&|]\s*)install\b/i, // coreutils install only as a command, not in paths
   /\bmkfs\b/i,
   /\bfdisk\b/i,
   /\bparted\b/i,
   /\bmkswap\b/i,
-  /(^|[^<])>(?!>)/, // single > redirect (2>&1 and >> are also caught below)
+  /(^|[^<])>(?!>|&)/, // single > redirect; 2>&1 fd redirects and >> are safe/separate
   />>/,
   /\bnpm\s+(install|uninstall|update|ci|link|publish)/i,
   /\byarn\s+(add|remove|install|publish)/i,
