@@ -4,15 +4,17 @@ import { resolveSmallModel } from "../../../lib/small-model.ts";
 
 const SUMMARY_MAX_TOKENS = 2048;
 
-interface SummaryResult {
+export interface SummaryOk {
   ok: true;
   text: string;
 }
 
-interface SummaryError {
+export interface SummaryError {
   ok: false;
   error: string;
 }
+
+export type SummaryResult = SummaryOk | SummaryError;
 
 function buildSummarySystemPrompt(): string {
   return `You prepare concise handoff summaries for a coding agent session.
@@ -34,9 +36,14 @@ Rules:
 }
 
 function buildSummaryUserMessage(transcript: string, goal: string): string {
-  return `Goal for the new session: ${goal}
+  // No goal line when handoff is invoked without one; the model then infers
+  // the focus from the transcript alone.
+  const goalLine = goal
+    ? `Goal for the new session: ${goal}
 
-<conversation_transcript>
+`
+    : "";
+  return `${goalLine}<conversation_transcript>
 ${transcript}
 </conversation_transcript>
 
@@ -47,7 +54,7 @@ export async function generateSummary(
   transcript: string,
   goal: string,
   ctx: ExtensionContext,
-): Promise<SummaryResult | SummaryError> {
+): Promise<SummaryResult> {
   try {
     const resolved = await resolveSmallModel(ctx);
     const options: {

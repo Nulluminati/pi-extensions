@@ -2,7 +2,7 @@ import { readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { ExtensionCommandContext } from "pi";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import handoffExtension, { STATUS_ICON } from "../../extensions/handoff/handoff.ts";
+import handoffExtension from "../../extensions/handoff/handoff.ts";
 import { createMockCommandContext } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
 import { getCommandHandler } from "../mocks/test-helpers.ts";
@@ -53,14 +53,6 @@ async function runHandoff(
   await handler(args, mockCtx);
 }
 
-function matchesPromptKey(data: string, keybinding: string): boolean {
-  const keys: Record<string, string[]> = {
-    "tui.select.confirm": ["\r", "\n"],
-    "tui.select.cancel": ["\u001b", "\u0003"],
-  };
-  return keys[keybinding]?.includes(data) ?? false;
-}
-
 describe("handoff-extension", () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -82,7 +74,7 @@ describe("handoff-extension", () => {
       const sourceFiles = await readdir(resolve(extensionDir, "src"));
 
       expect(rootTypeScriptFiles).toEqual(["handoff.ts"]);
-      expect(sourceFiles.filter((file) => file.endsWith(".ts"))).toHaveLength(4);
+      expect(sourceFiles.filter((file) => file.endsWith(".ts"))).toHaveLength(3);
     });
   });
 
@@ -99,27 +91,20 @@ describe("handoff-extension", () => {
     );
   });
 
-  it("prompts for a goal when called without args in UI mode", async () => {
+  it("drafts a summary when called without a goal", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
-    // TUI mode uses the framed promptText modal; drive it through ui.custom.
-    // biome-ignore lint/suspicious/noExplicitAny: test mock
-    mockCtx.ui.custom = vi.fn((factory: any) => {
-      return new Promise((resolve) => {
-        const component = factory(
-          { requestRender: vi.fn() },
-          mockCtx.ui.theme,
-          { matches: matchesPromptKey },
-          resolve,
-          // biome-ignore lint/suspicious/noExplicitAny: test mock
-        ) as any;
-        for (const character of "finish the refactor") component.handleInput(character);
-        component.handleInput("\r");
-      });
-    });
+    mockCustomResolvesOnDone(mockCtx);
+    const setupSessionManager = { appendSessionInfo: vi.fn() };
     mockCtx.sessionManager.getBranch = vi.fn(buildBranch);
     mockCtx.sessionManager.getSessionFile = vi.fn(() => "/sessions/old.json");
     mockCtx.ui.editor = vi.fn(() => Promise.resolve("edited summary"));
+    mockCtx.newSession = vi.fn(
+      async (options: Parameters<ExtensionCommandContext["newSession"]>[0]) => {
+        await options?.setup?.(setupSessionManager);
+        return { cancelled: false };
+      },
+    );
 
     const { completeSimple } = await import("@earendil-works/pi-ai");
     vi.mocked(completeSimple).mockResolvedValue({
@@ -128,22 +113,35 @@ describe("handoff-extension", () => {
 
     await runHandoff(mockPi, mockCtx, "");
 
+    // Only the loading modal opens — no goal prompt.
     expect(mockCtx.ui.custom).toHaveBeenCalledTimes(1);
-    expect(mockCtx.newSession).toHaveBeenCalled();
+    expect(mockCtx.ui.editor).toHaveBeenCalledWith("Review handoff prompt", "summary text");
+    // The summary prompt omits the goal line and steers from the transcript.
+    const request = vi.mocked(completeSimple).mock.calls[0][1].messages[0].content[0].text;
+    expect(request).not.toContain("Goal for the new session");
+    // The session falls back to the generic name.
+    expect(setupSessionManager.appendSessionInfo).toHaveBeenCalledWith("Handoff session");
   });
 
-  it("warns when called without args in non-UI mode", async () => {
+  it("prints a summary when called without args in non-UI mode", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     mockCtx.hasUI = false;
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockCtx.sessionManager.getBranch = vi.fn(buildBranch);
+
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const { completeSimple } = await import("@earendil-works/pi-ai");
+    vi.mocked(completeSimple).mockResolvedValue({
+      content: [{ type: "text", text: "print mode summary" }],
+    });
 
     await runHandoff(mockPi, mockCtx, "");
 
-    expect(warnSpy).toHaveBeenCalledWith("Usage: /handoff <goal>");
+    expect(logSpy).toHaveBeenCalledWith("print mode summary");
     expect(mockCtx.newSession).not.toHaveBeenCalled();
 
-    warnSpy.mockRestore();
+    logSpy.mockRestore();
   });
 
   it("errors when goal exceeds max length", async () => {
@@ -159,6 +157,7 @@ describe("handoff-extension", () => {
   it("errors when the global small model is unavailable without using the active model", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
+    mockCustomResolvesOnDone(mockCtx);
     mockCtx.sessionManager.getBranch = vi.fn(buildBranch);
     mockCtx.modelRegistry.find = vi.fn(() => undefined);
 
@@ -182,12 +181,20 @@ describe("handoff-extension", () => {
     expect(mockCtx.ui.notify).toHaveBeenCalledWith("No conversation to hand off.", "error");
   });
 
-  it("shows status while generating summary", async () => {
+  it("shows an inline loading modal while the summary is generating", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     mockCtx.sessionManager.getBranch = vi.fn(buildBranch);
     mockCtx.sessionManager.getSessionFile = vi.fn(() => "/sessions/old.json");
     mockCtx.ui.editor = vi.fn(() => Promise.resolve("edited summary"));
+
+    let modalComponent: { render(width: number): string[] } | undefined;
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
+    mockCtx.ui.custom = vi.fn((factory: any) => {
+      return new Promise((resolve) => {
+        modalComponent = factory({ requestRender: vi.fn() }, mockCtx.ui.theme, {}, resolve);
+      });
+    });
 
     const { completeSimple } = await import("@earendil-works/pi-ai");
     vi.mocked(completeSimple).mockResolvedValue({
@@ -196,20 +203,18 @@ describe("handoff-extension", () => {
 
     await runHandoff(mockPi, mockCtx, "finish the refactor");
 
-    expect(mockCtx.ui.setStatus).toHaveBeenCalledWith(
-      "handoff",
-      expect.stringContaining(STATUS_ICON),
-    );
-    expect(mockCtx.ui.setStatus).toHaveBeenCalledWith(
-      "handoff",
-      expect.stringContaining("Handoff: generating summary…"),
-    );
-    expect(mockCtx.ui.setStatus).toHaveBeenLastCalledWith("handoff", undefined);
+    expect(modalComponent).toBeDefined();
+    const rendered = modalComponent?.render(80).join("\n") ?? "";
+    expect(rendered).toContain("Handoff");
+    expect(rendered).toContain("Generating summary…");
+    expect(mockCtx.ui.setStatus).not.toHaveBeenCalled();
+    expect(mockCtx.ui.editor).toHaveBeenCalledWith("Review handoff prompt", "summary text");
   });
 
   it("prioritizes recent transcript segments when the transcript exceeds the budget", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
+    mockCustomResolvesOnDone(mockCtx);
     mockCtx.sessionManager.getBranch = vi.fn(() => [
       {
         type: "message",
@@ -261,6 +266,7 @@ describe("handoff-extension", () => {
   it("performs a full handoff with the global small model in UI mode", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
+    mockCustomResolvesOnDone(mockCtx);
     const activeModel = mockCtx.model;
     const smallModel = {
       ...activeModel,
@@ -315,6 +321,7 @@ describe("handoff-extension", () => {
   it("uses only replacement-session APIs after creating the new session", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
+    mockCustomResolvesOnDone(mockCtx);
     const replacementCtx = createMockCommandContext();
     const setupSessionManager = { appendSessionInfo: vi.fn() };
     mockCtx.sessionManager.getBranch = vi.fn(buildBranch);
@@ -376,6 +383,7 @@ describe("handoff-extension", () => {
   it("cancels when the editor is dismissed", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
+    mockCustomResolvesOnDone(mockCtx);
     mockCtx.sessionManager.getBranch = vi.fn(buildBranch);
     mockCtx.ui.editor = vi.fn(() => Promise.resolve(undefined));
 
@@ -393,6 +401,7 @@ describe("handoff-extension", () => {
   it("notifies on LLM error and does not create a session", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
+    mockCustomResolvesOnDone(mockCtx);
     mockCtx.sessionManager.getBranch = vi.fn(buildBranch);
 
     const { completeSimple } = await import("@earendil-works/pi-ai");
@@ -410,6 +419,7 @@ describe("handoff-extension", () => {
   it("notifies when the model returns empty content", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
+    mockCustomResolvesOnDone(mockCtx);
     mockCtx.sessionManager.getBranch = vi.fn(buildBranch);
 
     const { completeSimple } = await import("@earendil-works/pi-ai");
@@ -426,6 +436,7 @@ describe("handoff-extension", () => {
   it("notifies when new session is cancelled", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
+    mockCustomResolvesOnDone(mockCtx);
     mockCtx.sessionManager.getBranch = vi.fn(buildBranch);
     mockCtx.sessionManager.getSessionFile = vi.fn(() => "/sessions/old.json");
     mockCtx.ui.editor = vi.fn(() => Promise.resolve("edited summary"));
@@ -441,3 +452,19 @@ describe("handoff-extension", () => {
     expect(mockCtx.ui.notify).toHaveBeenCalledWith("New session cancelled.", "info");
   });
 });
+
+/**
+ * Mock ui.custom so the loading modal's factory runs immediately and the
+ * modal promise resolves when the component calls done — i.e. when the
+ * pending summary generation settles. dispose is invoked right away so the
+ * spinner interval is cleared in tests (it is unref'd in the extension too).
+ */
+function mockCustomResolvesOnDone(mockCtx: ReturnType<typeof createMockCommandContext>): void {
+  // biome-ignore lint/suspicious/noExplicitAny: test mock
+  mockCtx.ui.custom = vi.fn((factory: any) => {
+    return new Promise((resolve) => {
+      const component = factory({ requestRender: vi.fn() }, mockCtx.ui.theme, {}, resolve);
+      component?.dispose?.();
+    });
+  });
+}

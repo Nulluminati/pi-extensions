@@ -7,17 +7,23 @@
  *
  * Usage:
  *   /handoff finish the auth refactor and add tests
- *   /handoff                        (prompts for a goal)
+ *   /handoff                        (drafts a general summary)
  */
 
 import type { ExtensionAPI } from "pi";
-import { formatStatusLine } from "../../lib/ui-format.ts";
-import { ICON_COLOR, STATUS_ICON, STATUS_KEY, TEXT_COLOR } from "./src/constants.ts";
+import { renderModalFrame } from "../../lib/tui-frame.ts";
 import { formatGoalForSessionName, resolveGoal } from "./src/goal.ts";
-import { generateSummary } from "./src/summary.ts";
+import { generateSummary, type SummaryResult } from "./src/summary.ts";
 import { buildTranscript, type HandoffEntry } from "./src/transcript.ts";
 
-export { ICON_COLOR, STATUS_ICON, TEXT_COLOR };
+// --- Constants ---
+
+// Braille spinner frames, advanced on each render tick while the summary is
+// being generated. The interval only drives requestRender; the frame index
+// advances in render so repaints from any source stay in sync.
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+const SPINNER_INTERVAL_MS = 100;
 
 // --- Types ---
 
@@ -39,7 +45,7 @@ export default async function handoffExtension(pi: ExtensionAPI) {
     description: "Summarize the current session and start a new focused session",
     handler: async (args, ctx) => {
       const goal = await resolveGoal(args, ctx);
-      if (!goal) return;
+      if (goal === undefined) return;
 
       const entries = ctx.sessionManager.getBranch() as HandoffEntry[];
       const transcript = buildTranscript(entries);
@@ -50,23 +56,40 @@ export default async function handoffExtension(pi: ExtensionAPI) {
         return;
       }
 
+      let summary: SummaryResult;
       if (ctx.hasUI) {
-        ctx.ui.setStatus(
-          STATUS_KEY,
-          formatStatusLine(ctx.ui.theme, {
-            icon: STATUS_ICON,
-            prefix: "Handoff",
-            text: "generating summary…",
-            iconColor: ICON_COLOR,
-            textColor: TEXT_COLOR,
-          }),
-        );
-      }
+        const pending = generateSummary(transcript, goal, ctx);
+        summary = await ctx.ui.custom<SummaryResult>((tui, theme, _keybindings, done) => {
+          // Resolve the modal when the summary finishes; generation started
+          // before the modal opened so no time is lost to the paint.
+          void pending.then(done);
 
-      const summary = await generateSummary(transcript, goal, ctx);
+          const t = tui as { requestRender: () => void };
+          let frameIndex = 0;
+          const tick = setInterval(() => t.requestRender(), SPINNER_INTERVAL_MS);
+          tick.unref();
 
-      if (ctx.hasUI) {
-        ctx.ui.setStatus(STATUS_KEY, undefined);
+          return {
+            render(width: number): string[] {
+              const frame = SPINNER_FRAMES[frameIndex % SPINNER_FRAMES.length] ?? "⠋";
+              frameIndex++;
+              const spinner = theme.fg("accent", frame);
+              const text = theme.fg("dim", "Generating summary…");
+              return renderModalFrame(theme, width, [`${spinner} ${text}`], {
+                title: "Handoff",
+              });
+            },
+            invalidate(): void {},
+            // Swallow input: the modal is informational and closes itself
+            // when the summary lands.
+            handleInput(): void {},
+            dispose(): void {
+              clearInterval(tick);
+            },
+          };
+        });
+      } else {
+        summary = await generateSummary(transcript, goal, ctx);
       }
 
       if (!summary.ok) {
