@@ -665,20 +665,23 @@ describe("background-jobs-extension", () => {
 
       const factory = mockCtx.ui.custom.mock.calls[0][0];
       const done = vi.fn();
-      // Mimic pi's KeybindingsManager: tui.select.cancel resolves to every Esc
-      // byte variant, including kitty-protocol CSI sequences that raw-byte
-      // checks miss. Unknown ids (like the bare "cancel") resolve to nothing.
+      // Mimic pi's KeybindingsManager as a real class-method object: `matches`
+      // reads internal state through `this`, so an unbound extraction throws
+      // (as does the real manager — reading its keysById map). Esc resolves in
+      // every byte variant, including kitty-protocol CSI sequences.
       const keybindings = {
-        matches: vi.fn(
-          (data: string, keybinding: string) =>
-            keybinding === "tui.select.cancel" && (data === "\u001b" || data === "\u001b[27u"),
-        ),
+        bindings: {
+          "\u001b": ["tui.select.cancel"],
+          "\u001b[27u": ["tui.select.cancel"],
+        } as Record<string, string[]>,
+        matches(data: string, keybinding: string) {
+          return (this.bindings[data] ?? []).includes(keybinding);
+        },
       };
       const component = factory(null, mockCtx.ui.theme, keybindings, done);
 
       component.handleInput("\u001b[27u");
 
-      expect(keybindings.matches).toHaveBeenCalledWith("\u001b[27u", "tui.select.cancel");
       expect(done).toHaveBeenCalled();
     });
 

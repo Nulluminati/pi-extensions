@@ -172,13 +172,12 @@ export class JobPanel {
   }
 
   private matches(data: string, action: keyof typeof RAW_NAV): boolean {
-    const kb = this.keybindings?.matches;
-    if (kb) {
-      try {
-        if (kb(data, SELECT_KEYBINDING[action])) return true;
-      } catch {
-        // fall through to raw bytes
-      }
+    const manager = this.keybindings;
+    if (manager?.matches) {
+      // Method-call syntax keeps the manager as the receiver; extracting the
+      // function unbound throws inside the real manager (it reads its own
+      // internal key maps via `this`) and silently disables protocol keys.
+      if (manager.matches(data, SELECT_KEYBINDING[action])) return true;
     }
     return RAW_NAV[action](data);
   }
