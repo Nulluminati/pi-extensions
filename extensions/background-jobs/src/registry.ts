@@ -4,7 +4,7 @@
  * composition root); never module-level.
  */
 
-import { formatJobLine, MAX_RETAINED_JOBS } from "./format.ts";
+import { MAX_RETAINED_JOBS } from "./format.ts";
 import type { Job, JobKind, JobSnapshot, JobStatus } from "./types.ts";
 
 export interface JobRegistry {
@@ -96,9 +96,4 @@ export function formatStatusText(registry: JobRegistry): string | undefined {
     .join(", ");
   const more = active.length > 3 ? ` +${active.length - 3}` : "";
   return `${active.length} job${active.length === 1 ? "" : "s"}: ${labels}${more}`;
-}
-
-/** Rendered job list for the panel and list action. */
-export function renderJobList(registry: JobRegistry): string[] {
-  return listJobs(registry).map(formatJobLine);
 }

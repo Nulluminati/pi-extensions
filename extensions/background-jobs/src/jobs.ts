@@ -5,8 +5,9 @@
  */
 
 import { renderModalFrame } from "../../../lib/tui-frame.ts";
-import { formatJobLine, tailLines, truncate } from "./format.ts";
-import { getJob, type JobRegistry, listJobs, renderJobList } from "./registry.ts";
+import { formatStyledKeyHints } from "../../../lib/ui-format.ts";
+import { elapseMs, fmtDuration, formatJobLine, tailLines, truncate } from "./format.ts";
+import { getJob, type JobRegistry, listJobs } from "./registry.ts";
 import { cancelJob, KILL_GRACE_MS } from "./runner.ts";
 import type { Job, JobEvents } from "./types.ts";
 
@@ -137,6 +138,14 @@ function errorResult(text: string): JobsToolResult {
 
 // --- Panel -------------------------------------------------------------------
 
+/** Theme color for a job status, matching repo modal conventions. */
+function statusColor(status: Job["status"]): string {
+  if (status === "running" || status === "cancelling") return "accent";
+  if (status === "completed" || status === "satisfied") return "success";
+  if (status === "failed" || status === "timeout" || status === "kill_failed") return "error";
+  return "muted"; // cancelled
+}
+
 const RAW_NAV = {
   up: (d: string) => d === "k" || d === "\u001b[A" || d === "\u001bOA",
   down: (d: string) => d === "j" || d === "\u001b[B" || d === "\u001bOB",
@@ -201,18 +210,57 @@ export class JobPanel {
     if (this.paging) {
       const job = this.currentJob();
       const body = job
-        ? [formatJobLine(job), "", ...tailLines(truncate(job.buffer, 4_000), 60).split("\n")]
+        ? [
+            this.themedJobLine(job),
+            "",
+            ...tailLines(truncate(job.buffer, 4_000), 60).split("\n"),
+            "",
+            formatStyledKeyHints(this.theme, [
+              ["esc", "back"],
+              ["q", "close"],
+            ]),
+          ]
         : ["No job selected."];
       return renderModalFrame(this.theme, width, body, { title: `Job output — ${job?.id ?? ""}` });
     }
-    const lines = renderJobList(this.registry);
+    const jobs = listJobs(this.registry);
     const body =
-      lines.length === 0
+      jobs.length === 0
         ? ["No background jobs or monitors registered."]
-        : lines.map((line, index) => (index === this.selected ? `> ${line}` : `  ${line}`));
+        : jobs.map((job, index) => {
+            const line = this.themedJobLine(job);
+            return index === this.selected
+              ? `${this.theme.fg("accent", "›")} ${line}`
+              : `  ${line}`;
+          });
+    body.push(
+      "",
+      formatStyledKeyHints(this.theme, [
+        ["↑↓/jk", "navigate"],
+        ["enter", "page output"],
+        ["esc", "back / close"],
+        ["q", "close"],
+      ]),
+    );
     return renderModalFrame(this.theme, width, body, {
       title: "Background Jobs",
     });
+  }
+
+  /** formatJobLine (format.ts) with theme colors; the model-facing list stays plain. */
+  private themedJobLine(job: Job): string {
+    const color = statusColor(job.status);
+    const mark =
+      job.status === "running" || job.status === "cancelling"
+        ? "●"
+        : job.status === "completed" || job.status === "satisfied"
+          ? "✓"
+          : job.status === "failed" || job.status === "timeout" || job.status === "kill_failed"
+            ? "✗"
+            : "⊘";
+    const exit = job.exitCode != null ? ` exit ${job.exitCode}` : "";
+    const status = this.theme.fg(color, `[${job.status}${exit}]`);
+    return `#${job.id} ${this.theme.fg(color, mark)} ${status} ${job.kind} "${job.label}" (${fmtDuration(elapseMs(job))})`;
   }
 
   invalidate(): void {}

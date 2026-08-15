@@ -671,6 +671,23 @@ describe("background-jobs-extension", () => {
       expect(done).toHaveBeenCalled();
     });
 
+    it("shows a key-hints bar like other modals", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await backgroundJobsExtension(mockPi);
+      await startBackgroundJob(mockPi, mockCtx, { command: "npm test" });
+
+      const tool = getTool(mockPi, "jobs");
+      await tool.execute("call-1", { action: "view" }, undefined, undefined, mockCtx);
+
+      const factory = mockCtx.ui.custom.mock.calls[0][0];
+      const component = factory(null, mockCtx.ui.theme, null, vi.fn());
+      const text = component.render(100).join("\n");
+      expect(text).toContain("navigate");
+      expect(text).toContain("page");
+      expect(text).toContain("close");
+    });
+
     it("closes the panel on protocol-encoded escape via the keybinding manager", async () => {
       const mockPi = createMockPi();
       const mockCtx = createMockCommandContext();
