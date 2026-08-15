@@ -135,8 +135,6 @@ describe("status-bar-extension", () => {
     expect(mockPi.on).toHaveBeenCalledWith("message_end", expect.any(Function));
     expect(mockPi.on).toHaveBeenCalledWith("model_select", expect.any(Function));
     expect(mockPi.on).toHaveBeenCalledWith("thinking_level_select", expect.any(Function));
-    expect(mockPi.on).toHaveBeenCalledWith("tool_execution_start", expect.any(Function));
-    expect(mockPi.on).toHaveBeenCalledWith("tool_execution_end", expect.any(Function));
   });
 
   it("is enabled by default on session_start", async () => {
@@ -1069,63 +1067,6 @@ describe("status-bar-extension", () => {
     expect(lines[1]).toContain("🎯 active");
   });
 
-  it("active tool progress appears on line 2", async () => {
-    const mockPi = createMockPi();
-    const mockCtx = createMockCommandContext();
-    await enableBar(mockPi, mockCtx);
-
-    const toolStartHandler = getEventHandler(mockPi, "tool_execution_start");
-    await toolStartHandler(
-      { type: "tool_execution_start", toolCallId: "tc-1", toolName: "bash", args: {} },
-      mockCtx,
-    );
-
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      plainTheme(),
-      footerData(),
-    );
-    const lines = component.render(120);
-
-    expect(lines.length).toBe(2);
-    expect(lines[1]).toContain("⚙");
-    expect(lines[1]).toContain("bash");
-  });
-
-  it("completed tool count appears on line 2", async () => {
-    const mockPi = createMockPi();
-    const mockCtx = createMockCommandContext();
-    await enableBar(mockPi, mockCtx);
-
-    const toolStartHandler = getEventHandler(mockPi, "tool_execution_start");
-    await toolStartHandler(
-      { type: "tool_execution_start", toolCallId: "tc-1", toolName: "bash", args: {} },
-      mockCtx,
-    );
-    const toolEndHandler = getEventHandler(mockPi, "tool_execution_end");
-    await toolEndHandler(
-      {
-        type: "tool_execution_end",
-        toolCallId: "tc-1",
-        toolName: "bash",
-        result: {},
-        isError: false,
-      },
-      mockCtx,
-    );
-
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      plainTheme(),
-      footerData(),
-    );
-    const lines = component.render(120);
-
-    expect(lines.length).toBe(2);
-    expect(lines[1]).toContain("✓1");
-    expect(lines[1]).not.toContain("⚙");
-  });
-
   it("onBranchChange triggers requestRender", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
@@ -1203,16 +1144,14 @@ describe("status-bar-extension", () => {
     expect(lines[0]).not.toContain("undefined/");
   });
 
-  it("session_start resets tool execution state and token usage", async () => {
+  it("session_start resets turn count and token usage", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await enableBar(mockPi, mockCtx);
 
-    const toolStartHandler = getEventHandler(mockPi, "tool_execution_start");
-    await toolStartHandler(
-      { type: "tool_execution_start", toolCallId: "tc-1", toolName: "bash", args: {} },
-      mockCtx,
-    );
+    const turnStartHandler = getEventHandler(mockPi, "turn_start");
+    await turnStartHandler({ type: "turn_start", turnIndex: 0, timestamp: Date.now() }, mockCtx);
+    await turnStartHandler({ type: "turn_start", turnIndex: 1, timestamp: Date.now() }, mockCtx);
 
     const sessionStartHandler = getEventHandler(mockPi, "session_start");
     await sessionStartHandler({ type: "session_start", reason: "new" }, mockCtx);
@@ -1224,7 +1163,7 @@ describe("status-bar-extension", () => {
     );
     const lines = component.render(120);
 
-    // Only 1 line — tools and tokens reset, line 2 collapses.
+    // Only 1 line — turn count and tokens reset, line 2 collapses.
     expect(lines.length).toBe(1);
   });
 

@@ -12,7 +12,6 @@ Replaces Pi's default footer with a denser, more information-rich two-line statu
 - Right-aligned context usage bar with a token breakdown (`↑in ↓out ↗cache-read ↘cache-write`) and the turn count and cost
 
 **Footer line 2** (transient events):
-- Active and completed tool progress (`⚙ toolname ✓N`)
 - Third-party extension statuses published via `ctx.ui.setStatus()`
 
 The small model is deliberately excluded from line 2; it lives in the editor title instead (see below), so it is not shown twice.
@@ -66,7 +65,7 @@ The footer is registered through `ctx.ui.setFooter()`. While the extension is en
 
 ## Key Design Decisions
 
-- **Two lines, not one** — Static session info and transient events fight for the same real estate on a single line. Splitting them lets the right block (tokens, cost, bar) breathe on line 1 while in-flight tool progress and third-party statuses live on line 2, omitted when empty.
+- **Two lines, not one** — Static session info and transient events fight for the same real estate on a single line. Splitting them lets the right block (tokens, cost, bar) breathe on line 1 while third-party statuses live on line 2, omitted when empty.
 - **No new state outside the session** — All state is per-instance and lives in the closure. No module-level mutation, no global map. The status bar extension is safe to load alongside others.
 - **Editor captured, not overwritten** — The base editor factory is captured on install and restored on shutdown. If another extension (or Pi itself) replaces the editor, the polished one yields cleanly.
 - **Modal chrome, shared with overlays** — The input box reuses `renderModalFrame` (rounded `borderAccent` corners, title in the top border) so it reads as the same family as the voice/handoff modals, instead of a one-off grey rule. Models and thinking live in the title, so the border never needs to track the thinking level.
@@ -81,13 +80,11 @@ The footer is registered through `ctx.ui.setFooter()`. While the extension is en
 | `pi.registerCommand("statusbar:toggle")` | The toggle command |
 | `pi.on("session_start")` | Initializes state, installs the editor and footer, sets the status line |
 | `pi.on("session_shutdown")` | Disposes the footer, restores the editor factory |
-| `pi.on("turn_start")` | Increments the turn count, clears active tool list |
+| `pi.on("turn_start")` | Increments the turn count |
 | `pi.on("turn_end")` | Refreshes git status, accumulates token usage |
 | `pi.on("message_end")` | Re-aggregates token usage after each assistant message |
 | `pi.on("model_select")` | Re-renders the editor and footer when the model changes |
 | `pi.on("thinking_level_select")` | Re-renders the editor and footer when the thinking level changes |
-| `pi.on("tool_execution_start")` | Tracks active tool executions |
-| `pi.on("tool_execution_end")` | Removes completed tools, increments the completed count |
 | `pi.exec("git", …)` | Reads the working tree's git status and stash state |
 | `pi.getThinkingLevel()` | Reads the current thinking level for the editor title |
 | `ctx.ui.setFooter(factory)` | Replaces Pi's default footer |

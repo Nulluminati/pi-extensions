@@ -13,8 +13,8 @@
  *    with the token breakdown (↑↓↗↘), turn count, and cost.
  *
  *  Footer line 2 (transient events):
- *    active/completed tool execution progress and third-party extension
- *    statuses published via ctx.ui.setStatus(). Omitted entirely when empty.
+ *    third-party extension statuses published via ctx.ui.setStatus(). Omitted
+ *    entirely when empty.
  *
  *  Editor:
  *    The default Pi editor is wrapped in a rounded accent modal frame
@@ -64,8 +64,6 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     turnCount: 0,
     thinkingLevel: "none",
     smallModelLabel: "",
-    activeTools: [],
-    completedToolCount: 0,
     gitBranch: null,
     gitStatus: null,
     tokenUsage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
@@ -164,11 +162,6 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     const restored = removeEditorFactoryLayer(current, editorLayerId);
     if (restored !== current) ctx.ui.setEditorComponent(restored);
     editorRequestRender = undefined;
-  }
-
-  function resetTurnState(): void {
-    state.activeTools = [];
-    state.completedToolCount = 0;
   }
 
   /**
@@ -295,7 +288,6 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     state.tokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
     currentCwd = ctx.cwd;
     getBranch = () => ctx.sessionManager.getBranch();
-    resetTurnState();
     accumulateTokenUsage();
     refreshSmallModel();
     refreshContextUsage(ctx as ExtensionCommandContext);
@@ -364,7 +356,6 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
 
   pi.on("turn_start", async (_event, ctx) => {
     state.turnCount++;
-    resetTurnState();
     refreshSmallModel();
     refreshContextUsage(ctx as ExtensionCommandContext);
     if (state.lastHandle) state.lastHandle.requestRender();
@@ -394,17 +385,6 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     state.thinkingLevel = event.level;
     if (state.lastHandle) state.lastHandle.requestRender();
     editorRequestRender?.();
-  });
-
-  pi.on("tool_execution_start", async (event, _ctx) => {
-    state.activeTools.push({ name: event.toolName, id: event.toolCallId });
-    if (state.lastHandle) state.lastHandle.requestRender();
-  });
-
-  pi.on("tool_execution_end", async (event, _ctx) => {
-    state.activeTools = state.activeTools.filter((t) => t.id !== event.toolCallId);
-    state.completedToolCount++;
-    if (state.lastHandle) state.lastHandle.requestRender();
   });
 
   // --- Command ---

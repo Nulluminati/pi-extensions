@@ -14,8 +14,6 @@ export const STATUS_KEY = "status-bar";
 
 export const BAR_SEGMENTS = 10;
 
-export const MAX_TOOL_NAME = 18;
-
 // Nerd Font icons (Starship-inspired). The two Material Design glyphs live
 // in the Private Use Area, so they're built from codepoints to survive any
 // transport that would strip an invisible literal to a space.
@@ -35,10 +33,6 @@ export const ICON_FLEX = "⚡";
 export const FLEX_ON_COLOR = "success"; // green — the discounted tier is active
 export const FLEX_OFF_COLOR = "dim";
 export const ICON_TURN = "↻";
-
-export const ICON_TOOL_ACTIVE = "⚙";
-
-export const ICON_TOOL_DONE = "✓";
 
 // Git status indicators (Starship).
 export const ICON_AHEAD = "↑";

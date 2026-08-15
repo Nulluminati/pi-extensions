@@ -1,10 +1,5 @@
 // --- Types ---
 
-export interface ToolExecution {
-  name: string;
-  id: string;
-}
-
 export interface TokenUsage {
   input: number;
   output: number;
@@ -44,8 +39,6 @@ export interface State {
   // meta line after a "/" separator, beside the main model. Empty when no
   // small model is configured.
   smallModelLabel: string;
-  activeTools: ToolExecution[];
-  completedToolCount: number;
   gitBranch: string | null;
   gitStatus: GitStatus | null;
   tokenUsage: TokenUsage;

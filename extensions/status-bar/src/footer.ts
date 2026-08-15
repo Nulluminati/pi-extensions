@@ -13,12 +13,9 @@ import {
   ICON_RENAMED,
   ICON_STAGED,
   ICON_STASHED,
-  ICON_TOOL_ACTIVE,
-  ICON_TOOL_DONE,
   ICON_TURN,
   ICON_TYPECHANGED,
   ICON_UNTRACKED,
-  MAX_TOOL_NAME,
   SMALL_MODEL_STATUS_KEY,
   STATUS_KEY,
   TOKEN_COLORS,
@@ -61,22 +58,6 @@ function formatTokenBreakdown(tu: TokenUsage, theme: any): string {
     theme.fg(TOKEN_COLORS.cacheRead, `↗${formatTokenCount(tu.cacheRead)}`),
     theme.fg(TOKEN_COLORS.cacheWrite, `↘${formatTokenCount(tu.cacheWrite)}`),
   ];
-  return parts.join(" ");
-}
-
-function formatToolProgress(state: State, theme: any): string {
-  if (state.activeTools.length === 0 && state.completedToolCount === 0) return "";
-
-  const parts: string[] = [];
-  if (state.activeTools.length > 0) {
-    const names = state.activeTools.map((t) =>
-      t.name.length > MAX_TOOL_NAME ? `${t.name.slice(0, MAX_TOOL_NAME - 1)}…` : t.name,
-    );
-    parts.push(`${theme.fg("accent", ICON_TOOL_ACTIVE)} ${theme.fg("accent", names.join(", "))}`);
-  }
-  if (state.completedToolCount > 0) {
-    parts.push(theme.fg("dim", `${ICON_TOOL_DONE}${state.completedToolCount}`));
-  }
   return parts.join(" ");
 }
 
@@ -214,11 +195,8 @@ export function buildFooterLines(
     width,
   );
 
-  // --- Line 2: transient events (tools + third-party extension statuses) ---
+  // --- Line 2: transient events (third-party extension statuses) ---
   const line2Segments: string[] = [];
-
-  const toolProg = formatToolProgress(state, theme);
-  if (toolProg) line2Segments.push(toolProg);
 
   const extStatuses = footerData?.getExtensionStatuses?.();
   if (extStatuses) {
