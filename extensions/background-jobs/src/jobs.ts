@@ -1,7 +1,6 @@
 /**
- * The `jobs` tool: list / status / tail / cancel / view over the registry.
- * `view` opens a focusable overlay panel; everything else is text output for
- * the model.
+ * The `jobs` tool: list / status / tail / cancel over the registry, plus the
+ * focusable overlay panel opened by the user-facing /jobs command.
  */
 
 import { renderModalFrame } from "../../../lib/tui-frame.ts";
@@ -26,13 +25,25 @@ interface PanelUi {
   ): unknown;
 }
 
+/**
+ * Open the interactive jobs panel. User-facing only — invoked by the /jobs
+ * command, never from a tool: an agent opening a focusable modal steals the
+ * user's keyboard.
+ */
+export function openJobsPanel(ui: PanelUi, registry: JobRegistry): void {
+  if (!ui.custom) return;
+  ui.custom(
+    (tui: unknown, theme: any, keybindings: any, done: (result?: unknown) => void) =>
+      new JobPanel(registry, theme, done, keybindings, tui as { requestRender(): void } | null),
+    { overlay: true, overlayOptions: { width: "70%", maxHeight: "80%", anchor: "center" } },
+  );
+}
+
 export async function executeJobsAction(options: {
   registry: JobRegistry;
   action: string;
   jobId?: number | undefined;
   lines?: number | undefined;
-  mode: string;
-  ui: PanelUi;
   events: JobEvents;
 }): Promise<JobsToolResult> {
   const { registry, action, events } = options;
@@ -108,28 +119,7 @@ export async function executeJobsAction(options: {
     };
   }
 
-  if (action === "view") {
-    if (options.mode !== "tui" || !options.ui.custom) {
-      return errorResult(
-        "Interactive view is only available in TUI mode. Use action=list and action=tail instead.",
-      );
-    }
-    options.ui.custom(
-      (tui: unknown, theme: any, keybindings: any, done: (result?: unknown) => void) =>
-        new JobPanel(registry, theme, done, keybindings, tui as { requestRender(): void } | null),
-      { overlay: true, overlayOptions: { width: "70%", maxHeight: "80%", anchor: "center" } },
-    );
-    return {
-      content: [
-        {
-          type: "text",
-          text: "Opened the background jobs panel. Use arrows or j/k to move, enter to page a job's output, q or Esc to close.",
-        },
-      ],
-    };
-  }
-
-  return errorResult(`Unknown action "${action}". Use list, status, tail, cancel, or view.`);
+  return errorResult(`Unknown action "${action}". Use list, status, tail, or cancel.`);
 }
 
 function errorResult(text: string): JobsToolResult {

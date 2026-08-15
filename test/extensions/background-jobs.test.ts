@@ -625,13 +625,12 @@ describe("background-jobs-extension", () => {
       expect(result.content[0].text).toContain("already completed");
     });
 
-    it("errors on view outside TUI mode", async () => {
+    it("does not offer a view action — the panel is user-only", async () => {
       const mockPi = createMockPi();
       const mockCtx = createMockCommandContext();
-      mockCtx.mode = "rpc";
       await backgroundJobsExtension(mockPi);
-
       const tool = getTool(mockPi, "jobs");
+
       const result = await tool.execute(
         "call-1",
         { action: "view" },
@@ -640,7 +639,48 @@ describe("background-jobs-extension", () => {
         mockCtx,
       );
       expect(result.isError).toBe(true);
-      expect(result.content[0].text).toContain("TUI mode");
+      expect(result.content[0].text).toContain("Unknown action");
+      expect(mockCtx.ui.custom).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("/jobs command", () => {
+    async function openPanel(
+      mockPi: DeepMocked<ExtensionAPI>,
+      mockCtx: DeepMocked<ExtensionCommandContext>,
+    ) {
+      const call = mockPi.registerCommand.mock.calls.find((c) => c[0] === "jobs");
+      const handler = call?.[1].handler as (args: string, ctx: unknown) => Promise<void>;
+      await handler("", mockCtx);
+      expect(mockCtx.ui.custom).toHaveBeenCalledTimes(1);
+      return mockCtx.ui.custom.mock.calls[0][0] as (
+        tui: unknown,
+        theme: unknown,
+        keybindings: unknown,
+        done: (result?: unknown) => void,
+      ) => { render(width: number): string[]; handleInput(data: string): void; focused: boolean };
+    }
+
+    it("registers /jobs with a description", async () => {
+      const mockPi = createMockPi();
+      await backgroundJobsExtension(mockPi);
+      expect(mockPi.registerCommand).toHaveBeenCalledWith(
+        "jobs",
+        expect.objectContaining({
+          description: expect.stringContaining("panel"),
+          handler: expect.any(Function),
+        }),
+      );
+    });
+
+    it("does nothing without UI", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      mockCtx.hasUI = false;
+      await backgroundJobsExtension(mockPi);
+      const call = mockPi.registerCommand.mock.calls.find((c) => c[0] === "jobs");
+      await call?.[1].handler("", mockCtx);
+      expect(mockCtx.ui.custom).not.toHaveBeenCalled();
     });
 
     it("opens a panel listing jobs that closes on q", async () => {
@@ -650,18 +690,7 @@ describe("background-jobs-extension", () => {
       const { child } = await startBackgroundJob(mockPi, mockCtx, { command: "npm test" });
       child.emit("exit", 0);
 
-      const tool = getTool(mockPi, "jobs");
-      const result = await tool.execute(
-        "call-1",
-        { action: "view" },
-        undefined,
-        undefined,
-        mockCtx,
-      );
-      expect(result.content[0].text).toContain("panel");
-
-      expect(mockCtx.ui.custom).toHaveBeenCalledTimes(1);
-      const factory = mockCtx.ui.custom.mock.calls[0][0];
+      const factory = await openPanel(mockPi, mockCtx);
       const done = vi.fn();
       const component = factory(null, mockCtx.ui.theme, null, done);
       const lines = component.render(80);
@@ -677,10 +706,7 @@ describe("background-jobs-extension", () => {
       await backgroundJobsExtension(mockPi);
       await startBackgroundJob(mockPi, mockCtx, { command: "npm test" });
 
-      const tool = getTool(mockPi, "jobs");
-      await tool.execute("call-1", { action: "view" }, undefined, undefined, mockCtx);
-
-      const factory = mockCtx.ui.custom.mock.calls[0][0];
+      const factory = await openPanel(mockPi, mockCtx);
       const component = factory(null, mockCtx.ui.theme, null, vi.fn());
       const text = component.render(100).join("\n");
       expect(text).toContain("navigate");
@@ -695,10 +721,7 @@ describe("background-jobs-extension", () => {
       const { child } = await startBackgroundJob(mockPi, mockCtx, { command: "npm test" });
       child.emit("exit", 0);
 
-      const tool = getTool(mockPi, "jobs");
-      await tool.execute("call-1", { action: "view" }, undefined, undefined, mockCtx);
-
-      const factory = mockCtx.ui.custom.mock.calls[0][0];
+      const factory = await openPanel(mockPi, mockCtx);
       const done = vi.fn();
       // Mimic pi's KeybindingsManager as a real class-method object: `matches`
       // reads internal state through `this`, so an unbound extraction throws
@@ -727,10 +750,7 @@ describe("background-jobs-extension", () => {
       const { child } = await startBackgroundJob(mockPi, mockCtx, { command: "npm test" });
       child.emit("exit", 0);
 
-      const tool = getTool(mockPi, "jobs");
-      await tool.execute("call-1", { action: "view" }, undefined, undefined, mockCtx);
-
-      const factory = mockCtx.ui.custom.mock.calls[0][0];
+      const factory = await openPanel(mockPi, mockCtx);
       const done = vi.fn();
       const requestRender = vi.fn();
       const tui = { requestRender };
@@ -751,10 +771,7 @@ describe("background-jobs-extension", () => {
       const { child } = await startBackgroundJob(mockPi, mockCtx, { command: "npm test" });
       child.emit("exit", 0);
 
-      const tool = getTool(mockPi, "jobs");
-      await tool.execute("call-1", { action: "view" }, undefined, undefined, mockCtx);
-
-      const factory = mockCtx.ui.custom.mock.calls[0][0];
+      const factory = await openPanel(mockPi, mockCtx);
       const done = vi.fn();
       const requestRender = vi.fn();
       const component = factory({ requestRender }, mockCtx.ui.theme, null, done);

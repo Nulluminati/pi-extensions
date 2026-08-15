@@ -30,7 +30,7 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionUIContext } from "pi";
 import { Type } from "typebox";
 import { formatStatusLine } from "../../lib/ui-format.ts";
-import { executeJobsAction } from "./src/jobs.ts";
+import { executeJobsAction, openJobsPanel } from "./src/jobs.ts";
 import {
   DEFAULT_MONITOR_INTERVAL_S,
   DEFAULT_MONITOR_TIMEOUT_S,
@@ -101,7 +101,6 @@ const JobsParameters = Type.Object({
       Type.Literal("status"),
       Type.Literal("tail"),
       Type.Literal("cancel"),
-      Type.Literal("view"),
     ]),
     description: "Registry operation.",
   },
@@ -332,11 +331,19 @@ export default async function backgroundJobsExtension(pi: ExtensionAPI) {
     },
   });
 
+  pi.registerCommand("jobs", {
+    description: "Open the background jobs panel",
+    handler: async (_args, ctx) => {
+      if (!ctx.hasUI) return;
+      openJobsPanel(ctx.ui, registry);
+    },
+  });
+
   pi.registerTool({
     name: "jobs",
     label: "Jobs",
     description:
-      "Manage background jobs and monitors: list them, inspect status, tail captured output, cancel a running job, or open an interactive panel (view, TUI only). Command output is never auto-delivered on wake — read it here on demand.",
+      "Manage background jobs and monitors: list them, inspect status, tail captured output, cancel a running job. Command output is never auto-delivered on wake — read it here on demand.",
     promptSnippet: "List / inspect / cancel background jobs and monitors",
     parameters: JobsParameters,
     execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
@@ -346,8 +353,6 @@ export default async function backgroundJobsExtension(pi: ExtensionAPI) {
         action: String(params.action),
         jobId: params.jobId !== undefined ? Number(params.jobId) : undefined,
         lines: params.lines !== undefined ? Number(params.lines) : undefined,
-        mode: ctx.mode,
-        ui: ctx.ui,
         events,
       });
     },
