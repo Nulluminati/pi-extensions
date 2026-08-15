@@ -754,6 +754,12 @@ declare module "@earendil-works/pi-tui" {
 declare module "@earendil-works/pi-coding-agent" {
   export function getAgentDir(): string;
   export function getSettingsListTheme(): any;
+  export function estimateTokens(message: any): number;
+  export const DEFAULT_COMPACTION_SETTINGS: {
+    enabled: boolean;
+    reserveTokens: number;
+    keepRecentTokens: number;
+  };
 
   export class Theme {
     bg(color: string, text: string): string;

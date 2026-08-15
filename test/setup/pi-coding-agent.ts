@@ -61,6 +61,24 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
     status: "running" | "complete" | "error" | "cancelled" = "running";
   }
   class CustomMessageComponent extends RenderedComponent {}
+  // Mirrors pi's chars/4 heuristic (see estimateTokens in the real package):
+  // text blocks count chars/4, images count as 4800 chars each.
+  const estimateTokens = vi.fn((message: any) => {
+    let chars = 0;
+    const content = message?.content;
+    if (typeof content === "string") {
+      chars = content.length;
+    } else if (Array.isArray(content)) {
+      for (const block of content) {
+        if (block?.type === "text" && typeof block.text === "string") {
+          chars += block.text.length;
+        } else if (block?.type === "image") {
+          chars += 4800;
+        }
+      }
+    }
+    return Math.max(0, Math.ceil(chars / 4));
+  });
   return {
     BashExecutionComponent,
     CustomEditor,
@@ -68,6 +86,12 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
     DynamicBorder,
     Theme,
     ToolExecutionComponent,
+    DEFAULT_COMPACTION_SETTINGS: {
+      enabled: true,
+      reserveTokens: 16384,
+      keepRecentTokens: 20000,
+    },
+    estimateTokens,
     getAgentDir: vi.fn(() => "/home/test/.pi/agent"),
     getSettingsListTheme: vi.fn(() => ({
       label: (text: string) => text,
