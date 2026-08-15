@@ -134,6 +134,19 @@ const RAW_NAV = {
   cancel: (d: string) => d === "\u001b" || d === "\u0003" || d === "q",
 };
 
+/**
+ * pi-tui keybinding ids for the select action family. The keybinding manager
+ * resolves every byte variant of a key — kitty-protocol CSI sequences,
+ * application-cursor codes, and user rebindings — which raw-byte checks miss
+ * (e.g. Esc arriving as \u001b[27u instead of \u001b).
+ */
+const SELECT_KEYBINDING = {
+  up: "tui.select.up",
+  down: "tui.select.down",
+  confirm: "tui.select.confirm",
+  cancel: "tui.select.cancel",
+} as const;
+
 /** Focusable overlay listing jobs; enter pages the selected job's output. */
 export class JobPanel {
   private selected = 0;
@@ -144,7 +157,7 @@ export class JobPanel {
     private readonly theme: any,
     private readonly done: (result?: unknown) => void,
     private readonly keybindings?: {
-      matches?: (data: string, action: string) => boolean;
+      matches?: (data: string, keybinding: string) => boolean;
     },
   ) {}
 
@@ -152,7 +165,7 @@ export class JobPanel {
     const kb = this.keybindings?.matches;
     if (kb) {
       try {
-        if (kb(data, action)) return true;
+        if (kb(data, SELECT_KEYBINDING[action])) return true;
       } catch {
         // fall through to raw bytes
       }

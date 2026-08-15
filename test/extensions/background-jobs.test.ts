@@ -652,6 +652,35 @@ describe("background-jobs-extension", () => {
       component.handleInput("q");
       expect(done).toHaveBeenCalled();
     });
+
+    it("closes the panel on protocol-encoded escape via the keybinding manager", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await backgroundJobsExtension(mockPi);
+      const { child } = await startBackgroundJob(mockPi, mockCtx, { command: "npm test" });
+      child.emit("exit", 0);
+
+      const tool = getTool(mockPi, "jobs");
+      await tool.execute("call-1", { action: "view" }, undefined, undefined, mockCtx);
+
+      const factory = mockCtx.ui.custom.mock.calls[0][0];
+      const done = vi.fn();
+      // Mimic pi's KeybindingsManager: tui.select.cancel resolves to every Esc
+      // byte variant, including kitty-protocol CSI sequences that raw-byte
+      // checks miss. Unknown ids (like the bare "cancel") resolve to nothing.
+      const keybindings = {
+        matches: vi.fn(
+          (data: string, keybinding: string) =>
+            keybinding === "tui.select.cancel" && (data === "\u001b" || data === "\u001b[27u"),
+        ),
+      };
+      const component = factory(null, mockCtx.ui.theme, keybindings, done);
+
+      component.handleInput("\u001b[27u");
+
+      expect(keybindings.matches).toHaveBeenCalledWith("\u001b[27u", "tui.select.cancel");
+      expect(done).toHaveBeenCalled();
+    });
   });
 
   describe("cancellation", () => {
