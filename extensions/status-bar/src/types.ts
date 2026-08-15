@@ -57,4 +57,7 @@ export interface State {
   // badge is shown solely on that. `flexOn` drives the on/off label.
   flexOn: boolean;
   flexCapable: boolean;
+  // True while the plan extension is in plan mode (see plan:mode-change on the
+  // pi.events bus); tints the editor frame with the warning color.
+  planModeActive: boolean;
 }

@@ -104,3 +104,11 @@ export const SMALL_MODEL_STATUS_KEY = "small-model";
  * the same string.
  */
 export const FLEX_EVENT = "neuralwatt:flex-change";
+
+/**
+ * Event the plan extension emits on pi.events when plan mode changes. Used to
+ * tint the editor frame while planning. Defined here (not imported) so the
+ * status-bar extension stays self-contained; the plan extension owns the
+ * contract and emits the same string.
+ */
+export const PLAN_MODE_EVENT = "plan:mode-change";

@@ -22,6 +22,7 @@ import {
   MUTATING_TOOLS,
   PLAN_COMPLETE_TYPE,
   PLAN_CONTEXT_TYPE,
+  PLAN_MODE_EVENT,
   PLAN_SUBMIT_TOOL,
   STATUS_KEY,
   WIDGET_KEY,
@@ -32,7 +33,6 @@ import {
   buildKickoffMessage,
   buildPlanCompleteMessage,
   buildPlanModeContext,
-  formatPlanText,
 } from "./src/prompts.ts";
 import {
   getAssistantText,
@@ -51,6 +51,10 @@ export default async function planExtension(pi: ExtensionAPI) {
 
   function persistState() {
     pi.appendEntry(ENTRY_TYPE, { state });
+  }
+
+  function publishMode() {
+    pi.events.emit(PLAN_MODE_EVENT, { mode: state.mode });
   }
 
   // --- UI ---
@@ -114,6 +118,7 @@ export default async function planExtension(pi: ExtensionAPI) {
     state = { mode: "plan", plan: null, toolsBeforePlan: undefined };
     applyPlanModeTools();
     persistState();
+    publishMode();
     updateStatus(ctx);
     updateWidget(ctx);
   }
@@ -122,6 +127,7 @@ export default async function planExtension(pi: ExtensionAPI) {
     restorePrePlanTools();
     state = { mode: "off", plan: null, toolsBeforePlan: undefined };
     persistState();
+    publishMode();
     updateStatus(ctx);
     updateWidget(ctx);
   }
@@ -130,6 +136,7 @@ export default async function planExtension(pi: ExtensionAPI) {
     state = { ...state, mode: "executing", plan };
     restorePrePlanTools();
     persistState();
+    publishMode();
     updateStatus(ctx);
     updateWidget(ctx);
   }
@@ -325,29 +332,19 @@ export default async function planExtension(pi: ExtensionAPI) {
         };
       }
 
-      if (choice === "edit") {
-        const revised = await ctx.ui.editor(
-          "Revise the plan (submit to send back, Esc to cancel):",
-          formatPlanText(plan),
+      if (choice === "discuss") {
+        pi.sendUserMessage(
+          "The plan was not approved. Keep discussing the approach with the user and refine the plan; call plan_submit again when you have a revised plan they can approve.",
+          { deliverAs: "followUp" },
         );
-        if (revised?.trim()) {
-          pi.sendUserMessage(`Revise the plan based on my feedback:\n\n${revised.trim()}`, {
-            deliverAs: "followUp",
-          });
-          return {
-            content: [{ type: "text", text: "Plan sent back for revision with user feedback." }],
-            details: { status: "revising" },
-            terminate: true,
-          };
-        }
         return {
           content: [
             {
               type: "text",
-              text: "Plan revision cancelled. The plan was not approved; ask the user what to change.",
+              text: "Plan sent back for discussion. Refine the plan and call plan_submit again.",
             },
           ],
-          details: { status: "cancelled" },
+          details: { status: "discussing" },
           terminate: true,
         };
       }
@@ -464,6 +461,7 @@ export default async function planExtension(pi: ExtensionAPI) {
     }
 
     applyRestoredToolState();
+    publishMode();
     updateStatus(ctx);
     updateWidget(ctx);
   });
@@ -475,6 +473,7 @@ export default async function planExtension(pi: ExtensionAPI) {
       toolsBeforePlan: undefined,
     };
     applyRestoredToolState();
+    publishMode();
     updateStatus(ctx);
     updateWidget(ctx);
   });

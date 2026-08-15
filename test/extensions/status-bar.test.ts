@@ -1355,6 +1355,20 @@ describe("status-bar editor frame", () => {
     expect(fgMock).toHaveBeenCalledWith("borderAccent", expect.any(String));
   });
 
+  it("tints the frame with a custom border color when provided", () => {
+    const fgMock = vi.fn((_c: string, t: string) => t);
+    renderEditorModalFrame({
+      baseRendered: baseOutput(["hello"]),
+      autocompleteCount: 0,
+      width: 40,
+      title: "anthropic/claude",
+      theme: { fg: fgMock },
+      borderColor: "warning",
+    });
+    expect(fgMock).toHaveBeenCalledWith("warning", expect.any(String));
+    expect(fgMock).not.toHaveBeenCalledWith("borderAccent", expect.any(String));
+  });
+
   it("renders the title raw (pre-colored), not re-wrapped in accent", () => {
     const fgMock = vi.fn((c: string, t: string) => (c === "accent" ? `⟧${t}⟧` : t));
     const lines = renderEditorModalFrame({
@@ -1638,6 +1652,20 @@ function getFlexHandler(mockPi: ReturnType<typeof createMockPi>) {
   return undefined;
 }
 
+/**
+ * Extract the plan-mode handler the status-bar registered on pi.events. The
+ * plan extension populates the real state; tests drive it directly.
+ */
+function getPlanModeHandler(mockPi: ReturnType<typeof createMockPi>) {
+  const calls = (mockPi.events.on as ReturnType<typeof vi.fn>).mock.calls;
+  for (const [event, handler] of calls) {
+    if (event === "plan:mode-change") {
+      return handler as (payload: { mode: string }) => void;
+    }
+  }
+  return undefined;
+}
+
 describe("status-bar flex badge", () => {
   function plainTheme() {
     return { fg: vi.fn((_color: string, text: string) => text) };
@@ -1719,6 +1747,43 @@ describe("status-bar flex badge", () => {
     const mockCtx = createMockCommandContext();
     await enableBar(mockPi, mockCtx);
     expect(getFlexHandler(mockPi)).toBeDefined();
+  });
+});
+
+describe("status-bar plan mode tint", () => {
+  it("installed editor tints the frame while plan mode is active", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBar(mockPi, mockCtx);
+
+    const planHandler = getPlanModeHandler(mockPi);
+    expect(planHandler).toBeDefined();
+    planHandler?.({ mode: "plan" });
+
+    const editor = renderInstalledEditor(mockCtx);
+    editor.render(100);
+    expect(mockCtx.ui.theme.fg).toHaveBeenCalledWith("warning", expect.any(String));
+  });
+
+  it("installed editor keeps the default frame color when not planning", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBar(mockPi, mockCtx);
+
+    const planHandler = getPlanModeHandler(mockPi);
+    planHandler?.({ mode: "executing" });
+
+    const editor = renderInstalledEditor(mockCtx);
+    editor.render(100);
+    expect(mockCtx.ui.theme.fg).toHaveBeenCalledWith("borderAccent", expect.any(String));
+    expect(mockCtx.ui.theme.fg).not.toHaveBeenCalledWith("warning", expect.any(String));
+  });
+
+  it("status-bar subscribes to plan:mode-change on session_start", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBar(mockPi, mockCtx);
+    expect(getPlanModeHandler(mockPi)).toBeDefined();
   });
 });
 

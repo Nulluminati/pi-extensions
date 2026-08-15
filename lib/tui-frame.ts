@@ -13,6 +13,9 @@ export interface ModalFrameOptions {
   paddingX?: number;
   paddingY?: number;
   fixedBodyRows?: number;
+  /** Theme color name for the frame strokes (top border, sides, rule, bottom).
+   * Defaults to borderAccent. */
+  borderColor?: string;
 }
 
 export type FrameEdge = "top" | "bottom";
@@ -65,14 +68,16 @@ export function renderModalFrame(
   const innerWidth = safeWidth - 2;
   const contentWidth = modalContentWidth(safeWidth, paddingX);
   const border = (text: string) => theme.fg("borderAccent", text);
+  const stroke = (color: string) => (text: string) => theme.fg(color, text);
+  const frameStroke = options.borderColor !== undefined ? stroke(options.borderColor) : border;
   const title = truncateToWidth(options.title, Math.max(1, innerWidth - 4), "…");
   const titleCell = ` ${title} `;
   const styledTitleCell = options.rawTitle ? titleCell : theme.fg("accent", titleCell);
   const titleCellWidth = visibleWidth(titleCell);
   const leftRuleWidth = Math.min(2, Math.max(0, innerWidth - titleCellWidth));
   const rightRuleWidth = Math.max(0, innerWidth - leftRuleWidth - titleCellWidth);
-  const top = `${border("╭")}${border("─".repeat(leftRuleWidth))}${styledTitleCell}${border("─".repeat(rightRuleWidth))}${border("╮")}`;
-  const blank = `${border("│")}${" ".repeat(innerWidth)}${border("│")}`;
+  const top = `${frameStroke("╭")}${frameStroke("─".repeat(leftRuleWidth))}${styledTitleCell}${frameStroke("─".repeat(rightRuleWidth))}${frameStroke("╮")}`;
+  const blank = `${frameStroke("│")}${" ".repeat(innerWidth)}${frameStroke("│")}`;
 
   let body = [...lines];
   if (options.fixedBodyRows !== undefined) {
@@ -87,16 +92,16 @@ export function renderModalFrame(
     while (body.length < fixedRows) body.push("");
   }
 
-  const output = [top];
-  for (let index = 0; index < paddingY; index++) output.push(blank);
+  const output = [frameStroke(top)];
+  for (let index = 0; index < paddingY; index++) output.push(frameStroke(blank));
   for (const line of body) {
     const content = truncateToWidth(line, contentWidth, "…", true);
     output.push(
-      `${border("│")}${" ".repeat(paddingX)}${content}${" ".repeat(paddingX)}${border("│")}`,
+      `${frameStroke("│")}${" ".repeat(paddingX)}${content}${" ".repeat(paddingX)}${frameStroke("│")}`,
     );
   }
-  for (let index = 0; index < paddingY; index++) output.push(blank);
-  output.push(`${border("╰")}${border("─".repeat(innerWidth))}${border("╯")}`);
+  for (let index = 0; index < paddingY; index++) output.push(frameStroke(blank));
+  output.push(`${frameStroke("╰")}${frameStroke("─".repeat(innerWidth))}${frameStroke("╯")}`);
   return output.map((line) => truncateToWidth(line, safeWidth, ""));
 }
 

@@ -1,5 +1,5 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   frameBorderLine,
   frameContentLine,
@@ -45,6 +45,18 @@ describe("TUI frame helpers", () => {
 
     expect(lines.join("\n")).toContain("↓ 2 more lines");
     expect(lines.join("\n")).not.toContain("three");
+  });
+
+  it("tints the frame strokes with a custom border color", () => {
+    const fgMock = vi.fn((_color: string, text: string) => text);
+    const lines = renderModalFrame({ fg: fgMock }, 30, ["content"], {
+      title: "Plan",
+      borderColor: "warning",
+    });
+
+    expect(lines.length).toBeGreaterThan(0);
+    expect(fgMock).toHaveBeenCalledWith("warning", expect.any(String));
+    expect(fgMock).not.toHaveBeenCalledWith("borderAccent", expect.any(String));
   });
 
   it("clips long content by visible width", () => {

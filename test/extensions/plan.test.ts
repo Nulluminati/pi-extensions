@@ -78,6 +78,7 @@ describe("plan-extension", () => {
         "plan",
         expect.stringContaining("read-only"),
       );
+      expect(mockPi.events.emit).toHaveBeenCalledWith("plan:mode-change", { mode: "plan" });
       expect(mockPi.appendEntry).toHaveBeenCalledWith(
         "plan-state",
         expect.objectContaining({ state: expect.objectContaining({ mode: "plan" }) }),
@@ -103,6 +104,7 @@ describe("plan-extension", () => {
 
       expect(mockPi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "edit", "write", "grep"]);
       expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("plan", undefined);
+      expect(mockPi.events.emit).toHaveBeenCalledWith("plan:mode-change", { mode: "off" });
       expect(mockPi.appendEntry).toHaveBeenLastCalledWith(
         "plan-state",
         expect.objectContaining({ state: expect.objectContaining({ mode: "off" }) }),
@@ -388,6 +390,7 @@ describe("plan-extension", () => {
       );
       // Status shows progress 0/2 and widget lists the steps
       expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("plan", expect.stringContaining("0/2"));
+      expect(mockPi.events.emit).toHaveBeenCalledWith("plan:mode-change", { mode: "executing" });
       expect(mockCtx.ui.setWidget).toHaveBeenCalledWith(
         "plan-todos",
         expect.arrayContaining([expect.stringContaining("move file")]),
@@ -398,13 +401,12 @@ describe("plan-extension", () => {
       );
     });
 
-    it("edit sends the revised plan back and stays in plan mode", async () => {
+    it("discuss sends the plan back for discussion and stays in plan mode", async () => {
       const mockPi = createMockPi();
       const mockCtx = createMockCommandContext();
       await planExtension(mockPi);
       await getCommandHandler(mockPi, "plan")("", mockCtx);
-      mockApproval(mockCtx, "e");
-      mockCtx.ui.editor = vi.fn(async () => "Different approach");
+      mockApproval(mockCtx, "d");
 
       const result = await getTool(mockPi).execute(
         "call-1",
@@ -414,14 +416,11 @@ describe("plan-extension", () => {
         mockCtx,
       );
 
-      expect(result.details).toEqual({ status: "revising" });
+      expect(result.details).toEqual({ status: "discussing" });
       expect(result.terminate).toBe(true);
-      expect(mockCtx.ui.editor).toHaveBeenCalledWith(
-        expect.stringContaining("Revise the plan"),
-        expect.stringContaining("move file"),
-      );
+      expect(mockCtx.ui.editor).not.toHaveBeenCalled();
       expect(mockPi.sendUserMessage).toHaveBeenCalledWith(
-        expect.stringContaining("Revise the plan based on my feedback"),
+        expect.stringContaining("Keep discussing the approach"),
         { deliverAs: "followUp" },
       );
       // Still in plan mode: mutating tools remain blocked
@@ -684,7 +683,12 @@ function mockApproval(mockCtx: any, key: string) {
   mockCtx.ui.custom = vi.fn((factory: any) => {
     return new Promise((resolve) => {
       const theme = { fg: (_color: string, text: string) => text };
-      const component = factory(null, theme, null, resolve);
+      const keybindings = {
+        matches: (data: string, id: string) =>
+          (id === "tui.select.confirm" && data === "\r") ||
+          (id === "tui.select.cancel" && data === "\x1b"),
+      };
+      const component = factory({ requestRender: vi.fn() }, theme, keybindings, resolve);
       component.handleInput(key);
     });
   });

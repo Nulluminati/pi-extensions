@@ -1,6 +1,6 @@
 /**
  * Plan approval modal: an overlay showing the proposed plan with key hints
- * for approving, editing, or keeping planning.
+ * for approving, sending it back for discussion, or keeping planning.
  */
 
 import type { ExtensionUIContext } from "pi";
@@ -9,7 +9,7 @@ import { formatStyledKeyHints } from "../../../lib/ui-format.ts";
 import { formatPlanText } from "./prompts.ts";
 import type { Plan } from "./types.ts";
 
-export type PlanApprovalChoice = "approve" | "edit" | "cancel";
+export type PlanApprovalChoice = "approve" | "discuss" | "cancel";
 
 /**
  * Shows the plan in a framed overlay. Resolves with the user's choice, or
@@ -21,7 +21,7 @@ export async function promptPlanApproval(
 ): Promise<PlanApprovalChoice | undefined> {
   const body = formatPlanText(plan).split("\n");
   const result = await ui.custom<PlanApprovalChoice>(
-    (_tui, theme, _keybindings, done) => {
+    (tui, theme, keybindings, done) => {
       return {
         render(width: number) {
           const lines = [
@@ -29,7 +29,7 @@ export async function promptPlanApproval(
             "",
             formatStyledKeyHints(theme, [
               ["enter", "approve & execute"],
-              ["e", "edit plan"],
+              ["d", "keep discussing"],
               ["esc", "keep planning"],
             ]),
           ];
@@ -37,13 +37,14 @@ export async function promptPlanApproval(
         },
         invalidate() {},
         handleInput(data: string) {
-          if (data === "\r") {
+          if (keybindings.matches(data, "tui.select.confirm")) {
             done("approve");
-          } else if (data === "e" || data === "E") {
-            done("edit");
-          } else if (data === "\x1b") {
+          } else if (data === "d" || data === "D") {
+            done("discuss");
+          } else if (keybindings.matches(data, "tui.select.cancel")) {
             done("cancel");
           }
+          tui.requestRender();
         },
       };
     },

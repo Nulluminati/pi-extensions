@@ -36,7 +36,14 @@ import {
 } from "../../lib/editor-factory.ts";
 import { loadSmallModelConfig, resolveSmallModelConfigPath } from "../../lib/small-model.ts";
 import { formatStatusLine } from "../../lib/ui-format.ts";
-import { FLEX_EVENT, ICON_COLOR, STATUS_ICON, STATUS_KEY, TEXT_COLOR } from "./src/constants.ts";
+import {
+  FLEX_EVENT,
+  ICON_COLOR,
+  PLAN_MODE_EVENT,
+  STATUS_ICON,
+  STATUS_KEY,
+  TEXT_COLOR,
+} from "./src/constants.ts";
 import { getModelLabel, PolishedEditor } from "./src/editor.ts";
 import { buildFooterLines } from "./src/footer.ts";
 import { parseGitStatus } from "./src/git.ts";
@@ -66,6 +73,7 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     lastHandle: null,
     flexOn: false,
     flexCapable: false,
+    planModeActive: false,
   };
 
   let getBranch: () => any[] = () => [];
@@ -142,6 +150,7 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
           () => state.smallModelLabel,
           () => pi.getThinkingLevel() ?? "none",
           () => ({ on: state.flexOn, capable: state.flexCapable }),
+          () => (state.planModeActive ? "warning" : undefined),
         );
       },
     );
@@ -326,6 +335,15 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     pi.events.on(FLEX_EVENT, (flex: { flexOn: boolean; flexCapable: boolean }) => {
       state.flexOn = flex.flexOn;
       state.flexCapable = flex.flexCapable;
+      state.lastHandle?.requestRender();
+      editorRequestRender?.();
+    });
+
+    // Tint the editor frame while the plan extension is in plan mode. The
+    // plan extension publishes on the pi.events bus (see plan:mode-change);
+    // re-render so the frame picks up the new border color immediately.
+    pi.events.on(PLAN_MODE_EVENT, (payload: { mode: string }) => {
+      state.planModeActive = payload.mode === "plan";
       state.lastHandle?.requestRender();
       editorRequestRender?.();
     });

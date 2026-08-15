@@ -10,8 +10,10 @@ Plan mode has three phases:
 2. **Approval** — `plan_submit` (a tool that is only active in plan mode) shows the proposed plan in a framed overlay:
 
    - `Enter` — **approve & execute**: full tool access is restored, execution context with the numbered steps is injected, and the plan runs.
-   - `e` — **edit plan**: opens the plan in an editor; submitting sends your revision back to the agent.
+   - `d` — **keep discussing**: the plan is sent back to the agent, which keeps refining the approach and calls `plan_submit` again.
    - `Esc` — **keep planning**: nothing changes, the agent keeps researching.
+
+   While plan mode is active, the input editor frame tints with the theme's warning color (when the status-bar extension is loaded), so the read-only state is visible at a glance.
 
 3. **Execution** — the approved plan runs with full tool access. The agent marks each finished step with `[DONE:n]`; a ☐/☑ todo widget above the editor and a `📋 n/N` status line track progress. When every step is done, the mode ends automatically with a "Plan complete" message.
 
@@ -40,6 +42,7 @@ Stale plan-mode instructions are stripped from the model context every turn and 
 | `pi.registerTool("plan_submit")` | Structured plan (title + steps) with `terminate: true`; drives the approval overlay and the approve → execute transition |
 | `pi.on("turn_end")` / `pi.on("agent_end")` | Track `[DONE:n]` markers; end the mode when all steps complete |
 | `pi.appendEntry("plan-state")` | Persist mode, plan, progress, and tool set; reconstruct on `session_start` / `session_tree` |
+| `pi.events.emit("plan:mode-change")` | Publish mode changes on the shared bus; status-bar tints the editor frame warning-colored while planning |
 
 ## Configuration
 
@@ -51,3 +54,4 @@ No configuration. `--plan` is the only flag.
 - **The bash allowlist is conservative.** Anything not on it is blocked, which occasionally blocks unusual-but-read-only commands (e.g. `git stash show`). Blocked commands report the reason; exit plan mode to run them.
 - **Approval needs an interactive session.** In headless modes `plan_submit` saves the plan and asks the agent to retry when a user can review it.
 - **`[DONE:n]` markers are the completion contract.** If a model never emits them, execution stays active — toggle `/plan` to abort back into plan mode.
+- **The editor-frame tint needs the status-bar extension.** Without it, plan mode is still signaled by the footer status and the todo widget.
