@@ -61,6 +61,9 @@ export interface EditorModalFrameInput {
   width: number;
   /** Pre-colored title string shown in the top border (model + thinking). */
   title: string;
+  /** Pre-colored right-aligned label in the top border, opposite the title
+   * (for example "Plan Mode" while the plan extension is in plan mode). */
+  titleRight?: string;
   theme: any;
   /** Optional theme color name for the frame strokes; tints the whole frame
    * (for example the warning color while the plan extension is in plan mode). */
@@ -95,6 +98,7 @@ export function renderEditorModalFrame(input: EditorModalFrameInput): string[] {
     rawTitle: true,
     paddingX: MODAL_PADDING_X,
     paddingY: MODAL_PADDING_Y,
+    ...(input.titleRight !== undefined ? { titleRight: input.titleRight } : {}),
     ...(input.borderColor !== undefined ? { borderColor: input.borderColor } : {}),
   });
   return [...modalLines, ...autocompleteLines.map((line) => truncateToWidth(line, width, ""))];
@@ -114,6 +118,7 @@ export class PolishedEditor extends CustomEditor {
   private readonly getThinkingLevel: () => string;
   private readonly getFlexState: () => { on: boolean; capable: boolean };
   private readonly getBorderColor: () => string | undefined;
+  private readonly getTitleRight: () => string | undefined;
 
   constructor(
     tui: any,
@@ -125,6 +130,7 @@ export class PolishedEditor extends CustomEditor {
     getThinkingLevel: () => string,
     getFlexState: () => { on: boolean; capable: boolean },
     getBorderColor: () => string | undefined,
+    getTitleRight: () => string | undefined,
   ) {
     super(tui, theme, keybindings, { paddingX: 0 });
     this.uiTheme = uiTheme;
@@ -133,6 +139,7 @@ export class PolishedEditor extends CustomEditor {
     this.getThinkingLevel = getThinkingLevel;
     this.getFlexState = getFlexState;
     this.getBorderColor = getBorderColor;
+    this.getTitleRight = getTitleRight;
     // The base editor's own borders are discarded by render(); the modal frame
     // supplies its own borderAccent border, so no borderColor override needed.
   }
@@ -145,6 +152,7 @@ export class PolishedEditor extends CustomEditor {
     const baseRendered = super.render(contentWidth);
     const autocompleteCount = this.computeAutocompleteCount(contentWidth);
     const borderColor = this.getBorderColor();
+    const titleRight = this.getTitleRight();
     return renderEditorModalFrame({
       baseRendered,
       autocompleteCount,
@@ -152,6 +160,7 @@ export class PolishedEditor extends CustomEditor {
       title: this.buildTitle(),
       theme: this.uiTheme,
       ...(borderColor !== undefined ? { borderColor } : {}),
+      ...(titleRight !== undefined ? { titleRight } : {}),
     });
   }
 

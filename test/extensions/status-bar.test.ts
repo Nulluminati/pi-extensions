@@ -1369,6 +1369,21 @@ describe("status-bar editor frame", () => {
     expect(fgMock).not.toHaveBeenCalledWith("borderAccent", expect.any(String));
   });
 
+  it("renders a right-aligned label in the top border", () => {
+    const lines = renderEditorModalFrame({
+      baseRendered: baseOutput(["hello"]),
+      autocompleteCount: 0,
+      width: 40,
+      title: "anthropic/claude",
+      titleRight: "⟦Plan Mode⟧",
+      theme: plainTheme(),
+    });
+    expect(lines[0]).toContain("⟦Plan Mode⟧");
+    expect(lines[0]).toContain("╭");
+    expect(lines[0]).toContain("╮");
+    for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(40);
+  });
+
   it("renders the title raw (pre-colored), not re-wrapped in accent", () => {
     const fgMock = vi.fn((c: string, t: string) => (c === "accent" ? `⟧${t}⟧` : t));
     const lines = renderEditorModalFrame({
@@ -1761,7 +1776,8 @@ describe("status-bar plan mode tint", () => {
     planHandler?.({ mode: "plan" });
 
     const editor = renderInstalledEditor(mockCtx);
-    editor.render(100);
+    const lines = editor.render(100);
+    expect(lines[0]).toContain("Plan Mode");
     expect(mockCtx.ui.theme.fg).toHaveBeenCalledWith("warning", expect.any(String));
   });
 
@@ -1774,7 +1790,8 @@ describe("status-bar plan mode tint", () => {
     planHandler?.({ mode: "executing" });
 
     const editor = renderInstalledEditor(mockCtx);
-    editor.render(100);
+    const lines = editor.render(100);
+    expect(lines.some((l) => l.includes("Plan Mode"))).toBe(false);
     expect(mockCtx.ui.theme.fg).toHaveBeenCalledWith("borderAccent", expect.any(String));
     expect(mockCtx.ui.theme.fg).not.toHaveBeenCalledWith("warning", expect.any(String));
   });

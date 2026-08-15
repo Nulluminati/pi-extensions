@@ -59,6 +59,18 @@ describe("TUI frame helpers", () => {
     expect(fgMock).not.toHaveBeenCalledWith("borderAccent", expect.any(String));
   });
 
+  it("places a right-aligned label in the top border", () => {
+    const lines = renderModalFrame(ANSI_THEME, 30, ["content"], {
+      title: "Plan",
+      titleRight: "⟦MODE⟧",
+    });
+
+    expect(lines[0]?.replace(ANSI_PATTERN, "")).toContain("⟦MODE⟧");
+    expect(lines[0]?.replace(ANSI_PATTERN, "")).toContain("╭");
+    expect(lines[0]?.replace(ANSI_PATTERN, "")).toContain("╮");
+    expect(lines.every((line) => visibleWidth(line) === 30)).toBe(true);
+  });
+
   it("clips long content by visible width", () => {
     const line = frameContentLine(ANSI_THEME, 12, "content that is too long");
 

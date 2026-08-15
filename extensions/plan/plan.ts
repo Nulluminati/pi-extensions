@@ -61,24 +61,19 @@ export default async function planExtension(pi: ExtensionAPI) {
 
   function updateStatus(ctx: ExtensionContext) {
     if (!ctx.hasUI) return;
-    let text: string | undefined;
-    if (state.mode === "plan") {
-      text = formatStatusLine(ctx.ui.theme, {
-        icon: "📋",
-        prefix: "Plan",
-        text: "read-only",
-        iconColor: "warning",
-        textColor: "warning",
-      });
-    } else if (state.mode === "executing" && state.plan) {
+    if (state.mode === "executing" && state.plan) {
       const completed = state.plan.steps.filter((step) => step.completed).length;
-      text = formatStatusLine(ctx.ui.theme, {
-        icon: "📋",
-        prefix: "Plan",
-        text: `${completed}/${state.plan.steps.length}`,
-      });
+      ctx.ui.setStatus(
+        STATUS_KEY,
+        formatStatusLine(ctx.ui.theme, {
+          icon: "📋",
+          prefix: "Plan",
+          text: `${completed}/${state.plan.steps.length}`,
+        }),
+      );
+    } else {
+      ctx.ui.setStatus(STATUS_KEY, undefined);
     }
-    ctx.ui.setStatus(STATUS_KEY, text);
   }
 
   function updateWidget(ctx: ExtensionContext) {
@@ -328,23 +323,6 @@ export default async function planExtension(pi: ExtensionAPI) {
             status: "approved",
             plan: { title: plan.title, steps: plan.steps.map((step) => step.description) },
           },
-          terminate: true,
-        };
-      }
-
-      if (choice === "discuss") {
-        pi.sendUserMessage(
-          "The plan was not approved. Keep discussing the approach with the user and refine the plan; call plan_submit again when you have a revised plan they can approve.",
-          { deliverAs: "followUp" },
-        );
-        return {
-          content: [
-            {
-              type: "text",
-              text: "Plan sent back for discussion. Refine the plan and call plan_submit again.",
-            },
-          ],
-          details: { status: "discussing" },
           terminate: true,
         };
       }

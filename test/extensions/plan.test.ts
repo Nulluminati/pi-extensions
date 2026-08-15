@@ -74,10 +74,9 @@ describe("plan-extension", () => {
       await planHandler("", mockCtx);
 
       expect(mockPi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "plan_submit"]);
-      expect(mockCtx.ui.setStatus).toHaveBeenCalledWith(
-        "plan",
-        expect.stringContaining("read-only"),
-      );
+      // Plan mode is signaled on the input bar (status-bar), so the footer
+      // status is cleared rather than showing a read-only label.
+      expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("plan", undefined);
       expect(mockPi.events.emit).toHaveBeenCalledWith("plan:mode-change", { mode: "plan" });
       expect(mockPi.appendEntry).toHaveBeenCalledWith(
         "plan-state",
@@ -135,10 +134,7 @@ describe("plan-extension", () => {
         expect.stringContaining("Execution aborted"),
         "info",
       );
-      expect(mockCtx.ui.setStatus).toHaveBeenLastCalledWith(
-        "plan",
-        expect.stringContaining("read-only"),
-      );
+      expect(mockCtx.ui.setStatus).toHaveBeenLastCalledWith("plan", undefined);
       expect(mockPi.appendEntry).toHaveBeenLastCalledWith(
         "plan-state",
         expect.objectContaining({ state: expect.objectContaining({ mode: "plan" }) }),
@@ -401,37 +397,6 @@ describe("plan-extension", () => {
       );
     });
 
-    it("discuss sends the plan back for discussion and stays in plan mode", async () => {
-      const mockPi = createMockPi();
-      const mockCtx = createMockCommandContext();
-      await planExtension(mockPi);
-      await getCommandHandler(mockPi, "plan")("", mockCtx);
-      mockApproval(mockCtx, "d");
-
-      const result = await getTool(mockPi).execute(
-        "call-1",
-        { title: "Refactor", steps: ["move file"] },
-        undefined,
-        undefined,
-        mockCtx,
-      );
-
-      expect(result.details).toEqual({ status: "discussing" });
-      expect(result.terminate).toBe(true);
-      expect(mockCtx.ui.editor).not.toHaveBeenCalled();
-      expect(mockPi.sendUserMessage).toHaveBeenCalledWith(
-        expect.stringContaining("Keep discussing the approach"),
-        { deliverAs: "followUp" },
-      );
-      // Still in plan mode: mutating tools remain blocked
-      const toolCall = getEventHandler(mockPi, "tool_call");
-      const blocked = await toolCall(
-        { type: "tool_call", toolCallId: "2", toolName: "edit", input: { path: "a.ts" } },
-        mockCtx,
-      );
-      expect((blocked as { block?: boolean } | undefined)?.block).toBe(true);
-    });
-
     it("cancel keeps planning without sending a message", async () => {
       const mockPi = createMockPi();
       const mockCtx = createMockCommandContext();
@@ -450,10 +415,7 @@ describe("plan-extension", () => {
       expect(result.details).toEqual({ status: "cancelled" });
       expect(result.terminate).toBe(true);
       expect(mockPi.sendUserMessage).not.toHaveBeenCalled();
-      expect(mockCtx.ui.setStatus).toHaveBeenLastCalledWith(
-        "plan",
-        expect.stringContaining("read-only"),
-      );
+      expect(mockCtx.ui.setStatus).toHaveBeenLastCalledWith("plan", undefined);
     });
   });
 
@@ -590,10 +552,8 @@ describe("plan-extension", () => {
       await sessionStart({ type: "session_start", reason: "resume" }, mockCtx);
 
       expect(mockPi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "plan_submit"]);
-      expect(mockCtx.ui.setStatus).toHaveBeenCalledWith(
-        "plan",
-        expect.stringContaining("read-only"),
-      );
+      // Plan mode clears the footer status; the mode lives on the input bar.
+      expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("plan", undefined);
     });
 
     it("reconstructs execution state with the todo widget on session start", async () => {
@@ -641,10 +601,7 @@ describe("plan-extension", () => {
       await sessionStart({ type: "session_start", reason: "startup" }, mockCtx);
 
       expect(mockPi.setActiveTools).toHaveBeenCalledWith(expect.arrayContaining(["plan_submit"]));
-      expect(mockCtx.ui.setStatus).toHaveBeenCalledWith(
-        "plan",
-        expect.stringContaining("read-only"),
-      );
+      expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("plan", undefined);
     });
 
     it("persists state on shutdown", async () => {

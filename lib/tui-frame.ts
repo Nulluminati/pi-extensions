@@ -10,6 +10,9 @@ export interface ModalFrameOptions {
    * wrapped in the accent color. Title-cell sizing still uses visible width, so
    * embedded ANSI escapes don't corrupt the border layout. */
   rawTitle?: boolean;
+  /** Pre-colored right-aligned label in the top border, opposite the title.
+   * Rendered as-is, like rawTitle. */
+  titleRight?: string;
   paddingX?: number;
   paddingY?: number;
   fixedBodyRows?: number;
@@ -74,9 +77,15 @@ export function renderModalFrame(
   const titleCell = ` ${title} `;
   const styledTitleCell = options.rawTitle ? titleCell : theme.fg("accent", titleCell);
   const titleCellWidth = visibleWidth(titleCell);
-  const leftRuleWidth = Math.min(2, Math.max(0, innerWidth - titleCellWidth));
-  const rightRuleWidth = Math.max(0, innerWidth - leftRuleWidth - titleCellWidth);
-  const top = `${frameStroke("╭")}${frameStroke("─".repeat(leftRuleWidth))}${styledTitleCell}${frameStroke("─".repeat(rightRuleWidth))}${frameStroke("╮")}`;
+  const rightCell =
+    options.titleRight !== undefined
+      ? ` ${truncateToWidth(options.titleRight, Math.max(1, innerWidth - titleCellWidth - 4), "…")} `
+      : "";
+  const rightCellWidth = visibleWidth(rightCell);
+  const reservedWidth = titleCellWidth + rightCellWidth;
+  const leftRuleWidth = Math.min(2, Math.max(0, innerWidth - reservedWidth));
+  const rightRuleWidth = Math.max(0, innerWidth - leftRuleWidth - reservedWidth);
+  const top = `${frameStroke("╭")}${frameStroke("─".repeat(leftRuleWidth))}${styledTitleCell}${frameStroke("─".repeat(rightRuleWidth))}${rightCell}${frameStroke("╮")}`;
   const blank = `${frameStroke("│")}${" ".repeat(innerWidth)}${frameStroke("│")}`;
 
   let body = [...lines];

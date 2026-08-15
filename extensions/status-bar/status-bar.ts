@@ -151,6 +151,7 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
           () => pi.getThinkingLevel() ?? "none",
           () => ({ on: state.flexOn, capable: state.flexCapable }),
           () => (state.planModeActive ? "warning" : undefined),
+          () => (state.planModeActive ? ctx.ui.theme.fg("warning", "Plan Mode") : undefined),
         );
       },
     );

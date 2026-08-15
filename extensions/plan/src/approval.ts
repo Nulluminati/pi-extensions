@@ -1,6 +1,6 @@
 /**
  * Plan approval modal: an overlay showing the proposed plan with key hints
- * for approving, sending it back for discussion, or keeping planning.
+ * for approving or keeping planning.
  */
 
 import type { ExtensionUIContext } from "pi";
@@ -9,7 +9,7 @@ import { formatStyledKeyHints } from "../../../lib/ui-format.ts";
 import { formatPlanText } from "./prompts.ts";
 import type { Plan } from "./types.ts";
 
-export type PlanApprovalChoice = "approve" | "discuss" | "cancel";
+export type PlanApprovalChoice = "approve" | "cancel";
 
 /**
  * Shows the plan in a framed overlay. Resolves with the user's choice, or
@@ -29,7 +29,6 @@ export async function promptPlanApproval(
             "",
             formatStyledKeyHints(theme, [
               ["enter", "approve & execute"],
-              ["d", "keep discussing"],
               ["esc", "keep planning"],
             ]),
           ];
@@ -39,8 +38,6 @@ export async function promptPlanApproval(
         handleInput(data: string) {
           if (keybindings.matches(data, "tui.select.confirm")) {
             done("approve");
-          } else if (data === "d" || data === "D") {
-            done("discuss");
           } else if (keybindings.matches(data, "tui.select.cancel")) {
             done("cancel");
           }
