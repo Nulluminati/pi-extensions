@@ -20,6 +20,7 @@ pi -e git:github.com/Nulluminati/pi-extensions/extensions/goal/goal.ts
 
 | Extension | Description |
 |-----------|-------------|
+| `plan/` | Strict plan mode with an approval gate. `/plan` (or `Ctrl+Alt+P`, `--plan`) makes Pi read-only: `edit`/`write` are hard-blocked and bash is restricted to a read-only allowlist. The `plan_submit` tool proposes a structured plan in an overlay — approve to execute with `[DONE:n]` step tracking, edit to send it back, or keep planning. |
 | `handoff/` | Summarize the current session with the global small model and start a new focused session. `/handoff [goal]` builds a compact continuation prompt, lets you review it, then opens a new session with the summary pre-filled. |
 | `goal/` | Goal-oriented auto-continuation mode. `/goal` command with persistence, token budgets (`/goal budget <amount>`), pause/resume/clear, and a `goal_complete` tool. |
 | `background-jobs/` | Long-running work without blocking the turn. The `background` tool runs a shell command detached in its own process group and wakes the agent when it exits (or the first time output matches a pattern); `monitor` polls a command until a condition holds (exit code, output match) and wakes the agent; `jobs` lists, tails, and cancels jobs. Wake messages carry only the job id and exit status — output is read on demand and spooled to `~/.pi/agent/background-jobs/`. `/jobs` opens the interactive panel (user-only; the agent cannot open modals). |
