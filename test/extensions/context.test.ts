@@ -295,6 +295,57 @@ describe("context-extension", () => {
       await done;
     });
 
+    it("closes on kitty-protocol escape sequences via the keybindings manager", async () => {
+      const pi = createMockPi();
+      const ctx = createMockCommandContext();
+      ctx.getContextUsage = vi.fn(() => ({
+        tokens: 25_000,
+        contextWindow: 128_000,
+        percent: 19.5,
+      }));
+
+      let component: any;
+      const done = vi.fn();
+      let resolveModal!: (value: void) => void;
+      ctx.ui.custom = vi.fn(
+        (factory: any) =>
+          new Promise<void>((resolve) => {
+            resolveModal = resolve;
+            // Mimic pi's KeybindingsManager as a real class-method object:
+            // `matches` reads internal state through `this`. Esc resolves in
+            // every byte variant, including kitty-protocol CSI sequences that
+            // raw-byte checks (data === "\u001b") miss.
+            const keybindings = {
+              bindings: {
+                "\u001b": ["tui.select.cancel"],
+                "\u001b[27u": ["tui.select.cancel"],
+              } as Record<string, string[]>,
+              matches(data: string, keybinding: string) {
+                return (this.bindings[data] ?? []).includes(keybinding);
+              },
+            };
+            component = factory(
+              { requestRender: vi.fn(), terminal: { rows: 40 } },
+              ctx.ui.theme,
+              keybindings,
+              () => {
+                done();
+                resolve();
+              },
+            );
+          }),
+      );
+
+      await contextExtension(pi);
+      const handler = getCommandHandler(pi);
+      const pending = handler("", ctx);
+
+      component.handleInput("\u001b[27u");
+      expect(done).toHaveBeenCalled();
+      resolveModal();
+      await pending;
+    });
+
     it("delivers a plain-text breakdown via sendMessage without UI", async () => {
       const pi = createMockPi();
       const ctx = createMockCommandContext();

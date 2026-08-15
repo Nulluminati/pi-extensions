@@ -172,13 +172,29 @@ function buildModalLines(theme: any, data: ContextBreakdown, width: number): str
 // --- Modal ---
 
 /**
+ * Raw-byte fallbacks for environments without a keybindings manager (tests).
+ * The keybinding manager path resolves every byte variant of Esc —
+ * kitty-protocol CSI sequences (\u001b[27u), application-cursor codes, and
+ * user rebindings — which raw-byte checks miss.
+ */
+function matchesCancel(data: string, keybindings: any): boolean {
+  if (keybindings?.matches) {
+    // Method-call syntax keeps the manager as the receiver; extracting the
+    // function unbound throws inside the real manager (it reads its own
+    // internal key maps via `this`).
+    if (keybindings.matches(data, "tui.select.cancel")) return true;
+  }
+  return data === "\u001b" || data === "\u0003";
+}
+
+/**
  * Show the context breakdown in a framed modal. Closes on esc, enter, or q.
  */
 export async function showContextModal(
   ctx: ExtensionCommandContext,
   breakdown: ContextBreakdown,
 ): Promise<void> {
-  await ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
+  await ctx.ui.custom<void>((tui, theme, keybindings, done) => {
     return {
       render(width: number) {
         const rows = tui?.terminal?.rows ?? 0;
@@ -190,7 +206,7 @@ export async function showContextModal(
       },
       invalidate() {},
       handleInput(data: string) {
-        if (data === "\u001b" || data === "\r" || data.toLowerCase() === "q") {
+        if (matchesCancel(data, keybindings) || data === "\r" || data.toLowerCase() === "q") {
           done();
           return;
         }
