@@ -681,6 +681,65 @@ describe("background-jobs-extension", () => {
       expect(keybindings.matches).toHaveBeenCalledWith("\u001b[27u", "tui.select.cancel");
       expect(done).toHaveBeenCalled();
     });
+
+    it("exposes a focusable contract and requests re-render after input", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await backgroundJobsExtension(mockPi);
+      const { child } = await startBackgroundJob(mockPi, mockCtx, { command: "npm test" });
+      child.emit("exit", 0);
+
+      const tool = getTool(mockPi, "jobs");
+      await tool.execute("call-1", { action: "view" }, undefined, undefined, mockCtx);
+
+      const factory = mockCtx.ui.custom.mock.calls[0][0];
+      const done = vi.fn();
+      const requestRender = vi.fn();
+      const tui = { requestRender };
+      const component = factory(tui, mockCtx.ui.theme, null, done);
+
+      expect("focused" in component).toBe(true);
+
+      component.focused = true;
+      component.handleInput("j");
+
+      expect(requestRender).toHaveBeenCalled();
+    });
+
+    it("escape exits the paging view first, then closes from the list; q always closes", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await backgroundJobsExtension(mockPi);
+      const { child } = await startBackgroundJob(mockPi, mockCtx, { command: "npm test" });
+      child.emit("exit", 0);
+
+      const tool = getTool(mockPi, "jobs");
+      await tool.execute("call-1", { action: "view" }, undefined, undefined, mockCtx);
+
+      const factory = mockCtx.ui.custom.mock.calls[0][0];
+      const done = vi.fn();
+      const requestRender = vi.fn();
+      const component = factory({ requestRender }, mockCtx.ui.theme, null, done);
+
+      // Enter pages into the output view.
+      component.handleInput("\r");
+      expect(requestRender).toHaveBeenCalled();
+
+      // Esc from the paging view returns to the list, not out of the panel.
+      done.mockClear();
+      component.handleInput("\u001b");
+      expect(done).not.toHaveBeenCalled();
+
+      // Esc from the list closes the panel.
+      component.handleInput("\u001b");
+      expect(done).toHaveBeenCalled();
+
+      // q closes even from the paging view.
+      done.mockClear();
+      component.handleInput("\r");
+      component.handleInput("q");
+      expect(done).toHaveBeenCalled();
+    });
   });
 
   describe("cancellation", () => {

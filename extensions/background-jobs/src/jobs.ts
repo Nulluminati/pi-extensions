@@ -104,8 +104,8 @@ export async function executeJobsAction(options: {
       );
     }
     options.ui.custom(
-      (_tui: unknown, theme: any, keybindings: any, done: (result?: unknown) => void) =>
-        new JobPanel(registry, theme, done, keybindings),
+      (tui: unknown, theme: any, keybindings: any, done: (result?: unknown) => void) =>
+        new JobPanel(registry, theme, done, keybindings, tui as { requestRender(): void } | null),
       { overlay: true, overlayOptions: { width: "70%", maxHeight: "80%", anchor: "center" } },
     );
     return {
@@ -151,6 +151,7 @@ const SELECT_KEYBINDING = {
 export class JobPanel {
   private selected = 0;
   private paging = false;
+  private _focused = false;
 
   constructor(
     private readonly registry: JobRegistry,
@@ -159,7 +160,16 @@ export class JobPanel {
     private readonly keybindings?: {
       matches?: (data: string, keybinding: string) => boolean;
     },
+    private readonly tui?: { requestRender(): void } | null,
   ) {}
+
+  get focused(): boolean {
+    return this._focused;
+  }
+
+  set focused(value: boolean) {
+    this._focused = value;
+  }
 
   private matches(data: string, action: keyof typeof RAW_NAV): boolean {
     const kb = this.keybindings?.matches;
@@ -200,24 +210,46 @@ export class JobPanel {
 
   handleInput(data: string): void {
     const count = listJobs(this.registry).length;
-    if (this.matches(data, "cancel")) {
+    // q is an explicit, always-available quit: it closes the panel from any view.
+    if (data === "q") {
       this.done(undefined);
       return;
     }
+    if (this.matches(data, "cancel")) {
+      // Esc backs out of the output view first; from the list it closes the
+      // panel — the conventional two-level modal dismissal.
+      if (this.paging) {
+        this.paging = false;
+        this.requestRender();
+      } else {
+        this.done(undefined);
+      }
+      return;
+    }
     if (this.paging) {
+      // Any other key leaves the output view.
       this.paging = false;
+      this.requestRender();
       return;
     }
     if (this.matches(data, "up")) {
       this.selected = Math.max(0, this.selected - 1);
+      this.requestRender();
       return;
     }
     if (this.matches(data, "down")) {
       this.selected = Math.min(Math.max(0, count - 1), this.selected + 1);
+      this.requestRender();
       return;
     }
     if (this.matches(data, "confirm") && count > 0) {
       this.paging = true;
+      this.requestRender();
     }
+  }
+
+  /** Without this, cursor moves and view changes never appear on screen. */
+  private requestRender(): void {
+    this.tui?.requestRender();
   }
 }
