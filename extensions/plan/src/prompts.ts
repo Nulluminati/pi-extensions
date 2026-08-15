@@ -17,36 +17,36 @@ Your job: research the request thoroughly (read relevant files, search, inspect 
 
 /** Context message injected on every turn while executing an approved plan. */
 export function buildExecutionContext(plan: Plan): string {
-  const steps = plan.steps.map((step, i) => `${i + 1}. ${step.description}`).join("\n");
+  const steps = plan.steps.map((step, i) => `${i + 1}. ${step}`).join("\n");
   return `[EXECUTING PLAN — full tool access]
 Approved plan: ${plan.title}
 
 Steps:
 ${steps}
 
-Execute the steps in order. After finishing each step, include [DONE:n] in your reply, where n is the step number. When all steps are complete, summarize what changed.`;
+Execute the steps in order. The steps are already in the todo list: use the todo tool with action check to mark each item done as you finish it (item numbers are 1-based, matching the displayed list). When every item is checked, summarize what changed.`;
 }
 
 /** User message that kicks off execution after approval. */
 export function buildKickoffMessage(plan: Plan): string {
-  const steps = plan.steps.map((step, i) => `${i + 1}. ${step.description}`).join("\n");
+  const steps = plan.steps.map((step, i) => `${i + 1}. ${step}`).join("\n");
   return `Execute the approved plan: ${plan.title}
 
 Steps:
 ${steps}
 
-Start with step 1. Mark each finished step with [DONE:n] (n = step number).`;
+I've added these steps to the todo list. Use the todo tool (action check) to mark each item done as you finish it. When every item is checked, summarize what changed.`;
 }
 
-/** Plain-text rendering of a plan, used for the approval modal and editor. */
+/** Plain-text rendering of a plan, used for the approval modal. */
 export function formatPlanText(plan: Plan): string {
-  const steps = plan.steps.map((step, i) => `${i + 1}. ${step.description}`).join("\n");
+  const steps = plan.steps.map((step, i) => `${i + 1}. ${step}`).join("\n");
   const notes = plan.notes ? `\n\nNotes: ${plan.notes}` : "";
   return `Title: ${plan.title}\n\nSteps:\n${steps}${notes}`;
 }
 
 /** Transcript message shown when execution finishes. */
 export function buildPlanCompleteMessage(plan: Plan): string {
-  const completed = plan.steps.map((step) => `~~${step.description}~~`).join("\n");
+  const completed = plan.steps.map((step) => `~~${step}~~`).join("\n");
   return `**Plan complete!** ${plan.title}\n\n${completed}`;
 }

@@ -20,6 +20,7 @@ pi -e git:github.com/Nulluminati/pi-extensions/extensions/goal/goal.ts
 
 | Extension | Description |
 |-----------|-------------|
+| `todos/` | Persistent todo list the agent manages with the `todo` tool (add/check/uncheck/list/clear), rendered as a ☐/☑ widget above the editor. Shared state via `lib/todos.ts`; the plan extension populates the list from an approved plan and completes when every item is checked. |
 | `plan/` | Strict plan mode with an approval gate. `/plan` (or `Ctrl+Alt+P`, `--plan`) makes Pi read-only: `edit`/`write` are hard-blocked and bash is restricted to a read-only allowlist. The `plan_submit` tool proposes a structured plan in an overlay — approve to execute with `[DONE:n]` step tracking, edit to send it back, or keep planning. |
 | `handoff/` | Summarize the current session with the global small model and start a new focused session. `/handoff [goal]` builds a compact continuation prompt, lets you review it, then opens a new session with the summary pre-filled. |
 | `goal/` | Goal-oriented auto-continuation mode. `/goal` command with persistence, token budgets (`/goal budget <amount>`), pause/resume/clear, and a `goal_complete` tool. |

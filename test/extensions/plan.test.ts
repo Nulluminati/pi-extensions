@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import planExtension from "../../extensions/plan/plan.ts";
 import { isSafeBashCommand } from "../../extensions/plan/src/enforcement.ts";
+import { addTodoItems, clearTodoItems, getTodoItems, markTodoItems } from "../../lib/todos.ts";
 import { createMockCommandContext } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
 import { getCommandHandler, getEventHandler } from "../mocks/test-helpers.ts";
@@ -54,7 +55,6 @@ describe("plan-extension", () => {
         "tool_call",
         "before_agent_start",
         "context",
-        "turn_end",
         "agent_end",
         "session_start",
         "session_tree",
@@ -64,7 +64,7 @@ describe("plan-extension", () => {
   });
 
   describe("/plan toggle", () => {
-    it("enters plan mode: filters mutating tools, adds plan_submit, shows status", async () => {
+    it("enters plan mode: filters mutating tools, adds plan_submit, clears status", async () => {
       const mockPi = createMockPi();
       mockPi.getActiveTools = vi.fn(() => ["read", "bash", "edit", "write", "grep"]);
       const mockCtx = createMockCommandContext();
@@ -232,7 +232,7 @@ describe("plan-extension", () => {
       expect(planInjection.message.content[0].text).toContain("[PLAN MODE ACTIVE]");
       expect(planInjection.message.display).toBe(false);
 
-      // Executing: execution context with the approved steps
+      // Executing: execution context pointing at the shared todo list
       mockApproval(mockCtx, "\r");
       const tool = getTool(mockPi);
       await tool.execute(
@@ -247,7 +247,7 @@ describe("plan-extension", () => {
       };
       expect(executionInjection.message.customType).toBe("plan-execution-context");
       expect(executionInjection.message.content[0].text).toContain("1. move file");
-      expect(executionInjection.message.content[0].text).toContain("[DONE:n]");
+      expect(executionInjection.message.content[0].text).toContain("todo tool");
     });
   });
 
@@ -349,7 +349,7 @@ describe("plan-extension", () => {
       );
     });
 
-    it("approve transitions to execution, restores tools, and kicks off the plan", async () => {
+    it("approve transitions to execution, populates the todo list, and kicks off the plan", async () => {
       const mockPi = createMockPi();
       mockPi.getActiveTools = vi.fn(() => ["read", "bash", "edit", "write"]);
       const mockCtx = createMockCommandContext();
@@ -375,22 +375,25 @@ describe("plan-extension", () => {
 
       // Full tool access restored, plan_submit dropped
       expect(mockPi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "edit", "write"]);
-      // Execution kicked off with the plan steps
+      // Approved steps become the shared todo list
+      expect(getTodoItems(mockPi).map((item) => item.text)).toEqual(["move file", "update tests"]);
+      expect(mockPi.appendEntry).toHaveBeenCalledWith("todos-state", {
+        items: [
+          { text: "move file", completed: false },
+          { text: "update tests", completed: false },
+        ],
+      });
+      // Execution kicked off referencing the todo tool
       expect(mockPi.sendUserMessage).toHaveBeenCalledWith(
         expect.stringContaining("Execute the approved plan: Refactor"),
         { deliverAs: "followUp" },
       );
-      expect(mockPi.sendUserMessage).toHaveBeenCalledWith(
-        expect.stringContaining("2. update tests"),
-        { deliverAs: "followUp" },
-      );
-      // Status shows progress 0/2 and widget lists the steps
+      expect(mockPi.sendUserMessage).toHaveBeenCalledWith(expect.stringContaining("todo tool"), {
+        deliverAs: "followUp",
+      });
+      // Status shows progress 0/2
       expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("plan", expect.stringContaining("0/2"));
       expect(mockPi.events.emit).toHaveBeenCalledWith("plan:mode-change", { mode: "executing" });
-      expect(mockCtx.ui.setWidget).toHaveBeenCalledWith(
-        "plan-todos",
-        expect.arrayContaining([expect.stringContaining("move file")]),
-      );
       expect(mockPi.appendEntry).toHaveBeenLastCalledWith(
         "plan-state",
         expect.objectContaining({ state: expect.objectContaining({ mode: "executing" }) }),
@@ -419,9 +422,12 @@ describe("plan-extension", () => {
     });
   });
 
-  describe("execution tracking", () => {
+  describe("completion", () => {
     // biome-ignore lint/suspicious/noExplicitAny: test mock
     async function approvePlan(mockPi: any, mockCtx: any) {
+      // Establish the session UI context so todo events reach the status line.
+      const sessionStart = getEventHandler(mockPi, "session_start");
+      await sessionStart({ type: "session_start", reason: "startup" }, mockCtx);
       await getCommandHandler(mockPi, "plan")("", mockCtx);
       mockApproval(mockCtx, "\r");
       await getTool(mockPi).execute(
@@ -433,65 +439,17 @@ describe("plan-extension", () => {
       );
     }
 
-    it("turn_end marks [DONE:n] steps and updates the widget", async () => {
-      const mockPi = createMockPi();
-      mockPi.getActiveTools = vi.fn(() => ["read", "bash", "edit", "write"]);
-      const mockCtx = createMockCommandContext();
-      await planExtension(mockPi);
-      await approvePlan(mockPi, mockCtx);
-      mockCtx.ui.setWidget.mockClear();
-
-      const turnEnd = getEventHandler(mockPi, "turn_end");
-      await turnEnd(
-        {
-          type: "turn_end",
-          turnIndex: 0,
-          message: {
-            role: "assistant",
-            content: [{ type: "text", text: "Moved the file. [DONE:1]" }],
-          },
-          toolResults: [],
-        },
-        mockCtx,
-      );
-
-      const widgetCall = mockCtx.ui.setWidget.mock.calls.find(
-        (call: unknown[]) => call[0] === "plan-todos",
-      );
-      expect(widgetCall?.[1]?.[0]).toContain("☑");
-      expect(widgetCall?.[1]?.[1]).not.toContain("☑");
-      expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("plan", expect.stringContaining("1/2"));
-      expect(mockPi.appendEntry).toHaveBeenLastCalledWith(
-        "plan-state",
-        expect.objectContaining({
-          state: expect.objectContaining({
-            plan: expect.objectContaining({
-              steps: expect.arrayContaining([expect.objectContaining({ completed: true })]),
-            }),
-          }),
-        }),
-      );
-    });
-
-    it("agent_end completes the plan when all steps are done", async () => {
+    it("agent_end completes the plan when every todo item is checked", async () => {
       const mockPi = createMockPi();
       mockPi.getActiveTools = vi.fn(() => ["read", "bash", "edit", "write"]);
       const mockCtx = createMockCommandContext();
       await planExtension(mockPi);
       await approvePlan(mockPi, mockCtx);
 
-      const turnEnd = getEventHandler(mockPi, "turn_end");
-      const agentEnd = getEventHandler(mockPi, "agent_end");
-      const assistantMessage = (text: string) => ({
-        type: "turn_end" as const,
-        turnIndex: 0,
-        message: { role: "assistant", content: [{ type: "text", text }] },
-        toolResults: [],
-      });
-      await turnEnd(assistantMessage("Step one done [DONE:1]"), mockCtx);
-      await turnEnd(assistantMessage("Step two done [DONE:2]"), mockCtx);
+      markTodoItems(mockPi, [1, 2], true);
 
       mockCtx.ui.setStatus.mockClear();
+      const agentEnd = getEventHandler(mockPi, "agent_end");
       await agentEnd({ type: "agent_end", messages: [] }, mockCtx);
 
       expect(mockPi.sendMessage).toHaveBeenCalledWith(
@@ -499,36 +457,62 @@ describe("plan-extension", () => {
       );
       expect(mockCtx.ui.notify).toHaveBeenCalledWith("Plan complete.", "info");
       expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("plan", undefined);
-      expect(mockCtx.ui.setWidget).toHaveBeenCalledWith("plan-todos", undefined);
       expect(mockPi.appendEntry).toHaveBeenLastCalledWith(
         "plan-state",
         expect.objectContaining({ state: expect.objectContaining({ mode: "off" }) }),
       );
     });
 
-    it("agent_end leaves execution running when steps remain", async () => {
+    it("agent_end leaves execution running when some steps remain", async () => {
       const mockPi = createMockPi();
       mockPi.getActiveTools = vi.fn(() => ["read", "bash", "edit", "write"]);
       const mockCtx = createMockCommandContext();
       await planExtension(mockPi);
       await approvePlan(mockPi, mockCtx);
 
-      const turnEnd = getEventHandler(mockPi, "turn_end");
-      await turnEnd(
-        {
-          type: "turn_end",
-          turnIndex: 0,
-          message: { role: "assistant", content: [{ type: "text", text: "[DONE:1]" }] },
-          toolResults: [],
-        },
-        mockCtx,
-      );
+      markTodoItems(mockPi, [1], true);
+      // The mock event bus records without dispatching; drive the plan's
+      // todos:changed handler so the status line refreshes like in real pi.
+      getTodosChangedHandler(mockPi)?.();
 
       const agentEnd = getEventHandler(mockPi, "agent_end");
       await agentEnd({ type: "agent_end", messages: [] }, mockCtx);
 
       expect(mockPi.sendMessage).not.toHaveBeenCalled();
       expect(mockCtx.ui.setStatus).toHaveBeenLastCalledWith("plan", expect.stringContaining("1/2"));
+    });
+
+    it("agent_end completes when extra items beyond the plan steps exist", async () => {
+      const mockPi = createMockPi();
+      mockPi.getActiveTools = vi.fn(() => ["read", "bash", "edit", "write"]);
+      const mockCtx = createMockCommandContext();
+      await planExtension(mockPi);
+      await approvePlan(mockPi, mockCtx);
+
+      addTodoItems(mockPi, ["extra task"]);
+      markTodoItems(mockPi, [1, 2, 3], true);
+
+      const agentEnd = getEventHandler(mockPi, "agent_end");
+      await agentEnd({ type: "agent_end", messages: [] }, mockCtx);
+
+      expect(mockPi.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ customType: "plan-complete" }),
+      );
+    });
+
+    it("agent_end does not complete when the todo list is empty", async () => {
+      const mockPi = createMockPi();
+      mockPi.getActiveTools = vi.fn(() => ["read", "bash", "edit", "write"]);
+      const mockCtx = createMockCommandContext();
+      await planExtension(mockPi);
+      await approvePlan(mockPi, mockCtx);
+
+      clearTodoItems(mockPi);
+
+      const agentEnd = getEventHandler(mockPi, "agent_end");
+      await agentEnd({ type: "agent_end", messages: [] }, mockCtx);
+
+      expect(mockPi.sendMessage).not.toHaveBeenCalled();
     });
   });
 
@@ -556,7 +540,7 @@ describe("plan-extension", () => {
       expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("plan", undefined);
     });
 
-    it("reconstructs execution state with the todo widget on session start", async () => {
+    it("reconstructs execution state and progress from the shared todo list", async () => {
       const mockPi = createMockPi();
       const mockCtx = createMockCommandContext();
       mockCtx.sessionManager.getBranch = vi.fn(() => [
@@ -566,15 +550,19 @@ describe("plan-extension", () => {
           data: {
             state: {
               mode: "executing",
-              plan: {
-                title: "Refactor",
-                steps: [
-                  { description: "move file", completed: true },
-                  { description: "update tests", completed: false },
-                ],
-              },
+              plan: { title: "Refactor", steps: ["move file", "update tests"] },
               toolsBeforePlan: ["read", "bash", "edit", "write"],
             },
+          },
+        },
+        {
+          type: "custom",
+          customType: "todos-state",
+          data: {
+            items: [
+              { text: "move file", completed: true },
+              { text: "update tests", completed: false },
+            ],
           },
         },
       ]);
@@ -585,10 +573,6 @@ describe("plan-extension", () => {
 
       expect(mockPi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "edit", "write"]);
       expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("plan", expect.stringContaining("1/2"));
-      expect(mockCtx.ui.setWidget).toHaveBeenCalledWith(
-        "plan-todos",
-        expect.arrayContaining([expect.stringContaining("☑")]),
-      );
     });
 
     it("starts in plan mode when the --plan flag is set", async () => {
@@ -631,6 +615,18 @@ function getTool(mockPi: any): any {
     if (call[0].name === "plan_submit") return call[0];
   }
   throw new Error("plan_submit tool not found");
+}
+
+/** Plan's todos:changed subscriber, driven manually (mock events don't dispatch). */
+// biome-ignore lint/suspicious/noExplicitAny: test mock
+function getTodosChangedHandler(mockPi: any): (() => void) | undefined {
+  const calls = (mockPi.events.on as ReturnType<typeof vi.fn>).mock.calls;
+  for (const [event, handler] of calls) {
+    if (event === "todos:changed") {
+      return handler as () => void;
+    }
+  }
+  return undefined;
 }
 
 /** Drives the approval overlay with a single key. */

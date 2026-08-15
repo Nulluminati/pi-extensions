@@ -33,6 +33,8 @@ interface RenderInstance {
   isPartial?: boolean;
   result?: { isError?: boolean };
   status?: "running" | "complete" | "error" | "cancelled";
+  toolName?: string;
+  command?: string;
 }
 
 interface RenderPrototype {
@@ -123,10 +125,20 @@ function addRail(
   color: ThemeColor,
   theme: RailTheme,
   styleDirectCommand: boolean,
+  onRenderFailure?: (instance: RenderInstance) => void,
 ): string[] {
   const normalizedWidth = Math.max(1, Math.floor(width));
   const innerWidth = normalizedWidth === 1 ? 1 : normalizedWidth - 1;
-  const rendered = original.call(instance, innerWidth);
+  let rendered: string[];
+  try {
+    rendered = original.call(instance, innerWidth);
+  } catch {
+    // A component render throwing (e.g. pi's unguarded addChild(undefined) when
+    // a tool renderer returns undefined) must not kill the whole session.
+    // Degrade to an empty block and report the failure instead.
+    onRenderFailure?.(instance);
+    return [];
+  }
   const lines = styleDirectCommand ? removeDirectCommandBorders(rendered) : rendered;
   if (lines.length === 0) return lines;
   const rail = theme.fg(color, RAIL);
@@ -162,6 +174,7 @@ function patchRenderer(
   getTheme: () => RailTheme,
   isEnabled: () => boolean,
   styleDirectCommand = false,
+  onRenderFailure?: (instance: RenderInstance) => void,
 ): () => void {
   const prototype = target.prototype;
   prototype[RENDER_PATCH_PROPERTY]?.restore();
@@ -169,7 +182,15 @@ function patchRenderer(
   const original = prototype.render;
   const wrapper: RenderFunction = function (width) {
     if (!isEnabled()) return original.call(this, width);
-    return addRail(original, this, width, getColor(this), getTheme(), styleDirectCommand);
+    return addRail(
+      original,
+      this,
+      width,
+      getColor(this),
+      getTheme(),
+      styleDirectCommand,
+      onRenderFailure,
+    );
   };
   const restore = () => {
     if (prototype.render === wrapper) prototype.render = original;
@@ -232,15 +253,37 @@ export function installRailStyles(
   getTheme: () => RailTheme,
   getSurface: () => string | undefined,
   initiallyEnabled = true,
+  onRenderFailure?: (instance: RenderInstance) => void,
 ): RailController {
   let enabled = initiallyEnabled;
   let restored = false;
   const isEnabled = () => enabled;
   const restores = [
     patchThemeBackground(targets.Theme, getSurface, isEnabled),
-    patchRenderer(targets.ToolExecutionComponent, getToolColor, getTheme, isEnabled),
-    patchRenderer(targets.BashExecutionComponent, getBashColor, getTheme, isEnabled, true),
-    patchRenderer(targets.CustomMessageComponent, () => "customMessageLabel", getTheme, isEnabled),
+    patchRenderer(
+      targets.ToolExecutionComponent,
+      getToolColor,
+      getTheme,
+      isEnabled,
+      false,
+      onRenderFailure,
+    ),
+    patchRenderer(
+      targets.BashExecutionComponent,
+      getBashColor,
+      getTheme,
+      isEnabled,
+      true,
+      onRenderFailure,
+    ),
+    patchRenderer(
+      targets.CustomMessageComponent,
+      () => "customMessageLabel",
+      getTheme,
+      isEnabled,
+      false,
+      onRenderFailure,
+    ),
   ];
 
   return {

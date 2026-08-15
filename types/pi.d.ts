@@ -761,10 +761,12 @@ declare module "@earendil-works/pi-coding-agent" {
   }
 
   export class ToolExecutionComponent {
+    toolName?: string;
     render(width: number): string[];
   }
 
   export class BashExecutionComponent {
+    command?: string;
     render(width: number): string[];
   }
 

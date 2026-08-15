@@ -164,6 +164,62 @@ describe("tool-style-extension", () => {
     expect(component.renderedWidth).toBe(1);
   });
 
+  it("hides a tool block whose render throws instead of crashing the session", async () => {
+    const pi = createMockPi();
+    const ctx = createStyledContext();
+    ToolExecutionComponent.prototype.render = () => {
+      throw new Error("render failed");
+    };
+    await toolStyleExtension(pi);
+    const start = getEventHandler(pi, "session_start");
+    await start({ type: "session_start", reason: "startup" }, ctx);
+
+    const component = new ToolExecutionComponent();
+
+    expect(component.render(20)).toEqual([]);
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      "Tool style: a tool block failed to render and was hidden",
+      "error",
+    );
+  });
+
+  it("names the tool in the failure notification when known", async () => {
+    const pi = createMockPi();
+    const ctx = createStyledContext();
+    ToolExecutionComponent.prototype.render = () => {
+      throw new Error("render failed");
+    };
+    await toolStyleExtension(pi);
+    const start = getEventHandler(pi, "session_start");
+    await start({ type: "session_start", reason: "startup" }, ctx);
+
+    const component = new ToolExecutionComponent();
+    component.toolName = "web_search";
+    component.render(20);
+
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      'Tool style: the "web_search" tool block failed to render and was hidden',
+      "error",
+    );
+  });
+
+  it("notifies once per broken tool block", async () => {
+    const pi = createMockPi();
+    const ctx = createStyledContext();
+    ToolExecutionComponent.prototype.render = () => {
+      throw new Error("render failed");
+    };
+    await toolStyleExtension(pi);
+    const start = getEventHandler(pi, "session_start");
+    await start({ type: "session_start", reason: "startup" }, ctx);
+
+    const component = new ToolExecutionComponent();
+    component.render(20);
+    component.render(20);
+
+    expect(ctx.ui.notify).toHaveBeenCalledTimes(1);
+  });
+
   it("toggles rails without changing component behavior", async () => {
     const { pi, ctx } = await startExtension();
     const toggle = getCommandHandler(pi, "toolstyle:toggle");

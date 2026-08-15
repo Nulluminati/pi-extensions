@@ -2,14 +2,9 @@
 
 export type PlanMode = "off" | "plan" | "executing";
 
-export interface PlanStep {
-  description: string;
-  completed: boolean;
-}
-
 export interface Plan {
   title: string;
-  steps: PlanStep[];
+  steps: string[];
   notes?: string;
 }
 

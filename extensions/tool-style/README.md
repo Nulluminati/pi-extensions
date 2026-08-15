@@ -43,6 +43,8 @@ Pi does not currently expose a global tool-shell decorator. The extension narrow
 
 Original render and theme methods are restored during `session_shutdown`. The pywal watcher is stopped at the same time. A repeated `session_start` replaces earlier wrappers and the watcher instead of stacking them.
 
+A component whose render throws (for example, Pi's `addChild` crash when a tool renderer returns `undefined`) is hidden instead of taking down the session. Each affected block is reported once via a notification.
+
 ## Compatibility
 
 The component and theme classes are exported by Pi, but prototype wrapping is not a formal styling API. Pi upgrades that alter these classes may require an extension update. The automated tests cover color computation, state transitions, direct-command normalization, narrow terminals, live palette updates, toggling, repeated startup, and shutdown restoration.

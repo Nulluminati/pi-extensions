@@ -35,6 +35,7 @@ export default async function toolStyleExtension(pi: ExtensionAPI) {
   let stopSurfaceMonitor: (() => void) | undefined;
   let surface: string | undefined;
   let enabled = true;
+  const failedRenders = new WeakSet<object>();
 
   pi.on("session_start", async (_event, ctx) => {
     if (!ctx.hasUI) return;
@@ -47,6 +48,17 @@ export default async function toolStyleExtension(pi: ExtensionAPI) {
       () => ctx.ui.theme,
       () => surface,
       enabled,
+      (instance) => {
+        if (failedRenders.has(instance)) return;
+        failedRenders.add(instance);
+        const name = instance.toolName ?? instance.command;
+        ctx.ui.notify(
+          name
+            ? `Tool style: the "${name}" tool block failed to render and was hidden`
+            : "Tool style: a tool block failed to render and was hidden",
+          "error",
+        );
+      },
     );
     stopSurfaceMonitor = startWalSurfaceMonitor({
       onChange(value) {

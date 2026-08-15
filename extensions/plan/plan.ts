@@ -6,14 +6,20 @@
  * write tools are removed and hard-blocked, bash is restricted to a read-only
  * allowlist, and a plan-context message tells the model to research and call
  * the plan_submit tool. plan_submit shows the proposed plan in an overlay and
- * lets the user approve it (execution begins), edit it (plan is sent back),
- * or keep planning. Execution tracks [DONE:n] markers as a todo widget and
- * ends the mode when every step is completed.
+ * lets the user approve it (execution begins) or keep planning. Approved
+ * steps become the shared todo list (lib/todos.ts); the agent checks items
+ * off with the todo tool, and the mode ends when every step is completed.
  */
 
 // --- Imports ---
 
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "pi";
+import {
+  getTodoItems,
+  reconstructTodos,
+  setTodoItems,
+  TODOS_CHANGED_EVENT,
+} from "../../lib/todos.ts";
 import { formatStatusLine } from "../../lib/ui-format.ts";
 import { promptPlanApproval } from "./src/approval.ts";
 import {
@@ -25,7 +31,6 @@ import {
   PLAN_MODE_EVENT,
   PLAN_SUBMIT_TOOL,
   STATUS_KEY,
-  WIDGET_KEY,
 } from "./src/constants.ts";
 import { buildPlanModeTools, isSafeBashCommand } from "./src/enforcement.ts";
 import {
@@ -34,18 +39,15 @@ import {
   buildPlanCompleteMessage,
   buildPlanModeContext,
 } from "./src/prompts.ts";
-import {
-  getAssistantText,
-  isPlanComplete,
-  markCompletedSteps,
-  reconstructState,
-} from "./src/state.ts";
+import { completedStepCount, isPlanComplete, reconstructState } from "./src/state.ts";
 import type { Plan, PlanState } from "./src/types.ts";
 
 // --- Extension ---
 
 export default async function planExtension(pi: ExtensionAPI) {
   let state: PlanState = { mode: "off", plan: null, toolsBeforePlan: undefined };
+  // Session-scoped UI context for status refreshes from the todos event bus.
+  let uiCtx: ExtensionContext | undefined;
 
   // --- State persistence ---
 
@@ -59,10 +61,10 @@ export default async function planExtension(pi: ExtensionAPI) {
 
   // --- UI ---
 
-  function updateStatus(ctx: ExtensionContext) {
-    if (!ctx.hasUI) return;
+  function updateStatus(ctx: ExtensionContext | undefined) {
+    if (!ctx?.hasUI) return;
     if (state.mode === "executing" && state.plan) {
-      const completed = state.plan.steps.filter((step) => step.completed).length;
+      const completed = completedStepCount(state.plan, getTodoItems(pi));
       ctx.ui.setStatus(
         STATUS_KEY,
         formatStatusLine(ctx.ui.theme, {
@@ -76,20 +78,11 @@ export default async function planExtension(pi: ExtensionAPI) {
     }
   }
 
-  function updateWidget(ctx: ExtensionContext) {
-    if (!ctx.hasUI) return;
-    if (state.mode === "executing" && state.plan) {
-      const lines = state.plan.steps.map((step) =>
-        step.completed
-          ? ctx.ui.theme.fg("success", "☑ ") +
-            ctx.ui.theme.fg("muted", ctx.ui.theme.strikethrough(step.description))
-          : ctx.ui.theme.fg("muted", "☐ ") + step.description,
-      );
-      ctx.ui.setWidget(WIDGET_KEY, lines);
-    } else {
-      ctx.ui.setWidget(WIDGET_KEY, undefined);
-    }
-  }
+  // The todo widget itself is owned by the todos extension; plan only keeps
+  // the compact progress status in sync when items change.
+  pi.events.on(TODOS_CHANGED_EVENT, () => {
+    updateStatus(uiCtx);
+  });
 
   // --- Tool set management ---
 
@@ -115,7 +108,6 @@ export default async function planExtension(pi: ExtensionAPI) {
     persistState();
     publishMode();
     updateStatus(ctx);
-    updateWidget(ctx);
   }
 
   function exitPlanMode(ctx: ExtensionContext) {
@@ -124,16 +116,17 @@ export default async function planExtension(pi: ExtensionAPI) {
     persistState();
     publishMode();
     updateStatus(ctx);
-    updateWidget(ctx);
   }
 
   function enterExecution(ctx: ExtensionContext, plan: Plan) {
     state = { ...state, mode: "executing", plan };
     restorePrePlanTools();
+    // The approved steps become the shared todo list; the agent checks items
+    // off with the todo tool (owned by the todos extension).
+    setTodoItems(pi, plan.steps);
     persistState();
     publishMode();
     updateStatus(ctx);
-    updateWidget(ctx);
   }
 
   // --- Tool gate: block mutations while planning ---
@@ -197,21 +190,11 @@ export default async function planExtension(pi: ExtensionAPI) {
     };
   });
 
-  // --- Execution tracking ---
-
-  pi.on("turn_end", async (event, ctx) => {
-    if (state.mode !== "executing" || !state.plan) return;
-    const text = getAssistantText(event.message);
-    if (markCompletedSteps(text, state.plan.steps) > 0) {
-      updateWidget(ctx);
-      updateStatus(ctx);
-      persistState();
-    }
-  });
+  // --- Completion: every plan step checked in the shared todo list ---
 
   pi.on("agent_end", async (_event, ctx) => {
     if (state.mode !== "executing" || !state.plan) return;
-    if (!isPlanComplete(state.plan)) return;
+    if (!isPlanComplete(state.plan, getTodoItems(pi))) return;
 
     const plan = state.plan;
     pi.sendMessage({
@@ -229,7 +212,7 @@ export default async function planExtension(pi: ExtensionAPI) {
     name: PLAN_SUBMIT_TOOL,
     label: "Plan Submit",
     description:
-      "Submit a plan for user approval. Call only after researching the request in plan mode. The user approves, edits, or rejects the plan before any changes are made.",
+      "Submit a plan for user approval. Call only after researching the request in plan mode. The user approves or rejects the plan before any changes are made.",
     promptSnippet: "Submit a complete plan for user approval before making changes",
     promptGuidelines: [
       "In plan mode, research the request with read-only tools, then call plan_submit with a concise title and a numbered list of concrete steps.",
@@ -292,7 +275,7 @@ export default async function planExtension(pi: ExtensionAPI) {
       const notes = typeof params.notes === "string" ? params.notes.trim() : "";
       const plan: Plan = {
         title,
-        steps: steps.map((description: string) => ({ description, completed: false })),
+        steps,
         notes: notes || undefined,
       };
       state = { ...state, plan };
@@ -321,7 +304,7 @@ export default async function planExtension(pi: ExtensionAPI) {
           content: [{ type: "text", text: `Plan approved: ${plan.title}.` }],
           details: {
             status: "approved",
-            plan: { title: plan.title, steps: plan.steps.map((step) => step.description) },
+            plan: { title: plan.title, steps: plan.steps },
           },
           terminate: true,
         };
@@ -379,7 +362,7 @@ export default async function planExtension(pi: ExtensionAPI) {
         );
         return;
       }
-      const completed = state.plan.steps.filter((step) => step.completed).length;
+      const completed = completedStepCount(state.plan, getTodoItems(pi));
       ctx.ui.notify(
         `Plan mode: ${state.mode} | ${state.plan.title} | ${completed}/${state.plan.steps.length} steps done`,
         "info",
@@ -428,6 +411,7 @@ export default async function planExtension(pi: ExtensionAPI) {
   }
 
   pi.on("session_start", async (_event, ctx) => {
+    uiCtx = ctx;
     state = reconstructState(ctx.sessionManager.getBranch()) ?? {
       mode: "off",
       plan: null,
@@ -438,25 +422,29 @@ export default async function planExtension(pi: ExtensionAPI) {
       state = { mode: "plan", plan: null, toolsBeforePlan: undefined };
     }
 
+    // Rebuild the shared todo store so completion checks work without the
+    // todos extension being loaded (idempotent with its own reconstruction).
+    reconstructTodos(pi, ctx.sessionManager.getBranch());
     applyRestoredToolState();
     publishMode();
     updateStatus(ctx);
-    updateWidget(ctx);
   });
 
   pi.on("session_tree", async (_event, ctx) => {
+    uiCtx = ctx;
     state = reconstructState(ctx.sessionManager.getBranch()) ?? {
       mode: "off",
       plan: null,
       toolsBeforePlan: undefined,
     };
+    reconstructTodos(pi, ctx.sessionManager.getBranch());
     applyRestoredToolState();
     publishMode();
     updateStatus(ctx);
-    updateWidget(ctx);
   });
 
   pi.on("session_shutdown", async () => {
+    uiCtx = undefined;
     persistState();
   });
 }

@@ -1,10 +1,12 @@
 /**
- * Plan state persistence, reconstruction, and step tracking. Pure functions
- * over session entries; the composition root owns transitions and pi calls.
+ * Plan state persistence and reconstruction. Pure functions over session
+ * entries; the composition root owns transitions and pi calls. Step
+ * completion lives in lib/todos.ts — an approved plan becomes the todo list.
  */
 
+import type { TodoItem } from "../../../lib/todos.ts";
 import { ENTRY_TYPE } from "./constants.ts";
-import type { Plan, PlanState, PlanStep } from "./types.ts";
+import type { Plan, PlanState } from "./types.ts";
 
 interface CustomEntry {
   type: string;
@@ -22,15 +24,6 @@ export function findPlanStateEntry(entries: unknown[]): CustomEntry | undefined 
   return undefined;
 }
 
-function isValidStep(value: unknown): value is PlanStep {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    typeof (value as PlanStep).description === "string" &&
-    typeof (value as PlanStep).completed === "boolean"
-  );
-}
-
 function isValidPlan(value: unknown): value is Plan {
   if (typeof value !== "object" || value === null) return false;
   const plan = value as Plan;
@@ -38,7 +31,7 @@ function isValidPlan(value: unknown): value is Plan {
     typeof plan.title === "string" &&
     Array.isArray(plan.steps) &&
     plan.steps.length > 0 &&
-    plan.steps.every(isValidStep)
+    plan.steps.every((step) => typeof step === "string")
   );
 }
 
@@ -70,51 +63,17 @@ export function reconstructState(entries: unknown[]): PlanState | undefined {
   };
 }
 
-/** Extracts [DONE:n] markers from assistant text. */
-export function extractDoneSteps(text: string): number[] {
-  const steps: number[] = [];
-  for (const match of text.matchAll(/\[DONE:(\d+)\]/gi)) {
-    const step = Number(match[1]);
-    if (Number.isFinite(step)) steps.push(step);
-  }
-  return steps;
+/**
+ * True when the plan's steps are all completed in the todo list. Only the
+ * first `steps.length` items count — the plan's own steps — so extra items
+ * the agent adds mid-execution do not block completion.
+ */
+export function isPlanComplete(plan: Plan, items: TodoItem[]): boolean {
+  const ownSteps = items.slice(0, plan.steps.length);
+  return ownSteps.length === plan.steps.length && ownSteps.every((item) => item.completed);
 }
 
-/** Marks steps completed from [DONE:n] markers; returns how many matched. */
-export function markCompletedSteps(text: string, steps: PlanStep[]): number {
-  const doneSteps = extractDoneSteps(text);
-  let matched = 0;
-  for (const step of doneSteps) {
-    const item = steps[step - 1];
-    if (item && !item.completed) {
-      item.completed = true;
-      matched++;
-    }
-  }
-  return matched;
-}
-
-/** True when every step of the plan is completed. */
-export function isPlanComplete(plan: Plan): boolean {
-  return plan.steps.length > 0 && plan.steps.every((step) => step.completed);
-}
-
-/** Concatenated text of an assistant message, for [DONE:n] scanning. */
-export function getAssistantText(message: unknown): string {
-  const content = (message as { content?: unknown })?.content;
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content
-      .filter((block): block is { type: string; text: string } => {
-        return (
-          typeof block === "object" &&
-          block !== null &&
-          (block as { type?: string }).type === "text" &&
-          typeof (block as { text?: string }).text === "string"
-        );
-      })
-      .map((block) => block.text)
-      .join("\n");
-  }
-  return "";
+/** Completed step count for status display. */
+export function completedStepCount(plan: Plan, items: TodoItem[]): number {
+  return items.slice(0, plan.steps.length).filter((item) => item.completed).length;
 }
