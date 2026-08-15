@@ -1,6 +1,6 @@
 import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { ExtensionAPI, ExtensionContext } from "pi";
-import { AUTO_DISMISS_MS, STATUS_KEY, WIDGET_KEY } from "./constants.ts";
+import { AUTO_DISMISS_MS, WIDGET_KEY } from "./constants.ts";
 import { getState } from "./state.ts";
 
 export function showRecap(pi: ExtensionAPI, ctx: ExtensionContext, recap: string) {
@@ -54,5 +54,4 @@ export function clearRecap(pi: ExtensionAPI, ctx: ExtensionContext) {
     state.autoDismissTimer = undefined;
   }
   ctx.ui.setWidget(WIDGET_KEY, undefined);
-  ctx.ui.setStatus(STATUS_KEY, undefined);
 }

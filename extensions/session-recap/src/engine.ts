@@ -1,13 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "pi";
-import { formatStatusLine } from "../../../lib/ui-format.ts";
-import {
-  DEFAULT_FOCUS_MIN_SECONDS,
-  DEFAULT_IDLE_SECONDS,
-  ICON_COLOR,
-  STATUS_ICON,
-  STATUS_KEY,
-  TEXT_COLOR,
-} from "./constants.ts";
+import { DEFAULT_FOCUS_MIN_SECONDS, DEFAULT_IDLE_SECONDS } from "./constants.ts";
 import { generateRecap } from "./generate.ts";
 import { getState } from "./state.ts";
 import { buildRecentTranscript, hasMeaningfulActivity } from "./transcript.ts";
@@ -97,20 +89,6 @@ export async function generateAndShow(
   state.activeController = controller;
   state.activeReason = opts.reason;
 
-  const showStatus = opts.reason !== "resume" && opts.reason !== "focus";
-  if (showStatus && ctx.hasUI) {
-    ctx.ui.setStatus(
-      STATUS_KEY,
-      formatStatusLine(ctx.ui.theme, {
-        icon: STATUS_ICON,
-        prefix: "Session Recap",
-        text: "drafting…",
-        iconColor: ICON_COLOR,
-        textColor: TEXT_COLOR,
-      }),
-    );
-  }
-
   try {
     const recap = await generateRecap(transcript, ctx, controller.signal);
     if (!recap || controller.signal.aborted) return;
@@ -140,7 +118,6 @@ export async function generateAndShow(
     if (state.activeController === controller) {
       state.activeController = undefined;
       state.activeReason = undefined;
-      if (showStatus && ctx.hasUI) ctx.ui.setStatus(STATUS_KEY, undefined);
     }
   }
 }

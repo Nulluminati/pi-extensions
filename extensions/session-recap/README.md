@@ -97,7 +97,6 @@ All state is stored in a `WeakMap<ExtensionAPI, RecapState>` with the following 
 | `pi.on("session_shutdown")` | Detaches focus reporting and clears state |
 | `pi.getFlag()` | Reads configuration flags at runtime |
 | `ctx.ui.setWidget()` | Displays/clears the recap widget |
-| `ctx.ui.setStatus()` | Briefly shows "✦ drafting recap…" status |
 | `ctx.ui.theme.fg()` | Styles the recap header with accent color |
 | `ctx.sessionManager.getBranch()` | Extracts conversation transcript |
 | `ctx.sessionManager.getLeafId()` | Detects branch navigation during generation |

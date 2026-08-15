@@ -25,10 +25,7 @@ import type { ExtensionAPI } from "pi";
 import {
   DEFAULT_FOCUS_MIN_SECONDS,
   DEFAULT_IDLE_SECONDS,
-  ICON_COLOR,
   RESUME_RECAP_DELAY_MS,
-  STATUS_ICON,
-  TEXT_COLOR,
 } from "./src/constants.ts";
 import {
   generateAndShow,
@@ -38,8 +35,6 @@ import {
 import { attachFocusReporting, detachFocusReporting } from "./src/focus.ts";
 import { getState, resetState } from "./src/state.ts";
 import { clearRecap } from "./src/widget.ts";
-
-export { ICON_COLOR, STATUS_ICON, TEXT_COLOR };
 
 // --- Extension ---
 
