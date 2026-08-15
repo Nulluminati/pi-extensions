@@ -143,7 +143,7 @@ describe("plan-extension", () => {
   });
 
   describe("tool_call gate", () => {
-    it("blocks edit and write in plan mode with terminate", async () => {
+    it("blocks edit and write in plan mode without stopping the turn", async () => {
       const mockPi = createMockPi();
       const mockCtx = createMockCommandContext();
       await planExtension(mockPi);
@@ -157,7 +157,6 @@ describe("plan-extension", () => {
       expect(blockedEdit).toEqual({
         block: true,
         reason: expect.stringContaining("Plan mode is read-only"),
-        terminate: true,
       });
 
       const blockedWrite = await toolCall(
@@ -186,7 +185,6 @@ describe("plan-extension", () => {
       expect(blocked).toEqual({
         block: true,
         reason: expect.stringContaining("not on the read-only allowlist"),
-        terminate: true,
       });
 
       const allowed = await toolCall(

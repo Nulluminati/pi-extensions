@@ -134,11 +134,12 @@ export default async function planExtension(pi: ExtensionAPI) {
   pi.on("tool_call", async (event, _ctx) => {
     if (state.mode !== "plan") return;
     if (MUTATING_TOOLS.has(event.toolName)) {
+      // No terminate: the block reason is reported to the model and the turn
+      // continues, so the agent keeps working read-only instead of stopping.
       return {
         block: true,
         reason:
           "Plan mode is read-only: edit and write are blocked. Call plan_submit to propose changes or exit plan mode with /plan.",
-        terminate: true,
       };
     }
     if (event.toolName === "bash") {
@@ -147,7 +148,6 @@ export default async function planExtension(pi: ExtensionAPI) {
         return {
           block: true,
           reason: `Plan mode: bash command blocked (not on the read-only allowlist). Call plan_submit to propose changes or exit plan mode with /plan.\nCommand: ${command}`,
-          terminate: true,
         };
       }
     }

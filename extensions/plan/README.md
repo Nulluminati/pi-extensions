@@ -35,7 +35,7 @@ Stale plan-mode instructions are stripped from the model context every turn and 
 | `pi.registerFlag("plan")` | Start in plan mode via `--plan` |
 | `pi.registerCommand("plan")`, `pi.registerShortcut("ctrl+alt+p")` | Toggle the mode |
 | `pi.setActiveTools()` | Remove `edit`/`write`, add `plan_submit` while planning; restore the captured tool set on exit |
-| `pi.on("tool_call")` | Hard gate: block `edit`/`write` and non-allowlisted bash with `{ block, reason, terminate }` |
+| `pi.on("tool_call")` | Hard gate: block `edit`/`write` and non-allowlisted bash with `{ block, reason }`; the reason is reported to the model and the turn continues so the agent can keep working read-only |
 | `pi.on("before_agent_start")` | Inject per-turn plan or execution context messages |
 | `pi.on("context")` | Drop stale injected context copies between turns |
 | `pi.registerTool("plan_submit")` | Structured plan (title + steps) with `terminate: true`; drives the approval overlay and the approve → execute transition |
