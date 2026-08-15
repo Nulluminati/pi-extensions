@@ -568,6 +568,24 @@ describe("background-jobs-extension", () => {
       expect(result.content[0].text).toContain("line two");
     });
 
+    it("says no output was captured when the buffer is empty", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await backgroundJobsExtension(mockPi);
+      await startBackgroundJob(mockPi, mockCtx, { command: "sleep 60" });
+
+      const tool = getTool(mockPi, "jobs");
+      const result = await tool.execute(
+        "call-1",
+        { action: "tail", jobId: 1 },
+        undefined,
+        undefined,
+        mockCtx,
+      );
+      expect(result.isError).toBeUndefined();
+      expect(result.content[0].text).toContain("No output captured");
+    });
+
     it("caps tail output at a hard character limit", async () => {
       const mockPi = createMockPi();
       const mockCtx = createMockCommandContext();

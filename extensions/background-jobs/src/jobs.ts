@@ -65,6 +65,16 @@ export async function executeJobsAction(options: {
 
   if (action === "tail") {
     if (!job) return errorResult(`No job #${options.jobId}.`);
+    if (job.buffer.length === 0) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `No output captured for job #${job.id} "${job.label}" yet.`,
+          },
+        ],
+      };
+    }
     const lines = Number(options.lines) || 40;
     return { content: [{ type: "text", text: truncate(tailLines(job.buffer, lines)) }] };
   }
