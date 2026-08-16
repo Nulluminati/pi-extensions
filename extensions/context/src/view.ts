@@ -177,36 +177,57 @@ function buildModalLines(theme: any, data: ContextBreakdown, width: number): str
 // --- Modal ---
 
 /**
- * Show the context breakdown in a framed modal. Closes on esc, enter, or q.
+ * Overlay options for the context modal: 70% wide, up to 80% of terminal
+ * height, centered — the same treatment as the background-jobs panel.
+ */
+const OVERLAY_OPTIONS = { width: "70%", maxHeight: "80%", anchor: "center" } as const;
+/**
+ * Frame rows outside the body: top border + bottom border.
+ */
+const FRAME_BORDER_ROWS = 2;
+/**
+ * Frame padding rows: 1 above the body + 1 below.
+ */
+const FRAME_PADDING_ROWS = 2;
+
+/**
+ * Show the context breakdown in a framed overlay. Closes on esc, enter, or q.
  */
 export async function showContextModal(
   ctx: ExtensionCommandContext,
   breakdown: ContextBreakdown,
 ): Promise<void> {
-  await ctx.ui.custom<void>((tui, theme, keybindings, done) => {
-    return {
-      render(width: number) {
-        const rows = tui?.terminal?.rows ?? 0;
-        const options: ModalFrameOptions = { title: "Context" };
-        if (rows >= 18) {
-          options.fixedBodyRows = Math.max(10, rows - 6);
-        }
-        return renderModalFrame(theme, width, buildModalLines(theme, breakdown, width), options);
-      },
-      invalidate() {},
-      handleInput(data: string) {
-        if (
-          keybindings.matches(data, "tui.select.cancel") ||
-          data === "\r" ||
-          data.toLowerCase() === "q"
-        ) {
-          done();
-          return;
-        }
-        tui.requestRender();
-      },
-    };
-  });
+  await ctx.ui.custom<void>(
+    (tui, theme, keybindings, done) => {
+      return {
+        render(width: number) {
+          const rows = tui?.terminal?.rows ?? 0;
+          const options: ModalFrameOptions = { title: "Context" };
+          if (rows > 0) {
+            // Body budget that fits the overlay's maxHeight (80% of terminal
+            // rows), minus frame borders and padding, so the bottom border
+            // and key hints are never clipped.
+            const budget = Math.max(6, Math.floor(rows * 0.8));
+            options.fixedBodyRows = Math.max(1, budget - (FRAME_BORDER_ROWS + FRAME_PADDING_ROWS));
+          }
+          return renderModalFrame(theme, width, buildModalLines(theme, breakdown, width), options);
+        },
+        invalidate() {},
+        handleInput(data: string) {
+          if (
+            keybindings.matches(data, "tui.select.cancel") ||
+            data === "\r" ||
+            data.toLowerCase() === "q"
+          ) {
+            done();
+            return;
+          }
+          tui.requestRender();
+        },
+      };
+    },
+    { overlay: true, overlayOptions: OVERLAY_OPTIONS },
+  );
 }
 
 // --- Plain text ---

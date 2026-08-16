@@ -264,6 +264,10 @@ describe("context-extension", () => {
       const done = handler("", ctx);
 
       expect(ctx.ui.custom).toHaveBeenCalledTimes(1);
+      expect(ctx.ui.custom).toHaveBeenCalledWith(expect.any(Function), {
+        overlay: true,
+        overlayOptions: { width: "70%", maxHeight: "80%", anchor: "center" },
+      });
       const lines = component.render(80).join("\n");
       expect(lines).toContain("Used: 25.0k / 128.0k");
       expect(lines).toContain("System prompt");
