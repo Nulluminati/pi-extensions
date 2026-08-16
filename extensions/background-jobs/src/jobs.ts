@@ -13,8 +13,24 @@ import type { Job, JobEvents } from "./types.ts";
 export interface JobsToolResult {
   content: Array<{ type: "text"; text: string }>;
   details?: Record<string, unknown>;
-  isError?: boolean;
+  terminate?: boolean;
 }
+
+/** Slice of the TUI the panel needs: re-render on input, and terminal rows
+ * for height budgeting. Must mirror the overlay maxHeight enforced in pi-tui
+ * (compositeOverlays slices rendered lines to maxHeight) — render what fits
+ * ourselves, or the slice drops the bottom border and key hints. */
+interface PanelTui {
+  requestRender(): void;
+  terminal?: { rows?: number };
+}
+
+/** OverlayOptions passed to ui.custom in openJobsPanel: 80% of terminal height. */
+const MAX_HEIGHT_FRACTION = 0.8;
+/** Frame rows outside the body: top border + bottom border. */
+const FRAME_BORDER_ROWS = 2;
+/** Frame padding rows: 1 above the body + 1 below. */
+const FRAME_PADDING_ROWS = 2;
 
 interface PanelUi {
   // Loosely mirrors ExtensionUIContext.custom; any-params keep the factory
@@ -34,7 +50,7 @@ export function openJobsPanel(ui: PanelUi, registry: JobRegistry): void {
   if (!ui.custom) return;
   ui.custom(
     (tui: unknown, theme: any, keybindings: any, done: (result?: unknown) => void) =>
-      new JobPanel(registry, theme, done, keybindings, tui as { requestRender(): void } | null),
+      new JobPanel(registry, theme, done, keybindings, tui as PanelTui | null),
     { overlay: true, overlayOptions: { width: "70%", maxHeight: "80%", anchor: "center" } },
   );
 }
@@ -64,7 +80,7 @@ export async function executeJobsAction(options: {
     : undefined;
 
   if (action === "status") {
-    if (!job) return errorResult(`No job #${options.jobId}.`);
+    if (!job) return errorResult("unknown_job", `No job #${options.jobId}.`);
     return {
       content: [
         {
@@ -76,7 +92,7 @@ export async function executeJobsAction(options: {
   }
 
   if (action === "tail") {
-    if (!job) return errorResult(`No job #${options.jobId}.`);
+    if (!job) return errorResult("unknown_job", `No job #${options.jobId}.`);
     if (job.buffer.length === 0) {
       return {
         content: [
@@ -92,7 +108,7 @@ export async function executeJobsAction(options: {
   }
 
   if (action === "cancel") {
-    if (!job) return errorResult(`No job #${options.jobId}.`);
+    if (!job) return errorResult("unknown_job", `No job #${options.jobId}.`);
     if (job.status !== "running" && job.status !== "cancelling") {
       return {
         content: [
@@ -119,11 +135,14 @@ export async function executeJobsAction(options: {
     };
   }
 
-  return errorResult(`Unknown action "${action}". Use list, status, tail, or cancel.`);
+  return errorResult(
+    "unknown_action",
+    `Unknown action "${action}". Use list, status, tail, or cancel.`,
+  );
 }
 
-function errorResult(text: string): JobsToolResult {
-  return { content: [{ type: "text", text }], isError: true };
+function errorResult(code: string, text: string): JobsToolResult {
+  return { content: [{ type: "text", text }], details: { error: code }, terminate: true };
 }
 
 // --- Panel -------------------------------------------------------------------
@@ -169,7 +188,7 @@ export class JobPanel {
     private readonly keybindings?: {
       matches?: (data: string, keybinding: string) => boolean;
     },
-    private readonly tui?: { requestRender(): void } | null,
+    private readonly tui?: PanelTui | null,
   ) {}
 
   get focused(): boolean {
@@ -197,24 +216,28 @@ export class JobPanel {
   }
 
   render(width: number): string[] {
+    const bodyBudget = this.bodyRowsForBudget();
+    const titleOptions = bodyBudget === undefined ? {} : { fixedBodyRows: bodyBudget };
     if (this.paging) {
-      const job = this.currentJob();
-      const body = job
-        ? [
-            this.themedJobLine(job),
-            "",
-            ...tailLines(truncate(job.buffer, 4_000), 60).split("\n"),
-            "",
-            formatStyledKeyHints(this.theme, [
-              ["esc", "back"],
-              ["q", "close"],
-            ]),
-          ]
-        : ["No job selected."];
-      return renderModalFrame(this.theme, width, body, { title: `Job output — ${job?.id ?? ""}` });
+      return renderModalFrame(this.theme, width, this.pagingBody(bodyBudget), {
+        title: `Job output — ${this.currentJob()?.id ?? ""}`,
+        ...titleOptions,
+      });
     }
+    return renderModalFrame(this.theme, width, this.listBody(bodyBudget), {
+      title: "Background Jobs",
+      ...titleOptions,
+    });
+  }
+
+  /**
+   * Job list with a sliding window that keeps the selected row visible. The
+   * frame's fixedBodyRows alone would clip from the bottom and could hide the
+   * selection.
+   */
+  private listBody(bodyBudget: number | undefined): string[] {
     const jobs = listJobs(this.registry);
-    const body =
+    const jobLines =
       jobs.length === 0
         ? ["No background jobs or monitors registered."]
         : jobs.map((job, index) => {
@@ -223,18 +246,69 @@ export class JobPanel {
               ? `${this.theme.fg("accent", "›")} ${line}`
               : `  ${line}`;
           });
-    body.push(
-      "",
-      formatStyledKeyHints(this.theme, [
-        ["↑↓/jk", "navigate"],
-        ["enter", "page output"],
-        ["esc", "back / close"],
-        ["q", "close"],
-      ]),
+    const hints = formatStyledKeyHints(this.theme, [
+      ["↑↓/jk", "navigate"],
+      ["enter", "page output"],
+      ["esc", "back / close"],
+      ["q", "close"],
+    ]);
+    if (bodyBudget === undefined || jobLines.length + 2 <= bodyBudget) {
+      return [...jobLines, "", hints];
+    }
+    const windowSize = Math.max(1, bodyBudget - 2); // blank + hints must stay visible
+    // Keep the selected row in view: it anchors the window 1/3 from the top
+    // when scrolling down, 1/3 from the bottom when scrolling up.
+    const start = Math.max(
+      0,
+      Math.min(this.selected - Math.floor(windowSize / 3), jobLines.length - windowSize),
     );
-    return renderModalFrame(this.theme, width, body, {
-      title: "Background Jobs",
-    });
+    const window = jobLines.slice(start, start + windowSize);
+    const above = start > 0 ? this.theme.fg("dim", `↑ ${start} more`) : "";
+    const below =
+      start + windowSize < jobLines.length
+        ? this.theme.fg("dim", `↓ ${jobLines.length - start - windowSize} more`)
+        : "";
+    if (above) window[0] = above;
+    if (below) window[window.length - 1] = below;
+    return [...window, "", hints];
+  }
+
+  /** Paged output view: hints stay visible; the output slice scrolls. */
+  private pagingBody(bodyBudget: number | undefined): string[] {
+    const job = this.currentJob();
+    const hints = formatStyledKeyHints(this.theme, [
+      ["esc", "back"],
+      ["q", "close"],
+    ]);
+    if (!job) return ["No job selected.", "", hints];
+    const header = this.themedJobLine(job);
+    const outputLines = tailLines(truncate(job.buffer, 4_000), 60).split("\n");
+    if (bodyBudget === undefined || outputLines.length + 3 <= bodyBudget) {
+      return [header, "", ...outputLines, "", hints];
+    }
+    const windowSize = Math.max(1, bodyBudget - 3); // header + blank + blank + hints
+    const tail = outputLines.slice(-windowSize);
+    const hidden = outputLines.length - tail.length;
+    return [
+      header,
+      "",
+      this.theme.fg("dim", `↑ ${hidden} more line${hidden === 1 ? "" : "s"}`),
+      ...tail.slice(1),
+      "",
+      hints,
+    ];
+  }
+
+  /**
+   * Body rows that fit the overlay's maxHeight (80% of terminal rows), with
+   * the frame's 2 border lines and 2 padding rows subtracted. undefined when
+   * the terminal size is unknown.
+   */
+  private bodyRowsForBudget(): number | undefined {
+    const rows = this.tui?.terminal?.rows;
+    if (typeof rows !== "number" || !Number.isFinite(rows)) return undefined;
+    const budget = Math.max(5, Math.floor(rows * MAX_HEIGHT_FRACTION));
+    return Math.max(1, budget - (FRAME_BORDER_ROWS + FRAME_PADDING_ROWS));
   }
 
   /** formatJobLine (format.ts) with theme colors; the model-facing list stays plain. */

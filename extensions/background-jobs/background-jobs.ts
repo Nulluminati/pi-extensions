@@ -28,16 +28,12 @@
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionUIContext } from "pi";
-import { Type } from "typebox";
 import { formatStatusLine } from "../../lib/ui-format.ts";
 import { executeJobsAction, openJobsPanel } from "./src/jobs.ts";
-import {
-  DEFAULT_MONITOR_INTERVAL_S,
-  DEFAULT_MONITOR_TIMEOUT_S,
-  startMonitor,
-} from "./src/monitor.ts";
+import { startMonitor } from "./src/monitor.ts";
 import { activeJobs, buildSnapshot, createRegistry, type JobRegistry } from "./src/registry.ts";
 import { cancelJob, startBackgroundJob } from "./src/runner.ts";
+import { BACKGROUND_PARAMETERS, JOBS_PARAMETERS, MONITOR_PARAMETERS } from "./src/schemas.ts";
 import type { JobEvents } from "./src/types.ts";
 
 // --- Constants ---
@@ -46,69 +42,6 @@ const STATUS_KEY = "background-jobs";
 const STATUS_ICON = "⏳";
 const SNAPSHOT_TYPE = "background-jobs";
 const WAKE_CUSTOM_TYPE = "background-jobs:wake";
-
-const BackgroundParameters = Type.Object({
-  command: Type.String({ description: "Shell command to run in the background under /bin/sh." }),
-  label: Type.Optional(
-    Type.String({ description: "Short label for the job. Defaults to the command's first token." }),
-  ),
-  cwd: Type.Optional(
-    Type.String({ description: "Working directory. Defaults to the project root." }),
-  ),
-  wake_on_pattern: Type.Optional(
-    Type.String({
-      description:
-        "Regexp. If set, wake early (before exit) the first time any output line matches it.",
-    }),
-  ),
-  env: Type.Optional({
-    ...Type.Record(Type.String(), Type.String()),
-    description: "Extra environment variables, merged over the inherited environment.",
-  }),
-});
-
-const MonitorParameters = Type.Object({
-  command: Type.String({ description: "Shell command polled under /bin/sh -c on each tick." }),
-  satisfy_on: {
-    ...Type.Union([
-      Type.Literal("exit_zero"),
-      Type.Literal("exit_nonzero"),
-      Type.Literal("stdout_matches"),
-      Type.Literal("stdout_not_matches"),
-    ]),
-    description: "Condition that ends the monitor and wakes the agent.",
-  },
-  pattern: Type.Optional(
-    Type.String({ description: "Regexp required by stdout_matches / stdout_not_matches." }),
-  ),
-  interval_seconds: Type.Optional(
-    Type.Number({
-      description: `Poll interval in seconds (minimum 1). Defaults to ${DEFAULT_MONITOR_INTERVAL_S}.`,
-    }),
-  ),
-  timeout_seconds: Type.Optional(
-    Type.Number({
-      description: `Give up after this many seconds. Defaults to ${DEFAULT_MONITOR_TIMEOUT_S}.`,
-    }),
-  ),
-  label: Type.Optional(Type.String({ description: "Short label for the monitor." })),
-});
-
-const JobsParameters = Type.Object({
-  action: {
-    ...Type.Union([
-      Type.Literal("list"),
-      Type.Literal("status"),
-      Type.Literal("tail"),
-      Type.Literal("cancel"),
-    ]),
-    description: "Registry operation.",
-  },
-  jobId: Type.Optional(
-    Type.Number({ description: "Job id, required for status / tail / cancel." }),
-  ),
-  lines: Type.Optional(Type.Number({ description: "Tail line count. Defaults to 40." })),
-});
 
 // --- Extension ---
 
@@ -221,11 +154,11 @@ export default async function backgroundJobsExtension(pi: ExtensionAPI) {
       "Prefer the monitor tool over background when waiting for a CONDITION (CI going green, a file appearing, a log line) rather than a single command's exit.",
       "Command output is never auto-delivered: after a wake, read it with the jobs tool (action=tail).",
     ],
-    parameters: BackgroundParameters,
+    parameters: BACKGROUND_PARAMETERS,
     execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
       lastUi = ctx.ui;
       const command = String(params.command ?? "").trim();
-      if (!command) return err("command is required.");
+      if (!command) return err("command_required", "command is required.");
 
       let wakeOnPattern: RegExp | undefined;
       const patternRaw = params.wake_on_pattern ? String(params.wake_on_pattern) : undefined;
@@ -233,7 +166,10 @@ export default async function backgroundJobsExtension(pi: ExtensionAPI) {
         try {
           wakeOnPattern = new RegExp(patternRaw);
         } catch (error) {
-          return err(`Invalid wake_on_pattern regexp: ${(error as Error).message}`);
+          return err(
+            "invalid_pattern",
+            `Invalid wake_on_pattern regexp: ${(error as Error).message}`,
+          );
         }
       }
 
@@ -274,11 +210,11 @@ export default async function backgroundJobsExtension(pi: ExtensionAPI) {
       "Use monitor instead of hand-rolled sleep/poll loops (sleep N in bash, over and over). It is non-blocking and wakes you when the condition holds or the timeout fires.",
       "The wake never carries command output — read it with the jobs tool (action=tail) after the wake.",
     ],
-    parameters: MonitorParameters,
+    parameters: MONITOR_PARAMETERS,
     execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
       lastUi = ctx.ui;
       const command = String(params.command ?? "").trim();
-      if (!command) return err("command is required.");
+      if (!command) return err("command_required", "command is required.");
 
       const satisfyOn = params.satisfy_on as
         | "exit_zero"
@@ -288,14 +224,14 @@ export default async function backgroundJobsExtension(pi: ExtensionAPI) {
       const patternRaw = params.pattern ? String(params.pattern) : undefined;
 
       if ((satisfyOn === "stdout_matches" || satisfyOn === "stdout_not_matches") && !patternRaw) {
-        return err(`satisfy_on=${satisfyOn} requires a pattern.`);
+        return err("pattern_required", `satisfy_on=${satisfyOn} requires a pattern.`);
       }
       let pattern: RegExp | undefined;
       if (patternRaw) {
         try {
           pattern = new RegExp(patternRaw);
         } catch (error) {
-          return err(`Invalid pattern regexp: ${(error as Error).message}`);
+          return err("invalid_pattern", `Invalid pattern regexp: ${(error as Error).message}`);
         }
       }
 
@@ -345,7 +281,7 @@ export default async function backgroundJobsExtension(pi: ExtensionAPI) {
     description:
       "Manage background jobs and monitors: list them, inspect status, tail captured output, cancel a running job. Command output is never auto-delivered on wake — read it here on demand.",
     promptSnippet: "List / inspect / cancel background jobs and monitors",
-    parameters: JobsParameters,
+    parameters: JOBS_PARAMETERS,
     execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
       lastUi = ctx.ui;
       return executeJobsAction({
@@ -359,6 +295,10 @@ export default async function backgroundJobsExtension(pi: ExtensionAPI) {
   });
 }
 
-function err(text: string) {
-  return { content: [{ type: "text" as const, text }], isError: true };
+function err(code: string, text: string) {
+  return {
+    content: [{ type: "text" as const, text }],
+    details: { error: code },
+    terminate: true as const,
+  };
 }

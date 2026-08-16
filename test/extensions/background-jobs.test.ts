@@ -14,29 +14,6 @@ import { createMockPi } from "../mocks/pi-mocks.ts";
 const spawnMock = vi.hoisted(() => vi.fn());
 vi.mock("node:child_process", () => ({ spawn: spawnMock }));
 
-// The typebox peer dependency is not installed locally; stub the builders the
-// extension's schemas use (mirrors the ask-user test mock).
-vi.mock("typebox", () => ({
-  Type: {
-    Object: (properties: Record<string, unknown>) => ({ type: "object", properties }),
-    String: (options?: Record<string, unknown>) => ({ type: "string", ...options }),
-    Number: (options?: Record<string, unknown>) => ({ type: "number", ...options }),
-    Boolean: (options?: Record<string, unknown>) => ({ type: "boolean", ...options }),
-    Optional: (schema: Record<string, unknown>) => schema,
-    Record: (_keys: unknown, values: unknown, options?: Record<string, unknown>) => ({
-      type: "object",
-      additionalProperties: values,
-      ...options,
-    }),
-    Union: (variants: unknown[], options?: Record<string, unknown>) => ({
-      type: "union",
-      variants,
-      ...options,
-    }),
-    Literal: (value: unknown) => ({ type: "literal", value }),
-  },
-}));
-
 const agentDirRef = vi.hoisted(() => ({ dir: "/tmp/background-jobs-unset" }));
 vi.mock("@earendil-works/pi-coding-agent", () => ({
   getAgentDir: () => agentDirRef.dir,
@@ -115,6 +92,7 @@ describe("background-jobs-extension", () => {
         "monitor.ts",
         "registry.ts",
         "runner.ts",
+        "schemas.ts",
         "types.ts",
       ]);
     });
@@ -156,7 +134,7 @@ describe("background-jobs-extension", () => {
       const tool = getTool(mockPi, "background");
 
       const result = await tool.execute("call-1", {}, undefined, undefined, mockCtx);
-      expect(result.isError).toBe(true);
+      expect(result.terminate).toBe(true);
       expect(result.content[0].text).toContain("command is required");
     });
 
@@ -173,7 +151,7 @@ describe("background-jobs-extension", () => {
         undefined,
         mockCtx,
       );
-      expect(result.isError).toBe(true);
+      expect(result.terminate).toBe(true);
       expect(result.content[0].text).toContain("Invalid wake_on_pattern");
     });
 
@@ -350,7 +328,7 @@ describe("background-jobs-extension", () => {
       await backgroundJobsExtension(mockPi);
 
       const result = await startMonitor(mockPi, mockCtx, { satisfy_on: "exit_zero" });
-      expect(result.isError).toBe(true);
+      expect(result.terminate).toBe(true);
       expect(result.content[0].text).toContain("command is required");
     });
 
@@ -363,7 +341,7 @@ describe("background-jobs-extension", () => {
         command: "git status",
         satisfy_on: "stdout_matches",
       });
-      expect(result.isError).toBe(true);
+      expect(result.terminate).toBe(true);
       expect(result.content[0].text).toContain("pattern");
     });
 
@@ -377,7 +355,7 @@ describe("background-jobs-extension", () => {
         satisfy_on: "stdout_matches",
         pattern: "([bad",
       });
-      expect(result.isError).toBe(true);
+      expect(result.terminate).toBe(true);
       expect(result.content[0].text).toContain("Invalid pattern");
     });
 
@@ -508,7 +486,7 @@ describe("background-jobs-extension", () => {
         undefined,
         mockCtx,
       );
-      expect(result.isError).toBe(true);
+      expect(result.terminate).toBe(true);
       expect(result.content[0].text).toContain("Unknown action");
     });
 
@@ -544,7 +522,7 @@ describe("background-jobs-extension", () => {
         undefined,
         mockCtx,
       );
-      expect(result.isError).toBe(true);
+      expect(result.terminate).toBe(true);
       expect(result.content[0].text).toContain("No job #99");
     });
 
@@ -638,7 +616,7 @@ describe("background-jobs-extension", () => {
         undefined,
         mockCtx,
       );
-      expect(result.isError).toBe(true);
+      expect(result.terminate).toBe(true);
       expect(result.content[0].text).toContain("Unknown action");
       expect(mockCtx.ui.custom).not.toHaveBeenCalled();
     });
@@ -741,6 +719,89 @@ describe("background-jobs-extension", () => {
       component.handleInput("\u001b[27u");
 
       expect(done).toHaveBeenCalled();
+    });
+
+    it("limits the paged output body to the overlay height budget on short terminals", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await backgroundJobsExtension(mockPi);
+      const { child } = await startBackgroundJob(mockPi, mockCtx, { command: "npm test" });
+      child.stdout.emit(
+        "data",
+        Buffer.from(Array.from({ length: 100 }, (_, i) => `line ${i}\n`).join("")),
+      );
+      child.emit("exit", 0);
+
+      const factory = await openPanel(mockPi, mockCtx);
+      // 20-row terminal -> overlay maxHeight is 80% -> 16 rows total, so the
+      // frame body budget is 12 (after top/bottom border and padding rows).
+      const component = factory(
+        { requestRender: vi.fn(), terminal: { rows: 20 } },
+        mockCtx.ui.theme,
+        null,
+        vi.fn(),
+      );
+      component.handleInput("\r"); // page into the output view
+
+      const lines = component.render(80);
+      expect(lines.length).toBeLessThanOrEqual(16);
+      expect(lines[0]).toContain("\u256d"); // top border
+      expect(lines[lines.length - 1]).toContain("\u2570"); // bottom border never clipped
+      const text = lines.join("\n");
+      // Only the tail of the 100-line buffer is shown; the rest collapses to
+      // an indicator ("↑ N more lines") above it.
+      expect(text).toContain("line 99");
+      expect(text).toContain("more line");
+    });
+
+    it("fits paged output without truncation when the terminal is tall enough", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await backgroundJobsExtension(mockPi);
+      const { child } = await startBackgroundJob(mockPi, mockCtx, { command: "npm test" });
+      child.stdout.emit("data", Buffer.from("only one line of output\n"));
+      child.emit("exit", 0);
+
+      const factory = await openPanel(mockPi, mockCtx);
+      const component = factory(
+        { requestRender: vi.fn(), terminal: { rows: 60 } },
+        mockCtx.ui.theme,
+        null,
+        vi.fn(),
+      );
+      component.handleInput("\r");
+
+      const text = component.render(80).join("\n");
+      expect(text).toContain("only one line of output");
+      expect(text).not.toContain("more line");
+    });
+
+    it("truncates the job list to the height budget on very short terminals", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await backgroundJobsExtension(mockPi);
+      for (let i = 0; i < 20; i++) {
+        await startBackgroundJob(mockPi, mockCtx, { command: `job-${i}` });
+      }
+
+      const factory = await openPanel(mockPi, mockCtx);
+      const component = factory(
+        { requestRender: vi.fn(), terminal: { rows: 10 } },
+        mockCtx.ui.theme,
+        null,
+        vi.fn(),
+      );
+
+      // Initially the window shows the head of the list.
+      let text = component.render(80).join("\n");
+      expect(text).toContain("#1");
+      expect(text).not.toContain("#20");
+
+      // Navigate all the way down; the window must scroll so #20 is visible.
+      for (let i = 0; i < 25; i++) component.handleInput("j");
+      text = component.render(80).join("\n");
+      expect(text).toContain("#20");
+      expect(text).not.toContain('"job-0"'); // #1 scrolled off the top
     });
 
     it("exposes a focusable contract and requests re-render after input", async () => {
