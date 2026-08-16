@@ -1,14 +1,14 @@
 import type { AgentToolResult, Theme, ToolRenderContext, ToolRenderResultOptions } from "pi";
 import { createToolStatus, wrapToolText } from "../../../lib/tool-renderer.ts";
-import type { GrepAppSearchDetails, GrepAppSearchParams } from "./types.ts";
+import type { CodeSearchDetails, CodeSearchParams } from "./types.ts";
 
 const EXPANDED_PREVIEW_RESULT_LIMIT = 5;
 
-export function renderGrepAppResult(
-  result: AgentToolResult<GrepAppSearchDetails>,
+export function renderCodeSearchResult(
+  result: AgentToolResult<CodeSearchDetails>,
   options: ToolRenderResultOptions,
   theme: Theme,
-  context: ToolRenderContext<unknown, GrepAppSearchParams>,
+  context: ToolRenderContext<unknown, CodeSearchParams>,
 ) {
   const details = result.details;
   const args = context.args;
@@ -17,11 +17,11 @@ export function renderGrepAppResult(
 
   if (isError) {
     const errorText = result.content[0]?.type === "text" ? result.content[0].text : "";
-    return createToolStatus(theme, "error", `✗ Grep: "${query}" — ${errorText}`);
+    return createToolStatus(theme, "error", `✗ Code search: "${query}" — ${errorText}`);
   }
 
   if (options.isPartial) {
-    return createToolStatus(theme, "warning", `🔍 Grep: "${query}"...`);
+    return createToolStatus(theme, "warning", `🔍 Code search: "${query}"...`);
   }
 
   if (options.expanded) {
@@ -56,5 +56,5 @@ export function renderGrepAppResult(
       ? "no results"
       : `${totalResults.toLocaleString()} match${totalResults !== 1 ? "es" : ""} in ${repositoriesFound} repo${repositoriesFound !== 1 ? "s" : ""} (${resultsShown} shown)`;
 
-  return createToolStatus(theme, "success", `🔍 Grep: "${query}" — ${label}`);
+  return createToolStatus(theme, "success", `🔍 Code search: "${query}" — ${label}`);
 }
