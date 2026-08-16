@@ -475,6 +475,45 @@ describe("plan-extension", () => {
       expect(customOptions).toBeNull();
     });
 
+    it("sizes the prompt to the plan instead of filling the window", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await planExtension(mockPi);
+      await getCommandHandler(mockPi, "plan")("", mockCtx);
+
+      let rendered: string[] = [];
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      mockCtx.ui.custom = vi.fn((factory: any) => {
+        return new Promise((resolve) => {
+          const theme = { fg: (_color: string, text: string) => text };
+          const keybindings = {
+            matches: (data: string, id: string) => id === "tui.select.confirm" && data === "\r",
+          };
+          const component = factory(
+            { requestRender: vi.fn(), terminal: { rows: 40 } },
+            theme,
+            keybindings,
+            resolve,
+          );
+          rendered = component.render(80);
+          component.handleInput("\r");
+        });
+      });
+
+      await getTool(mockPi).execute(
+        "call-1",
+        { title: "T", steps: ["a", "b"] },
+        undefined,
+        undefined,
+        mockCtx,
+      );
+
+      // Content-sized: title + blank + "Steps:" + 2 steps + blank + hints =
+      // 7 body rows + 4 frame rows, nowhere near the 40-row terminal.
+      expect(rendered.length).toBeLessThanOrEqual(12);
+      expect(rendered.join("\n")).not.toContain("more line");
+    });
+
     it("clips a long plan to the terminal height with an overflow indicator", async () => {
       const mockPi = createMockPi();
       const mockCtx = createMockCommandContext();
@@ -509,9 +548,13 @@ describe("plan-extension", () => {
         mockCtx,
       );
 
-      // fixedBodyRows = max(6, rows - 6) = 6, plus 2 border + 2 padding rows.
+      // Title + blank + "Steps:" + 30 steps = 33 plan lines on a 12-row
+      // terminal: clipped to 3 + indicator, plus blank + hints and 4 frame
+      // rows. The hints stay pinned below the clip.
       expect(rendered.length).toBeLessThanOrEqual(10);
-      expect(rendered.join("\n")).toContain("more line");
+      const text = rendered.join("\n");
+      expect(text).toContain("more line");
+      expect(text).toContain("approve & execute");
     });
   });
 

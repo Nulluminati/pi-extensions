@@ -5,7 +5,7 @@
  */
 
 import type { ExtensionUIContext } from "pi";
-import { type ModalFrameOptions, renderModalFrame } from "../../../lib/tui-frame.ts";
+import { renderModalFrame } from "../../../lib/tui-frame.ts";
 import { formatStyledKeyHints } from "../../../lib/ui-format.ts";
 import { formatPlanText } from "./prompts.ts";
 import type { Plan } from "./types.ts";
@@ -13,10 +13,11 @@ import type { Plan } from "./types.ts";
 export type PlanApprovalChoice = "approve" | "cancel";
 
 /**
- * Shows the plan in a framed prompt. A long plan clips with a "↓ N more
- * lines" indicator instead of blowing past the terminal height. Resolves with
- * the user's choice, or undefined when the dialog cannot run (for example
- * RPC mode).
+ * Shows the plan in a framed prompt sized to its content. A plan that would
+ * push the frame plus hints past the terminal clips its steps with a
+ * "↓ N more lines" indicator; the hints stay pinned as the last line.
+ * Resolves with the user's choice, or undefined when the dialog cannot run
+ * (for example RPC mode).
  */
 export async function promptPlanApproval(
   ui: ExtensionUIContext,
@@ -26,23 +27,27 @@ export async function promptPlanApproval(
   const result = await ui.custom<PlanApprovalChoice>((tui, theme, keybindings, done) => {
     return {
       render(width: number) {
+        const hints = formatStyledKeyHints(theme, [
+          ["enter", "approve & execute"],
+          ["esc", "keep planning"],
+        ]);
+        // The frame adds 4 rows (borders + padding) and the blank + hints add
+        // 2; leave 2 more so the prompt never fills the window.
+        let planLines = body;
         const rows = tui?.terminal?.rows ?? 0;
-        const options: ModalFrameOptions = { title: "Approve plan?" };
         if (rows > 0) {
-          // Plan body plus blank line plus the hints line, capped to the
-          // terminal height minus frame borders and padding so the hints stay
-          // visible.
-          options.fixedBodyRows = Math.max(6, rows - 6);
+          const planBudget = Math.max(2, rows - 8);
+          if (planLines.length > planBudget) {
+            const hidden = planLines.length - planBudget + 1;
+            planLines = [
+              ...planLines.slice(0, planBudget - 1),
+              theme.fg("dim", `↓ ${hidden} more line${hidden === 1 ? "" : "s"}`),
+            ];
+          }
         }
-        const lines = [
-          ...body,
-          "",
-          formatStyledKeyHints(theme, [
-            ["enter", "approve & execute"],
-            ["esc", "keep planning"],
-          ]),
-        ];
-        return renderModalFrame(theme, width, lines, options);
+        return renderModalFrame(theme, width, [...planLines, "", hints], {
+          title: "Approve plan?",
+        });
       },
       invalidate() {},
       handleInput(data: string) {
