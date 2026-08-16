@@ -341,7 +341,7 @@ describe("todos-extension", () => {
 
       await getCommandHandler(mockPi, "todos")("", mockCtx);
 
-      expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("1. ✓ one"), "info");
+      expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("1. ☑ one"), "info");
     });
 
     it("/todos reports an empty list", async () => {

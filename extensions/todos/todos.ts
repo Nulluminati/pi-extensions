@@ -184,7 +184,7 @@ export default async function todosExtension(pi: ExtensionAPI) {
       }
       ctx.ui.notify(
         items
-          .map((item, index) => `${index + 1}. ${item.completed ? "✓" : "○"} ${item.text}`)
+          .map((item, index) => `${index + 1}. ${item.completed ? "☑" : "☐"} ${item.text}`)
           .join("\n"),
         "info",
       );
