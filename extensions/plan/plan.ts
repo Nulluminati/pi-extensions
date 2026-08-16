@@ -5,8 +5,9 @@
  * /plan (or Ctrl+Alt+P, or --plan at startup) enters plan mode: the edit and
  * write tools are removed and hard-blocked, bash is restricted to a read-only
  * allowlist, and a plan-context message tells the model to research and call
- * the plan_submit tool. plan_submit shows the proposed plan in an overlay and
- * lets the user approve it (execution begins) or keep planning. Approved
+ * the plan_submit tool. plan_submit shows the proposed plan in a prompt above
+ * the editor and lets the user approve it (execution begins) or keep
+ * planning. Approved
  * steps become the shared todo list (lib/todos.ts); the agent checks items
  * off with the todo tool, and the mode ends when every step is completed.
  */

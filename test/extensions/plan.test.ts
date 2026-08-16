@@ -438,6 +438,81 @@ describe("plan-extension", () => {
       expect(mockPi.sendUserMessage).not.toHaveBeenCalled();
       expect(mockCtx.ui.setStatus).toHaveBeenLastCalledWith("plan", undefined);
     });
+
+    it("prompts for approval in the editor slot, not an overlay", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await planExtension(mockPi);
+      await getCommandHandler(mockPi, "plan")("", mockCtx);
+
+      let customOptions: unknown = "unset";
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      mockCtx.ui.custom = vi.fn((factory: any, options: unknown) => {
+        customOptions = options ?? null;
+        return new Promise((resolve) => {
+          const theme = { fg: (_color: string, text: string) => text };
+          const keybindings = {
+            matches: (data: string, id: string) => id === "tui.select.confirm" && data === "\r",
+          };
+          const component = factory(
+            { requestRender: vi.fn(), terminal: { rows: 40 } },
+            theme,
+            keybindings,
+            resolve,
+          );
+          component.handleInput("\r");
+        });
+      });
+
+      await getTool(mockPi).execute(
+        "call-1",
+        { title: "T", steps: ["a"] },
+        undefined,
+        undefined,
+        mockCtx,
+      );
+
+      expect(customOptions).toBeNull();
+    });
+
+    it("clips a long plan to the terminal height with an overflow indicator", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await planExtension(mockPi);
+      await getCommandHandler(mockPi, "plan")("", mockCtx);
+
+      let rendered: string[] = [];
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      mockCtx.ui.custom = vi.fn((factory: any) => {
+        return new Promise((resolve) => {
+          const theme = { fg: (_color: string, text: string) => text };
+          const keybindings = {
+            matches: (data: string, id: string) => id === "tui.select.confirm" && data === "\r",
+          };
+          const component = factory(
+            { requestRender: vi.fn(), terminal: { rows: 12 } },
+            theme,
+            keybindings,
+            resolve,
+          );
+          rendered = component.render(80);
+          component.handleInput("\r");
+        });
+      });
+
+      const steps = Array.from({ length: 30 }, (_, i) => `step ${i + 1}`);
+      await getTool(mockPi).execute(
+        "call-1",
+        { title: "Big", steps },
+        undefined,
+        undefined,
+        mockCtx,
+      );
+
+      // fixedBodyRows = max(6, rows - 6) = 6, plus 2 border + 2 padding rows.
+      expect(rendered.length).toBeLessThanOrEqual(10);
+      expect(rendered.join("\n")).toContain("more line");
+    });
   });
 
   describe("completion", () => {
@@ -647,7 +722,7 @@ function getTodosChangedHandler(mockPi: any): (() => void) | undefined {
   return undefined;
 }
 
-/** Drives the approval overlay with a single key. */
+/** Drives the approval prompt with a single key. */
 // biome-ignore lint/suspicious/noExplicitAny: test mock
 function mockApproval(mockCtx: any, key: string) {
   // biome-ignore lint/suspicious/noExplicitAny: test mock
