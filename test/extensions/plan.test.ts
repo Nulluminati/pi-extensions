@@ -271,6 +271,26 @@ describe("plan-extension", () => {
       expect(result.messages).toHaveLength(1);
       expect(result.messages[0].content).toBe("hi");
     });
+
+    it("returns undefined when there is nothing to strip", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await planExtension(mockPi);
+
+      const contextHandler = getEventHandler(mockPi, "context");
+      const result = await contextHandler(
+        {
+          type: "context",
+          messages: [
+            { role: "user", content: "hi" },
+            { role: "assistant", content: "hello" },
+          ],
+        },
+        mockCtx,
+      );
+
+      expect(result).toBeUndefined();
+    });
   });
 
   describe("plan_submit tool", () => {

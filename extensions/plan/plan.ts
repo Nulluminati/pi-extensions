@@ -129,6 +129,23 @@ export default async function planExtension(pi: ExtensionAPI) {
     updateStatus(ctx);
   }
 
+  /** Toggle plan mode off when planning, on when off/executing. */
+  function togglePlanMode(ctx: ExtensionContext) {
+    if (state.mode === "plan") {
+      exitPlanMode(ctx);
+      ctx.ui.notify("Plan mode disabled. Full access restored.", "info");
+    } else {
+      const wasExecuting = state.mode === "executing";
+      enterPlanMode(ctx);
+      ctx.ui.notify(
+        wasExecuting
+          ? "Execution aborted. Plan mode enabled; file mutations are blocked."
+          : "Plan mode enabled. File mutations are blocked until a plan is approved.",
+        "info",
+      );
+    }
+  }
+
   // --- Tool gate: block mutations while planning ---
 
   pi.on("tool_call", async (event, _ctx) => {
@@ -179,8 +196,14 @@ export default async function planExtension(pi: ExtensionAPI) {
   });
 
   // Mode instructions are re-injected fresh every turn, so stale copies from
-  // earlier turns are dropped from context unconditionally.
+  // earlier turns are dropped from context unconditionally. Nothing to strip
+  // when the mode is off, so skip the allocation.
   pi.on("context", async (event) => {
+    const stales = event.messages.some(
+      (message: { customType?: string }) =>
+        message.customType === PLAN_CONTEXT_TYPE || message.customType === EXECUTION_CONTEXT_TYPE,
+    );
+    if (!stales) return undefined;
     return {
       messages: event.messages.filter((message: { customType?: string }) => {
         return (
@@ -329,19 +352,7 @@ export default async function planExtension(pi: ExtensionAPI) {
     description: "Toggle plan mode (read-only planning with approval gate)",
     handler: async (_args, ctx: ExtensionCommandContext) => {
       if (!ctx.hasUI) return;
-      if (state.mode === "plan") {
-        exitPlanMode(ctx);
-        ctx.ui.notify("Plan mode disabled. Full access restored.", "info");
-      } else {
-        const wasExecuting = state.mode === "executing";
-        enterPlanMode(ctx);
-        ctx.ui.notify(
-          wasExecuting
-            ? "Execution aborted. Plan mode enabled; file mutations are blocked."
-            : "Plan mode enabled. File mutations are blocked until a plan is approved.",
-          "info",
-        );
-      }
+      togglePlanMode(ctx);
     },
   });
 
@@ -376,19 +387,7 @@ export default async function planExtension(pi: ExtensionAPI) {
     description: "Toggle plan mode",
     handler: async (ctx: ExtensionContext) => {
       if (!ctx.hasUI) return;
-      if (state.mode === "plan") {
-        exitPlanMode(ctx);
-        ctx.ui.notify("Plan mode disabled. Full access restored.", "info");
-      } else {
-        const wasExecuting = state.mode === "executing";
-        enterPlanMode(ctx);
-        ctx.ui.notify(
-          wasExecuting
-            ? "Execution aborted. Plan mode enabled; file mutations are blocked."
-            : "Plan mode enabled. File mutations are blocked until a plan is approved.",
-          "info",
-        );
-      }
+      togglePlanMode(ctx);
     },
   });
 
