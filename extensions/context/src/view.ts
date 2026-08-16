@@ -3,7 +3,7 @@
  * style) and a plain-text variant used when there is no UI (print/json mode).
  */
 
-import type { ExtensionCommandContext, ExtensionUIContext } from "pi";
+import type { ExtensionCommandContext } from "pi";
 import {
   type ModalFrameOptions,
   modalContentWidth,
