@@ -164,28 +164,17 @@ function buildModalLines(theme: any, data: ContextBreakdown, width: number): str
   );
   lines.push(dim("Estimates use chars/4; the used total comes from the last provider usage."));
   lines.push("");
-  lines.push(formatStyledKeyHints(theme, [["esc", "close"]]));
+  lines.push(
+    formatStyledKeyHints(theme, [
+      ["esc", "close"],
+      ["q", "close"],
+    ]),
+  );
 
   return lines;
 }
 
 // --- Modal ---
-
-/**
- * Raw-byte fallbacks for environments without a keybindings manager (tests).
- * The keybinding manager path resolves every byte variant of Esc —
- * kitty-protocol CSI sequences (\u001b[27u), application-cursor codes, and
- * user rebindings — which raw-byte checks miss.
- */
-function matchesCancel(data: string, keybindings: any): boolean {
-  if (keybindings?.matches) {
-    // Method-call syntax keeps the manager as the receiver; extracting the
-    // function unbound throws inside the real manager (it reads its own
-    // internal key maps via `this`).
-    if (keybindings.matches(data, "tui.select.cancel")) return true;
-  }
-  return data === "\u001b" || data === "\u0003";
-}
 
 /**
  * Show the context breakdown in a framed modal. Closes on esc, enter, or q.
@@ -206,7 +195,11 @@ export async function showContextModal(
       },
       invalidate() {},
       handleInput(data: string) {
-        if (matchesCancel(data, keybindings) || data === "\r" || data.toLowerCase() === "q") {
+        if (
+          keybindings.matches(data, "tui.select.cancel") ||
+          data === "\r" ||
+          data.toLowerCase() === "q"
+        ) {
           done();
           return;
         }

@@ -58,6 +58,7 @@ afterEach(() => {
 });
 
 describe("context-extension", () => {
+  const NULL_KEYBINDINGS = { matches: () => false };
   it("registers the /context command with a descriptive help text", async () => {
     const pi = createMockPi();
 
@@ -67,6 +68,18 @@ describe("context-extension", () => {
     expect(name).toBe("context");
     expect(options.description).toContain("context window");
     expect(options.handler).toBeTypeOf("function");
+  });
+
+  it("registers a message renderer that hides stale context blocks from the transcript", async () => {
+    const pi = createMockPi();
+
+    await contextExtension(pi);
+
+    expect(pi.registerMessageRenderer).toHaveBeenCalledWith("context", expect.any(Function));
+    const renderer = pi.registerMessageRenderer.mock.calls.find(
+      (call: unknown[]) => call[0] === "context",
+    )?.[1] as () => undefined;
+    expect(renderer()).toBeUndefined();
   });
 
   describe("measureContext", () => {
@@ -240,7 +253,7 @@ describe("context-extension", () => {
             component = factory(
               { requestRender: vi.fn(), terminal: { rows: 40 } },
               ctx.ui.theme,
-              null,
+              NULL_KEYBINDINGS,
               resolve,
             );
           }),
@@ -260,7 +273,7 @@ describe("context-extension", () => {
       expect(lines).toContain("Largest messages");
       expect(lines).toContain("Session:");
 
-      component.handleInput("\u001b");
+      component.handleInput("\r");
       await done;
     });
 
@@ -277,7 +290,7 @@ describe("context-extension", () => {
             component = factory(
               { requestRender: vi.fn(), terminal: { rows: 40 } },
               ctx.ui.theme,
-              null,
+              NULL_KEYBINDINGS,
               resolve,
             );
           }),

@@ -43,4 +43,9 @@ export default async function contextExtension(pi: ExtensionAPI) {
       await showContextModal(ctx, breakdown);
     },
   });
+
+  // The /context breakdown is only meaningful in the moment it's requested.
+  // Hiding the custom message from the transcript UI keeps unavailable-UI
+  // print/json output from persisting as a large block on reload.
+  pi.registerMessageRenderer("context", () => undefined);
 }
