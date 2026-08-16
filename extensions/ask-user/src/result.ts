@@ -44,8 +44,7 @@ export function renderAskResult(
   theme: Theme,
 ): Component {
   const details = result.details;
-  if (!details)
-    return textComponent(result.content[0]?.type === "text" ? result.content[0].text : "");
+  if (!details) return textComponent(contentText(result));
 
   switch (details.status) {
     case "submitted":
@@ -58,6 +57,12 @@ export function renderAskResult(
       return textComponent(theme.fg("error", "Unavailable"));
     case "invalid":
       return textComponent(theme.fg("error", "Invalid question request"));
+    default:
+      // pi writes details: {} when schema validation rejects the call, and
+      // older sessions can carry statuses this version no longer emits.
+      // Returning undefined here would be pushed into the tool block's render
+      // box and crash the next render pass.
+      return textComponent(contentText(result));
   }
 }
 
@@ -69,6 +74,10 @@ export function renderAskCall(questions: AskUserQuestion[], theme: Theme): Compo
     `${count} question${count === 1 ? "" : "s"}`,
   )}${headers ? theme.fg("dim", ` · ${headers}`) : ""}`;
   return textComponent(text);
+}
+
+function contentText(result: AgentToolResult<AskUserDetails>): string {
+  return result.content[0]?.type === "text" ? result.content[0].text : "";
 }
 
 function textComponent(text: string): Component {

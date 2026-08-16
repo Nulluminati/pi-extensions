@@ -455,6 +455,42 @@ describe("ask-user-extension", () => {
     expect(result.render(80).join("\n")).toContain("Storage: Tool result details");
     expect(result.render(80).join("\n")).toContain("Features: Review tab; wrote: CSV export");
   });
+
+  it("renders a component for results with unrecognized details shapes", async () => {
+    const pi = createMockPi();
+    const ctx = createMockContext();
+    await askUserExtension(pi);
+    const tool = getTool(pi);
+
+    // pi writes details: {} when schema validation rejects the tool call.
+    const validationFailure = tool.renderResult(
+      {
+        content: [{ type: "text", text: 'Validation failed for tool "ask_user"' }],
+        details: {},
+      } as unknown as AgentToolResult<AskUserDetails>,
+      { expanded: false, isPartial: false },
+      ctx.ui.theme,
+      createRenderContext({ questions: QUESTIONS }),
+    );
+
+    expect(validationFailure).toBeDefined();
+    expect(validationFailure.render(80).join("\n")).toContain("Validation failed");
+
+    // Sessions from older extension versions can carry statuses this version no
+    // longer emits.
+    const unknownStatus = tool.renderResult(
+      {
+        content: [{ type: "text", text: "stale result text" }],
+        details: { version: 1, status: "expired", answers: [] },
+      } as unknown as AgentToolResult<AskUserDetails>,
+      { expanded: false, isPartial: false },
+      ctx.ui.theme,
+      createRenderContext({ questions: QUESTIONS }),
+    );
+
+    expect(unknownStatus).toBeDefined();
+    expect(unknownStatus.render(80).join("\n")).toContain("stale result text");
+  });
 });
 
 describe("ask-user schema and state", () => {
