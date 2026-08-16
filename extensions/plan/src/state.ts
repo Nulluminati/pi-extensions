@@ -14,14 +14,16 @@ interface CustomEntry {
   data?: unknown;
 }
 
-/** Returns the persisted plan-state entry, if any. */
+/** Returns the latest persisted plan-state entry, if any. Entries append
+ * chronologically, so the last match carries the newest state. */
 export function findPlanStateEntry(entries: unknown[]): CustomEntry | undefined {
+  let found: CustomEntry | undefined;
   for (const entry of entries as CustomEntry[]) {
     if (entry?.type === "custom" && entry.customType === ENTRY_TYPE) {
-      return entry;
+      found = entry;
     }
   }
-  return undefined;
+  return found;
 }
 
 function isValidPlan(value: unknown): value is Plan {
