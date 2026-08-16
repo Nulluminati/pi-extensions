@@ -15,6 +15,10 @@ import type {
 
 const SOURCEGRAPH_API_URL = "https://sourcegraph.com/.api/search/stream";
 const REQUEST_TIMEOUT_MS = 30_000;
+// Server-side search budget, kept below REQUEST_TIMEOUT_MS so zero-match
+// queries terminate the stream (budget + facet overhead) before the client
+// abort fires.
+const SEARCH_BUDGET_TERM = "timeout:15s";
 const USER_AGENT = "Mozilla/5.0 (compatible; pi-code-search/1.0)";
 const GITHUB_REPO_PREFIX = "github.com/";
 
@@ -44,6 +48,7 @@ export function buildSearchUrl(params: CodeSearchParams): string {
     terms.push(`file:${params.path.trim()}`);
   }
   terms.push(`count:${maxResults}`);
+  terms.push(SEARCH_BUDGET_TERM);
 
   const url = new URL(SOURCEGRAPH_API_URL);
   url.searchParams.set("q", terms.join(" "));

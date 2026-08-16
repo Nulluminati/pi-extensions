@@ -217,6 +217,9 @@ export async function executeCodeSearch(
     return result;
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
+    if (error instanceof Error && error.name === "AbortError") {
+      return errorResult(query, "Error: search timed out or was cancelled.", filters);
+    }
     return errorResult(query, `Error: ${message}`, filters);
   }
 }

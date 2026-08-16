@@ -159,6 +159,7 @@ describe("code-search-extension", () => {
       expect(q).toContain("repo:^github\\.com/vercel/next\\.js$");
       expect(q).toContain("file:src/");
       expect(q).toContain("count:10");
+      expect(q).toContain("timeout:15s");
       expect(url.searchParams.get("display")).toBe("10");
     });
 
@@ -327,6 +328,20 @@ describe("code-search-extension", () => {
       const result = await tool.execute("id-1", { query: "foo" }, undefined, undefined, {});
 
       expect(result.content[0].text).toContain("Connection refused");
+      expect(result.details.isError).toBe(true);
+    });
+
+    it("reports a readable message when the request aborts", async () => {
+      const abortError = new Error("This operation was aborted");
+      abortError.name = "AbortError";
+      mockFetch.mockRejectedValueOnce(abortError);
+
+      const mockPi = createMockPi();
+      await codeSearchExtension(mockPi);
+      const tool = getRegisteredTool(mockPi, "code_search");
+      const result = await tool.execute("id-1", { query: "foo" }, undefined, undefined, {});
+
+      expect(result.content[0].text).toContain("timed out or was cancelled");
       expect(result.details.isError).toBe(true);
     });
 
