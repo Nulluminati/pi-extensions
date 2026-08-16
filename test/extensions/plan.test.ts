@@ -549,12 +549,117 @@ describe("plan-extension", () => {
       );
 
       // Title + blank + "Steps:" + 30 steps = 33 plan lines on a 12-row
-      // terminal: clipped to 3 + indicator, plus blank + hints and 4 frame
-      // rows. The hints stay pinned below the clip.
+      // terminal: windowed to 4 lines (budget = 12 - 8), plus blank + hints
+      // and 4 frame rows. The hints stay pinned below the window.
       expect(rendered.length).toBeLessThanOrEqual(10);
       const text = rendered.join("\n");
       expect(text).toContain("more line");
       expect(text).toContain("approve & execute");
+    });
+
+    it("scrolls a long plan with j/k and the arrow keys, clamping at both ends", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await planExtension(mockPi);
+      await getCommandHandler(mockPi, "plan")("", mockCtx);
+
+      let component: any;
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      mockCtx.ui.custom = vi.fn((factory: any) => {
+        return new Promise((resolve) => {
+          const theme = { fg: (_color: string, text: string) => text };
+          const keybindings = {
+            matches: (data: string, id: string) => id === "tui.select.confirm" && data === "\r",
+          };
+          component = factory(
+            { requestRender: vi.fn(), terminal: { rows: 12 } },
+            theme,
+            keybindings,
+            resolve,
+          );
+        });
+      });
+
+      const steps = Array.from({ length: 30 }, (_, i) => `step ${i + 1}`);
+      const pending = getTool(mockPi).execute(
+        "call-1",
+        { title: "Big", steps },
+        undefined,
+        undefined,
+        mockCtx,
+      );
+      await Promise.resolve();
+
+      const renderText = () => component.render(80).join("\n");
+
+      // Initial window: no up indicator; scroll up at the top clamps.
+      expect(renderText()).toContain("↓ 29 more lines");
+      component.handleInput("k");
+      expect(renderText()).not.toContain("↑");
+
+      // One tick down reveals the up indicator and drains the down count.
+      component.handleInput("j");
+      expect(renderText()).toContain("↑ 1 more line");
+      expect(renderText()).toContain("↓ 28 more lines");
+
+      // Raw arrow bytes scroll the same way.
+      component.handleInput("\u001b[A");
+      expect(renderText()).toContain("↓ 29 more lines");
+      component.handleInput("\u001b[B");
+      expect(renderText()).toContain("↓ 28 more lines");
+
+      // Bottom clamps: the down indicator disappears entirely.
+      for (let i = 0; i < 50; i++) component.handleInput("j");
+      const bottom = renderText();
+      expect(bottom).toContain("↑ 29 more lines");
+      expect(bottom).not.toContain("↓");
+      expect(bottom).toContain("step 30");
+
+      // Enter still resolves after scrolling.
+      component.handleInput("\r");
+      const result = await pending;
+      expect(result.details).toMatchObject({ status: "approved" });
+    });
+
+    it("ignores scroll keys when the plan fits the terminal", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await planExtension(mockPi);
+      await getCommandHandler(mockPi, "plan")("", mockCtx);
+
+      let component: any;
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      mockCtx.ui.custom = vi.fn((factory: any) => {
+        return new Promise((resolve) => {
+          const theme = { fg: (_color: string, text: string) => text };
+          const keybindings = {
+            matches: (data: string, id: string) => id === "tui.select.confirm" && data === "\r",
+          };
+          component = factory(
+            { requestRender: vi.fn(), terminal: { rows: 40 } },
+            theme,
+            keybindings,
+            resolve,
+          );
+        });
+      });
+
+      const pending = getTool(mockPi).execute(
+        "call-1",
+        { title: "T", steps: ["a", "b"] },
+        undefined,
+        undefined,
+        mockCtx,
+      );
+      await Promise.resolve();
+
+      const before = component.render(80).join("\n");
+      component.handleInput("j");
+      component.handleInput("\u001b[B");
+      expect(component.render(80).join("\n")).toBe(before);
+
+      component.handleInput("\r");
+      await pending;
     });
   });
 
@@ -674,6 +779,58 @@ describe("plan-extension", () => {
       expect(mockPi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "plan_submit"]);
       // Plan mode clears the footer status; the mode lives on the input bar.
       expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("plan", undefined);
+    });
+
+    it("restores the latest persisted state when the branch holds older snapshots", async () => {
+      const mockPi = createMockPi();
+      mockPi.getActiveTools = vi.fn(() => ["read", "bash", "edit", "write"]);
+      const mockCtx = createMockCommandContext();
+      // Entered plan mode, later exited: the newest snapshot says off.
+      mockCtx.sessionManager.getBranch = vi.fn(() => [
+        {
+          type: "custom",
+          customType: "plan-state",
+          data: { state: { mode: "plan", plan: null, toolsBeforePlan: ["read"] } },
+        },
+        {
+          type: "custom",
+          customType: "plan-state",
+          data: { state: { mode: "off", plan: null } },
+        },
+      ]);
+      await planExtension(mockPi);
+
+      const sessionStart = getEventHandler(mockPi, "session_start");
+      await sessionStart({ type: "session_start", reason: "resume" }, mockCtx);
+
+      expect(mockPi.setActiveTools).not.toHaveBeenCalled();
+      expect(mockPi.events.emit).toHaveBeenCalledWith("plan:mode-change", { mode: "off" });
+    });
+
+    it("restores plan mode when it is the latest snapshot after an earlier off", async () => {
+      const mockPi = createMockPi();
+      mockPi.getActiveTools = vi.fn(() => ["read", "bash", "edit", "write"]);
+      const mockCtx = createMockCommandContext();
+      mockCtx.sessionManager.getBranch = vi.fn(() => [
+        {
+          type: "custom",
+          customType: "plan-state",
+          data: { state: { mode: "off", plan: null } },
+        },
+        {
+          type: "custom",
+          customType: "plan-state",
+          data: {
+            state: { mode: "plan", plan: null, toolsBeforePlan: ["read", "bash", "edit", "write"] },
+          },
+        },
+      ]);
+      await planExtension(mockPi);
+
+      const sessionStart = getEventHandler(mockPi, "session_start");
+      await sessionStart({ type: "session_start", reason: "resume" }, mockCtx);
+
+      expect(mockPi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "plan_submit"]);
     });
 
     it("reconstructs execution state and progress from the shared todo list", async () => {
