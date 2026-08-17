@@ -1,6 +1,5 @@
 /** Keys, tool sets, and entry/message types for the plan extension. */
 
-export const STATUS_KEY = "plan";
 export const ENTRY_TYPE = "plan-state";
 
 /** Custom messages injected per turn (filtered from context between turns). */

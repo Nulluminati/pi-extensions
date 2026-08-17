@@ -15,13 +15,7 @@
 // --- Imports ---
 
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "pi";
-import {
-  getTodoItems,
-  reconstructTodos,
-  setTodoItems,
-  TODOS_CHANGED_EVENT,
-} from "../../lib/todos.ts";
-import { formatStatusLine } from "../../lib/ui-format.ts";
+import { getTodoItems, reconstructTodos, setTodoItems } from "../../lib/todos.ts";
 import { promptPlanApproval } from "./src/approval.ts";
 import {
   ENTRY_TYPE,
@@ -31,7 +25,6 @@ import {
   PLAN_CONTEXT_TYPE,
   PLAN_MODE_EVENT,
   PLAN_SUBMIT_TOOL,
-  STATUS_KEY,
 } from "./src/constants.ts";
 import { buildPlanModeTools, isSafeBashCommand } from "./src/enforcement.ts";
 import {
@@ -47,8 +40,6 @@ import type { Plan, PlanState } from "./src/types.ts";
 
 export default async function planExtension(pi: ExtensionAPI) {
   let state: PlanState = { mode: "off", plan: null, toolsBeforePlan: undefined };
-  // Session-scoped UI context for status refreshes from the todos event bus.
-  let uiCtx: ExtensionContext | undefined;
 
   // --- State persistence ---
 
@@ -61,29 +52,6 @@ export default async function planExtension(pi: ExtensionAPI) {
   }
 
   // --- UI ---
-
-  function updateStatus(ctx: ExtensionContext | undefined) {
-    if (!ctx?.hasUI) return;
-    if (state.mode === "executing" && state.plan) {
-      const completed = completedStepCount(state.plan, getTodoItems(pi));
-      ctx.ui.setStatus(
-        STATUS_KEY,
-        formatStatusLine(ctx.ui.theme, {
-          icon: "📋",
-          prefix: "Plan",
-          text: `${completed}/${state.plan.steps.length}`,
-        }),
-      );
-    } else {
-      ctx.ui.setStatus(STATUS_KEY, undefined);
-    }
-  }
-
-  // The todo widget itself is owned by the todos extension; plan only keeps
-  // the compact progress status in sync when items change.
-  pi.events.on(TODOS_CHANGED_EVENT, () => {
-    updateStatus(uiCtx);
-  });
 
   // --- Tool set management ---
 
@@ -103,23 +71,21 @@ export default async function planExtension(pi: ExtensionAPI) {
 
   // --- Mode transitions ---
 
-  function enterPlanMode(ctx: ExtensionContext) {
+  function enterPlanMode() {
     state = { mode: "plan", plan: null, toolsBeforePlan: undefined };
     applyPlanModeTools();
     persistState();
     publishMode();
-    updateStatus(ctx);
   }
 
-  function exitPlanMode(ctx: ExtensionContext) {
+  function exitPlanMode() {
     restorePrePlanTools();
     state = { mode: "off", plan: null, toolsBeforePlan: undefined };
     persistState();
     publishMode();
-    updateStatus(ctx);
   }
 
-  function enterExecution(ctx: ExtensionContext, plan: Plan) {
+  function enterExecution(plan: Plan) {
     state = { ...state, mode: "executing", plan };
     restorePrePlanTools();
     // The approved steps become the shared todo list; the agent checks items
@@ -127,17 +93,16 @@ export default async function planExtension(pi: ExtensionAPI) {
     setTodoItems(pi, plan.steps);
     persistState();
     publishMode();
-    updateStatus(ctx);
   }
 
   /** Toggle plan mode off when planning, on when off/executing. */
   function togglePlanMode(ctx: ExtensionContext) {
     if (state.mode === "plan") {
-      exitPlanMode(ctx);
+      exitPlanMode();
       ctx.ui.notify("Plan mode disabled. Full access restored.", "info");
     } else {
       const wasExecuting = state.mode === "executing";
-      enterPlanMode(ctx);
+      enterPlanMode();
       ctx.ui.notify(
         wasExecuting
           ? "Execution aborted. Plan mode enabled; file mutations are blocked."
@@ -226,7 +191,7 @@ export default async function planExtension(pi: ExtensionAPI) {
       content: [{ type: "text", text: buildPlanCompleteMessage(plan) }],
       display: true,
     });
-    exitPlanMode(ctx);
+    exitPlanMode();
     ctx.ui.notify("Plan complete.", "info");
   });
 
@@ -304,7 +269,6 @@ export default async function planExtension(pi: ExtensionAPI) {
       };
       state = { ...state, plan };
       persistState();
-      updateStatus(ctx);
 
       if (!ctx.hasUI) {
         return {
@@ -322,7 +286,7 @@ export default async function planExtension(pi: ExtensionAPI) {
       const choice = await promptPlanApproval(ctx.ui, plan);
 
       if (choice === "approve") {
-        enterExecution(ctx, plan);
+        enterExecution(plan);
         pi.sendUserMessage(buildKickoffMessage(plan), { deliverAs: "followUp" });
         return {
           content: [{ type: "text", text: `Plan approved: ${plan.title}.` }],
@@ -411,7 +375,6 @@ export default async function planExtension(pi: ExtensionAPI) {
   }
 
   pi.on("session_start", async (_event, ctx) => {
-    uiCtx = ctx;
     state = reconstructState(ctx.sessionManager.getBranch()) ?? {
       mode: "off",
       plan: null,
@@ -427,11 +390,9 @@ export default async function planExtension(pi: ExtensionAPI) {
     reconstructTodos(pi, ctx.sessionManager.getBranch());
     applyRestoredToolState();
     publishMode();
-    updateStatus(ctx);
   });
 
   pi.on("session_tree", async (_event, ctx) => {
-    uiCtx = ctx;
     state = reconstructState(ctx.sessionManager.getBranch()) ?? {
       mode: "off",
       plan: null,
@@ -440,11 +401,9 @@ export default async function planExtension(pi: ExtensionAPI) {
     reconstructTodos(pi, ctx.sessionManager.getBranch());
     applyRestoredToolState();
     publishMode();
-    updateStatus(ctx);
   });
 
   pi.on("session_shutdown", async () => {
-    uiCtx = undefined;
     persistState();
   });
 }

@@ -5,6 +5,7 @@ import {
   getTodoItems,
   markTodoItems,
   reconstructTodos,
+  removeCompletedTodoItems,
   setTodoItems,
 } from "../../lib/todos.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
@@ -104,6 +105,35 @@ describe("todos store", () => {
     mockPi.appendEntry.mockClear();
     clearTodoItems(mockPi);
     expect(mockPi.appendEntry).not.toHaveBeenCalled();
+  });
+
+  it("removeCompletedTodoItems keeps open items and returns the removed count", () => {
+    const mockPi = createMockPi();
+    setTodoItems(mockPi, ["one", "two", "three"]);
+    markTodoItems(mockPi, [1, 3], true);
+    mockPi.appendEntry.mockClear();
+    mockPi.events.emit.mockClear();
+
+    expect(removeCompletedTodoItems(mockPi)).toBe(2);
+    expect(getTodoItems(mockPi)).toEqual([{ text: "two", completed: false }]);
+    expect(mockPi.appendEntry).toHaveBeenCalledWith("todos-state", {
+      items: [{ text: "two", completed: false }],
+    });
+    expect(mockPi.events.emit).toHaveBeenCalledWith("todos:changed", {
+      items: [{ text: "two", completed: false }],
+    });
+  });
+
+  it("removeCompletedTodoItems with nothing completed is a no-op", () => {
+    const mockPi = createMockPi();
+    setTodoItems(mockPi, ["one"]);
+    mockPi.appendEntry.mockClear();
+    mockPi.events.emit.mockClear();
+
+    expect(removeCompletedTodoItems(mockPi)).toBe(0);
+    expect(getTodoItems(mockPi)).toHaveLength(1);
+    expect(mockPi.appendEntry).not.toHaveBeenCalled();
+    expect(mockPi.events.emit).not.toHaveBeenCalled();
   });
 
   it("reconstructTodos restores the last persisted snapshot", () => {

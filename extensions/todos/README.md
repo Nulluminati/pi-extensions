@@ -11,9 +11,21 @@ The agent calls the `todo` tool to build a checklist, then ticks items off as it
 The agent drives the list through the tool; you inspect and manage it with commands:
 
 ```
-/todos            Show the current list
-/todos:clear      Empty the list
+/todos                 Show the list in a framed panel (c clears completed items)
+/todos:clear           Empty the list
+/todos:clear-completed Remove completed items, keeping open ones
 ```
+
+The panel uses the same frame and overlay treatment as the context view
+(70% width, centered) and lists every item with its 1-based number.
+
+### The widget
+
+While items exist, a framed box sits above the editor. It shows what's left
+to do: completed items are hidden (progress lives in the frame title, e.g.
+`2/5 done`) and at most three open items are displayed, with a `↓ N more`
+indicator for the rest. When everything is complete the finished items stay
+visible. `/todos:clear-completed` (or `c` inside the panel) tidies it up.
 
 ### The `todo` tool
 
@@ -34,7 +46,7 @@ Every result includes the current list so the agent can see its own progress. Th
 | `pi.registerTool("todo")` | The LLM-facing interface: add/check/uncheck/list/clear |
 | `lib/todos.ts` | Shared per-instance store: mutations, `appendEntry("todos-state")` persistence, `todos:changed` event publishing |
 | `pi.events.on("todos:changed")` | Re-render the widget after any mutation, including ones made by other extensions via the lib |
-| `pi.registerCommand("todos")` / `pi.registerCommand("todos:clear")` | User-facing list inspection and cleanup |
+| `pi.registerCommand("todos")` / `pi.registerCommand("todos:clear")` / `pi.registerCommand("todos:clear-completed")` | User-facing panel, full clear, and completed-only clear |
 | `pi.on("session_start")` / `pi.on("session_tree")` | Reconstruct the store from the last persisted snapshot |
 
 ## Configuration
@@ -43,6 +55,8 @@ None.
 
 ## Notes
 
-- **State is per session.** The list is stored in the session file and reconstructed on reload, resume, and tree navigation. `/todos:clear` (or the `clear` action) dismisses it.
+- **State is per session.** The list is stored in the session file and reconstructed on reload, resume, and tree navigation. `/todos:clear` (or the `clear` action) dismisses it; `/todos:clear-completed` keeps open items.
+- **Widget numbers vs tool numbers.** The widget hides completed items, so item numbering there would drift from the store. The tool's own results always carry the authoritative 1-based list; the panel shows those same numbers.
+- **Yields to the recap.** Pi stacks aboveEditor widgets in insertion order; when session-recap publishes `recap:changed`, this extension re-inserts its widget so the recap renders above the todo box.
 - **Plan integration.** The plan extension replaces the list with the approved plan's steps when execution starts; it leaves the finished list in place when the plan completes. Nothing here depends on plan — the list works standalone.
 - **One widget owner.** Only this extension renders the `todos` widget; other extensions mutate the list through `lib/todos.ts` and the widget follows via the event bus.

@@ -22,7 +22,10 @@ describe("todos-extension", () => {
       const sourceFiles = await readdir(resolve(extensionDir, "src"));
 
       expect(rootTypeScriptFiles).toEqual(["todos.ts"]);
-      expect(sourceFiles.filter((file) => file.endsWith(".ts"))).toHaveLength(1);
+      expect(sourceFiles.filter((file) => file.endsWith(".ts")).sort()).toEqual([
+        "panel.ts",
+        "widget.ts",
+      ]);
     });
   });
 
@@ -37,7 +40,7 @@ describe("todos-extension", () => {
       }),
     );
     const commands = mockPi.registerCommand.mock.calls.map((call: unknown[]) => call[0]);
-    expect(commands).toEqual(["todos", "todos:clear"]);
+    expect(commands).toEqual(["todos", "todos:clear", "todos:clear-completed"]);
     expect(mockPi.events.on).toHaveBeenCalledWith("todos:changed", expect.any(Function));
 
     const events = mockPi.on.mock.calls.map((call: unknown[]) => call[0]);
@@ -234,17 +237,29 @@ describe("todos-extension", () => {
   });
 
   describe("widget", () => {
-    it("renders the list above the editor after changes", async () => {
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
+    function renderLastWidget(mockCtx: any, width = 80): string[] {
+      const lastCall = mockCtx.ui.setWidget.mock.calls.at(-1) as unknown[];
+      const factory = lastCall[1] as
+        | ((
+            tui: unknown,
+            // biome-ignore lint/suspicious/noExplicitAny: test mock
+            theme: any,
+          ) => { render(w: number): string[] })
+        | undefined;
+      if (typeof factory !== "function") {
+        throw new Error(`expected a widget factory, got ${String(factory)}`);
+      }
+      return factory(undefined, mockCtx.ui.theme).render(width);
+    }
+
+    it("renders the list in a framed box with a progress label", async () => {
       const mockPi = createMockPi();
       const mockCtx = createMockCommandContext();
       await todosExtension(mockPi);
-      // session_start establishes the UI context for event-driven updates
       const sessionStart = getEventHandler(mockPi, "session_start");
       await sessionStart({ type: "session_start", reason: "startup" }, mockCtx);
-      // The mock event bus records without dispatching; drive the subscriber
-      // the same way real pi would after each mutation.
       const onChanged = getTodosChangedHandler(mockPi);
-      expect(onChanged).toBeDefined();
 
       const tool = getTool(mockPi);
       await tool.execute(
@@ -256,21 +271,91 @@ describe("todos-extension", () => {
       );
       onChanged?.();
 
-      expect(mockCtx.ui.setWidget).toHaveBeenLastCalledWith(
-        "todos",
-        expect.arrayContaining([
-          expect.stringContaining("☐"),
-          expect.stringContaining("one"),
-          expect.stringContaining("two"),
-        ]),
-      );
+      const lines = renderLastWidget(mockCtx);
+      expect(lines[0]?.startsWith("╭")).toBe(true);
+      expect(lines.at(-1)?.startsWith("╰")).toBe(true);
+      expect(lines.join("\n")).toContain("Todos");
+      expect(lines.join("\n")).toContain("0/2 done");
+      expect(lines.join("\n")).toContain("☐ one");
+      expect(lines.join("\n")).toContain("☐ two");
 
       await tool.execute("call-2", { action: "check", ids: [1] }, undefined, undefined, mockCtx);
       onChanged?.();
-      const lastCall = mockCtx.ui.setWidget.mock.calls.at(-1) as unknown[];
-      expect(lastCall[0]).toBe("todos");
-      expect((lastCall[1] as string[])[0]).toContain("☑");
-      expect((lastCall[1] as string[])[1]).toContain("☐");
+      expect(renderLastWidget(mockCtx).join("\n")).toContain("1/2 done");
+    });
+
+    it("hides completed items while open items remain", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await todosExtension(mockPi);
+      const sessionStart = getEventHandler(mockPi, "session_start");
+      await sessionStart({ type: "session_start", reason: "startup" }, mockCtx);
+      const onChanged = getTodosChangedHandler(mockPi);
+      const tool = getTool(mockPi);
+      await tool.execute(
+        "call-1",
+        { action: "add", items: ["one", "two", "three", "four"] },
+        undefined,
+        undefined,
+        mockCtx,
+      );
+      await tool.execute("call-2", { action: "check", ids: [1, 2] }, undefined, undefined, mockCtx);
+      onChanged?.();
+
+      const text = renderLastWidget(mockCtx).join("\n");
+      expect(text).toContain("2/4 done");
+      expect(text).not.toContain("☑ one");
+      expect(text).not.toContain("☑ two");
+      expect(text).toContain("☐ three");
+      expect(text).toContain("☐ four");
+    });
+
+    it("keeps finished items visible when everything is complete", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await todosExtension(mockPi);
+      const sessionStart = getEventHandler(mockPi, "session_start");
+      await sessionStart({ type: "session_start", reason: "startup" }, mockCtx);
+      const onChanged = getTodosChangedHandler(mockPi);
+      const tool = getTool(mockPi);
+      await tool.execute(
+        "call-1",
+        { action: "add", items: ["one", "two"] },
+        undefined,
+        undefined,
+        mockCtx,
+      );
+      await tool.execute("call-2", { action: "check", ids: [1, 2] }, undefined, undefined, mockCtx);
+      onChanged?.();
+
+      const text = renderLastWidget(mockCtx).join("\n");
+      expect(text).toContain("2/2 done");
+      expect(text).toContain("☑ one");
+      expect(text).toContain("☑ two");
+    });
+
+    it("truncates the list to three items with a more indicator", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await todosExtension(mockPi);
+      const sessionStart = getEventHandler(mockPi, "session_start");
+      await sessionStart({ type: "session_start", reason: "startup" }, mockCtx);
+      const onChanged = getTodosChangedHandler(mockPi);
+      const tool = getTool(mockPi);
+      await tool.execute(
+        "call-1",
+        { action: "add", items: ["one", "two", "three", "four", "five"] },
+        undefined,
+        undefined,
+        mockCtx,
+      );
+      onChanged?.();
+
+      const text = renderLastWidget(mockCtx).join("\n");
+      expect(text).toContain("☐ one");
+      expect(text).toContain("☐ three");
+      expect(text).not.toContain("four");
+      expect(text).toContain("↓ 2 more");
     });
 
     it("clears the widget when the list is emptied", async () => {
@@ -296,6 +381,32 @@ describe("todos-extension", () => {
       expect(mockCtx.ui.setWidget).toHaveBeenLastCalledWith("todos", undefined);
     });
 
+    it("re-inserts the widget when the recap widget changes so the recap stays on top", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await todosExtension(mockPi);
+      const sessionStart = getEventHandler(mockPi, "session_start");
+      await sessionStart({ type: "session_start", reason: "startup" }, mockCtx);
+      const onChanged = getTodosChangedHandler(mockPi);
+
+      const tool = getTool(mockPi);
+      await tool.execute(
+        "call-1",
+        { action: "add", items: ["one"] },
+        undefined,
+        undefined,
+        mockCtx,
+      );
+      onChanged?.();
+      mockCtx.ui.setWidget.mockClear();
+
+      const onRecapChanged = getEventHandler(mockPi.events, "recap:changed");
+      expect(onRecapChanged).toBeDefined();
+      onRecapChanged?.({ visible: true });
+
+      expect(mockCtx.ui.setWidget).toHaveBeenCalledWith("todos", expect.any(Function));
+    });
+
     it("reconstructs and renders persisted todos on session start", async () => {
       const mockPi = createMockPi();
       const mockCtx = createMockCommandContext();
@@ -317,41 +428,174 @@ describe("todos-extension", () => {
       await sessionStart({ type: "session_start", reason: "resume" }, mockCtx);
 
       expect(getTodoItems(mockPi).map((item) => item.text)).toEqual(["done task", "open task"]);
-      expect(mockCtx.ui.setWidget).toHaveBeenCalledWith(
-        "todos",
-        expect.arrayContaining([expect.stringContaining("☑"), expect.stringContaining("☐")]),
-      );
+      const text = renderLastWidget(mockCtx).join("\n");
+      expect(text).toContain("1/2 done");
+      expect(text).toContain("☐ open task");
     });
   });
 
   describe("commands", () => {
-    it("/todos shows the list", async () => {
+    const NULL_KEYBINDINGS = { matches: () => false };
+
+    it("/todos opens a framed panel listing every item", async () => {
       const mockPi = createMockPi();
       const mockCtx = createMockCommandContext();
       await todosExtension(mockPi);
       const tool = getTool(mockPi);
       await tool.execute(
         "call-1",
-        { action: "add", items: ["one"] },
+        { action: "add", items: ["done thing", "open thing"] },
         undefined,
         undefined,
         mockCtx,
       );
       await tool.execute("call-2", { action: "check", ids: [1] }, undefined, undefined, mockCtx);
 
-      await getCommandHandler(mockPi, "todos")("", mockCtx);
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      let component: any;
+      mockCtx.ui.custom = vi.fn(
+        // biome-ignore lint/suspicious/noExplicitAny: test mock
+        (factory: any) =>
+          new Promise<void>((resolve) => {
+            component = factory(
+              { requestRender: vi.fn(), terminal: { rows: 40 } },
+              mockCtx.ui.theme,
+              NULL_KEYBINDINGS,
+              resolve,
+            );
+          }),
+      );
 
-      expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("1. ☑ one"), "info");
+      const pending = getCommandHandler(mockPi, "todos")("", mockCtx);
+
+      expect(mockCtx.ui.custom).toHaveBeenCalledTimes(1);
+      expect(mockCtx.ui.custom).toHaveBeenCalledWith(expect.any(Function), {
+        overlay: true,
+        overlayOptions: { width: "70%", maxHeight: "80%", anchor: "center" },
+      });
+      const lines = component.render(80).join("\n");
+      expect(lines).toContain("Todos");
+      expect(lines).toContain("1/2 done");
+      expect(lines).toContain("1. ☑ done thing");
+      expect(lines).toContain("2. ☐ open thing");
+      expect(lines).toContain("c: clear done");
+
+      component.handleInput("\r");
+      await pending;
     });
 
-    it("/todos reports an empty list", async () => {
+    it("/todos panel renders an empty state", async () => {
       const mockPi = createMockPi();
       const mockCtx = createMockCommandContext();
       await todosExtension(mockPi);
 
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      let component: any;
+      mockCtx.ui.custom = vi.fn(
+        // biome-ignore lint/suspicious/noExplicitAny: test mock
+        (factory: any) =>
+          new Promise<void>((resolve) => {
+            component = factory(
+              { requestRender: vi.fn(), terminal: { rows: 40 } },
+              mockCtx.ui.theme,
+              NULL_KEYBINDINGS,
+              resolve,
+            );
+          }),
+      );
+
+      const pending = getCommandHandler(mockPi, "todos")("", mockCtx);
+
+      const lines = component.render(80).join("\n");
+      expect(lines).toContain("No items yet.");
+      expect(lines).not.toContain("0/0 done");
+
+      component.handleInput("\r");
+      await pending;
+    });
+
+    it("/todos panel `c` removes completed items and re-renders live", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await todosExtension(mockPi);
+      const tool = getTool(mockPi);
+      await tool.execute(
+        "call-1",
+        { action: "add", items: ["a", "b"] },
+        undefined,
+        undefined,
+        mockCtx,
+      );
+      await tool.execute("call-2", { action: "check", ids: [1] }, undefined, undefined, mockCtx);
+
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      let component: any;
+      mockCtx.ui.custom = vi.fn(
+        // biome-ignore lint/suspicious/noExplicitAny: test mock
+        (factory: any) =>
+          new Promise<void>((resolve) => {
+            component = factory(
+              { requestRender: vi.fn(), terminal: { rows: 40 } },
+              mockCtx.ui.theme,
+              NULL_KEYBINDINGS,
+              resolve,
+            );
+          }),
+      );
+      const pending = getCommandHandler(mockPi, "todos")("", mockCtx);
+
+      component.handleInput("c");
+
+      expect(getTodoItems(mockPi).map((item) => item.text)).toEqual(["b"]);
+      const after = component.render(80).join("\n");
+      expect(after).not.toContain("1. ☑ a");
+      expect(after).toContain("1. ☐ b");
+
+      component.handleInput("q");
+      await pending;
+    });
+
+    it("/todos panel closes on esc via the keybindings manager", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await todosExtension(mockPi);
+
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      let component: any;
+      const done = vi.fn();
+      mockCtx.ui.custom = vi.fn(
+        // biome-ignore lint/suspicious/noExplicitAny: test mock
+        (factory: any) =>
+          new Promise<void>(() => {
+            const keybindings = {
+              bindings: { "\u001b": ["tui.select.cancel"] } as Record<string, string[]>,
+              matches(data: string, keybinding: string) {
+                return (this.bindings[data] ?? []).includes(keybinding);
+              },
+            };
+            component = factory(
+              { requestRender: vi.fn(), terminal: { rows: 40 } },
+              mockCtx.ui.theme,
+              keybindings,
+              done,
+            );
+          }),
+      );
+
+      void getCommandHandler(mockPi, "todos")("", mockCtx);
+      component.handleInput("\u001b");
+      expect(done).toHaveBeenCalledTimes(1);
+    });
+
+    it("/todos does nothing without a UI", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      mockCtx.hasUI = false;
+      await todosExtension(mockPi);
+
       await getCommandHandler(mockPi, "todos")("", mockCtx);
 
-      expect(mockCtx.ui.notify).toHaveBeenCalledWith("Todo list is empty.", "info");
+      expect(mockCtx.ui.custom).not.toHaveBeenCalled();
     });
 
     it("/todos:clear empties the list", async () => {
@@ -371,6 +615,45 @@ describe("todos-extension", () => {
 
       expect(getTodoItems(mockPi)).toEqual([]);
       expect(mockCtx.ui.notify).toHaveBeenCalledWith("Todo list cleared.", "info");
+    });
+
+    it("/todos:clear-completed removes only completed items", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await todosExtension(mockPi);
+      const tool = getTool(mockPi);
+      await tool.execute(
+        "call-1",
+        { action: "add", items: ["one", "two", "three"] },
+        undefined,
+        undefined,
+        mockCtx,
+      );
+      await tool.execute("call-2", { action: "check", ids: [1, 3] }, undefined, undefined, mockCtx);
+
+      await getCommandHandler(mockPi, "todos:clear-completed")("", mockCtx);
+
+      expect(getTodoItems(mockPi).map((item) => item.text)).toEqual(["two"]);
+      expect(mockCtx.ui.notify).toHaveBeenCalledWith("Removed 2 completed item(s).", "info");
+    });
+
+    it("/todos:clear-completed reports when nothing is completed", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await todosExtension(mockPi);
+      const tool = getTool(mockPi);
+      await tool.execute(
+        "call-1",
+        { action: "add", items: ["one"] },
+        undefined,
+        undefined,
+        mockCtx,
+      );
+
+      await getCommandHandler(mockPi, "todos:clear-completed")("", mockCtx);
+
+      expect(getTodoItems(mockPi).map((item) => item.text)).toEqual(["one"]);
+      expect(mockCtx.ui.notify).toHaveBeenCalledWith("No completed items to remove.", "info");
     });
   });
 });

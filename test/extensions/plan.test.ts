@@ -74,9 +74,8 @@ describe("plan-extension", () => {
       await planHandler("", mockCtx);
 
       expect(mockPi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "plan_submit"]);
-      // Plan mode is signaled on the input bar (status-bar), so the footer
-      // status is cleared rather than showing a read-only label.
-      expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("plan", undefined);
+      // No footer status is published; plan mode is signaled on the input bar.
+      expect(mockCtx.ui.setStatus).not.toHaveBeenCalled();
       expect(mockPi.events.emit).toHaveBeenCalledWith("plan:mode-change", { mode: "plan" });
       expect(mockPi.appendEntry).toHaveBeenCalledWith(
         "plan-state",
@@ -97,12 +96,11 @@ describe("plan-extension", () => {
       const planHandler = getCommandHandler(mockPi, "plan");
       await planHandler("", mockCtx);
       mockPi.setActiveTools.mockClear();
-      mockCtx.ui.setStatus.mockClear();
 
       await planHandler("", mockCtx);
 
       expect(mockPi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "edit", "write", "grep"]);
-      expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("plan", undefined);
+      expect(mockCtx.ui.setStatus).not.toHaveBeenCalled();
       expect(mockPi.events.emit).toHaveBeenCalledWith("plan:mode-change", { mode: "off" });
       expect(mockPi.appendEntry).toHaveBeenLastCalledWith(
         "plan-state",
@@ -134,7 +132,6 @@ describe("plan-extension", () => {
         expect.stringContaining("Execution aborted"),
         "info",
       );
-      expect(mockCtx.ui.setStatus).toHaveBeenLastCalledWith("plan", undefined);
       expect(mockPi.appendEntry).toHaveBeenLastCalledWith(
         "plan-state",
         expect.objectContaining({ state: expect.objectContaining({ mode: "plan" }) }),
@@ -409,8 +406,8 @@ describe("plan-extension", () => {
       expect(mockPi.sendUserMessage).toHaveBeenCalledWith(expect.stringContaining("todo tool"), {
         deliverAs: "followUp",
       });
-      // Status shows progress 0/2
-      expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("plan", expect.stringContaining("0/2"));
+      // No footer status; progress lives in the todos widget.
+      expect(mockCtx.ui.setStatus).not.toHaveBeenCalled();
       expect(mockPi.events.emit).toHaveBeenCalledWith("plan:mode-change", { mode: "executing" });
       expect(mockPi.appendEntry).toHaveBeenLastCalledWith(
         "plan-state",
@@ -436,7 +433,6 @@ describe("plan-extension", () => {
       expect(result.details).toEqual({ status: "cancelled" });
       expect(result.terminate).toBe(true);
       expect(mockPi.sendUserMessage).not.toHaveBeenCalled();
-      expect(mockCtx.ui.setStatus).toHaveBeenLastCalledWith("plan", undefined);
     });
 
     it("prompts for approval in the editor slot, not an overlay", async () => {
@@ -689,7 +685,6 @@ describe("plan-extension", () => {
 
       markTodoItems(mockPi, [1, 2], true);
 
-      mockCtx.ui.setStatus.mockClear();
       const agentEnd = getEventHandler(mockPi, "agent_end");
       await agentEnd({ type: "agent_end", messages: [] }, mockCtx);
 
@@ -697,7 +692,6 @@ describe("plan-extension", () => {
         expect.objectContaining({ customType: "plan-complete", display: true }),
       );
       expect(mockCtx.ui.notify).toHaveBeenCalledWith("Plan complete.", "info");
-      expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("plan", undefined);
       expect(mockPi.appendEntry).toHaveBeenLastCalledWith(
         "plan-state",
         expect.objectContaining({ state: expect.objectContaining({ mode: "off" }) }),
@@ -712,15 +706,12 @@ describe("plan-extension", () => {
       await approvePlan(mockPi, mockCtx);
 
       markTodoItems(mockPi, [1], true);
-      // The mock event bus records without dispatching; drive the plan's
-      // todos:changed handler so the status line refreshes like in real pi.
-      getTodosChangedHandler(mockPi)?.();
 
       const agentEnd = getEventHandler(mockPi, "agent_end");
       await agentEnd({ type: "agent_end", messages: [] }, mockCtx);
 
       expect(mockPi.sendMessage).not.toHaveBeenCalled();
-      expect(mockCtx.ui.setStatus).toHaveBeenLastCalledWith("plan", expect.stringContaining("1/2"));
+      expect(mockCtx.ui.setStatus).not.toHaveBeenCalled();
     });
 
     it("agent_end completes when extra items beyond the plan steps exist", async () => {
@@ -777,8 +768,8 @@ describe("plan-extension", () => {
       await sessionStart({ type: "session_start", reason: "resume" }, mockCtx);
 
       expect(mockPi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "plan_submit"]);
-      // Plan mode clears the footer status; the mode lives on the input bar.
-      expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("plan", undefined);
+      // No footer status is published; the mode lives on the input bar.
+      expect(mockCtx.ui.setStatus).not.toHaveBeenCalled();
     });
 
     it("restores the latest persisted state when the branch holds older snapshots", async () => {
@@ -865,7 +856,7 @@ describe("plan-extension", () => {
       await sessionStart({ type: "session_start", reason: "resume" }, mockCtx);
 
       expect(mockPi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "edit", "write"]);
-      expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("plan", expect.stringContaining("1/2"));
+      expect(mockCtx.ui.setStatus).not.toHaveBeenCalled();
     });
 
     it("starts in plan mode when the --plan flag is set", async () => {
@@ -878,7 +869,7 @@ describe("plan-extension", () => {
       await sessionStart({ type: "session_start", reason: "startup" }, mockCtx);
 
       expect(mockPi.setActiveTools).toHaveBeenCalledWith(expect.arrayContaining(["plan_submit"]));
-      expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("plan", undefined);
+      expect(mockCtx.ui.setStatus).not.toHaveBeenCalled();
     });
 
     it("persists state on shutdown", async () => {
@@ -908,18 +899,6 @@ function getTool(mockPi: any): any {
     if (call[0].name === "plan_submit") return call[0];
   }
   throw new Error("plan_submit tool not found");
-}
-
-/** Plan's todos:changed subscriber, driven manually (mock events don't dispatch). */
-// biome-ignore lint/suspicious/noExplicitAny: test mock
-function getTodosChangedHandler(mockPi: any): (() => void) | undefined {
-  const calls = (mockPi.events.on as ReturnType<typeof vi.fn>).mock.calls;
-  for (const [event, handler] of calls) {
-    if (event === "todos:changed") {
-      return handler as () => void;
-    }
-  }
-  return undefined;
 }
 
 /** Drives the approval prompt with a single key. */

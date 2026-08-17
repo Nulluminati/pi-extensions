@@ -17,13 +17,21 @@ import {
   getTodoItems,
   markTodoItems,
   reconstructTodos,
+  removeCompletedTodoItems,
   TODOS_CHANGED_EVENT,
 } from "../../lib/todos.ts";
-import { buildWidgetLines } from "./src/widget.ts";
+import { showTodosPanel } from "./src/panel.ts";
+import { createTodosWidget } from "./src/widget.ts";
 
 // --- Constants ---
 
 const WIDGET_KEY = "todos";
+
+/** Wire name of the event session-recap publishes ("recap:changed") when its
+ * widget appears or clears. The todos widget re-inserts itself in response so
+ * pi renders it below the recap. Keep the literal in sync with
+ * extensions/session-recap/src/constants.ts. */
+const RECAP_CHANGED_EVENT = "recap:changed";
 
 // --- Extension ---
 
@@ -34,14 +42,16 @@ export default async function todosExtension(pi: ExtensionAPI) {
 
   function updateWidget(ctx: ExtensionContext | undefined) {
     if (!ctx?.hasUI) return;
-    const items = getTodoItems(pi);
-    ctx.ui.setWidget(
-      WIDGET_KEY,
-      items.length > 0 ? buildWidgetLines(ctx.ui.theme, items) : undefined,
-    );
+    ctx.ui.setWidget(WIDGET_KEY, getTodoItems(pi).length > 0 ? createTodosWidget(pi) : undefined);
   }
 
   pi.events.on(TODOS_CHANGED_EVENT, () => {
+    updateWidget(uiCtx);
+  });
+
+  // Re-insert after the recap widget so the recap renders above this box
+  // (pi stacks aboveEditor widgets in insertion order).
+  pi.events.on(RECAP_CHANGED_EVENT, () => {
     updateWidget(uiCtx);
   });
 
@@ -51,11 +61,11 @@ export default async function todosExtension(pi: ExtensionAPI) {
     name: "todo",
     label: "Todo",
     description:
-      "Maintain a todo list shown as a widget above the editor. Actions: add new items, check or uncheck items by 1-based number (matching the displayed list), list current items, or clear the list.",
+      "Maintain a todo list shown as a widget above the editor. Actions: add new items, check or uncheck items by 1-based number (matching the list returned by this tool), list current items, or clear the list.",
     promptSnippet: "Track multi-step work with a visible todo list",
     promptGuidelines: [
       "Use todo with action add to create a checklist for multi-step tasks so progress stays visible in the UI.",
-      "Use todo with action check to mark items complete as you finish them; item numbers are 1-based and match the displayed list.",
+      "Use todo with action check to mark items complete as you finish them; item numbers are 1-based and match the list returned by this tool.",
     ],
     parameters: {
       type: "object",
@@ -115,7 +125,7 @@ export default async function todosExtension(pi: ExtensionAPI) {
             content: [
               {
                 type: "text",
-                text: `No item numbers provided for action ${action}. Provide ids matching the displayed list.`,
+                text: `No item numbers provided for action ${action}. Provide ids matching the list returned by this tool.`,
               },
             ],
             details: { error: "no_ids" },
@@ -174,20 +184,10 @@ export default async function todosExtension(pi: ExtensionAPI) {
   // --- Commands ---
 
   pi.registerCommand("todos", {
-    description: "Show the current todo list",
+    description: "Show the current todo list in a panel",
     handler: async (_args, ctx: ExtensionCommandContext) => {
       if (!ctx.hasUI) return;
-      const items = getTodoItems(pi);
-      if (items.length === 0) {
-        ctx.ui.notify("Todo list is empty.", "info");
-        return;
-      }
-      ctx.ui.notify(
-        items
-          .map((item, index) => `${index + 1}. ${item.completed ? "☑" : "☐"} ${item.text}`)
-          .join("\n"),
-        "info",
-      );
+      await showTodosPanel(pi, ctx);
     },
   });
 
@@ -197,6 +197,18 @@ export default async function todosExtension(pi: ExtensionAPI) {
       if (!ctx.hasUI) return;
       clearTodoItems(pi);
       ctx.ui.notify("Todo list cleared.", "info");
+    },
+  });
+
+  pi.registerCommand("todos:clear-completed", {
+    description: "Remove completed items, keeping open ones",
+    handler: async (_args, ctx: ExtensionCommandContext) => {
+      if (!ctx.hasUI) return;
+      const removed = removeCompletedTodoItems(pi);
+      ctx.ui.notify(
+        removed > 0 ? `Removed ${removed} completed item(s).` : "No completed items to remove.",
+        "info",
+      );
     },
   });
 

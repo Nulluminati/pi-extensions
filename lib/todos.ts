@@ -112,6 +112,18 @@ export function clearTodoItems(pi: ExtensionAPI): void {
   publish(pi, store.items);
 }
 
+/** Removes completed items, keeping open ones. Returns how many were removed. */
+export function removeCompletedTodoItems(pi: ExtensionAPI): number {
+  const store = getStore(pi);
+  const remaining = store.items.filter((item) => !item.completed);
+  const removed = store.items.length - remaining.length;
+  if (removed === 0) return 0;
+  store.items = remaining;
+  persist(pi, store.items);
+  publish(pi, store.items);
+  return removed;
+}
+
 /**
  * Rebuilds the store from session entries (the last persisted snapshot wins,
  * matching how pi appends entries over time). Call from session_start and
