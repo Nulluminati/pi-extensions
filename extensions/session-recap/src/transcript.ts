@@ -11,6 +11,20 @@ function formatToolCallSummary(content: unknown): string[] {
   });
 }
 
+/**
+ * Id of the last message entry on the branch, or undefined when the branch
+ * has no messages. Custom entries (e.g. todos-state, goal-state) advance the
+ * session leaf but are not conversation content, so staleness checks compare
+ * message ids instead of leaf ids.
+ */
+export function lastMessageEntryId(entries: Entry[]): string | undefined {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i];
+    if (e && e.type === "message") return e.id;
+  }
+  return undefined;
+}
+
 export function buildRecentTranscript(entries: Entry[], fromLastUser = true): string {
   let slice = entries;
   if (fromLastUser) {

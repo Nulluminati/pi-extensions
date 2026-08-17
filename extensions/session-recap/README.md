@@ -16,7 +16,7 @@ This is inspired by Claude Code's session recap feature — it helps you quickly
 /recap
 ```
 
-Force-generates a recap of recent session activity right now.
+Force-generates a recap of recent session activity right now. A manual recap wins over automatic triggers: idle/focus generations yield to an in-flight `/recap` instead of aborting it. When there is nothing to recap yet, `/recap` says so instead of failing silently.
 
 ### Automatic recap
 
@@ -33,7 +33,7 @@ The extension generates recaps automatically in three scenarios:
 1. **Context extraction** — Reads the session branch and builds a text transcript from the last user message onward. Includes user text, assistant text, tool calls (with truncated arguments), and tool results.
 2. **Meaningful activity check** — Only generates a recap if the transcript contains at least 30 assistant words or 1+ tool call after the last user message. This prevents empty/empty-looking recaps.
 3. **LLM call** — Uses `completeSimple()` from `@earendil-works/pi-ai` with a dedicated system prompt ("You write terse, concrete session recaps for a coding agent UI."). The prompt instructs the model to produce exactly one line in the format: `recap: <what happened, past tense, concrete>. Next: <one-line next step>.`
-4. **Display** — The recap is shown via `ctx.ui.setWidget("session-recap", ...)` with `placement: "aboveEditor"`.
+4. **Display** — The recap is shown via `ctx.ui.setWidget("session-recap", ...)` with `placement: "aboveEditor"`, then a `recap:changed` event is published on the shared `pi.events` bus so sibling widgets (todos) can re-insert themselves below the recap.
 
 ### Focus reporting (DECSET ?1004)
 
@@ -77,7 +77,7 @@ All state is stored in a `WeakMap<ExtensionAPI, RecapState>` with the following 
 
 - **One-line format** — The recap is intentionally terse (~220 chars max). It's meant to orient you, not replace reading the scrollback.
 - **Widget, not notification** — The recap uses `setWidget()` with `placement: "aboveEditor"` so it's visible but unobtrusive. It clears automatically on the next user input.
-- **AbortController for LLM calls** — If a new recap request starts before the old one finishes, the old one is aborted. This prevents stale recaps from appearing.
+- **AbortController for LLM calls** — If a new recap request starts before the old one finishes, the old one is aborted. This prevents stale recaps from appearing. Exception: automatic triggers (idle, focus) never abort an in-flight `/recap` — slash commands run before the `input` event, so the idle timer can still be armed when `/recap` starts.
 - **`completeSimple()`** — Uses the simpler API instead of `complete()` because recaps don't need streaming, tool calls, or complex payload construction.
 - **Cache retention: "none"** — Recaps are ephemeral and should not be cached by the provider.
 - **Max tokens: 256** — Caps the LLM response to prevent long rambling recaps.
@@ -97,6 +97,7 @@ All state is stored in a `WeakMap<ExtensionAPI, RecapState>` with the following 
 | `pi.on("session_shutdown")` | Detaches focus reporting and clears state |
 | `pi.getFlag()` | Reads configuration flags at runtime |
 | `ctx.ui.setWidget()` | Displays/clears the recap widget |
+| `pi.events.emit("recap:changed")` | Notifies sibling widgets when the recap appears or clears (todos re-inserts itself so the recap renders on top) |
 | `ctx.ui.theme.fg()` | Styles the recap header with accent color |
 | `ctx.sessionManager.getBranch()` | Extracts conversation transcript |
 | `ctx.sessionManager.getLeafId()` | Detects branch navigation during generation |

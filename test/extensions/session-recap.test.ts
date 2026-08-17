@@ -309,6 +309,35 @@ describe("session-recap-extension", () => {
     expect(completeSimple).not.toHaveBeenCalled();
   });
 
+  it("publishes recap:changed on the event bus when the widget shows and clears", async () => {
+    const { completeSimple } = await import("@earendil-works/pi-ai");
+    vi.mocked(completeSimple).mockResolvedValueOnce({
+      content: [{ type: "text", text: "recap: did some work" }],
+    });
+
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
+    await sessionRecapExtension(mockPi);
+
+    const sessionStartHandler = getEventHandler(mockPi, "session_start");
+    await sessionStartHandler({ type: "session_start", reason: "new" }, mockCtx);
+
+    const turnEndHandler = getEventHandler(mockPi, "turn_end");
+    await turnEndHandler({ type: "turn_end", turnIndex: 1, message: {}, toolResults: [] }, mockCtx);
+
+    vi.advanceTimersByTime(46000);
+    await vi.waitFor(() =>
+      expect(mockPi.events.emit).toHaveBeenCalledWith("recap:changed", { visible: true }),
+    );
+
+    const inputHandler = getEventHandler(mockPi, "input");
+    await inputHandler({ type: "input", text: "hello", source: "interactive" }, mockCtx);
+
+    expect(mockPi.events.emit).toHaveBeenCalledWith("recap:changed", { visible: false });
+  });
+
   it("agent_start sets active state and clears recap", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
@@ -411,6 +440,144 @@ describe("session-recap-extension", () => {
     const component = factory!(null, theme) as { render: (w: number) => string[] };
     const lines = component.render(80);
     expect(lines.some((l: string) => l.includes("manual recap here"))).toBe(true);
+  });
+
+  it("idle recap firing mid-generation does not abort an in-flight /recap", async () => {
+    const { completeSimple } = await import("@earendil-works/pi-ai");
+    const { gated, release: releaseGeneration } = gateGeneration();
+    vi.mocked(completeSimple).mockImplementationOnce(() => gated);
+
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
+    await sessionRecapExtension(mockPi);
+
+    // Slash commands run before the input event, so the idle timer survives
+    // typing /recap and can fire while the manual recap is generating.
+    const recapDone = getCommandHandler(mockPi, "recap")("", mockCtx);
+    await vi.waitFor(() => expect(completeSimple).toHaveBeenCalledTimes(1));
+
+    const turnEndHandler = getEventHandler(mockPi, "turn_end");
+    await turnEndHandler({ type: "turn_end", turnIndex: 1, message: {}, toolResults: [] }, mockCtx);
+    vi.advanceTimersByTime(46000);
+
+    // The idle trigger must yield to the manual recap, not abort it
+    expect(completeSimple).toHaveBeenCalledTimes(1);
+
+    releaseGeneration({ content: [{ type: "text", text: "recap: manual wins" }] });
+    await recapDone;
+
+    expect(mockCtx.ui.setWidget).toHaveBeenCalledWith(
+      "session-recap",
+      expect.any(Function),
+      expect.objectContaining({ placement: "aboveEditor" }),
+    );
+  });
+
+  it("/recap with an empty transcript notifies instead of silently doing nothing", async () => {
+    const { completeSimple } = await import("@earendil-works/pi-ai");
+
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.sessionManager.getBranch = vi.fn(() => []);
+    await sessionRecapExtension(mockPi);
+
+    await getCommandHandler(mockPi, "recap")("", mockCtx);
+
+    expect(mockCtx.ui.notify).toHaveBeenCalledWith("Nothing to recap yet.", "info");
+    expect(completeSimple).not.toHaveBeenCalled();
+  });
+
+  it("/recap reports when generation returns no output", async () => {
+    const { completeSimple } = await import("@earendil-works/pi-ai");
+    vi.mocked(completeSimple).mockResolvedValueOnce({ content: [] });
+
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
+    await sessionRecapExtension(mockPi);
+
+    await getCommandHandler(mockPi, "recap")("", mockCtx);
+
+    await vi.waitFor(() => expect(completeSimple).toHaveBeenCalled());
+    expect(mockCtx.ui.notify).toHaveBeenCalledWith(
+      "Recap generation returned no output.",
+      "warning",
+    );
+    expect(mockCtx.ui.setWidget).not.toHaveBeenCalledWith(
+      "session-recap",
+      expect.any(Function),
+      expect.anything(),
+    );
+  });
+
+  it("/recap still shows when only a custom entry (e.g. todos-state) is appended during generation", async () => {
+    const { completeSimple } = await import("@earendil-works/pi-ai");
+    const { gated, release: releaseGeneration } = gateGeneration();
+    vi.mocked(completeSimple).mockImplementationOnce(() => gated);
+
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
+    await sessionRecapExtension(mockPi);
+
+    const recapDone = getCommandHandler(mockPi, "recap")("", mockCtx);
+    await vi.waitFor(() => expect(completeSimple).toHaveBeenCalled());
+
+    // Simulate the todo tool persisting state mid-generation: the leaf
+    // advances but no new conversation content appears.
+    mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-2");
+    mockCtx.sessionManager.getBranch = vi.fn(() => [
+      ...buildMeaningfulBranch(),
+      { type: "custom", customType: "todos-state", data: { items: [] } },
+    ]);
+
+    releaseGeneration({ content: [{ type: "text", text: "recap: not stale" }] });
+    await recapDone;
+
+    expect(mockCtx.ui.setWidget).toHaveBeenCalledWith(
+      "session-recap",
+      expect.any(Function),
+      expect.objectContaining({ placement: "aboveEditor" }),
+    );
+  });
+
+  it("/recap drops the recap when a new message lands during generation", async () => {
+    const { completeSimple } = await import("@earendil-works/pi-ai");
+    const { gated, release: releaseGeneration } = gateGeneration();
+    vi.mocked(completeSimple).mockImplementationOnce(() => gated);
+
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
+    await sessionRecapExtension(mockPi);
+
+    const recapDone = getCommandHandler(mockPi, "recap")("", mockCtx);
+    await vi.waitFor(() => expect(completeSimple).toHaveBeenCalled());
+
+    // A new user message means the conversation moved on; the recap is stale.
+    mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-2");
+    mockCtx.sessionManager.getBranch = vi.fn(() => [
+      ...buildMeaningfulBranch(),
+      {
+        type: "message",
+        id: "msg-3",
+        message: { role: "user", content: [{ type: "text", text: "new question" }] },
+      },
+    ]);
+
+    releaseGeneration({ content: [{ type: "text", text: "recap: stale" }] });
+    await recapDone;
+
+    expect(mockCtx.ui.setWidget).not.toHaveBeenCalledWith(
+      "session-recap",
+      expect.any(Function),
+      expect.anything(),
+    );
   });
 
   it("uses the global small model instead of the active model", async () => {
@@ -628,3 +795,14 @@ describe("session-recap-extension", () => {
     expect(lines[0]).toContain("recap"); // header
   });
 });
+
+function gateGeneration(): {
+  gated: Promise<{ content: Array<{ type: string; text: string }> }>;
+  release: (value: { content: Array<{ type: string; text: string }> }) => void;
+} {
+  let release!: (value: { content: Array<{ type: string; text: string }> }) => void;
+  const gated = new Promise<{ content: Array<{ type: string; text: string }> }>((resolve) => {
+    release = resolve;
+  });
+  return { gated, release };
+}

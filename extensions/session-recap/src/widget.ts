@@ -1,6 +1,6 @@
 import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { ExtensionAPI, ExtensionContext } from "pi";
-import { AUTO_DISMISS_MS, WIDGET_KEY } from "./constants.ts";
+import { AUTO_DISMISS_MS, RECAP_CHANGED_EVENT, WIDGET_KEY } from "./constants.ts";
 import { getState } from "./state.ts";
 
 export function showRecap(pi: ExtensionAPI, ctx: ExtensionContext, recap: string) {
@@ -38,6 +38,7 @@ export function showRecap(pi: ExtensionAPI, ctx: ExtensionContext, recap: string
     },
     { placement: "aboveEditor" },
   );
+  pi.events.emit(RECAP_CHANGED_EVENT, { visible: true });
 
   // Auto-dismiss after timeout
   state.autoDismissTimer = setTimeout(() => {
@@ -54,4 +55,5 @@ export function clearRecap(pi: ExtensionAPI, ctx: ExtensionContext) {
     state.autoDismissTimer = undefined;
   }
   ctx.ui.setWidget(WIDGET_KEY, undefined);
+  pi.events.emit(RECAP_CHANGED_EVENT, { visible: false });
 }

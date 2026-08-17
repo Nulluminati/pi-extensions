@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "pi";
 import { DEFAULT_FOCUS_MIN_SECONDS, DEFAULT_IDLE_SECONDS } from "./constants.ts";
 import { generateRecap } from "./generate.ts";
 import { getState } from "./state.ts";
-import { buildRecentTranscript, hasMeaningfulActivity } from "./transcript.ts";
+import { buildRecentTranscript, hasMeaningfulActivity, lastMessageEntryId } from "./transcript.ts";
 import type { Entry, RecapReason } from "./types.ts";
 import { showRecap } from "./widget.ts";
 
@@ -74,12 +74,20 @@ export async function generateAndShow(
   if (!hasMeaningfulActivity(entries) && opts.reason !== "manual") return;
 
   const transcript = buildRecentTranscript(entries, opts.reason !== "resume");
-  if (!transcript.trim()) return;
+  if (!transcript.trim()) {
+    if (opts.reason === "manual" && ctx.hasUI) {
+      ctx.ui.notify("Nothing to recap yet.", "info");
+    }
+    return;
+  }
 
-  const startLeaf = ctx.sessionManager.getLeafId();
+  const startLastMessageId = lastMessageEntryId(ctx.sessionManager.getBranch() as Entry[]);
 
-  // Cancel any prior request
+  // Manual intent wins: slash commands execute before the input event, so an
+  // automatic trigger (idle timer, focus) can fire while a /recap generation
+  // is in flight. Automatic triggers yield instead of aborting it.
   if (state.activeController) {
+    if (opts.reason !== "manual" && state.activeReason === "manual") return;
     state.activeController.abort();
     state.activeController = undefined;
     state.activeReason = undefined;
@@ -91,10 +99,16 @@ export async function generateAndShow(
 
   try {
     const recap = await generateRecap(transcript, ctx, controller.signal);
-    if (!recap || controller.signal.aborted) return;
-    if (ctx.sessionManager.getLeafId() !== startLeaf) return;
+    if (!recap || controller.signal.aborted) {
+      if (!recap && !controller.signal.aborted && opts.reason === "manual" && ctx.hasUI) {
+        ctx.ui.notify("Recap generation returned no output.", "warning");
+      }
+      return;
+    }
+    if (lastMessageEntryId(ctx.sessionManager.getBranch() as Entry[]) !== startLastMessageId)
+      return;
 
-    state.lastDraftedLeafId = startLeaf;
+    state.lastDraftedLeafId = ctx.sessionManager.getLeafId();
     if (state.idleTimer) {
       clearTimeout(state.idleTimer);
       state.idleTimer = undefined;
