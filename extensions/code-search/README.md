@@ -46,7 +46,7 @@ Results are grouped by repository, ranked by match count, and include the matchi
 
 1. **Validation** — Empty queries and oversize parameters are rejected with structured error results. The `max_results` value is clamped to 1–50 (default 10).
 2. **URL build** — The query plus any active filters are compiled into a single Sourcegraph query string: `context:global <query> lang:<language> repo:^github\.com/<owner/repo>$ file:<path> count:<N>`, with `display=<N>` as a URL parameter.
-3. **Fetch** — A 30-second timeout aborts the request if the API is slow. The caller signal is wired into the same abort controller.
+3. **Fetch** — A 60-second timeout aborts the request if the API is slow. The caller signal is wired into the same abort controller.
 4. **Stream parse** — Sourcegraph answers with server-sent events. The client reads the full body once the stream terminates (`done`) and parses `matches`, `filters`, `progress`, and `error` events in one pass. Stream-level errors surface as readable tool errors.
 5. **Normalize** — Each match's `repository` (`github.com/owner/repo`) is stripped to `owner/repo`; `lineMatches` provide both the line numbers and the snippet text; the API's `language` field tags fenced code blocks.
 6. **Group and rank** — Matches are grouped by repository; the result list is sorted by total match count, descending.

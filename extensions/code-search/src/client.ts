@@ -1,9 +1,8 @@
 // Sourcegraph public search API client.
 //
 // Sourcegraph's anonymous stream endpoint answers SSE events: `matches`,
-// `filters`, `progress`, `error`, and `done`. The full body is read as text
-// once the server closes the stream (it always terminates with `done` after
-// `count:` results are collected), then parsed in one pass.
+// `filters`, `progress`, `error`, and `done`. The body is read incrementally
+// and parsing begins as soon as the terminal `done` event arrives.
 
 import { DEFAULT_MAX_RESULTS } from "./constants.ts";
 import type {
@@ -14,11 +13,12 @@ import type {
 } from "./types.ts";
 
 const SOURCEGRAPH_API_URL = "https://sourcegraph.com/.api/search/stream";
-const REQUEST_TIMEOUT_MS = 30_000;
-// Server-side search budget, kept below REQUEST_TIMEOUT_MS so zero-match
-// queries terminate the stream (budget + facet overhead) before the client
-// abort fires.
+// Server-side search budget. Soft — zero-match queries have been observed to
+// run 18-51s with it (vs 64-108s without) — so the client backstop must sit
+// above that range.
 const SEARCH_BUDGET_TERM = "timeout:15s";
+// Client backstop, sized to cover the observed worst case of the soft budget.
+const REQUEST_TIMEOUT_MS = 60_000;
 const USER_AGENT = "Mozilla/5.0 (compatible; pi-code-search/1.0)";
 const GITHUB_REPO_PREFIX = "github.com/";
 
@@ -130,6 +130,37 @@ export function parseSearchStream(raw: string): SourcegraphStreamData {
 
 // --- Fetch ---
 
+/**
+ * Reads the SSE body incrementally and stops as soon as the terminal `done`
+ * event arrives. Waiting for body EOF hangs on Bun, whose response.text()
+ * never resolves for this stream even after the server finishes sending.
+ */
+async function readStreamUntilDone(response: Response): Promise<string> {
+  const body = response.body;
+  if (!body) {
+    return response.text();
+  }
+
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let raw = "";
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      raw += decoder.decode(value, { stream: true });
+      // The event name may straddle a chunk boundary, so inspect the recent tail.
+      if (raw.slice(-1024).includes("event: done")) break;
+    }
+  } finally {
+    // Release the connection; the server may keep it open after `done`.
+    await reader.cancel().catch(() => {});
+  }
+
+  return raw;
+}
+
 export async function fetchSourcegraphSearch(
   url: string,
   signal: AbortSignal | undefined,
@@ -161,7 +192,7 @@ export async function fetchSourcegraphSearch(
       throw new Error(`Sourcegraph API error (${response.status}): ${response.statusText}`);
     }
 
-    const raw = await response.text();
+    const raw = await readStreamUntilDone(response);
     return parseSearchStream(raw);
   } finally {
     clearTimeout(timeout);

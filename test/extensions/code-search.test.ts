@@ -345,6 +345,37 @@ describe("code-search-extension", () => {
       expect(result.details.isError).toBe(true);
     });
 
+    it("resolves from stream chunks without waiting for body EOF", async () => {
+      // Regression: Bun's response.text() never resolves on Sourcegraph's SSE
+      // stream even after the server finishes sending. The client must stop
+      // reading once the `done` event arrives, even if the body never ends.
+      const chunks = [
+        new TextEncoder().encode(sseEvent("matches", [createMatch({ path: "a.ts" })])),
+        new TextEncoder().encode(sseEvent("progress", { done: true, matchCount: 1 })),
+        new TextEncoder().encode(sseEvent("done", {})),
+      ];
+      const neverEndingBody = new ReadableStream<Uint8Array>({
+        start(controller) {
+          for (const chunk of chunks) controller.enqueue(chunk);
+          // Deliberately never call controller.close().
+        },
+      });
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: neverEndingBody,
+        text: () => new Promise<string>(() => {}),
+      });
+
+      const mockPi = createMockPi();
+      await codeSearchExtension(mockPi);
+      const tool = getRegisteredTool(mockPi, "code_search");
+      const result = await tool.execute("id-1", { query: "foo" }, undefined, undefined, {});
+
+      expect(result.details.isError).toBeFalsy();
+      expect(result.details.resultsShown).toBe(1);
+    });
+
     it("handles invalid response payloads", async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
