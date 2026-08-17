@@ -127,7 +127,7 @@ describe("voice-extension", () => {
       expect(handleInput).toHaveBeenCalledWith(" ");
     });
 
-    it("passes a tapped Space through when key-release reporting is unavailable", () => {
+    it("commits a single Space shortly after press when key-release reporting is unavailable", () => {
       vi.useFakeTimers();
       const handleInput = vi.fn();
       const editor = addHoldToVoice({ handleInput }, vi.fn(), {
@@ -138,12 +138,15 @@ describe("voice-extension", () => {
       });
 
       editor.handleInput(" ");
-      vi.advanceTimersByTime(1000);
+      expect(handleInput).not.toHaveBeenCalled(); // buffered: a hold must not type text
+      vi.advanceTimersByTime(399);
+      expect(handleInput).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
 
       expect(handleInput).toHaveBeenCalledWith(" ");
     });
 
-    it("opens voice from slow remote-session Space auto-repeat", () => {
+    it("opens voice from Space auto-repeat without key-release reporting", () => {
       vi.useFakeTimers();
       const handleInput = vi.fn();
       const onHold = vi.fn();
@@ -154,10 +157,11 @@ describe("voice-extension", () => {
         isRepeat: () => false,
       });
 
+      // A repeat arriving within the buffering window is a hold candidate.
       editor.handleInput(" ");
-      vi.advanceTimersByTime(800);
+      vi.advanceTimersByTime(300);
       editor.handleInput(" ");
-      vi.advanceTimersByTime(200);
+      vi.advanceTimersByTime(700);
 
       expect(onHold).toHaveBeenCalledTimes(1);
     });
@@ -174,8 +178,7 @@ describe("voice-extension", () => {
       });
 
       editor.handleInput(" ");
-      vi.advanceTimersByTime(500);
-      for (let elapsed = 500; elapsed < 1000; elapsed += 100) {
+      for (let elapsed = 100; elapsed <= 1000; elapsed += 100) {
         editor.handleInput(" ");
         vi.advanceTimersByTime(100);
       }
@@ -201,8 +204,8 @@ describe("voice-extension", () => {
 
       const hold = (): void => {
         editor.handleInput(" ");
-        vi.advanceTimersByTime(500);
-        for (let elapsed = 500; elapsed < 1000; elapsed += 100) {
+        vi.advanceTimersByTime(100);
+        for (let elapsed = 100; elapsed < 1000; elapsed += 100) {
           editor.handleInput(" ");
           vi.advanceTimersByTime(100);
         }
@@ -223,6 +226,139 @@ describe("voice-extension", () => {
       suppressed = false;
       hold();
       expect(onHold).toHaveBeenCalledTimes(2);
+    });
+
+    it("cancels an armed hold when another key is typed before release", () => {
+      vi.useFakeTimers();
+      const handleInput = vi.fn();
+      const onHold = vi.fn();
+      const editor = addHoldToVoice({ handleInput }, onHold, {
+        isSupported: () => true,
+        isSpace: (data) => data === "space-press" || data === "space-release",
+        isRelease: (data) => data.endsWith("-release"),
+        isRepeat: () => false,
+      });
+
+      editor.handleInput("space-press");
+      vi.advanceTimersByTime(500);
+      editor.handleInput("a-press");
+      vi.advanceTimersByTime(600);
+
+      expect(onHold).not.toHaveBeenCalled();
+      expect(handleInput).toHaveBeenCalledWith("a-press");
+    });
+
+    it("does not fire when Space was already released before the deadline", () => {
+      vi.useFakeTimers();
+      let keyDown = true;
+      const handleInput = vi.fn();
+      const onHold = vi.fn();
+      const editor = addHoldToVoice({ handleInput }, onHold, {
+        isSupported: () => true,
+        isSpace: (data) => data === "space-press" || data === "space-release",
+        isRelease: (data) => data === "space-release",
+        isRepeat: () => false,
+        isKeyDown: () => keyDown,
+      });
+
+      editor.handleInput("space-press");
+      keyDown = false; // release event was never delivered to the editor
+      vi.advanceTimersByTime(1000);
+
+      expect(onHold).not.toHaveBeenCalled();
+    });
+
+    it("does not arm during cooldown and forwards Space as normal text", () => {
+      vi.useFakeTimers();
+      let canArm = false;
+      const handleInput = vi.fn();
+      const onHold = vi.fn();
+      const editor = addHoldToVoice({ handleInput }, onHold, {
+        isSupported: () => true,
+        isSpace: (data) => data === "space-press" || data === "space-release",
+        isRelease: (data) => data === "space-release",
+        isRepeat: () => false,
+        canArm: () => canArm,
+      });
+
+      editor.handleInput("space-press");
+      vi.advanceTimersByTime(1000);
+      editor.handleInput("space-release");
+
+      expect(onHold).not.toHaveBeenCalled();
+      expect(handleInput).toHaveBeenCalledWith(" ");
+
+      canArm = true;
+      editor.handleInput("space-press");
+      vi.advanceTimersByTime(1000);
+      expect(onHold).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not count Space as a hold while cooldown is active", () => {
+      vi.useFakeTimers();
+      const canArm = false;
+      const handleInput = vi.fn();
+      const onHold = vi.fn();
+      const editor = addHoldToVoice({ handleInput }, onHold, {
+        isSupported: () => false,
+        isSpace: (data) => data === " ",
+        isRelease: () => false,
+        isRepeat: () => false,
+        canArm: () => canArm,
+      });
+
+      editor.handleInput(" ");
+      vi.advanceTimersByTime(100);
+      editor.handleInput(" ");
+      vi.advanceTimersByTime(1000);
+
+      expect(onHold).not.toHaveBeenCalled();
+      expect(handleInput).toHaveBeenNthCalledWith(1, " ");
+      expect(handleInput).toHaveBeenNthCalledWith(2, " ");
+    });
+
+    it("commits both spaces of a fast double Space when typing continues", () => {
+      vi.useFakeTimers();
+      const handleInput = vi.fn();
+      const onHold = vi.fn();
+      const editor = addHoldToVoice({ handleInput }, onHold, {
+        isSupported: () => false,
+        isSpace: (data) => data === " ",
+        isRelease: () => false,
+        isRepeat: () => false,
+      });
+
+      editor.handleInput(" ");
+      vi.advanceTimersByTime(150);
+      editor.handleInput(" "); // looks like a repeat: buffered as hold candidate
+      vi.advanceTimersByTime(100);
+      editor.handleInput("a"); // typing resumes: commit buffered spaces, then the letter
+
+      expect(handleInput.mock.calls.map((c) => c[0])).toEqual([" ", " ", "a"]);
+      expect(onHold).not.toHaveBeenCalled();
+    });
+
+    it("fires a hold without inserting or deleting editor text", () => {
+      vi.useFakeTimers();
+      const handleInput = vi.fn();
+      const onHold = vi.fn();
+      const editor = addHoldToVoice({ handleInput }, onHold, {
+        isSupported: () => false,
+        isSpace: (data) => data === " ",
+        isRelease: () => false,
+        isRepeat: () => false,
+      });
+
+      editor.handleInput(" ");
+      vi.advanceTimersByTime(100);
+      editor.handleInput(" ");
+      vi.advanceTimersByTime(100);
+      editor.handleInput(" ");
+      vi.advanceTimersByTime(800);
+
+      expect(onHold).toHaveBeenCalledTimes(1);
+      expect(handleInput).not.toHaveBeenCalledWith(" ");
+      expect(handleInput).not.toHaveBeenCalledWith("\x7f");
     });
   });
 
@@ -309,7 +445,7 @@ describe("voice-extension", () => {
       inputHandler(" ");
       vi.advanceTimersByTime(500);
 
-      expect(ctx.ui.setEditorText).toHaveBeenCalledWith("prompt");
+      expect(ctx.ui.setEditorText).not.toHaveBeenCalled();
       expect(ctx.ui.notify).toHaveBeenCalledWith(
         expect.stringContaining("Open /voice:settings"),
         "error",
@@ -391,9 +527,48 @@ describe("voice-extension", () => {
       await flush();
       expect(ctx.ui.notify).toHaveBeenCalledTimes(1);
 
-      // After release (gap with no Space) a fresh hold fires again.
-      vi.advanceTimersByTime(1200);
+      // After release (gap with no Space) a fresh hold fires again, once the
+      // post-close cooldown has expired.
+      vi.advanceTimersByTime(1600);
       inputHandler(" ");
+      inputHandler(" ");
+      vi.advanceTimersByTime(1000);
+      await flush();
+      expect(ctx.ui.notify).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not reopen the overlay during cooldown after a close in kitty mode", async () => {
+      vi.useFakeTimers();
+      vi.mocked(isKittyProtocolActive).mockReturnValue(true);
+      const modelsDir = mkdtempSync(join(tmpdir(), "pi-voice-reopen-kitty-"));
+      vi.stubEnv("PI_VOICE_MODELS", modelsDir);
+      const mockPi = createMockPi();
+      const ctx = createMockCommandContext();
+      ctx.ui.getEditorText = vi.fn(() => "prompt  ");
+      await voiceExtension(mockPi);
+      const sessionStart = getEventHandler(mockPi, "session_start");
+      await sessionStart({ type: "session_start", reason: "startup" }, ctx);
+      const inputHandler = ctx.ui.onTerminalInput.mock.calls[0]?.[0];
+      if (!inputHandler) throw new Error("Terminal input handler was not installed");
+      const flush = async (): Promise<void> => {
+        for (let i = 0; i < 4; i++) await Promise.resolve();
+      };
+
+      // Hold Space through the one-second deadline: overlay opens.
+      inputHandler(" ");
+      vi.advanceTimersByTime(1000);
+      await flush();
+      expect(ctx.ui.notify).toHaveBeenCalledTimes(1);
+
+      // Panel closed. A fresh hold pressed immediately must NOT reopen it.
+      inputHandler(" ");
+      inputHandler(" ");
+      vi.advanceTimersByTime(1000);
+      await flush();
+      expect(ctx.ui.notify).toHaveBeenCalledTimes(1);
+
+      // Once the cooldown window passes, a held Space works again.
+      vi.advanceTimersByTime(1600);
       inputHandler(" ");
       vi.advanceTimersByTime(1000);
       await flush();
@@ -453,6 +628,7 @@ describe("voice-extension", () => {
       expect(mockCtx.ui.custom).not.toHaveBeenCalled();
       expect(mockCtx.ui.notify).not.toHaveBeenCalled();
       expect(mockCtx.ui.setStatus).not.toHaveBeenCalled();
+      expect(mockCtx.ui.setWidget).not.toHaveBeenCalled();
     });
   });
 
@@ -563,6 +739,48 @@ describe("voice-extension", () => {
 
       expect(summarize).toHaveBeenCalledWith("A detailed answer.", ctx);
       expect(speak).toHaveBeenCalledWith("A short summary.", 2);
+    });
+
+    it("shows a Thinking-style speaking indicator widget during speech, then clears it", async () => {
+      const dir = createDownloadedTtsModel();
+      const ctx = createMockCommandContext();
+      ctx.sessionManager.getBranch = vi.fn(() => [
+        { type: "message", message: { role: "assistant", content: "A detailed answer." } },
+      ]);
+      const speak = vi.fn(async () => {});
+
+      await runVoiceSpeak("", ctx, {
+        modelsDir: dir,
+        summarize: async () => "A short summary.",
+        speak,
+        speakerId: 0,
+      });
+
+      const calls = ctx.ui.setWidget.mock.calls.filter((call) => call[0] === "voice-speak");
+      // preparing → speaking → cleared
+      expect(calls.length).toBeGreaterThanOrEqual(3);
+      expect(calls[calls.length - 1]?.[1]).toBeUndefined();
+
+      const rendered = calls
+        .filter((call) => typeof call[1] === "function")
+        .map((call) => {
+          const factory = call[1] as (
+            tui: unknown,
+            theme: unknown,
+          ) => { render: (width: number) => string[] };
+          const component = factory(
+            { requestRender: vi.fn() },
+            {
+              fg: (_color: string, text: string) => text,
+            },
+          );
+          return component.render(80).join("\n");
+        })
+        .join("\n");
+      expect(rendered).toContain("Preparing speech");
+      expect(rendered).toContain("Speaking");
+      // The old footer status line is gone.
+      expect(ctx.ui.setStatus).not.toHaveBeenCalled();
     });
 
     it("speaks the cleaned full message without calling the summary model", async () => {

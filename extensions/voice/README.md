@@ -101,6 +101,8 @@ A missing model stays visible but cannot be selected. Download it with the comma
 
 Hold Space for one second to dictate. A short Space press still inserts a normal space in the editor. `/voice` opens the same overlay directly.
 
+Hold detection errs on the side of typing: typing any other key cancels an armed hold, a hold only fires while Space is still physically held, and after the overlay closes a 1.5 second cooldown keeps Space inserting normally so the key press that just closed the panel cannot reopen it. In terminals without key-release reporting, a lone Space is committed after a short buffering delay to tell a tap from a hold without ever writing hold text into the editor.
+
 The overlay shows the input level, elapsed recording time, and a partial transcript. Use:
 
 - Enter to stop recording, finalize the transcript, and paste it into the editor.
@@ -117,6 +119,8 @@ Hold-to-dictate requires Pi's interactive TUI. It supports terminals with key-re
 Choose the model with `/smallmodel`. Voice playback stops with an error if the configured model is missing or unauthenticated; it does not use the active chat model as a fallback.
 
 Use `/voice:speak full` when the response is already short or when no cloud model should receive it. This mode strips Markdown, links, and fenced code before local synthesis. A response made entirely of fenced code has no speakable text.
+
+While speech is prepared and played, a transient spinner row ("Preparing speech..." / "Speaking...", styled like Pi's `Thinking...` indicator) appears above the editor and disappears when playback ends. `/voice:stop` cancels playback and removes it.
 
 Model engines are loaded on first use and cached. This keeps them out of Pi's startup path. Audio is written to a temporary WAV file, played with `pw-play` or `ffplay`, and removed after playback.
 

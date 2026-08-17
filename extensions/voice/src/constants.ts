@@ -8,6 +8,16 @@ export const HOLD_TO_VOICE_MS = 1000;
 
 export const HOLD_RELEASE_DEBOUNCE_MS = 75;
 
+// Delay before a lone Space (no repeat following it) is committed to the
+// editor in terminals without key-release reporting. Lets a repeat arrive in
+// time to classify a press as a hold without ever typing hold text.
+export const SPACE_COMMIT_DELAY_MS = 400;
+
+// Window after the voice overlay closes during which Space presses insert
+// normally instead of arming a hold, so the key press that opened (or closed)
+// the panel cannot instantly reopen it.
+export const HOLD_COOLDOWN_MS = 1500;
+
 export const HOLD_REPEAT_INITIAL_GAP_MS = 2000;
 
 export const HOLD_REPEAT_GAP_MS = 1200;
@@ -18,17 +28,7 @@ export const DEFAULT_MODEL_ID = "moonshine-base-int8";
 
 export const DEFAULT_TTS_MODEL_ID = "kitten-nano-en-v0_1-fp16";
 
-export const TTS_STATUS_KEY = "voice-speak";
-
-// Footer status indicator: a Nerd Font volume-high glyph in a distinct accent
-// hue with a greyed label, matching the cross-extension footer convention.
-// The codepoint is built explicitly so the PUA glyph survives transports
-// that strip literals.
-export const TTS_STATUS_ICON = String.fromCodePoint(0xf057e); // nf-md-volume-high
-
-export const ICON_COLOR = "accent";
-
-export const TEXT_COLOR = "muted";
+export const TTS_WIDGET_KEY = "voice-speak";
 
 export const KITTEN_VOICES = [
   "expr-voice-2-m",

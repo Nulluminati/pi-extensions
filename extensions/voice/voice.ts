@@ -46,11 +46,11 @@ import {
   saveActiveVoice,
 } from "./src/config.ts";
 import {
+  HOLD_COOLDOWN_MS,
   HOLD_RELEASE_DEBOUNCE_MS,
   HOLD_REPEAT_GAP_MS,
   HOLD_TO_VOICE_MS,
   KITTEN_VOICES,
-  TTS_STATUS_KEY,
 } from "./src/constants.ts";
 import { addHoldToVoice } from "./src/hold.ts";
 import type { InflectTtsEngine as InflectTtsEngineType } from "./src/inflect.ts";
@@ -65,7 +65,7 @@ import {
   stopSpeechJob,
 } from "./src/playback.ts";
 import { runVoiceSettings } from "./src/settings.ts";
-import { runVoiceSpeak, summarizeForSpeech } from "./src/summary.ts";
+import { runVoiceSpeak, setTtsIndicator, summarizeForSpeech } from "./src/summary.ts";
 import type {
   OfflineTtsInstance,
   OnnxRuntime,
@@ -172,6 +172,15 @@ export default async function voiceExtension(pi: ExtensionAPI) {
   // terminal input listener (which sees every keystroke) clears it on release.
   let spaceConsumed = false;
   let holdReleaseTimer: ReturnType<typeof setTimeout> | null = null;
+  // Authoritative Space down-state from the terminal-level listener, which sees
+  // releases even when the editor does not. The editor consults it before
+  // firing a hold so a missed release can't open the overlay.
+  let spaceDown = false;
+  // Post-close grace window: while `Date.now() < cooldownUntil`, Space presses
+  // insert normally instead of arming a hold.
+  let cooldownUntil = 0;
+
+  const canArmHold = (): boolean => Date.now() >= cooldownUntil;
 
   const openVoice = (ctx: ExtensionContext): void => {
     if (voiceOpen) return;
@@ -183,6 +192,16 @@ export default async function voiceExtension(pi: ExtensionAPI) {
       })
       .finally(() => {
         voiceOpen = false;
+        // The key press that opened the overlay is usually still in flight (the
+        // overlay steals focus, so its release may never reach the editor). Reset
+        // every piece of hold state and start a grace window during which Space
+        // inserts normally, so closing the panel can never be followed by an
+        // instant reopen from the same press.
+        clearHoldRelease();
+        spaceConsumed = false;
+        spaceDown = false;
+        resetTerminalRepeat();
+        cooldownUntil = Date.now() + HOLD_COOLDOWN_MS;
       });
   };
 
@@ -207,17 +226,13 @@ export default async function voiceExtension(pi: ExtensionAPI) {
     }, HOLD_REPEAT_GAP_MS);
   };
 
-  const removeHeldSpaces = (ctx: ExtensionContext): void => {
-    const text = ctx.ui.getEditorText();
-    let removeCount = 0;
-    while (removeCount < terminalRepeatCount && text[text.length - removeCount - 1] === " ") {
-      removeCount++;
-    }
-    if (removeCount > 0) ctx.ui.setEditorText(text.slice(0, -removeCount));
-  };
-
   const triggerTerminalVoice = (ctx: ExtensionContext): void => {
-    removeHeldSpaces(ctx);
+    // A hold may have armed just before the overlay closed; never let it open
+    // the panel again during the cooldown window.
+    if (!canArmHold()) {
+      resetTerminalRepeat();
+      return;
+    }
     resetTerminalRepeat();
     if (!isKittyProtocolActive()) spaceConsumed = true;
     openVoice(ctx);
@@ -227,6 +242,12 @@ export default async function voiceExtension(pi: ExtensionAPI) {
     if (terminalHoldTimer) return;
     terminalHoldTimer = setTimeout(() => {
       terminalHoldTimer = null;
+      // In kitty mode a release is observable even when the editor missed it;
+      // don't open the overlay from a key that was already released.
+      if (isKittyProtocolActive() && !spaceDown) {
+        resetTerminalRepeat();
+        return;
+      }
       if (terminalRepeatCount >= minimumEvents) triggerTerminalVoice(ctx);
       else resetTerminalRepeat();
     }, HOLD_TO_VOICE_MS);
@@ -257,6 +278,7 @@ export default async function voiceExtension(pi: ExtensionAPI) {
           if (userInput) {
             clearHoldRelease();
             spaceConsumed = false;
+            spaceDown = false;
           }
         }
       }
@@ -267,6 +289,7 @@ export default async function voiceExtension(pi: ExtensionAPI) {
       if (kitty) {
         if (!space) return;
         if (release) {
+          spaceDown = false;
           if (terminalReleaseTimer) clearTimeout(terminalReleaseTimer);
           terminalReleaseTimer = setTimeout(() => {
             terminalReleaseTimer = null;
@@ -275,6 +298,8 @@ export default async function voiceExtension(pi: ExtensionAPI) {
           return;
         }
         if (repeat) return;
+        if (!canArmHold()) return; // cooldown: plain Space passthrough
+        spaceDown = true;
         if (terminalReleaseTimer) {
           clearTimeout(terminalReleaseTimer);
           terminalReleaseTimer = null;
@@ -293,9 +318,14 @@ export default async function voiceExtension(pi: ExtensionAPI) {
           data === "\n" ||
           data === "\x7f" ||
           (codePoint !== undefined && codePoint >= 32);
-        if (userInput) resetTerminalRepeat();
+        if (userInput) {
+          resetTerminalRepeat();
+          spaceDown = false;
+        }
         return;
       }
+      if (!canArmHold()) return; // cooldown: don't count toward a hold
+      spaceDown = true;
       terminalRepeatCount++;
       scheduleTerminalHold(ctx, 2);
       return;
@@ -327,7 +357,11 @@ export default async function voiceExtension(pi: ExtensionAPI) {
             if (!isKittyProtocolActive()) spaceConsumed = true;
             openVoice(ctx);
           },
-          { isSuppressed: () => spaceConsumed },
+          {
+            isSuppressed: () => spaceConsumed,
+            canArm: canArmHold,
+            isKeyDown: () => spaceDown,
+          },
         );
       },
     );
@@ -353,6 +387,8 @@ export default async function voiceExtension(pi: ExtensionAPI) {
     editorRecheckTimer = null;
     clearHoldRelease();
     spaceConsumed = false;
+    spaceDown = false;
+    cooldownUntil = 0;
     resetTerminalRepeat();
     terminalInputUnsubscribe?.();
     terminalInputUnsubscribe = null;
@@ -437,7 +473,7 @@ export default async function voiceExtension(pi: ExtensionAPI) {
       }
       stopSpeechJob(speechJob);
       speechJob = null;
-      ctx.ui.setStatus(TTS_STATUS_KEY, undefined);
+      setTtsIndicator(ctx, undefined);
       ctx.ui.notify("Voice playback stopped.", "info");
     },
   });

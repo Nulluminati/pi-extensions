@@ -7,9 +7,9 @@ import {
 } from "@earendil-works/pi-tui";
 import {
   HOLD_REPEAT_GAP_MS,
-  HOLD_REPEAT_INITIAL_GAP_MS,
   HOLD_REPEAT_MIN_EVENTS,
   HOLD_TO_VOICE_MS,
+  SPACE_COMMIT_DELAY_MS,
 } from "./constants.ts";
 
 export function addHoldToVoice<T extends HoldToVoiceEditor>(
@@ -23,15 +23,20 @@ export function addHoldToVoice<T extends HoldToVoiceEditor>(
     isRelease = isKeyRelease,
     isRepeat = isKeyRepeat,
     isSuppressed = () => false,
+    isKeyDown = () => true,
+    canArm = () => true,
   } = deps;
   const originalHandleInput = editor.handleInput.bind(editor);
   const originalDispose = editor.dispose?.bind(editor);
   let holdTimer: ReturnType<typeof setTimeout> | null = null;
   let repeatGapTimer: ReturnType<typeof setTimeout> | null = null;
+  // Legacy mode (no key-release reporting): Space events are buffered instead
+  // of typed immediately, so a hold never puts text into the editor and a
+  // trigger never needs to delete text. A lone Space is committed after
+  // SPACE_COMMIT_DELAY_MS; a repeat arriving within that window marks a hold.
+  let pendingSpaces = 0;
+  let pendingSpaceTimer: ReturnType<typeof setTimeout> | null = null;
   let repeatStartedAt = 0;
-  let repeatLastAt = 0;
-  let repeatCount = 0;
-  let repeatActive = false;
   let triggered = false;
   let wasSuppressed = false;
 
@@ -43,30 +48,24 @@ export function addHoldToVoice<T extends HoldToVoiceEditor>(
     if (repeatGapTimer) clearTimeout(repeatGapTimer);
     repeatGapTimer = null;
   };
-  // Drop any in-flight hold tracking without touching editor text. Used when a
-  // hold was suppressed (the overlay already opened from this key press) and is
-  // now being re-armed after the key was released.
+  const clearPendingSpaceTimer = (): void => {
+    if (pendingSpaceTimer) clearTimeout(pendingSpaceTimer);
+    pendingSpaceTimer = null;
+  };
+  /** Commit buffered Spaces in order, as real typing. */
+  const commitPendingSpaces = (): void => {
+    clearPendingSpaceTimer();
+    for (let i = 0; i < pendingSpaces; i++) originalHandleInput(" ");
+    pendingSpaces = 0;
+  };
+  /** Drop all hold tracking without touching editor text or inserting anything. */
   const resetHoldTracking = (): void => {
     clearHoldTimer();
     clearRepeatGapTimer();
+    clearPendingSpaceTimer();
+    pendingSpaces = 0;
     repeatStartedAt = 0;
-    repeatLastAt = 0;
-    repeatCount = 0;
-    repeatActive = false;
     triggered = false;
-  };
-  const resetRepeat = (restoreSpace: boolean): void => {
-    clearHoldTimer();
-    clearRepeatGapTimer();
-    repeatStartedAt = 0;
-    repeatLastAt = 0;
-    repeatCount = 0;
-    repeatActive = false;
-    if (restoreSpace) originalHandleInput(" ");
-  };
-  const scheduleRepeatReset = (delay: number, restoreSpace: boolean): void => {
-    clearRepeatGapTimer();
-    repeatGapTimer = setTimeout(() => resetRepeat(restoreSpace), delay);
   };
   const scheduleTriggeredReset = (): void => {
     clearRepeatGapTimer();
@@ -81,13 +80,18 @@ export function addHoldToVoice<T extends HoldToVoiceEditor>(
       () => {
         holdTimer = null;
         clearRepeatGapTimer();
+        clearPendingSpaceTimer();
+        pendingSpaces = 0;
         repeatStartedAt = 0;
-        repeatLastAt = 0;
-        repeatCount = 0;
-        repeatActive = false;
-        triggered = true;
         if (!isSupported()) scheduleTriggeredReset();
-        onHold();
+        // Only fire when the key is genuinely still held and holds are armed.
+        // The key-down check covers releases the editor itself never saw.
+        if (isKeyDown() && canArm()) {
+          triggered = true;
+          onHold();
+        } else {
+          triggered = false;
+        }
       },
       Math.max(0, HOLD_TO_VOICE_MS - elapsed),
     );
@@ -114,7 +118,10 @@ export function addHoldToVoice<T extends HoldToVoiceEditor>(
 
     if (!supported) {
       if (!space) {
-        resetRepeat(repeatActive);
+        // Typing resumes: the buffered Spaces were real typing, so commit them
+        // in order before the character, then drop hold tracking.
+        commitPendingSpaces();
+        resetHoldTracking();
         originalHandleInput(data);
         return;
       }
@@ -124,38 +131,37 @@ export function addHoldToVoice<T extends HoldToVoiceEditor>(
         return;
       }
 
-      const now = Date.now();
-      if (repeatCount === 0) {
+      // Post-close cooldown: plain Space passthrough, no hold detection.
+      if (!canArm()) {
         originalHandleInput(" ");
-        repeatStartedAt = now;
-        repeatLastAt = now;
-        repeatCount = 1;
-        scheduleRepeatReset(HOLD_REPEAT_INITIAL_GAP_MS, false);
         return;
       }
 
-      const maximumGap = repeatCount === 1 ? HOLD_REPEAT_INITIAL_GAP_MS : HOLD_REPEAT_GAP_MS;
-      if (now - repeatLastAt > maximumGap) {
-        resetRepeat(repeatActive);
-        originalHandleInput(" ");
-        repeatStartedAt = now;
-        repeatLastAt = now;
-        repeatCount = 1;
-        scheduleRepeatReset(HOLD_REPEAT_INITIAL_GAP_MS, false);
+      // A hold is already armed and waiting for the deadline; later repeats
+      // are part of the same hold and must not start a new burst (whose commit
+      // timer would cancel the pending hold).
+      if (holdTimer) return;
+
+      if (pendingSpaceTimer === null) {
+        // First event of a burst: buffer it instead of inserting, so a hold
+        // never puts text into the editor.
+        pendingSpaces = 1;
+        repeatStartedAt = Date.now();
+        pendingSpaceTimer = setTimeout(() => {
+          pendingSpaceTimer = null;
+          commitPendingSpaces();
+          resetHoldTracking();
+        }, SPACE_COMMIT_DELAY_MS);
         return;
       }
 
-      repeatLastAt = now;
-      repeatCount++;
-      if (!repeatActive) {
-        originalHandleInput(" ");
-        if (repeatCount >= HOLD_REPEAT_MIN_EVENTS) {
-          repeatActive = true;
-          for (let i = 0; i < repeatCount; i++) originalHandleInput("\x7f");
-          startHoldTimer(now - repeatStartedAt);
-        }
+      // A repeat arrived before the buffered Space committed: this is a hold
+      // candidate. Never commit the buffered events; count them instead.
+      pendingSpaces++;
+      clearPendingSpaceTimer();
+      if (pendingSpaces >= HOLD_REPEAT_MIN_EVENTS) {
+        startHoldTimer(Date.now() - repeatStartedAt);
       }
-      scheduleRepeatReset(HOLD_REPEAT_GAP_MS, repeatActive);
       return;
     }
 
@@ -168,17 +174,21 @@ export function addHoldToVoice<T extends HoldToVoiceEditor>(
       return;
     }
     if (!space) {
+      // Any other key cancels an armed hold while typing.
+      clearHoldTimer();
       originalHandleInput(data);
       return;
     }
     if (isRepeat(data)) return;
     if (triggered) triggered = false;
+    if (!canArm()) return; // cooldown: the release will insert the Space normally
     if (holdTimer) return;
     startHoldTimer(0);
   };
   editor.dispose = (): void => {
     clearHoldTimer();
     clearRepeatGapTimer();
+    clearPendingSpaceTimer();
     originalDispose?.();
   };
   return editor;
@@ -197,4 +207,8 @@ interface HoldToVoiceDeps {
   isRepeat?: (data: string) => boolean;
   /** While true, ignore Space so a single hold can't reopen the overlay. */
   isSuppressed?: () => boolean;
+  /** Whether the Space key is physically down, from the terminal-level listener. */
+  isKeyDown?: () => boolean;
+  /** Whether a new hold may be armed right now (false during the post-close cooldown). */
+  canArm?: () => boolean;
 }
