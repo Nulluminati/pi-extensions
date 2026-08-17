@@ -84,6 +84,29 @@ class MockText {
   }
 }
 
+/** Mock `Loader` — spinner row like pi's "Thinking..." indicator. */
+class MockLoader {
+  message: string;
+  constructor(
+    _ui: unknown,
+    _spinnerColorFn: (str: string) => string,
+    private messageColorFn: (str: string) => string,
+    message = "Loading...",
+  ) {
+    this.message = message;
+  }
+  start(): void {}
+  stop(): void {}
+  setMessage(message: string): void {
+    this.message = message;
+  }
+  render(_width: number): string[] {
+    // Mirrors the real Loader: a blank line, then the colored message row.
+    return ["", this.messageColorFn(this.message)];
+  }
+  invalidate(): void {}
+}
+
 /** Mock `SelectList` — records items/theme and drives selection via onSelect/onCancel. */
 class MockSelectList {
   onSelect?: (item: { label: string; description?: string }) => void;
@@ -230,6 +253,7 @@ vi.mock("@earendil-works/pi-tui", () => ({
   Input: MockInput,
   Container: MockContainer,
   Text: MockText,
+  Loader: MockLoader,
   SelectList: MockSelectList,
   SettingsList: MockSettingsList,
   Key: MockKey,

@@ -1,15 +1,9 @@
 import { completeSimple } from "@earendil-works/pi-ai";
+import { Loader } from "@earendil-works/pi-tui";
 import type { ExtensionCommandContext } from "pi";
 import { resolveSmallModel } from "../../../lib/small-model.ts";
-import { formatStatusLine } from "../../../lib/ui-format.ts";
 import { resolveModelsDir } from "./config.ts";
-import {
-  DEFAULT_TTS_MODEL_ID,
-  ICON_COLOR,
-  TEXT_COLOR,
-  TTS_STATUS_ICON,
-  TTS_STATUS_KEY,
-} from "./constants.ts";
+import { DEFAULT_TTS_MODEL_ID, TTS_WIDGET_KEY } from "./constants.ts";
 import { modelIsDownloaded, TTS_MODELS } from "./models.ts";
 
 export function findLatestAssistantText(entries: unknown[]): string | undefined {
@@ -135,16 +129,7 @@ export async function runVoiceSpeak(
     return;
   }
 
-  ctx.ui.setStatus(
-    TTS_STATUS_KEY,
-    formatStatusLine(ctx.ui.theme, {
-      icon: TTS_STATUS_ICON,
-      prefix: "Voice",
-      text: "preparing speech…",
-      iconColor: ICON_COLOR,
-      textColor: TEXT_COLOR,
-    }),
-  );
+  setTtsIndicator(ctx, "Preparing speech...");
   try {
     const full = args.trim().toLowerCase() === "full";
     const spokenText = full
@@ -154,16 +139,7 @@ export async function runVoiceSpeak(
       ctx.ui.notify("The assistant message has no speakable text.", "warning");
       return;
     }
-    ctx.ui.setStatus(
-      TTS_STATUS_KEY,
-      formatStatusLine(ctx.ui.theme, {
-        icon: TTS_STATUS_ICON,
-        prefix: "Voice",
-        text: "speaking…",
-        iconColor: ICON_COLOR,
-        textColor: TEXT_COLOR,
-      }),
-    );
+    setTtsIndicator(ctx, "Speaking...");
     await opts.speak(spokenText, opts.speakerId);
   } catch (error) {
     ctx.ui.notify(
@@ -171,6 +147,34 @@ export async function runVoiceSpeak(
       "error",
     );
   } finally {
-    ctx.ui.setStatus(TTS_STATUS_KEY, undefined);
+    setTtsIndicator(ctx, undefined);
   }
+}
+
+/**
+ * Transient speech indicator in the working-indicator style: an animated
+ * Loader row (accent spinner + muted message, like pi's "Thinking...")
+ * shown as a widget just above the editor while speech is prepared or
+ * played, removed when done.
+ */
+export function setTtsIndicator(ctx: ExtensionCommandContext, text: string | undefined): void {
+  if (!ctx.hasUI) return;
+  if (text === undefined) {
+    ctx.ui.setWidget(TTS_WIDGET_KEY, undefined);
+    return;
+  }
+  ctx.ui.setWidget(TTS_WIDGET_KEY, (tui: any, theme: any) => {
+    const loader = new Loader(
+      tui,
+      (spinner: string) => theme.fg("accent", spinner),
+      (message: string) => theme.fg("muted", message),
+      text,
+    );
+    loader.start();
+    return {
+      render: (width: number) => loader.render(width),
+      invalidate: () => loader.invalidate(),
+      dispose: () => loader.stop(),
+    };
+  });
 }

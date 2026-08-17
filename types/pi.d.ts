@@ -617,6 +617,23 @@ declare module "@earendil-works/pi-tui" {
   export function isKeyRepeat(data: string): boolean;
   export function isKittyProtocolActive(): boolean;
 
+  /** Animated spinner + message row, the component behind pi's "Thinking..."
+   * working indicator. */
+  export class Loader {
+    constructor(
+      ui: any,
+      spinnerColorFn: (str: string) => string,
+      messageColorFn: (str: string) => string,
+      message?: string,
+      indicator?: { frames?: string[]; intervalMs?: number },
+    );
+    start(): void;
+    stop(): void;
+    setMessage(message: string): void;
+    render(width: number): string[];
+    invalidate(): void;
+  }
+
   export class Input {
     value: string;
     cursor: number;
