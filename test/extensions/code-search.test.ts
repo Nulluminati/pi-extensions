@@ -618,23 +618,32 @@ describe("code-search-extension", () => {
         expect(mockFetch).toHaveBeenCalledTimes(1);
       });
 
-      it("allows a quoted phrase containing parentheses as one term", async () => {
-        mockFetch.mockResolvedValueOnce(createStreamResponse([sseEvent("done", {})]));
-
+      it("rejects quoted phrases containing parentheses", async () => {
         const mockPi = createMockPi();
         await codeSearchExtension(mockPi);
         const tool = getRegisteredTool(mockPi, "code_search");
-        await tool.execute(
+        const result = await tool.execute(
           "id-1",
-          { query: '"MarshalJSON() ([]byte, error)"' },
+          { query: '"func (t Type) MarshalJSON"' },
           undefined,
           undefined,
           {},
         );
 
+        expect(result.content[0].text).toContain("parentheses");
+        expect(result.details.isError).toBe(true);
+        expect(mockFetch).not.toHaveBeenCalled();
+      });
+
+      it("allows multi-word quoted phrases without parentheses", async () => {
+        mockFetch.mockResolvedValueOnce(createStreamResponse([sseEvent("done", {})]));
+
+        const mockPi = createMockPi();
+        await codeSearchExtension(mockPi);
+        const tool = getRegisteredTool(mockPi, "code_search");
+        await tool.execute("id-1", { query: '"package main"' }, undefined, undefined, {});
+
         expect(mockFetch).toHaveBeenCalledTimes(1);
-        const url = new URL(String(mockFetch.mock.calls[0]?.[0] ?? ""));
-        expect(url.searchParams.get("patternType")).toBeNull();
       });
 
       it("does not cache across separate extension instances", async () => {

@@ -105,16 +105,18 @@ function clampMaxResults(value: unknown): number {
 }
 
 /**
- * Sourcegraph's public API silently returns zero matches for multi-term
- * queries where any term contains parentheses, so reject them up front with
- * guidance instead of letting the model trust a false negative. Single terms
- * and quoted phrases containing parentheses are fine.
+ * Sourcegraph's public API silently returns zero matches for several
+ * query shapes containing parentheses: multi-term queries where any term has
+ * parens (order- and time-dependent), and quoted phrases with parens (a
+ * phrase literally present in an indexed file can match nothing). Parens are
+ * only reliable inside a single unquoted term, so reject everything else up
+ * front with guidance instead of letting the model trust a false negative.
  */
-function hasParenTerm(query: string): boolean {
-  // Split into terms, treating double-quoted phrases as single terms.
-  const terms = query.match(/"[^"]*"|\S+/g) ?? [];
-  if (terms.length <= 1) return false;
-  return terms.some((term) => /[()]/.test(term));
+function hasUnreliableParens(query: string): boolean {
+  if (!/[()]/.test(query)) return false;
+  if (/\s/.test(query)) return true;
+  if (query.startsWith('"') && query.endsWith('"') && query.length >= 2) return true;
+  return false;
 }
 
 function errorResult(
@@ -159,10 +161,10 @@ export async function executeCodeSearch(
   if (query.length > MAX_QUERY_LENGTH) {
     return errorResult(query, `Error: query is too long (max ${MAX_QUERY_LENGTH} characters).`);
   }
-  if (hasParenTerm(query)) {
+  if (hasUnreliableParens(query)) {
     return errorResult(
       query,
-      "Error: multi-term queries containing parentheses are unreliable on this API and return false zeros. Use a single term like MarshalJSON(), a quoted phrase, or drop the parentheses.",
+      "Error: parentheses are only reliable in a single unquoted term on this API; other shapes return false zeros. Use a single term like MarshalJSON(), or remove the parentheses.",
     );
   }
   if (language && language.length > MAX_LANGUAGE_LENGTH) {
