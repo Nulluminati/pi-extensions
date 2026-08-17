@@ -4,7 +4,7 @@ Registers [Synthetic](https://synthetic.new) as a Pi model provider using their 
 
 ## What It Does
 
-This extension registers the "synthetic" provider so you can use Synthetic's hosted models (Kimi-K2.7-Code, MiniMax-M3, etc.) directly in Pi. It:
+This extension registers the "synthetic" provider so you can use Synthetic's hosted models (GLM-5.2, Kimi-K3, gpt-oss-120b, etc.) directly in Pi. It:
 
 1. **Registers the provider** at load time with a static catalog of always-on models (so Pi can start even if the API is unavailable)
 2. **Checks for staleness** on `session_start` and notifies you when the live catalog exposes models the static list does not know about
@@ -16,7 +16,7 @@ This extension registers the "synthetic" provider so you can use Synthetic's hos
 ### Select a Synthetic model
 
 ```
-/model synthetic/hf:moonshotai/Kimi-K2.7-Code
+/model synthetic/hf:zai-org/GLM-5.2
 ```
 
 Or use Pi's model cycling (`Ctrl+M`) to cycle through available models.
@@ -50,17 +50,22 @@ The extension calls `pi.registerProvider("synthetic", config)` at load time. The
 
 ### Static model catalog
 
-The extension ships a hardcoded list of always-on, tools-capable models with known pricing and capabilities (priced per million tokens):
+The extension ships a hardcoded list of always-on, tools-capable models with known pricing and capabilities (priced per million tokens, sourced from the live catalog in 2026-08):
 
 | Model | Context | Reasoning | Vision | Input/Output Cost |
 |-------|---------|-----------|--------|-------------------|
-| moonshotai/Kimi-K2.7-Code | 262K | ✓ | ✓ | $0.95 / $4.00 |
-| zai-org/GLM-5.2 | 524K | ✓ | — | $1.40 / $4.40 |
-| MiniMaxAI/MiniMax-M3 | 262K | ✓ (always on) | ✓ | $0.60 / $1.20 |
+| syn:large:text | 524K | ✓ | — | $1.00 / $3.00 |
+| syn:small:text | 196K | ✓ | — | $0.10 / $0.50 |
+| syn:large:vision | 524K | ✓ | ✓ | $3.00 / $15.00 |
+| syn:small:vision | 262K | ✓ | ✓ | $0.45 / $2.20 |
+| zai-org/GLM-5.2 | 524K | ✓ | — | $1.00 / $3.00 |
+| zai-org/GLM-4.7-Flash | 196K | ✓ | — | $0.10 / $0.50 |
+| moonshotai/Kimi-K3 | 524K | ✓ | ✓ | $3.00 / $15.00 |
+| Qwen/Qwen3.6-27B | 262K | ✓ | ✓ | $0.45 / $2.20 |
 | nvidia/NVIDIA-Nemotron-3-Super | 262K | ✓ | — | $0.30 / $1.00 |
 | openai/gpt-oss-120b | 131K | ✓ (always on) | — | $0.10 / $0.10 |
 
-Two models (`MiniMax-M3`, `gpt-oss-120b`) always think and cannot be turned off, so the `off` thinking level is hidden for them. Every other reasoning model accepts the full `none`/`minimal`/`low`/`medium`/`high`/`xhigh` enum.
+One model (`gpt-oss-120b`) always thinks and cannot be turned off, so its `off` thinking level is hidden. Every other reasoning model accepts the full `none`/`minimal`/`low`/`medium`/`high`/`xhigh` enum. `Kimi-K2.7-Code` and `MiniMax-M3` were retired by Synthetic (HTTP 404 "no longer supported") and are no longer listed.
 
 ### Startup staleness check
 
@@ -103,4 +108,4 @@ Configure your Synthetic API key using one of:
    ```json
    { "synthetic": { "type": "api_key", "key": "syn_..." } }
    ```
-3. **CLI flag**: `pi --model synthetic/hf:moonshotai/Kimi-K2.7-Code --api-key syn_...`
+3. **CLI flag**: `pi --model synthetic/hf:zai-org/GLM-5.2 --api-key syn_...`

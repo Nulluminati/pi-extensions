@@ -33,9 +33,9 @@ const DISABLEABLE_THINKING_MAP: ThinkingLevelMap = {
 };
 
 /**
- * Thinking map for MiniMax-M3, whose thinking cannot be disabled. Mapping off
- * to null hides the off level in pi's UI rather than sending a value the model
- * ignores.
+ * Thinking map for gpt-oss-120b, whose thinking cannot be disabled. Mapping
+ * off to null hides the off level in pi's UI rather than sending a value the
+ * model ignores.
  */
 const ALWAYS_ON_THINKING_MAP: ThinkingLevelMap = {
   off: null,
@@ -46,41 +46,31 @@ const ALWAYS_ON_THINKING_MAP: ThinkingLevelMap = {
   xhigh: "xhigh",
 };
 
-/**
- * Thinking map for Kimi-K3, whose gateway rejects the `medium` effort. Probed
- * 2026-07: the inference backend reports `supported values are ['high', 'low',
- * 'max']` and returns HTTP 500 for `medium`, so medium maps to null (hidden in
- * pi). `none` disables thinking; minimal and low are accepted but do not
- * engage thinking (the model decides whether lower tiers think, like GLM-5.2).
- * high and xhigh both engage reasoning. `max` is also accepted but is not a pi
- * level, so xhigh stays identity-mapped.
- */
-const DISABLEABLE_NO_MEDIUM_MAP: ThinkingLevelMap = {
-  off: "none",
-  minimal: "minimal",
-  low: "low",
-  medium: null,
-  high: "high",
-  xhigh: "xhigh",
-};
-
 // --- Static model catalog ---
 
 /**
  * Hardcoded catalog of always-on Synthetic models with tools support.
  *
  * Pricing is per million tokens, sourced from the authenticated
- * GET /openai/v1/models endpoint. Thinking maps reflect the gateway's accepted
- * reasoning_effort enum (verified 2026-07): every reasoning model accepts
- * none/minimal/low/medium/high/xhigh and rejects "max". Two models always think
- * and cannot be turned off (MiniMax-M3, gpt-oss-120b), so off maps to null for
- * them.
+ * GET /openai/v1/models endpoint (verified 2026-08; GLM-5.2 dropped 1.4/4.4 to
+ * 1.0/3.0 and syn:large:vision re-aliased onto Kimi-K3). Thinking maps reflect
+ * the gateway's accepted reasoning_effort enum (probed 2026-08): every
+ * reasoning model accepts none/minimal/low/medium/high/xhigh and rejects
+ * "max". One model always thinks and cannot be turned off (gpt-oss-120b), so
+ * off maps to null for it. Kimi-K3 briefly rejected `medium` (probed 2026-07)
+ * but the 2026-08 probe shows it accepted again, so the full identity map
+ * applies.
+ *
+ * Kimi-K2.7-Code and MiniMax-M3 no longer appear in /v1/models and return
+ * HTTP 404 "no longer supported", so their static entries were removed.
  *
  * The syn:* ids are first-class selectable models in the Synthetic API (each
  * points at a concrete model behind the scenes) and are registered standalone.
  */
 export const STATIC_MODELS: ProviderModelConfig[] = [
   // --- syn: aliases (first-class selectable ids) ---
+  // syn:large:* currently alias GLM-5.2 and Kimi-K3 respectively; pricing
+  // from the live catalog (2026-08).
   {
     id: "syn:large:text",
     name: "syn:large:text",
@@ -88,7 +78,7 @@ export const STATIC_MODELS: ProviderModelConfig[] = [
     reasoning: true,
     thinkingLevelMap: DISABLEABLE_THINKING_MAP,
     input: ["text"],
-    cost: { input: 1.4, output: 4.4, cacheRead: 1.4, cacheWrite: 0 },
+    cost: { input: 1.0, output: 3.0, cacheRead: 0.16, cacheWrite: 0 },
     contextWindow: 524288,
     maxTokens: 65536,
     compat: SYNTHETIC_COMPAT,
@@ -100,7 +90,7 @@ export const STATIC_MODELS: ProviderModelConfig[] = [
     reasoning: true,
     thinkingLevelMap: DISABLEABLE_THINKING_MAP,
     input: ["text"],
-    cost: { input: 0.1, output: 0.5, cacheRead: 0.1, cacheWrite: 0 },
+    cost: { input: 0.1, output: 0.5, cacheRead: 0.02, cacheWrite: 0 },
     contextWindow: 196608,
     maxTokens: 65536,
     compat: SYNTHETIC_COMPAT,
@@ -112,8 +102,8 @@ export const STATIC_MODELS: ProviderModelConfig[] = [
     reasoning: true,
     thinkingLevelMap: DISABLEABLE_THINKING_MAP,
     input: ["text", "image"],
-    cost: { input: 0.95, output: 4, cacheRead: 0.95, cacheWrite: 0 },
-    contextWindow: 262144,
+    cost: { input: 3.0, output: 15.0, cacheRead: 0.45, cacheWrite: 0 },
+    contextWindow: 524288,
     maxTokens: 65536,
     compat: SYNTHETIC_COMPAT,
   },
@@ -124,7 +114,7 @@ export const STATIC_MODELS: ProviderModelConfig[] = [
     reasoning: true,
     thinkingLevelMap: DISABLEABLE_THINKING_MAP,
     input: ["text", "image"],
-    cost: { input: 0.45, output: 3.6, cacheRead: 0.45, cacheWrite: 0 },
+    cost: { input: 0.45, output: 2.2, cacheRead: 0.09, cacheWrite: 0 },
     contextWindow: 262144,
     maxTokens: 65536,
     compat: SYNTHETIC_COMPAT,
@@ -138,7 +128,7 @@ export const STATIC_MODELS: ProviderModelConfig[] = [
     reasoning: true,
     thinkingLevelMap: DISABLEABLE_THINKING_MAP,
     input: ["text"],
-    cost: { input: 1.4, output: 4.4, cacheRead: 1.4, cacheWrite: 0 },
+    cost: { input: 1.0, output: 3.0, cacheRead: 0.16, cacheWrite: 0 },
     contextWindow: 524288,
     maxTokens: 65536,
     compat: SYNTHETIC_COMPAT,
@@ -150,33 +140,24 @@ export const STATIC_MODELS: ProviderModelConfig[] = [
     reasoning: true,
     thinkingLevelMap: DISABLEABLE_THINKING_MAP,
     input: ["text"],
-    cost: { input: 0.1, output: 0.5, cacheRead: 0.1, cacheWrite: 0 },
+    cost: { input: 0.1, output: 0.5, cacheRead: 0.02, cacheWrite: 0 },
     contextWindow: 196608,
     maxTokens: 65536,
     compat: SYNTHETIC_COMPAT,
   },
 
   // --- Other reasoning models ---
-  {
-    id: "hf:moonshotai/Kimi-K2.7-Code",
-    name: "Kimi-K2.7-Code",
-    api: "openai-completions",
-    reasoning: true,
-    thinkingLevelMap: DISABLEABLE_THINKING_MAP,
-    input: ["text", "image"],
-    cost: { input: 0.95, output: 4, cacheRead: 0.95, cacheWrite: 0 },
-    contextWindow: 262144,
-    maxTokens: 65536,
-    compat: SYNTHETIC_COMPAT,
-  },
+  // Kimi-K3 briefly rejected `medium` (probed 2026-07) but the 2026-08 probe
+  // shows the gateway accepts the full enum again with medium engaging
+  // thinking, so the identity map applies.
   {
     id: "hf:moonshotai/Kimi-K3",
     name: "Kimi-K3",
     api: "openai-completions",
     reasoning: true,
-    thinkingLevelMap: DISABLEABLE_NO_MEDIUM_MAP,
+    thinkingLevelMap: DISABLEABLE_THINKING_MAP,
     input: ["text", "image"],
-    cost: { input: 3.0, output: 15.0, cacheRead: 3.0, cacheWrite: 0 },
+    cost: { input: 3.0, output: 15.0, cacheRead: 0.45, cacheWrite: 0 },
     contextWindow: 524288,
     maxTokens: 65536,
     compat: SYNTHETIC_COMPAT,
@@ -188,20 +169,7 @@ export const STATIC_MODELS: ProviderModelConfig[] = [
     reasoning: true,
     thinkingLevelMap: DISABLEABLE_THINKING_MAP,
     input: ["text", "image"],
-    cost: { input: 0.45, output: 3.6, cacheRead: 0.45, cacheWrite: 0 },
-    contextWindow: 262144,
-    maxTokens: 65536,
-    compat: SYNTHETIC_COMPAT,
-  },
-  {
-    id: "hf:MiniMaxAI/MiniMax-M3",
-    name: "MiniMax-M3",
-    api: "openai-completions",
-    reasoning: true,
-    // Thinking cannot be disabled for MiniMax-M3; off is hidden.
-    thinkingLevelMap: ALWAYS_ON_THINKING_MAP,
-    input: ["text", "image"],
-    cost: { input: 0.6, output: 1.2, cacheRead: 0.6, cacheWrite: 0 },
+    cost: { input: 0.45, output: 2.2, cacheRead: 0.09, cacheWrite: 0 },
     contextWindow: 262144,
     maxTokens: 65536,
     compat: SYNTHETIC_COMPAT,
@@ -213,7 +181,7 @@ export const STATIC_MODELS: ProviderModelConfig[] = [
     reasoning: true,
     thinkingLevelMap: DISABLEABLE_THINKING_MAP,
     input: ["text"],
-    cost: { input: 0.3, output: 1, cacheRead: 0.3, cacheWrite: 0 },
+    cost: { input: 0.3, output: 1, cacheRead: 0.06, cacheWrite: 0 },
     contextWindow: 262144,
     maxTokens: 65536,
     compat: SYNTHETIC_COMPAT,
@@ -230,7 +198,7 @@ export const STATIC_MODELS: ProviderModelConfig[] = [
     // cannot be turned off. off is hidden.
     thinkingLevelMap: ALWAYS_ON_THINKING_MAP,
     input: ["text"],
-    cost: { input: 0.1, output: 0.1, cacheRead: 0.1, cacheWrite: 0 },
+    cost: { input: 0.1, output: 0.1, cacheRead: 0.02, cacheWrite: 0 },
     contextWindow: 131072,
     maxTokens: 65536,
     compat: SYNTHETIC_COMPAT,

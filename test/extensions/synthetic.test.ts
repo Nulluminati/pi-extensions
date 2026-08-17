@@ -21,10 +21,8 @@ const EXPECTED_MODEL_IDS = [
   "syn:large:vision",
   "syn:small:vision",
   "hf:zai-org/GLM-5.2",
-  "hf:moonshotai/Kimi-K2.7-Code",
   "hf:moonshotai/Kimi-K3",
   "hf:Qwen/Qwen3.6-27B",
-  "hf:MiniMaxAI/MiniMax-M3",
   "hf:zai-org/GLM-4.7-Flash",
   "hf:nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4",
   "hf:openai/gpt-oss-120b",
@@ -117,25 +115,24 @@ describe("synthetic-extension", () => {
     }
   });
 
-  it("hides medium for Kimi-K3 (gateway rejects it; supported values are high/low/max)", () => {
+  it("maps every reasoning model through the full identity map (incl. medium)", () => {
+    // Kimi-K3 briefly rejected `medium` (probed 2026-07) but the 2026-08 probe
+    // shows the gateway accepts the full enum again, so no level is hidden.
     const kimi = STATIC_MODELS.find((m) => m.id === "hf:moonshotai/Kimi-K3");
     expect(kimi).toBeDefined();
     expect(kimi?.thinkingLevelMap).toEqual({
       off: "none",
       minimal: "minimal",
       low: "low",
-      medium: null,
+      medium: "medium",
       high: "high",
       xhigh: "xhigh",
     });
   });
 
   it("maps off to null for always-on reasoning models (thinking cannot be disabled)", () => {
-    const alwaysOn = STATIC_MODELS.filter(
-      (m) =>
-        m.reasoning && (m.id === "hf:MiniMaxAI/MiniMax-M3" || m.id === "hf:openai/gpt-oss-120b"),
-    );
-    expect(alwaysOn.length).toBe(2);
+    const alwaysOn = STATIC_MODELS.filter((m) => m.reasoning && m.id === "hf:openai/gpt-oss-120b");
+    expect(alwaysOn.length).toBe(1);
     for (const m of alwaysOn) {
       expect(m.thinkingLevelMap?.off, `${m.id} should map off to null`).toBeNull();
     }
@@ -143,7 +140,7 @@ describe("synthetic-extension", () => {
 
   it("maps off to 'none' for the other reasoning models (thinking is disableable)", () => {
     const disableable = STATIC_MODELS.filter(
-      (m) => m.reasoning && m.id !== "hf:MiniMaxAI/MiniMax-M3" && m.id !== "hf:openai/gpt-oss-120b",
+      (m) => m.reasoning && m.id !== "hf:openai/gpt-oss-120b",
     );
     expect(disableable.length).toBeGreaterThan(0);
     for (const m of disableable) {
@@ -283,7 +280,7 @@ describe("synthetic-extension", () => {
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("vision"), "info");
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("reasoning"), "info");
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(
-      expect.stringContaining("hf:moonshotai/Kimi-K2.7-Code"),
+      expect.stringContaining("hf:moonshotai/Kimi-K3"),
       "info",
     );
   });
@@ -375,8 +372,8 @@ describe("synthetic-extension", () => {
       {
         type: "model_select",
         model: {
-          id: "hf:moonshotai/Kimi-K2.7-Code",
-          name: "Kimi-K2.7-Code",
+          id: "hf:zai-org/GLM-5.2",
+          name: "GLM-5.2",
           provider: "synthetic",
         },
         previousModel: undefined,

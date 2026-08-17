@@ -13,7 +13,7 @@
  * Auth (choose one):
  *   1. SYNTHETIC_API_KEY environment variable
  *   2. ~/.pi/agent/auth.json: { "synthetic": { "type": "api_key", "key": "syn_..." } }
- *   3. CLI flag: pi --model synthetic/hf:moonshotai/Kimi-K2.6 --api-key syn_...
+ *   3. CLI flag: pi --model synthetic/hf:zai-org/GLM-5.2 --api-key syn_...
  */
 
 import type { ExtensionAPI } from "pi";

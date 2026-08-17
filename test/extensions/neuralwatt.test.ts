@@ -44,15 +44,10 @@ const EXPECTED_MODEL_IDS = [
   "glm-5.2-fast",
   "glm-5.2-short",
   "glm-5.2-short-fast",
-  "moonshotai/Kimi-K2.5",
-  "kimi-k2.5-fast",
-  "kimi-k2.6",
-  "kimi-k2.6-fast",
   "kimi-k2.7-code",
+  "kimi-k2.7-code-fast",
   "kimi-k3",
   "kimi-k3-fast",
-  "qwen3.5-397b",
-  "qwen3.5-397b-fast",
   "qwen3.6-35b",
   "qwen3.6-35b-fast",
 ];
@@ -101,7 +96,7 @@ describe("neuralwatt-extension", () => {
         name: "Gemma 4 31B",
         reasoning: true,
         input: ["text", "image"],
-        cost: { input: 0.144, output: 0.42, cacheRead: 0.036, cacheWrite: 0 },
+        cost: { input: 0.144, output: 0.42, cacheRead: 0.0144, cacheWrite: 0 },
         contextWindow: 262128,
         maxTokens: 16384,
       }),
@@ -197,8 +192,8 @@ describe("neuralwatt-extension", () => {
     }
   });
 
-  // Verified per-model thinking maps (probed against the gateway 2026-06).
-  // See DISABLEABLE_*/ALWAYS_ON_* map constants in the extension source.
+  // Verified per-model thinking maps (probed against the gateway 2026-08).
+  // See DISABLEABLE_* map constants in the extension source.
   it("maps each reasoning model's levels to the probed gateway behavior", () => {
     const byId = Object.fromEntries(STATIC_MODELS.map((m) => [m.id, m]));
 
@@ -235,8 +230,20 @@ describe("neuralwatt-extension", () => {
       high: "high",
       xhigh: "xhigh",
     });
+    // qwen3.6-35b previously rejected minimal/xhigh/max and kept thinking on at
+    // none; the 2026-08 re-probe shows the full enum accepted with none
+    // disabling thinking.
+    expect(byId["qwen3.6-35b"].thinkingLevelMap).toEqual({
+      off: "none",
+      minimal: "minimal",
+      low: "low",
+      medium: "medium",
+      high: "high",
+      xhigh: "xhigh",
+    });
 
-    // Disableable + accepts full enum (incl. max); xhigh -> "max" for deepest tier.
+    // Disableable + accepts full enum (incl. max); xhigh -> "max" for deepest
+    // tier.
     expect(byId["glm-5.2"].thinkingLevelMap).toEqual({
       off: "none",
       minimal: "minimal",
@@ -253,7 +260,9 @@ describe("neuralwatt-extension", () => {
       high: "high",
       xhigh: "max",
     });
-    expect(byId["qwen3.5-397b"].thinkingLevelMap).toEqual({
+    // kimi-k2.7-code was always-on at probe time; the 2026-08 re-probe shows
+    // none disables thinking, so off maps to "none" and the full map applies.
+    expect(byId["kimi-k2.7-code"].thinkingLevelMap).toEqual({
       off: "none",
       minimal: "minimal",
       low: "low",
@@ -261,43 +270,15 @@ describe("neuralwatt-extension", () => {
       high: "high",
       xhigh: "max",
     });
-
-    // Cannot be disabled (off hidden) + accepts full enum.
-    expect(byId["kimi-k2.6"].thinkingLevelMap).toEqual({
-      off: null,
+    // kimi-k2.7-code-fast now reasons (catalog metadata + 2026-08 probe), same
+    // map as its sibling.
+    expect(byId["kimi-k2.7-code-fast"].thinkingLevelMap).toEqual({
+      off: "none",
       minimal: "minimal",
       low: "low",
       medium: "medium",
       high: "high",
       xhigh: "max",
-    });
-    expect(byId["kimi-k2.7-code"].thinkingLevelMap).toEqual({
-      off: null,
-      minimal: "minimal",
-      low: "low",
-      medium: "medium",
-      high: "high",
-      xhigh: "max",
-    });
-
-    // Cannot be disabled + accepts identity-mapped levels through xhigh.
-    expect(byId["moonshotai/Kimi-K2.5"].thinkingLevelMap).toEqual({
-      off: null,
-      minimal: "minimal",
-      low: "low",
-      medium: "medium",
-      high: "high",
-      xhigh: "xhigh",
-    });
-
-    // Cannot be disabled and rejects minimal/xhigh/max.
-    expect(byId["qwen3.6-35b"].thinkingLevelMap).toEqual({
-      off: null,
-      minimal: null,
-      low: "low",
-      medium: "medium",
-      high: "high",
-      xhigh: null,
     });
   });
 
@@ -714,13 +695,13 @@ describe("neuralwatt flex helpers", () => {
       mockModelsResponse([
         { id: "glm-5.2" },
         { id: "glm-5.2-flex" },
-        { id: "kimi-k2.6" },
-        { id: "kimi-k2.6-flex" },
+        { id: "kimi-k2.7-code" },
+        { id: "kimi-k2.7-code-flex" },
         { id: "qwen3.6-35b" }, // no flex sibling
       ]),
     );
     const capable = await fetchFlexCapableIds("key", undefined);
-    expect([...capable].sort()).toEqual(["glm-5.2", "kimi-k2.6"]);
+    expect([...capable].sort()).toEqual(["glm-5.2", "kimi-k2.7-code"]);
   });
 
   it("fetchFlexCapableIds returns an empty set on a non-OK response", async () => {
@@ -818,7 +799,7 @@ describe("neuralwatt flex integration", () => {
   it("session_start builds the flex-capable set and emits flex state", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
-    await bootWithFlex(mockPi, mockCtx, "glm-5.2", ["glm-5.2", "kimi-k2.6"]);
+    await bootWithFlex(mockPi, mockCtx, "glm-5.2", ["glm-5.2", "kimi-k2.7-code"]);
 
     const emits = mockPi.events.emit.mock.calls.filter((c) => c[0] === FLEX_EVENT);
     expect(emits.length).toBeGreaterThan(0);
@@ -914,7 +895,7 @@ describe("neuralwatt flex integration", () => {
   it("model_select emits flex state and notifies for Neuralwatt models", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
-    await bootWithFlex(mockPi, mockCtx, "glm-5.2", ["glm-5.2", "kimi-k2.6"]);
+    await bootWithFlex(mockPi, mockCtx, "glm-5.2", ["glm-5.2", "kimi-k2.7-code"]);
 
     mockPi.events.emit.mockClear();
     mockCtx.ui.notify.mockClear();
@@ -922,7 +903,7 @@ describe("neuralwatt flex integration", () => {
     await handler(
       {
         type: "model_select",
-        model: { id: "kimi-k2.6", name: "Kimi K2.6", provider: "neuralwatt" },
+        model: { id: "kimi-k2.7-code", name: "Kimi K2.7 Code", provider: "neuralwatt" },
         previousModel: undefined,
         source: "set",
       },
@@ -933,7 +914,7 @@ describe("neuralwatt flex integration", () => {
       expect.stringContaining("Using Neuralwatt model"),
       "info",
     );
-    // kimi-k2.6 is capable too, so flexCapable stays true and flexOn false.
+    // kimi-k2.7-code is capable too, so flexCapable stays true and flexOn false.
     const emit = mockPi.events.emit.mock.calls.find((c) => c[0] === FLEX_EVENT);
     expect(emit?.[1]).toEqual({ flexOn: false, flexCapable: true });
   });
