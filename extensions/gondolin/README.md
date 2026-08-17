@@ -18,7 +18,7 @@ Start Pi with the `--gondolin` flag:
 pi --gondolin
 ```
 
-The first session start spins up a Gondolin VM, mounts your cwd at `/workspace`, and updates the status bar with the VM ID. From that point on, every built-in file or shell tool runs inside the guest.
+The first session start spins up a Gondolin VM, mounts your cwd at `/workspace`, and surfaces the VM in the footer (a `with WS <id>` segment on the status bar's first line when installed). From that point on, every built-in file or shell tool runs inside the guest.
 
 ### Check VM status
 
@@ -38,7 +38,7 @@ If the sandbox is not enabled, the command tells you to restart with `--gondolin
 2. **Tool routing** — Every `pi.registerTool()` call wraps a local tool factory (e.g. `createReadTool(localCwd)`) and, when a VM is active, re-creates that factory with a guest-rooted cwd and custom operations backed by `vm.fs` and `vm.exec`. When the VM is not active, the wrapped tool delegates to the local factory.
 3. **User bash** — A `user_bash` handler returns `createGondolinBashOps(vm, localCwd, shellPath)` so `!` and `!!` commands run inside the guest.
 4. **System prompt** — A `before_agent_start` handler rewrites the "Current working directory" line so the LLM sees `/workspace` (in the VM) and the underlying host path.
-5. **Shutdown** — On `session_shutdown`, the VM is closed and the status line cleared.
+5. **Shutdown** — On `session_shutdown`, the VM is closed and the status cleared.
 
 ### Path translation
 
@@ -65,7 +65,7 @@ These tools walk the guest filesystem via `walkGuestFiles()`, which mirrors the 
 - **Lazy VM creation with a shared start promise** — `ensureVm()` caches the in-flight `VM.create()` promise in a module-level `vmStarting` so concurrent tool calls during a cold start share the same VM and only one is ever created.
 - **Built-in tool override pattern** — Each registered tool is a local tool factory (e.g. `createReadTool`, `createBashTool`) wrapped with a conditional `execute` that re-instantiates the factory with a custom `operations` adapter when a VM exists. This keeps the local path identical when the flag is off and avoids forking Pi's tool implementations.
 - **Host/guest cwd separation** — Tools are instantiated with the guest path (`/workspace`) as the local cwd argument so the inner tool implementation stays unaware of the host. All host-to-guest translation lives in the operation adapters.
-- **Status line integration** — The extension sets a `gondolin` status line that surfaces the VM ID and workspace mapping while the VM is running, then clears it on shutdown. This gives visible feedback that the sandbox is active without requiring a separate widget.
+- **Status integration** — VM state changes are published on the event bus (`gondolin:vm-state`), which the status-bar extension renders as a `with WS <id>` segment on footer line 1. A `gondolin` `setStatus` entry remains as the fallback for Pi's default footer when the status bar is not installed, showing the VM ID and workspace mapping while the VM runs and clearing on shutdown.
 - **Mount semantics** — Mounting the host cwd as `/workspace` (via `RealFSProvider`) means changes inside the workspace are visible on the host immediately, while changes elsewhere in the guest are discarded when the VM closes. This is a deliberate trade-off: the agent still edits your real files, but cannot tamper with anything outside the cwd.
 
 ## Pi APIs Used
@@ -76,7 +76,8 @@ These tools walk the guest filesystem via `walkGuestFiles()`, which mirrors the 
 | `pi.registerCommand("gondolin")` | `/gondolin` status command |
 | `pi.registerTool(...)` | Overrides for `read`, `write`, `edit`, `bash`, `ls`, `find`, `grep` |
 | `pi.on("session_start")` | Boots the VM on demand when the flag is set |
-| `pi.on("session_shutdown")` | Closes the VM and clears the status line |
+| `pi.on("session_shutdown")` | Closes the VM and clears the status |
+| `pi.events.emit("gondolin:vm-state")` | Publishes VM state for the status bar's line 1 workspace segment |
 | `pi.on("user_bash")` | Routes `!` and `!!` commands into the VM |
 | `pi.on("before_agent_start")` | Rewrites the cwd line in the system prompt |
 | `pi.getFlag("gondolin")` | Reads the flag at runtime per tool invocation |

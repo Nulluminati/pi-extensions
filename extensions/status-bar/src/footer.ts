@@ -2,6 +2,8 @@ import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { ExtensionCommandContext } from "pi";
 import {
   BAR_SEGMENTS,
+  GOAL_STATUS_KEY,
+  GONDOLIN_STATUS_KEY,
   ICON_AHEAD,
   ICON_BEHIND,
   ICON_CONFLICTED,
@@ -137,6 +139,20 @@ function composeLine1(left: string, rightVariants: string[], width: number): str
   return truncateToWidth(left, width, "");
 }
 
+/**
+ * Gondolin workspace segment for line 1: "with WS <short vm id>" once the VM
+ * is ready, or "with WS starting…"/"with WS stopping…" during transitions.
+ * Rendered after the working directory, before the git branch, so line 1
+ * reads like "pi-extensions with WS a1b2c3d4 on main".
+ */
+function buildGondolinSegment(
+  vm: { state: "starting" | "ready" | "stopping"; vmId?: string },
+  theme: any,
+): string {
+  const label = vm.state === "ready" && vm.vmId ? vm.vmId.slice(0, 8) : `${vm.state}…`;
+  return `${theme.fg("dim", "with")} ${theme.fg("thinkingHigh", `WS ${label}`)}`;
+}
+
 export function buildFooterLines(
   state: State,
   ctx: ExtensionCommandContext,
@@ -150,6 +166,12 @@ export function buildFooterLines(
 
   // Working directory (last path component) — blue, Starship-style.
   leftSegments.push(theme.fg("mdLink", `${ICON_CWD} ${formatCwd(ctx.cwd)}`));
+
+  // Gondolin sandbox VM, when one exists: "with WS <id>" between the
+  // working directory and the git branch.
+  if (state.gondolinVm) {
+    leftSegments.push(buildGondolinSegment(state.gondolinVm, theme));
+  }
 
   // Git branch + status indicator block. Branch in purple (Starship's
   // signature), status indicators in red.
@@ -202,8 +224,19 @@ export function buildFooterLines(
   if (extStatuses) {
     for (const [key, text] of extStatuses) {
       // Skip our own indicator and the small-model status: the small model is
-      // shown in the editor meta line, not the footer.
-      if (key !== STATUS_KEY && key !== SMALL_MODEL_STATUS_KEY && text) line2Segments.push(text);
+      // shown in the editor meta line, not the footer. Skip gondolin too: its
+      // workspace segment lives on line 1, and goal: a running goal is shown
+      // as a "Goal" badge in the editor frame (their setStatus entries are
+      // only the fallback for the default footer).
+      if (
+        key !== STATUS_KEY &&
+        key !== SMALL_MODEL_STATUS_KEY &&
+        key !== GONDOLIN_STATUS_KEY &&
+        key !== GOAL_STATUS_KEY &&
+        text
+      ) {
+        line2Segments.push(text);
+      }
     }
   }
 

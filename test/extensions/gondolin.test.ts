@@ -224,6 +224,13 @@ describe("gondolin-extension", () => {
       "gondolin",
       expect.stringContaining("starting"),
     );
+    // VM state changes are also published on the event bus so the status bar
+    // can render the workspace segment on line 1.
+    expect(mockPi.events.emit).toHaveBeenCalledWith("gondolin:vm-state", { state: "starting" });
+    expect(mockPi.events.emit).toHaveBeenCalledWith("gondolin:vm-state", {
+      state: "ready",
+      vmId: "test-vm-id",
+    });
   });
 
   it("session_shutdown handler stops the VM", async () => {
@@ -239,6 +246,8 @@ describe("gondolin-extension", () => {
     await sessionShutdown({ type: "session_shutdown", reason: "user_request" }, mockCtx);
 
     expect(mockVm.close).toHaveBeenCalled();
+    expect(mockPi.events.emit).toHaveBeenCalledWith("gondolin:vm-state", { state: "stopping" });
+    expect(mockPi.events.emit).toHaveBeenCalledWith("gondolin:vm-state", { state: "stopped" });
   });
 
   it("before_agent_start handler patches system prompt", async () => {

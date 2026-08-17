@@ -31,6 +31,7 @@ import {
   STATUS_ICON,
   STATUS_KEY,
   TEXT_COLOR,
+  VM_EVENT,
 } from "./src/constants.ts";
 import {
   createGondolinEditOps,
@@ -69,6 +70,7 @@ export default async function gondolinExtension(pi: ExtensionAPI) {
     // Lazy-load the native addon so the ~36 MB krun runner only maps into the
     // process when a VM is actually started, not at extension import.
     const { VM, RealFSProvider } = await import("@earendil-works/gondolin");
+    pi.events.emit(VM_EVENT, { state: "starting" });
     ctx?.ui.setStatus(
       STATUS_KEY,
       formatStatusLine(ctx.ui.theme, {
@@ -90,6 +92,7 @@ export default async function gondolinExtension(pi: ExtensionAPI) {
     const bashProbe = await created.exec(["/bin/sh", "-lc", "command -v bash || true"]);
     shellPath = bashProbe.stdout.trim() || "/bin/sh";
     vm = created;
+    pi.events.emit(VM_EVENT, { state: "ready", vmId: created.id });
     ctx?.ui.setStatus(
       STATUS_KEY,
       formatStatusLine(ctx.ui.theme, {
@@ -130,6 +133,7 @@ export default async function gondolinExtension(pi: ExtensionAPI) {
     vm = undefined;
     vmStarting = undefined;
     if (!activeVm) return;
+    pi.events.emit(VM_EVENT, { state: "stopping" });
     ctx.ui.setStatus(
       STATUS_KEY,
       formatStatusLine(ctx.ui.theme, {
@@ -143,6 +147,7 @@ export default async function gondolinExtension(pi: ExtensionAPI) {
     try {
       await activeVm.close();
     } finally {
+      pi.events.emit(VM_EVENT, { state: "stopped" });
       ctx.ui.setStatus(STATUS_KEY, undefined);
     }
   });

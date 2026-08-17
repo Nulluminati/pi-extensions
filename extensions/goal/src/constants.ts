@@ -16,4 +16,9 @@ export const GOAL_MAX_LENGTH = 4000;
 
 export const STATUS_KEY = "goal";
 
+// Event bus topic for goal state changes, consumed by the status-bar extension
+// ("Goal" badge in the editor frame while a goal is running). Payload:
+// { status: "active" | "paused" | "complete" | "budget" | null }.
+export const STATE_EVENT = "goal:state-change";
+
 export const COMPLETION_STATUS_DURATION = 8000;

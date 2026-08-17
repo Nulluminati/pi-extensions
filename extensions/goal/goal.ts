@@ -12,6 +12,7 @@ import { parseNewGoalArgs, parseTokenBudget, validateObjective } from "./src/com
 import {
   COMPLETION_STATUS_DURATION,
   ICON_COLOR,
+  STATE_EVENT,
   STATUS_ICON,
   STATUS_KEY,
   TEXT_COLOR,
@@ -54,6 +55,9 @@ export default async function goalExtension(pi: ExtensionAPI) {
   }
 
   function updateStatusLine(ctx: ExtensionContext) {
+    // Publish on the event bus for the status-bar extension's editor badge,
+    // regardless of UI mode (the event is inert when nothing subscribes).
+    pi.events.emit(STATE_EVENT, { status: state?.status ?? null });
     if (!ctx.hasUI) return;
     const text = state ? buildStatusLine(state) : undefined;
     ctx.ui.setStatus(

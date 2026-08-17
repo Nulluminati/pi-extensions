@@ -73,6 +73,13 @@ function footerData(opts: { branch?: string | null; statuses?: Map<string, strin
   };
 }
 
+/** Helper: extract a pi.events bus handler registered by the extension. */
+function getEventsHandler(mockPi: ReturnType<typeof createMockPi>, eventName: string) {
+  const call = mockPi.events.on.mock.calls.find((c) => c[0] === eventName);
+  if (!call) throw new Error(`No pi.events handler for ${eventName}`);
+  return call[1] as (payload: any) => void;
+}
+
 /**
  * Mock pi.exec for git: returns porcelain-v2 stdout for `status`, and the
  * given stash stdout for `rev-parse --verify refs/stash`.
@@ -1029,7 +1036,7 @@ describe("status-bar-extension", () => {
       plainTheme(),
       footerData({
         statuses: new Map([
-          ["goal", "🎯 active"],
+          ["neuralwatt", "🎯 active"],
           ["small-model", "small synthetic/syn:small:text · minimal"],
           ["other", "some status"],
         ]),
@@ -1057,7 +1064,7 @@ describe("status-bar-extension", () => {
       footerData({
         statuses: new Map([
           ["status-bar", `${STATUS_ICON} statusbar`],
-          ["goal", "🎯 active"],
+          ["neuralwatt", "🎯 active"],
         ]),
       }),
     );
@@ -1065,6 +1072,82 @@ describe("status-bar-extension", () => {
 
     expect(lines[1]).not.toContain(`${STATUS_ICON} statusbar`);
     expect(lines[1]).toContain("🎯 active");
+  });
+
+  it("does not show the gondolin status on line 2 (it lives on line 1)", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBar(mockPi, mockCtx);
+
+    const component = getFooterFactory(mockCtx)(
+      { requestRender: vi.fn() },
+      plainTheme(),
+      footerData({
+        statuses: new Map([
+          ["gondolin", "cube a1b2c3d4 (/workspace)"],
+          ["neuralwatt", "🎯 active"],
+        ]),
+      }),
+    );
+    const lines = component.render(120);
+
+    expect(lines[1]).not.toContain("gondolin");
+    expect(lines[1]).not.toContain("/workspace");
+    expect(lines[1]).toContain("🎯 active");
+  });
+
+  it("footer line 1 shows the gondolin workspace segment after the cwd", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBar(mockPi, mockCtx);
+
+    const handler = getEventsHandler(mockPi, "gondolin:vm-state");
+    handler({ state: "ready", vmId: "abcd1234efgh5678" });
+
+    const component = getFooterFactory(mockCtx)(
+      { requestRender: vi.fn() },
+      plainTheme(),
+      footerData({ branch: "main" }),
+    );
+    const line1 = component.render(120)[0] ?? "";
+
+    expect(line1).toContain("with WS abcd1234");
+    // Segment order: cwd, then WS, then git branch.
+    expect(line1.indexOf("with WS")).toBeGreaterThan(line1.indexOf("pi-extensions"));
+    expect(line1.indexOf("main")).toBeGreaterThan(line1.indexOf("with WS"));
+  });
+
+  it("gondolin segment shows starting state before the VM id is known", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBar(mockPi, mockCtx);
+
+    const handler = getEventsHandler(mockPi, "gondolin:vm-state");
+    handler({ state: "starting" });
+
+    const component = getFooterFactory(mockCtx)(
+      { requestRender: vi.fn() },
+      plainTheme(),
+      footerData(),
+    );
+    expect(component.render(120)[0]).toContain("with WS starting");
+  });
+
+  it("gondolin segment disappears once the VM stops", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBar(mockPi, mockCtx);
+
+    const handler = getEventsHandler(mockPi, "gondolin:vm-state");
+    handler({ state: "ready", vmId: "abcd1234efgh5678" });
+    handler({ state: "stopped" });
+
+    const component = getFooterFactory(mockCtx)(
+      { requestRender: vi.fn() },
+      plainTheme(),
+      footerData(),
+    );
+    expect(component.render(120)[0]).not.toContain("with WS");
   });
 
   it("onBranchChange triggers requestRender", async () => {
@@ -1620,6 +1703,98 @@ function getPlanModeHandler(mockPi: ReturnType<typeof createMockPi>) {
   return undefined;
 }
 
+/**
+ * Extract the goal-state handler the status-bar registered on pi.events at
+ * load time. The goal extension populates the real state; tests drive it
+ * directly.
+ */
+function getGoalHandler(mockPi: ReturnType<typeof createMockPi>) {
+  const calls = (mockPi.events.on as ReturnType<typeof vi.fn>).mock.calls;
+  for (const [event, handler] of calls) {
+    if (event === "goal:state-change") {
+      return handler as (payload: { status: string | null }) => void;
+    }
+  }
+  return undefined;
+}
+
+describe("status-bar goal badge", () => {
+  it("installed editor shows a Goal badge while a goal is running", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBar(mockPi, mockCtx);
+
+    const handler = getGoalHandler(mockPi);
+    expect(handler).toBeDefined();
+    handler?.({ status: "active" });
+
+    const editor = renderInstalledEditor(mockCtx);
+    const lines = editor.render(100);
+    expect(lines[0]).toContain("Goal");
+  });
+
+  it("hides the badge when the goal is paused, complete, or gone", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBar(mockPi, mockCtx);
+
+    const handler = getGoalHandler(mockPi);
+    handler?.({ status: "active" });
+    handler?.({ status: "paused" });
+
+    const editor = renderInstalledEditor(mockCtx);
+    expect(editor.render(100).some((l) => l.includes("Goal"))).toBe(false);
+
+    handler?.({ status: "active" });
+    handler?.({ status: "complete" });
+    expect(editor.render(100).some((l) => l.includes("Goal"))).toBe(false);
+
+    handler?.({ status: "active" });
+    handler?.({ status: null });
+    expect(editor.render(100).some((l) => l.includes("Goal"))).toBe(false);
+  });
+
+  it("shows the Goal badge beside Plan Mode when both are active", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBar(mockPi, mockCtx);
+
+    getPlanModeHandler(mockPi)?.({ mode: "plan" });
+    getGoalHandler(mockPi)?.({ status: "active" });
+
+    const editor = renderInstalledEditor(mockCtx);
+    const topLine = editor.render(120)[0] ?? "";
+    expect(topLine).toContain("Plan Mode");
+    expect(topLine).toContain("Goal");
+  });
+
+  it("status-bar subscribes to goal:state-change at load time (before session_start)", async () => {
+    const mockPi = createMockPi();
+    await statusBarExtension(mockPi);
+    // No session_start required: the subscription must exist as soon as the
+    // extension loads, or the first-load goal announcement is missed.
+    expect(getGoalHandler(mockPi)).toBeDefined();
+  });
+
+  it("footer line 2 suppresses the goal status (a running goal is the badge)", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBar(mockPi, mockCtx);
+
+    const component = getFooterFactory(mockCtx)(
+      { requestRender: vi.fn() },
+      plainTheme(),
+      footerData({
+        statuses: new Map([["goal", "🎯 Goal: active 2m 30s"]]),
+      }),
+    );
+    const lines = component.render(120);
+
+    expect(lines.length).toBe(1);
+    expect(lines[0]).not.toContain("Goal");
+  });
+});
+
 describe("status-bar flex badge", () => {
   function plainTheme() {
     return { fg: vi.fn((_color: string, text: string) => text) };
@@ -1831,13 +2006,13 @@ describe("status-bar small model segment", () => {
       footerData({
         statuses: new Map([
           ["small-model", "small synthetic/haiku · minimal"],
-          ["goal", "🎯 active"],
+          ["neuralwatt", "🎯 active"],
         ]),
       }),
     );
     const lines = component.render(120);
 
-    // Line 2 still renders for the goal status, but small-model is gone.
+    // Line 2 still renders for the neuralwatt status, but small-model is gone.
     expect(lines.length).toBe(2);
     expect(lines[1]).toContain("🎯 active");
     expect(lines[1]).not.toContain("small synthetic/haiku");

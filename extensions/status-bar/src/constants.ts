@@ -92,6 +92,40 @@ export const EDITOR_META_SEPARATOR = "  ";
 export const SMALL_MODEL_STATUS_KEY = "small-model";
 
 /**
+ * Status key the goal extension publishes under. Suppressed from footer line
+ * 2 because a running goal is shown as a "Goal" badge in the editor frame
+ * (see GOAL_STATE_EVENT); the setStatus entry remains the fallback for the
+ * default footer when the status bar is disabled.
+ */
+export const GOAL_STATUS_KEY = "goal";
+
+/**
+ * Event the goal extension emits on pi.events whenever the goal state
+ * changes. The editor frame shows a "Goal" badge in its top-right cell while
+ * a goal is running. Defined here (not imported) so the status-bar extension
+ * stays self-contained; the goal extension owns the contract and emits the
+ * same string.
+ */
+export const GOAL_STATE_EVENT = "goal:state-change";
+
+/**
+ * Status key the gondolin extension publishes under. Suppressed from footer
+ * line 2 because the workspace segment is shown on line 1 instead (see
+ * GONDOLIN_VM_EVENT); the setStatus entry remains the fallback for the
+ * default footer when the status bar is disabled.
+ */
+export const GONDOLIN_STATUS_KEY = "gondolin";
+
+/**
+ * Event the gondolin extension emits on pi.events when the sandbox VM state
+ * changes (starting / ready / stopping / stopped). The footer renders a
+ * workspace segment on line 1 from it. Defined here (not imported) so the
+ * status-bar extension stays self-contained; the gondolin extension owns the
+ * contract and emits the same string.
+ */
+export const GONDOLIN_VM_EVENT = "gondolin:vm-state";
+
+/**
  * Event the Neuralwatt extension emits on pi.events to publish flex state for
  * the current model. Defined here (not imported) so the status-bar extension
  * stays self-contained; the Neuralwatt extension owns the contract and emits

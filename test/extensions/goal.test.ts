@@ -263,6 +263,7 @@ describe("goal-extension", () => {
     expect(mockCtx.ui.confirm).toHaveBeenCalledTimes(1);
     expect(mockPi.appendEntry).toHaveBeenLastCalledWith("goal-state", { goal: null });
     expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("goal", undefined);
+    expect(mockPi.events.emit).toHaveBeenCalledWith("goal:state-change", { status: null });
   });
 
   it("/goal reset declined keeps the goal", async () => {
@@ -328,6 +329,7 @@ describe("goal-extension", () => {
     );
     expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("goal", expect.stringContaining(STATUS_ICON));
     expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("goal", expect.stringContaining("complete"));
+    expect(mockPi.events.emit).toHaveBeenCalledWith("goal:state-change", { status: "complete" });
   });
 
   it("goal_complete tool errors when no active goal", async () => {
@@ -537,6 +539,7 @@ describe("goal-extension", () => {
 
     // Check status reflects reconstructed state
     expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("goal", expect.stringContaining("active"));
+    expect(mockPi.events.emit).toHaveBeenCalledWith("goal:state-change", { status: "active" });
   });
 
   it("input event cancels pending continuation", async () => {

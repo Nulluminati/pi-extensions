@@ -65,7 +65,7 @@ Cancels the goal entirely, clears the status line, and resets all internal state
 
 3. **Auto-continuation** — On `agent_end`, if the goal is still active, no `goal_complete` was called, and there are no pending messages, the extension sends a continuation follow-up message via `sendUserMessage()`. The agent receives this as a new prompt and continues working.
 
-4. **Completion** — The LLM calls the `goal_complete` tool when it believes the objective is fully met. This sets status to "complete", stops auto-continuation, and shows "🎯 complete" in the status line for 8 seconds.
+4. **Completion** — The LLM calls the `goal_complete` tool when it believes the objective is fully met. This sets status to "complete", stops auto-continuation, and shows "🎯 complete" in the status line for 8 seconds (see the status-bar integration below).
 
 5. **Interruption handling** — If a message ends with `stopReason: "aborted"` or `"error"`, the goal is automatically paused.
 
@@ -108,7 +108,8 @@ The extension uses module-level variables (`state`, `goalCompleteCalled`, `conti
 | `pi.on("session_shutdown")` | Persists final state |
 | `pi.on("session_tree")` | Reconstructs state when navigating the tree |
 | `pi.on("input")` | Cancels pending continuation on user input |
-| `ctx.ui.setStatus()` | Shows 🎯 status line (active, paused, budget, complete) |
+| `ctx.ui.setStatus()` | Shows 🎯 status line (active, paused, budget, complete) in the default footer; the status-bar extension suppresses it in favor of its editor **Goal** badge |
+| `pi.events.emit("goal:state-change")` | Publishes goal state; the status-bar extension shows a **Goal** badge in the editor frame's top-right cell while a goal is running |
 | `ctx.ui.confirm()` | Confirms goal replacement |
 | `ctx.ui.notify()` | Status messages |
 | `ctx.getContextUsage()` | Token usage tracking |

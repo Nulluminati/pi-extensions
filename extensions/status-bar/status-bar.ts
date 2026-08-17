@@ -38,6 +38,8 @@ import { loadSmallModelConfig, resolveSmallModelConfigPath } from "../../lib/sma
 import { formatStatusLine } from "../../lib/ui-format.ts";
 import {
   FLEX_EVENT,
+  GOAL_STATE_EVENT,
+  GONDOLIN_VM_EVENT,
   ICON_COLOR,
   PLAN_MODE_EVENT,
   STATUS_ICON,
@@ -64,6 +66,8 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     turnCount: 0,
     thinkingLevel: "none",
     smallModelLabel: "",
+    goalRunning: false,
+    gondolinVm: null,
     gitBranch: null,
     gitStatus: null,
     tokenUsage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
@@ -78,6 +82,19 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
   let currentCwd = "";
   let smallModelWatcher: FSWatcher | undefined;
   let smallModelWatchDebounce: ReturnType<typeof setTimeout> | undefined;
+
+  // Track a running goal so the editor frame can show a "Goal" badge in its
+  // top-right cell. Subscribed at load time rather than in session_start: the
+  // goal extension announces its state during its own session_start handler,
+  // which may run before this extension's handler registers a
+  // session_start-scoped listener, and the state would be missed on first
+  // load. Load-time subscriptions are registered before any session events
+  // dispatch.
+  pi.events.on(GOAL_STATE_EVENT, (payload: { status: string | null }) => {
+    state.goalRunning = payload.status === "active";
+    state.lastHandle?.requestRender();
+    editorRequestRender?.();
+  });
 
   function setFooter(ctx: ExtensionCommandContext): void {
     if (!ctx.hasUI) return;
@@ -149,7 +166,12 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
           () => pi.getThinkingLevel() ?? "none",
           () => ({ on: state.flexOn, capable: state.flexCapable }),
           () => (state.planModeActive ? "warning" : undefined),
-          () => (state.planModeActive ? ctx.ui.theme.fg("warning", "Plan Mode") : undefined),
+          () => {
+            const parts: string[] = [];
+            if (state.planModeActive) parts.push(ctx.ui.theme.fg("warning", "Plan Mode"));
+            if (state.goalRunning) parts.push(ctx.ui.theme.fg("mdHeading", "Goal"));
+            return parts.length > 0 ? parts.join(ctx.ui.theme.fg("dim", " · ")) : undefined;
+          },
         );
       },
     );
@@ -322,6 +344,9 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
       }, 0);
     }
 
+    // Track a running goal so the editor frame can show a "Goal" badge in
+    // its top-right cell (subscribed at load time; see above).
+
     // Subscribe to Neuralwatt flex state changes to render the flex badge next
     // to the thinking level. Keeps the metadata line in sync with the toggle
     // without coupling the status-bar editor to Neuralwatt's internals.
@@ -340,6 +365,23 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
       state.lastHandle?.requestRender();
       editorRequestRender?.();
     });
+
+    // Track the Gondolin sandbox VM so line 1 can show the workspace segment
+    // ("with WS <id>") after the working directory. The gondolin extension
+    // publishes on the pi.events bus (see gondolin:vm-state).
+    pi.events.on(
+      GONDOLIN_VM_EVENT,
+      (payload: { state: "starting" | "ready" | "stopping" | "stopped"; vmId?: string }) => {
+        state.gondolinVm =
+          payload.state === "stopped"
+            ? null
+            : {
+                state: payload.state,
+                ...(payload.vmId !== undefined ? { vmId: payload.vmId } : {}),
+              };
+        state.lastHandle?.requestRender();
+      },
+    );
 
     // Watch the small-model config so the editor title reflects `/smallmodel`
     // changes immediately rather than on the next turn.

@@ -39,6 +39,15 @@ export interface State {
   // meta line after a "/" separator, beside the main model. Empty when no
   // small model is configured.
   smallModelLabel: string;
+  // True while the goal extension has a running goal (status "active"),
+  // published on the pi.events bus (see goal:state-change). Shown as a "Goal"
+  // badge in the editor frame's top-right cell, beside "Plan Mode" when both
+  // are active.
+  goalRunning: boolean;
+  // Gondolin sandbox VM state, published by the gondolin extension on the
+  // pi.events bus (see gondolin:vm-state). Shown as a "with WS <id>" segment
+  // on footer line 1 after the working directory; null when no VM exists.
+  gondolinVm: { state: "starting" | "ready" | "stopping"; vmId?: string } | null;
   gitBranch: string | null;
   gitStatus: GitStatus | null;
   tokenUsage: TokenUsage;
