@@ -7,7 +7,6 @@ export interface CodeSearchFacetBucket {
 
 export interface CodeSearchParams {
   query: string;
-  regex?: boolean;
   language?: string;
   repo?: string;
   path?: string;

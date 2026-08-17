@@ -590,34 +590,51 @@ describe("code-search-extension", () => {
         expect(second.content[0].text).toBe(first.content[0].text);
       });
 
-      it("omits patternType by default and sets regexp mode when regex is true", async () => {
-        mockFetch.mockResolvedValueOnce(createStreamResponse([sseEvent("done", {})]));
-        mockFetch.mockResolvedValueOnce(createStreamResponse([sseEvent("done", {})]));
-
+      it("rejects multi-term queries containing parentheses with guidance", async () => {
         const mockPi = createMockPi();
         await codeSearchExtension(mockPi);
         const tool = getRegisteredTool(mockPi, "code_search");
+        const result = await tool.execute(
+          "id-1",
+          { query: "MarshalJSON() error" },
+          undefined,
+          undefined,
+          {},
+        );
 
-        await tool.execute("id-1", { query: "foo bar" }, undefined, undefined, {});
-        let url = new URL(String(mockFetch.mock.calls[0]?.[0] ?? ""));
-        expect(url.searchParams.get("patternType")).toBeNull();
-
-        await tool.execute("id-2", { query: "foo\\.bar", regex: true }, undefined, undefined, {});
-        url = new URL(String(mockFetch.mock.calls[1]?.[0] ?? ""));
-        expect(url.searchParams.get("patternType")).toBe("regexp");
+        expect(result.content[0].text).toContain("parentheses");
+        expect(result.details.isError).toBe(true);
+        expect(mockFetch).not.toHaveBeenCalled();
       });
 
-      it("caches regex and non-regex queries separately", async () => {
-        mockFetch.mockResolvedValue(createStreamResponse([sseEvent("done", {})]));
+      it("allows a single term containing parentheses", async () => {
+        mockFetch.mockResolvedValueOnce(createStreamResponse([sseEvent("done", {})]));
 
         const mockPi = createMockPi();
         await codeSearchExtension(mockPi);
         const tool = getRegisteredTool(mockPi, "code_search");
+        await tool.execute("id-1", { query: "MarshalJSON()" }, undefined, undefined, {});
 
-        await tool.execute("id-1", { query: "a.b" }, undefined, undefined, {});
-        await tool.execute("id-2", { query: "a.b", regex: true }, undefined, undefined, {});
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+      });
 
-        expect(mockFetch).toHaveBeenCalledTimes(2);
+      it("allows a quoted phrase containing parentheses as one term", async () => {
+        mockFetch.mockResolvedValueOnce(createStreamResponse([sseEvent("done", {})]));
+
+        const mockPi = createMockPi();
+        await codeSearchExtension(mockPi);
+        const tool = getRegisteredTool(mockPi, "code_search");
+        await tool.execute(
+          "id-1",
+          { query: '"MarshalJSON() ([]byte, error)"' },
+          undefined,
+          undefined,
+          {},
+        );
+
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+        const url = new URL(String(mockFetch.mock.calls[0]?.[0] ?? ""));
+        expect(url.searchParams.get("patternType")).toBeNull();
       });
 
       it("does not cache across separate extension instances", async () => {

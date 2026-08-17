@@ -23,11 +23,7 @@ export const CODE_SEARCH_PARAMS = {
     query: {
       type: "string",
       description:
-        "Search query. Terms are ANDed; quote exact strings. Set regex: true for RE2 regular expressions.",
-    },
-    regex: {
-      type: "boolean",
-      description: "Interpret query as an RE2 regular expression instead of literal terms.",
+        "Search query. Terms are ANDed; quote exact strings (e.g. 'useEffect cleanup'). Parentheses only work within a single term.",
     },
     language: {
       type: "string",
@@ -65,7 +61,6 @@ export function createCodeSearchCache(): CodeSearchCache {
 function cacheKey(params: CodeSearchParams): string {
   return JSON.stringify([
     params.query,
-    params.regex ?? null,
     params.language ?? null,
     params.repo ?? null,
     params.path ?? null,
@@ -107,6 +102,19 @@ function clampMaxResults(value: unknown): number {
   const num = Number(value);
   if (!Number.isFinite(num) || num < MIN_MAX_RESULTS) return DEFAULT_MAX_RESULTS;
   return Math.min(MAX_MAX_RESULTS, Math.floor(num));
+}
+
+/**
+ * Sourcegraph's public API silently returns zero matches for multi-term
+ * queries where any term contains parentheses, so reject them up front with
+ * guidance instead of letting the model trust a false negative. Single terms
+ * and quoted phrases containing parentheses are fine.
+ */
+function hasParenTerm(query: string): boolean {
+  // Split into terms, treating double-quoted phrases as single terms.
+  const terms = query.match(/"[^"]*"|\S+/g) ?? [];
+  if (terms.length <= 1) return false;
+  return terms.some((term) => /[()]/.test(term));
 }
 
 function errorResult(
@@ -151,6 +159,12 @@ export async function executeCodeSearch(
   if (query.length > MAX_QUERY_LENGTH) {
     return errorResult(query, `Error: query is too long (max ${MAX_QUERY_LENGTH} characters).`);
   }
+  if (hasParenTerm(query)) {
+    return errorResult(
+      query,
+      "Error: multi-term queries containing parentheses are unreliable on this API and return false zeros. Use a single term like MarshalJSON(), a quoted phrase, or drop the parentheses.",
+    );
+  }
   if (language && language.length > MAX_LANGUAGE_LENGTH) {
     return errorResult(
       query,
@@ -179,7 +193,6 @@ export async function executeCodeSearch(
   const filters: CodeSearchDetails["filters"] = { language, repo, path };
   const searchParams: CodeSearchParams = {
     query,
-    ...(params.regex && { regex: true }),
     ...(language && { language }),
     ...(repo && { repo }),
     ...(path && { path }),
