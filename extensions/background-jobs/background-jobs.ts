@@ -28,18 +28,17 @@
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionUIContext } from "pi";
-import { formatStatusLine } from "../../lib/ui-format.ts";
 import { executeJobsAction, openJobsPanel } from "./src/jobs.ts";
 import { startMonitor } from "./src/monitor.ts";
 import { activeJobs, buildSnapshot, createRegistry, type JobRegistry } from "./src/registry.ts";
 import { cancelJob, startBackgroundJob } from "./src/runner.ts";
 import { BACKGROUND_PARAMETERS, JOBS_PARAMETERS, MONITOR_PARAMETERS } from "./src/schemas.ts";
 import type { JobEvents } from "./src/types.ts";
+import { createJobsWidget } from "./src/widget.ts";
 
 // --- Constants ---
 
-const STATUS_KEY = "background-jobs";
-const STATUS_ICON = "⏳";
+const WIDGET_KEY = "background-jobs";
 const SNAPSHOT_TYPE = "background-jobs";
 const WAKE_CUSTOM_TYPE = "background-jobs:wake";
 
@@ -66,32 +65,16 @@ export default async function backgroundJobsExtension(pi: ExtensionAPI) {
     }
   }
 
-  function refreshStatus(): void {
+  function refreshWidget(): void {
     const ui = lastUi;
-    if (!ui?.setStatus) return;
+    if (!ui?.setWidget) return;
     const active = activeJobs(registry);
     try {
-      if (active.length === 0) {
-        ui.setStatus(STATUS_KEY, undefined);
-        return;
-      }
-      const labels = active
-        .slice(0, 3)
-        .map((job) => `#${job.id} ${job.label}`)
-        .join(", ");
-      const more = active.length > 3 ? ` +${active.length - 3}` : "";
-      ui.setStatus(
-        STATUS_KEY,
-        formatStatusLine(ui.theme, {
-          icon: STATUS_ICON,
-          prefix: "Jobs",
-          text: `${active.length} job${active.length === 1 ? "" : "s"}: ${labels}${more}`,
-        }),
-      );
+      ui.setWidget(WIDGET_KEY, active.length > 0 ? createJobsWidget(registry) : undefined);
     } catch (err) {
       const message = (err as Error).message;
       if (!message.includes("stale")) {
-        console.error(`[background-jobs] status refresh failed: ${message}`);
+        console.error(`[background-jobs] widget refresh failed: ${message}`);
       }
     }
   }
@@ -118,7 +101,7 @@ export default async function backgroundJobsExtension(pi: ExtensionAPI) {
     },
     onChange(): void {
       persist();
-      refreshStatus();
+      refreshWidget();
     },
   };
 

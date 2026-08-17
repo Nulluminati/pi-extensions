@@ -94,6 +94,7 @@ describe("background-jobs-extension", () => {
         "runner.ts",
         "schemas.ts",
         "types.ts",
+        "widget.ts",
       ]);
     });
   });
@@ -174,16 +175,55 @@ describe("background-jobs-extension", () => {
       expect(spawnArgs[1]).toMatchObject({ shell: "/bin/sh", detached: true });
     });
 
-    it("shows the running job in the status line", async () => {
+    it("shows the running job in a todos-style framed widget", async () => {
       const mockPi = createMockPi();
       const mockCtx = createMockCommandContext();
       await backgroundJobsExtension(mockPi);
       await startBackgroundJob(mockPi, mockCtx, { command: "npm test" });
 
-      expect(mockCtx.ui.setStatus).toHaveBeenCalledWith(
-        "background-jobs",
-        expect.stringContaining("#1"),
+      const call = mockCtx.ui.setWidget.mock.calls.find((c) => c[0] === "background-jobs");
+      expect(call).toBeDefined();
+      expect(typeof call?.[1]).toBe("function");
+
+      const factory = call?.[1] as (
+        tui: unknown,
+        theme: unknown,
+      ) => { render: (width: number) => string[] };
+      const theme = { fg: (_color: string, text: string) => text };
+      const component = factory({ requestRender: vi.fn() }, theme);
+      const text = component.render(80).join("\n");
+
+      expect(text).toContain("Jobs");
+      expect(text).toContain("#1");
+      // The default label is the slugified command ("npm test" → "npm").
+      expect(text).toContain("npm");
+    });
+
+    it("shows at most three jobs in the widget with a more indicator", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await backgroundJobsExtension(mockPi);
+      for (const label of ["one", "two", "three", "four"]) {
+        await startBackgroundJob(mockPi, mockCtx, { command: `cmd ${label}`, label });
+      }
+
+      const calls = mockCtx.ui.setWidget.mock.calls.filter(
+        (call: unknown[]) => call[0] === "background-jobs",
       );
+      const call = calls[calls.length - 1];
+      const factory = call?.[1] as (
+        tui: unknown,
+        theme: unknown,
+      ) => { render: (width: number) => string[] };
+      const theme = { fg: (_color: string, text: string) => text };
+      const component = factory({ requestRender: vi.fn() }, theme);
+      const text = component.render(80).join("\n");
+
+      expect(text).toContain("one");
+      expect(text).toContain("three");
+      expect(text).not.toContain("four");
+      expect(text).toContain("↓ 1 more");
+      expect(text).toContain("4 running");
     });
 
     it("captures output, wakes the agent on exit without leaking output, and clears the status", async () => {
@@ -205,7 +245,7 @@ describe("background-jobs-extension", () => {
         { triggerTurn: true, deliverAs: "steer" },
       );
       expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("exit 0"), "info");
-      expect(mockCtx.ui.setStatus).toHaveBeenLastCalledWith("background-jobs", undefined);
+      expect(mockCtx.ui.setWidget).toHaveBeenLastCalledWith("background-jobs", undefined);
     });
 
     it("reports failure on non-zero exit", async () => {
