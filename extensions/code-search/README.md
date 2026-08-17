@@ -32,7 +32,8 @@ code_search({
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `query` | yes | Search pattern (Sourcegraph uses RE2 syntax) |
+| `query` | yes | Search query — terms are ANDed; quote exact strings (e.g., `"useEffect cleanup"`) |
+| `regex` | no | Interpret `query` as an RE2 regular expression instead of literal terms |
 | `language` | no | Filter by language, e.g., `"Python"`, `"TypeScript"` |
 | `repo` | no | Filter to one repository in `owner/repo` format |
 | `path` | no | Restrict to a subdirectory |
@@ -45,7 +46,7 @@ Results are grouped by repository, ranked by match count, and include the matchi
 ### Search
 
 1. **Validation** — Empty queries and oversize parameters are rejected with structured error results. The `max_results` value is clamped to 1–50 (default 10).
-2. **URL build** — The query plus any active filters are compiled into a single Sourcegraph query string: `context:global <query> lang:<language> repo:^github\.com/<owner/repo>$ file:<path> count:<N>`, with `display=<N>` as a URL parameter.
+2. **URL build** — The query plus any active filters are compiled into a single Sourcegraph query string: `context:global <query> lang:<language> repo:^github\.com/<owner/repo>$ file:<path> count:<N> timeout:15s`, with `display=<N>` as a URL parameter. `regex: true` adds `patternType=regexp`; the default is Sourcegraph's standard mode where terms are ANDed and quoted phrases match exactly.
 3. **Fetch** — A 60-second timeout aborts the request if the API is slow. The caller signal is wired into the same abort controller.
 4. **Stream parse** — Sourcegraph answers with server-sent events. The client reads the full body once the stream terminates (`done`) and parses `matches`, `filters`, `progress`, and `error` events in one pass. Stream-level errors surface as readable tool errors.
 5. **Normalize** — Each match's `repository` (`github.com/owner/repo`) is stripped to `owner/repo`; `lineMatches` provide both the line numbers and the snippet text; the API's `language` field tags fenced code blocks.

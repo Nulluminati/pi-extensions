@@ -53,6 +53,11 @@ export function buildSearchUrl(params: CodeSearchParams): string {
   const url = new URL(SOURCEGRAPH_API_URL);
   url.searchParams.set("q", terms.join(" "));
   url.searchParams.set("display", String(maxResults));
+  // Default is Sourcegraph's "standard" mode (literal terms, ANDed). Only
+  // opt-in regex queries get regexp semantics.
+  if (params.regex) {
+    url.searchParams.set("patternType", "regexp");
+  }
   return url.toString();
 }
 

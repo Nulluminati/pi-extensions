@@ -23,7 +23,11 @@ export const CODE_SEARCH_PARAMS = {
     query: {
       type: "string",
       description:
-        "Search query string. Supports plain text or regular expressions (Sourcegraph uses RE2 syntax).",
+        "Search query. Terms are ANDed; quote exact strings. Set regex: true for RE2 regular expressions.",
+    },
+    regex: {
+      type: "boolean",
+      description: "Interpret query as an RE2 regular expression instead of literal terms.",
     },
     language: {
       type: "string",
@@ -61,6 +65,7 @@ export function createCodeSearchCache(): CodeSearchCache {
 function cacheKey(params: CodeSearchParams): string {
   return JSON.stringify([
     params.query,
+    params.regex ?? null,
     params.language ?? null,
     params.repo ?? null,
     params.path ?? null,
@@ -174,6 +179,7 @@ export async function executeCodeSearch(
   const filters: CodeSearchDetails["filters"] = { language, repo, path };
   const searchParams: CodeSearchParams = {
     query,
+    ...(params.regex && { regex: true }),
     ...(language && { language }),
     ...(repo && { repo }),
     ...(path && { path }),
