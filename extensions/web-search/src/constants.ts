@@ -31,22 +31,9 @@ export const BINARY_CONTENT_TYPE_PREFIXES = ["image/", "video/", "audio/"];
 // dominate the formatted output. Brave descriptions are already short.
 export const SYNTHETIC_SNIPPET_MAX_CHARS = 500;
 
-export const STATUS_KEY = "web-search";
-
 export const PROVIDER_STATE_TYPE = "web-search-provider";
 
 export const DEFAULT_PROVIDER_ID = "synthetic";
-
-// Footer status indicator: a Nerd Font magnifier (nf-md-magnify) in a
-// distinct accent hue with a greyed provider label, following the status-bar
-// extension's icon/color conventions. The codepoint is built explicitly so
-// the PUA glyph survives transports that strip literals.
-export const STATUS_ICON = String.fromCodePoint(0xf0349);
-
-// nf-md-magnify
-export const ICON_COLOR = "accent";
-
-export const TEXT_COLOR = "muted";
 
 export const BRAVE_SEARCH_API_URL = "https://api.search.brave.com/res/v1/web/search";
 

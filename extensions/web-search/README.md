@@ -9,7 +9,7 @@ Registers two LLM-callable tools:
 - **`web_search`** — Searches the web via the **currently selected provider** and returns results with titles, URLs, and snippets.
 - **`web_fetch`** — Fetches the text content of any HTTP/HTTPS URL, stripping HTML by default (or returning raw HTML if requested). Provider-independent.
 
-A `/websearch:select` command opens a fuzzy-filterable selector (the same `SelectList` component Pi's model picker uses) to choose the active provider. The choice persists across sessions and is shown in the footer.
+A `/websearch:select` command opens a fuzzy-filterable selector (the same `SelectList` component Pi's model picker uses) to choose the active provider. The choice persists across sessions; the active provider is visible in the selector and in `details.backend` of tool results, not in any status bar.
 
 ### Providers
 
@@ -85,7 +85,7 @@ The active provider is held in closure scope (per Pi instance) and is chosen on 
 1. **Restore** the persisted choice from the session branch (`web-search-provider` entry), if any.
 2. Otherwise **default to the first configured provider** (synthetic, then brave, then searxng).
 
-`/websearch:select` (or `/websearch:select <id>`) updates it, calls `appendEntry("web-search-provider", ...)` so it survives reloads/restarts, and refreshes the footer status (`🔍 brave` / `🔍 synthetic`).
+`/websearch:select` (or `/websearch:select <id>`) updates it and calls `appendEntry("web-search-provider", ...)` so it survives reloads/restarts.
 
 ### web_search
 
@@ -127,8 +127,7 @@ Both tools use a shared `truncateWithSpill()` helper: output within the 50,000-c
 | `pi.registerTool("web_search")` | Web search tool (uses the active provider) |
 | `pi.registerTool("web_fetch")` | URL fetch + HTML-to-text tool |
 | `pi.registerCommand("websearch:select")` | Provider selector / direct switch |
-| `pi.on("session_start")` | Restore persisted provider or pick first configured |
-| `pi.on("session_shutdown")` | Clear footer status |
+| `pi.on("session_start")` | Restores the persisted provider or picks the first configured one |
 | `pi.appendEntry("web-search-provider")` | Persist the active provider |
 | `ctx.ui.custom` + `SelectList` | Provider picker UI |
 | `ctx.ui.setStatus` | Footer provider indicator |

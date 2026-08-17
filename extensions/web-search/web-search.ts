@@ -7,8 +7,9 @@
  *
  * Switch the active provider mid-session with `/websearch:select` (opens a
  * selector) or `/websearch:select <id>` (e.g. `/websearch:select synthetic`).
- * The choice persists
- * across sessions and is shown in the footer.
+ * The choice persists across sessions. The active provider is not rendered in
+ * any bar; it is visible in the selector and in `details.backend` of tool
+ * results.
  *
  * Provider auth:
  *   - brave:     $BRAVE_API_KEY  (https://brave.com/search/api/)
@@ -18,21 +19,16 @@
  */
 
 import type { SelectItem } from "@earendil-works/pi-tui";
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "pi";
+import type { ExtensionAPI, ExtensionCommandContext } from "pi";
 import { createSearchableSelectModal } from "../../lib/searchable-select.ts";
-import { formatStatusLine } from "../../lib/ui-format.ts";
 import {
   DEFAULT_MAX_RESULTS,
   DEFAULT_PROVIDER_ID,
-  ICON_COLOR,
   MAX_FETCH_CONTENT_LENGTH,
   MAX_INLINE_CHARS,
   MAX_MAX_RESULTS,
   MIN_MAX_RESULTS,
   PROVIDER_STATE_TYPE,
-  STATUS_ICON,
-  STATUS_KEY,
-  TEXT_COLOR,
 } from "./src/constants.ts";
 import { assertTextContentType } from "./src/html.ts";
 import { extractBodyAsText, fetchUrlOrThrow } from "./src/http.ts";
@@ -47,10 +43,7 @@ import { WEB_FETCH_PARAMS, WEB_SEARCH_PARAMS } from "./src/schemas.ts";
 import { truncateWithSpill } from "./src/truncation.ts";
 import type { SearchProvider } from "./src/types.ts";
 
-export { ICON_COLOR, STATUS_ICON, TEXT_COLOR } from "./src/constants.ts";
-
 // --- Extension ---
-
 export default async function webSearchExtension(pi: ExtensionAPI) {
   // Active provider is closure-scoped so each Pi instance (and each test) gets
   // its own. session_start restores the persisted choice or picks the first
@@ -65,21 +58,6 @@ export default async function webSearchExtension(pi: ExtensionAPI) {
       throw new Error("No search providers registered.");
     }
     return provider;
-  }
-
-  function updateStatus(ctx: ExtensionContext) {
-    if (!ctx.hasUI) return;
-    const provider = activeProvider();
-    ctx.ui.setStatus(
-      STATUS_KEY,
-      formatStatusLine(ctx.ui.theme, {
-        icon: STATUS_ICON,
-        prefix: "Web Search",
-        text: provider.id,
-        iconColor: ICON_COLOR,
-        textColor: TEXT_COLOR,
-      }),
-    );
   }
 
   async function selectProvider(ctx: ExtensionCommandContext): Promise<SearchProvider | null> {
@@ -122,10 +100,9 @@ export default async function webSearchExtension(pi: ExtensionAPI) {
     return getProvider(selectedId ?? undefined) ?? null;
   }
 
-  function applyProvider(provider: SearchProvider, ctx: ExtensionCommandContext) {
+  function applyProvider(provider: SearchProvider) {
     activeProviderId = provider.id;
     pi.appendEntry(PROVIDER_STATE_TYPE, { provider: provider.id });
-    updateStatus(ctx);
   }
 
   // --- Lifecycle ---
@@ -143,11 +120,6 @@ export default async function webSearchExtension(pi: ExtensionAPI) {
         }
       }
     }
-    updateStatus(ctx);
-  });
-
-  pi.on("session_shutdown", async (_event, ctx) => {
-    ctx.ui.setStatus(STATUS_KEY, undefined);
   });
 
   // --- Tools ---
@@ -352,7 +324,7 @@ export default async function webSearchExtension(pi: ExtensionAPI) {
           ctx.ui.notify(`Unknown search provider "${requested}". Available: ${available}`, "error");
           return;
         }
-        applyProvider(provider, ctx);
+        applyProvider(provider);
         const configured = await provider.isConfigured(ctx);
         const note = configured ? "" : ` — not configured (${provider.authHint})`;
         ctx.ui.notify(
@@ -364,7 +336,7 @@ export default async function webSearchExtension(pi: ExtensionAPI) {
 
       const provider = await selectProvider(ctx);
       if (!provider) return; // cancelled
-      applyProvider(provider, ctx);
+      applyProvider(provider);
       const configured = await provider.isConfigured(ctx);
       const note = configured ? "" : ` — not configured (${provider.authHint})`;
       ctx.ui.notify(
