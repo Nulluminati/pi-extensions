@@ -14,7 +14,7 @@ title = "pi-extensions"
 # Allow the README docs in each extension to mention example API key
 # placeholders like `syn_...` and `ctx7sk-...` without tripping the scan.
 # These are documentation strings, not real secrets.
-[allowlist]
+[[allowlists]]
 description = "Documentation placeholders"
 paths = [
   '''(.*/)?README\.md$''',
@@ -26,4 +26,13 @@ regexes = [
   '''sk-\.\.\.''',
   '''PLACEHOLDER''',
   '''<your[_-]?key[_-]?here>''',
+]
+
+# Sourcegraph access tokens are bare 40-char hex strings, which also matches
+# the fake git commit SHAs in test fixtures (e.g. code-search.test.ts).
+[[allowlists]]
+description = "Fake commit SHAs in test fixtures"
+regexTarget = "line"
+regexes = [
+  '''commit: "[0-9a-f]{40}"''',
 ]
