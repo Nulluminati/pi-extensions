@@ -42,10 +42,12 @@ const NEURALWATT_REASONING_COMPAT = {
  *      maps to `max` so pi's deepest tier engages the deepest thinking. The
  *      probe-model skill warns `max` is usually rejected by OpenAI-compatible
  *      shims; Neuralwatt's vLLM gateway is an exception.
- *   2. No current reasoning model forces always-on thinking: `none` disables
- *      thinking on every model (verified 2026-08, including kimi-k2.7-code and
- *      qwen3.6-35b, which were always-on and restricted in earlier probes).
- *      Every reasoning model here uses an DISABLEABLE_* map with off:"none".
+ *   2. Every reasoning model except glm-5.3 is disableable: `none` disables
+ *      thinking (verified 2026-08, including kimi-k2.7-code and qwen3.6-35b,
+ *      which were always-on and restricted in earlier probes). glm-5.3 is the
+ *      exception: its catalog entry marks reasoning mandatory and the probe
+ *      shows thinking output even at `none`, so it uses ALWAYS_ON_FULL_MAP
+ *      with off:null.
  *
  * The published pi-neuralwatt extension exposes only `medium` for Kimi/Qwen,
  * but that restriction came from probing with the wrong key
@@ -76,6 +78,20 @@ const DISABLEABLE_FULL_MAP: ThinkingLevelMap = {
   xhigh: "max",
 };
 
+// Always-on, accepts the full enum including `max` (glm-5.3). The catalog
+// marks reasoning mandatory and omits `none` from accepted_efforts, and the
+// probe shows a reasoning block even when `none` is sent, so thinking cannot
+// be turned off: off is hidden. xhigh maps to `max` like the other
+// full-enum models.
+const ALWAYS_ON_FULL_MAP: ThinkingLevelMap = {
+  off: null,
+  minimal: "minimal",
+  low: "low",
+  medium: "medium",
+  high: "high",
+  xhigh: "max",
+};
+
 // --- Static model catalog ---
 
 /**
@@ -87,8 +103,10 @@ const DISABLEABLE_FULL_MAP: ThinkingLevelMap = {
  *
  * The GLM, Kimi, and Qwen reasoning/fast pairs share pricing; their "-fast"
  * variants are non-reasoning. Neuralwatt publishes both DeepSeek ids for the
- * same 0731 checkpoint. No reasoning model currently forces always-on thinking
- * (qwen3.6-35b's previous restriction was lifted in 2026-08; see its entry).
+ * same 0731 checkpoint. glm-5.3 (gated preview) forces always-on thinking
+ * (catalog marks reasoning mandatory; see its entry); every other reasoning
+ * model is disableable (qwen3.6-35b's previous restriction was lifted in
+ * 2026-08).
  */
 export const STATIC_MODELS: ProviderModelConfig[] = [
   // --- Gemma 4 (Google/NVIDIA) ---
@@ -164,6 +182,27 @@ export const STATIC_MODELS: ProviderModelConfig[] = [
     contextWindow: 199984,
     maxTokens: 65536,
     compat: NEURALWATT_COMPAT,
+  },
+
+  // GLM-5.3 (gated preview) — same architecture as GLM-5.2 ("weight swap
+  // confirmed" per the catalog description) at GLM-5.2 parity pricing and
+  // context. Probed 2026-08: every effort returns HTTP 200, but the catalog
+  // marks reasoning mandatory, omits `none` from accepted_efforts, and the
+  // disable check shows a reasoning block even at `none` (r=735 on the
+  // reasoning prompt), so thinking cannot be turned off: off is hidden.
+  // xhigh maps to `max`, which the gateway accepts and which produces deeper
+  // reasoning than `xhigh`, matching the other GLM entries.
+  {
+    id: "glm-5.3",
+    name: "GLM 5.3",
+    api: "openai-completions",
+    reasoning: true,
+    thinkingLevelMap: ALWAYS_ON_FULL_MAP,
+    input: ["text"],
+    cost: { input: 1.45, output: 4.5, cacheRead: 0.145, cacheWrite: 0 },
+    contextWindow: 1048560,
+    maxTokens: 65536,
+    compat: NEURALWATT_REASONING_COMPAT,
   },
 
   // --- DeepSeek V4 Flash (DeepSeek) ---

@@ -44,6 +44,7 @@ const EXPECTED_MODEL_IDS = [
   "glm-5.2-fast",
   "glm-5.2-short",
   "glm-5.2-short-fast",
+  "glm-5.3",
   "kimi-k2.7-code",
   "kimi-k2.7-code-fast",
   "kimi-k3",
@@ -274,6 +275,18 @@ describe("neuralwatt-extension", () => {
     // map as its sibling.
     expect(byId["kimi-k2.7-code-fast"].thinkingLevelMap).toEqual({
       off: "none",
+      minimal: "minimal",
+      low: "low",
+      medium: "medium",
+      high: "high",
+      xhigh: "max",
+    });
+
+    // Always-on: catalog marks reasoning mandatory and the probe shows a
+    // reasoning block even at `none`, so off is hidden. Accepts the full
+    // enum incl. max, so xhigh -> "max" as on the other GLM entries.
+    expect(byId["glm-5.3"].thinkingLevelMap).toEqual({
+      off: null,
       minimal: "minimal",
       low: "low",
       medium: "medium",

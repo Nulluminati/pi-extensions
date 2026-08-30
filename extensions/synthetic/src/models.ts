@@ -55,11 +55,14 @@ const ALWAYS_ON_THINKING_MAP: ThinkingLevelMap = {
  * GET /openai/v1/models endpoint (verified 2026-08; GLM-5.2 dropped 1.4/4.4 to
  * 1.0/3.0 and syn:large:vision re-aliased onto Kimi-K3). Thinking maps reflect
  * the gateway's accepted reasoning_effort enum (probed 2026-08): every
- * reasoning model accepts none/minimal/low/medium/high/xhigh and rejects
- * "max". One model always thinks and cannot be turned off (gpt-oss-120b), so
- * off maps to null for it. Kimi-K3 briefly rejected `medium` (probed 2026-07)
- * but the 2026-08 probe shows it accepted again, so the full identity map
- * applies.
+ * reasoning model accepts none/minimal/low/medium/high/xhigh; the 2026-08
+ * probes of GLM-5.2 and Kimi-K3 rejected the non-OpenAI "max" sentinel, while
+ * the GLM-5.3-Flash and Qwen3.8-27B probes returned HTTP 200 for it (the
+ * identity map is kept either way — max is not a pi thinking level and is
+ * never sent). One model always thinks and cannot be turned off
+ * (gpt-oss-120b), so off maps to null for it. Kimi-K3 briefly rejected
+ * `medium` (probed 2026-07) but the 2026-08 probe shows it accepted again, so
+ * the full identity map applies.
  *
  * Kimi-K2.7-Code and MiniMax-M3 no longer appear in /v1/models and return
  * HTTP 404 "no longer supported", so their static entries were removed.
@@ -145,6 +148,22 @@ export const STATIC_MODELS: ProviderModelConfig[] = [
     maxTokens: 65536,
     compat: SYNTHETIC_COMPAT,
   },
+  // GLM-5.3 (Flash) — vision-capable, 524K context, Opus-4.8-class. The
+  // catalog flags always_on, but the 2026-08 disable check shows none
+  // produces no thinking, so off maps to "none" (same pattern as GLM-5.2);
+  // every pi level is accepted and medium/high/xhigh engage thinking.
+  {
+    id: "hf:zai-org/GLM-5.3-Flash",
+    name: "GLM-5.3-Flash",
+    api: "openai-completions",
+    reasoning: true,
+    thinkingLevelMap: DISABLEABLE_THINKING_MAP,
+    input: ["text", "image"],
+    cost: { input: 0.15, output: 0.5, cacheRead: 0.04, cacheWrite: 0 },
+    contextWindow: 524288,
+    maxTokens: 65536,
+    compat: SYNTHETIC_COMPAT,
+  },
 
   // --- Other reasoning models ---
   // Kimi-K3 briefly rejected `medium` (probed 2026-07) but the 2026-08 probe
@@ -165,6 +184,22 @@ export const STATIC_MODELS: ProviderModelConfig[] = [
   {
     id: "hf:Qwen/Qwen3.6-27B",
     name: "Qwen3.6-27B",
+    api: "openai-completions",
+    reasoning: true,
+    thinkingLevelMap: DISABLEABLE_THINKING_MAP,
+    input: ["text", "image"],
+    cost: { input: 0.45, output: 2.2, cacheRead: 0.09, cacheWrite: 0 },
+    contextWindow: 262144,
+    maxTokens: 65536,
+    compat: SYNTHETIC_COMPAT,
+  },
+  // Qwen3.8-27B — small vision-capable coding model at the same specs and
+  // pricing as Qwen3.6-27B. Probed 2026-08: none disables thinking and every
+  // pi level is accepted (medium/high/xhigh engage), so the identity map
+  // applies despite the catalog's always_on flag.
+  {
+    id: "hf:Qwen/Qwen3.8-27B",
+    name: "Qwen3.8-27B",
     api: "openai-completions",
     reasoning: true,
     thinkingLevelMap: DISABLEABLE_THINKING_MAP,
