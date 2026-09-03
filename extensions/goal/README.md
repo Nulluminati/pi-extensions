@@ -1,12 +1,16 @@
 # Goal Extension
 
-Goal-oriented auto-continuation mode — tell Pi what to accomplish and it keeps going until it's done.
+Goal-oriented auto-continuation mode — tell Pi what to accomplish and it keeps going until an independent evaluator confirms the goal is met.
 
 ## What It Does
 
-The `/goal:*` commands activate a persistence mode where the agent autonomously continues working on an objective until it is fully complete and verified. Instead of stopping after a single turn, the agent is automatically continued with instructions to keep working from where it left off.
+The `/goal:*` commands activate a persistence mode where the agent autonomously continues working on an objective. After every turn, a small-model evaluator judges the conversation evidence against the objective with a three-way verdict:
 
-A `goal_complete` tool is registered so the LLM can signal when it has finished, preventing infinite loops.
+- **met** — the goal clears and a completion notice is shown.
+- **not yet met** — the evaluator's reason becomes the guidance for the next automatic continuation.
+- **impossible** — the goal pauses and the reason is reported.
+
+The evaluator never calls tools. Like Claude Code's native `/goal` judge, it weighs only the evidence the agent already surfaced in the transcript (tool results, command output, files changed), so completion is decided by evidence rather than the working model's self-report.
 
 ## Usage
 
@@ -14,12 +18,14 @@ A `goal_complete` tool is registered so the LLM can signal when it has finished,
 
 ```
 /goal:new implement a snake game in the terminal
-/goal:new --tokens 100k refactor the auth module
+/goal:new --iterations 10 refactor the auth module
 ```
 
 `/goal` is an alias for `/goal:new` — it starts a goal the same way.
 
-Running `/goal:new` with no objective opens the shared framed input modal (`lib/input-modal.ts`, the same dialog `/handoff` uses) so the objective can be typed interactively. The `--tokens` flag sets a token budget. When the budget is reached, the goal pauses and you can resume or reset it.
+Running `/goal:new` with no objective opens the shared framed input modal (`lib/input-modal.ts`, the same dialog `/handoff` uses) so the objective can be typed interactively.
+
+The `--iterations` flag caps automatic continuations (default 25; `--iterations 0` means unlimited). Write a verifiable objective — a measurable end state, the command or evidence that proves it, and any constraints — because the evaluator judges against the transcript.
 
 ### Check status
 
@@ -27,7 +33,7 @@ Running `/goal:new` with no objective opens the shared framed input modal (`lib/
 /goal:status
 ```
 
-Shows the objective, status, elapsed time (or token usage), and iteration count.
+Shows the objective, status, elapsed time, token spend (display only), iteration count, and the evaluator's most recent reason.
 
 ### Edit the objective
 
@@ -45,7 +51,7 @@ Updates the objective text without resetting usage counters. With no inline obje
 /goal:resume
 ```
 
-Pausing stops auto-continuation. Resuming sends a follow-up prompt telling the agent to continue from where it left off.
+Pausing stops auto-continuation. Resuming sends a follow-up prompt telling the agent to continue from where it left off and resets the no-progress counter.
 
 ### Reset
 
@@ -61,59 +67,61 @@ Cancels the goal entirely, clears the status line, and resets all internal state
 
 1. **Start** — `/goal:new <objective>` creates a `GoalState` object and persists it via `appendEntry("goal-state", ...)`. A follow-up user message is sent with the objective and persistence rules.
 
-2. **System prompt injection** — On every `before_agent_start`, if a goal is active, the extension appends a system prompt section with the objective and goal-mode rules. This reminds the agent to keep working.
+2. **Per-turn reminder** — On every `before_agent_start`, if a goal is active, the extension injects a tail-position message (custom type `goal-context`) carrying the objective and goal-mode rules. A `context` handler strips all stale copies, so the request prefix stays byte-stable across turns — the system prompt is never modified, which keeps provider prompt caching intact.
 
-3. **Auto-continuation** — On `agent_end`, if the goal is still active, no `goal_complete` was called, and there are no pending messages, the extension sends a continuation follow-up message via `sendUserMessage()`. The agent receives this as a new prompt and continues working.
+3. **Evaluation** — On `agent_end`, while the goal is active and no messages are pending, the extension sends the objective plus a bounded recent transcript to the global small model (`lib/small-model.ts`) via `completeSimple`. The verdict must be a JSON object: `{"status":"met"|"not_met"|"impossible","reason":"..."}`.
 
-4. **Completion** — The LLM calls the `goal_complete` tool when it believes the objective is fully met. This sets status to "complete", stops auto-continuation, and shows "🎯 complete" in the status line for 8 seconds (see the status-bar integration below).
+4. **Continuation** — On `not_met`, the extension queues a follow-up message carrying the evaluator's reason as guidance and increments the iteration count.
 
-5. **Interruption handling** — If a message ends with `stopReason: "aborted"` or `"error"`, the goal is automatically paused.
+5. **Completion** — On `met`, the goal is persisted as complete and the status line shows "complete" for 8 seconds.
 
-### Token budgets
+6. **Interruption handling** — If a message ends with `stopReason: "aborted"` or `"error"`, the goal is automatically paused. If evaluation itself fails (no small model configured, API error, unparseable verdict), the goal stays active and control returns to the user — the loop never continues on a broken evaluator.
 
-When `--tokens` is specified:
-- The extension tracks token usage by comparing `getContextUsage().tokens` against the baseline at goal start
-- On `agent_end`, if `tokensUsed >= tokenBudget`, the goal is set to "budget" status and paused
-- You can resume (if usage dropped) or edit to increase the budget
+### Runaway guards
+
+Two guards replace the old token budget:
+
+- **Iteration cap** — after `maxIterations` automatic continuations (default 25, `--iterations 0` for unlimited), the goal pauses.
+- **No-progress detection** — three consecutive continuation turns with no tool calls pause the goal; the model is churning, not working. Tool use or an explicit `/goal:resume` resets the counter.
 
 ### State persistence
 
-Goal state is persisted via `appendEntry("goal-state", { goal })`. On `session_start`, the extension walks the branch backwards looking for the most recent `goal-state` entry and reconstructs the state. Completed goals are skipped during reconstruction.
+Goal state is persisted via `appendEntry("goal-state", { goal })`. On `session_start`, the extension walks the branch backwards looking for the most recent `goal-state` entry and reconstructs the state. Completed goals are skipped. Sessions persisted before the token budget was removed carry status `"budget"`, which is normalized to `"paused"`.
 
-### Module-level state
+### State scope
 
-The extension uses module-level variables (`state`, `goalCompleteCalled`, `continuationQueued`, `completionStatusTimer`) that are reset on `session_start` and `session_shutdown`. This is the simplest pattern because only one goal can be active at a time.
+The extension keeps state in closure variables (`state`, `continuationQueued`, `evaluating`, `completionStatusTimer`) that are reset on `session_start` and `session_shutdown`. Only one goal can be active at a time.
 
 ## Key Design Decisions
 
-- **Persistence rules in prompts** — Every follow-up and system prompt includes explicit instructions not to stop at analysis, plans, TODOs, or partial fixes. The agent must autonomously perform implementation and verification.
-- **`goal_complete` tool** — Without this, the agent would loop forever. The tool is described with `promptSnippet` and `promptGuidelines` so the LLM knows when to call it.
-- **`terminate: true`** — The `goal_complete` tool returns `terminate: true`, which ends the current agent turn after the tool result is processed.
-- **Confirmation on replacement** — Starting a new goal while one is active (and not complete) triggers a `ui.confirm()` dialog to prevent accidental replacement.
+- **The system prompt is never modified** — the old design appended a per-turn-varying system prompt section, which invalidated the provider prompt cache on every turn. Goal context now enters as a stripped-and-re-injected tail message (the same pattern the `plan` extension uses), so cached prefixes survive.
+- **No LLM-facing completion tool** — the old `goal_complete` tool let the working model self-report completion (and its enable/disable toggling churned the tool schema). The small-model evaluator is the sole completion authority, so there is nothing to toggle.
+- **No token budget** — budget counters in prompts broke caching, and budget-as-prompt-content is an anti-pattern. Token spend is still tracked for `/goal:status` display only. Bounding is done with the iteration cap and no-progress guard.
+- **Fail-safe evaluation** — an evaluator failure never silently continues the loop; it notifies and hands control back.
+- **Confirmation on replacement** — starting a new goal while one is active (and not complete) triggers a `ui.confirm()` dialog to prevent accidental replacement.
 - **Reset confirmation** — `/goal:reset` wipes the objective and all usage counters, so it requires a `ui.confirm()` before proceeding.
 
 ## Pi APIs Used
 
 | API | Purpose |
 |-----|---------|
-| `pi.registerCommand("goal", "goal:status", "goal:new", …)` | Registers the eight `/goal*` slash commands |
-| `pi.registerTool("goal_complete")` | LLM-callable tool to signal goal completion |
+| `pi.registerCommand(...)` | Registers the seven `/goal*` slash commands |
 | `pi.appendEntry("goal-state")` | Persists goal state to the session branch |
-| `pi.sendUserMessage()` | Sends start, resume, and continuation prompts |
-| `pi.on("before_agent_start")` | Injects goal system prompt into every agent turn |
-| `pi.on("agent_end")` | Queues auto-continuation when goal is incomplete |
+| `pi.sendUserMessage()` | Sends start, resume, edit, and continuation prompts |
+| `pi.on("before_agent_start")` | Injects the per-turn goal-context message |
+| `pi.on("context")` | Strips stale goal-context copies from history |
+| `pi.on("agent_end")` | Runs the evaluator; queues continuation or completes/pauses |
 | `pi.on("message_end")` | Pauses goal on abort/error |
-| `pi.on("turn_end")` | Tracks token usage delta |
-| `pi.on("session_start")` | Reconstructs state from branch entries |
+| `pi.on("turn_end")` | Tracks token spend and elapsed time |
+| `pi.on("session_start")` / `pi.on("session_tree")` | Reconstruct state from branch entries |
 | `pi.on("session_shutdown")` | Persists final state |
-| `pi.on("session_tree")` | Reconstructs state when navigating the tree |
 | `pi.on("input")` | Cancels pending continuation on user input |
-| `ctx.ui.setStatus()` | Shows 🎯 status line (active, paused, budget, complete) in the default footer; the status-bar extension suppresses it in favor of its editor **Goal** badge |
-| `pi.events.emit("goal:state-change")` | Publishes goal state; the status-bar extension shows a **Goal** badge in the editor frame's top-right cell while a goal is running |
-| `ctx.ui.confirm()` | Confirms goal replacement |
-| `ctx.ui.notify()` | Status messages |
-| `ctx.getContextUsage()` | Token usage tracking |
+| `ctx.ui.setStatus()` | Status line (active, paused, complete); suppressed by the status-bar extension in favor of its **Goal** badge |
+| `pi.events.emit("goal:state-change")` | Publishes goal state; the status-bar extension shows a **Goal** badge in the editor frame while a goal is running |
+| `ctx.ui.confirm()` / `ctx.ui.notify()` | Confirmations and status messages |
+| `ctx.getContextUsage()` | Token spend tracking (display only) |
+| `completeSimple()` + `lib/small-model.ts` | The global small model, used for completion evaluation |
 
 ## Configuration
 
-No flags. Token budget is set per-goal via `--tokens`.
+No flags on the extension itself. The evaluator uses the global small model — configure it with `/smallmodel` or the `PI_SMALL_MODEL` environment variable (see `extensions/small-model/`).

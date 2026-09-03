@@ -25,13 +25,5 @@ export function getElapsedMs(state: GoalState): number {
 export function buildStatusLine(state: GoalState): string {
   if (state.status === "complete") return "complete";
   if (state.status === "paused") return "paused";
-  if (state.status === "budget") {
-    const b = state.tokenBudget;
-    if (b === undefined) return "budget";
-    return `budget ${formatTokens(state.tokensUsed)}/${formatTokens(b)}`;
-  }
-  if (state.tokenBudget) {
-    return `active ${formatTokens(state.tokensUsed)}/${formatTokens(state.tokenBudget)}`;
-  }
   return `active ${formatElapsed(getElapsedMs(state))}`;
 }

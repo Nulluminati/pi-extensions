@@ -1,48 +1,50 @@
 /**
  * Goal Extension
  *
- * Provides /goal command and goal_complete tool for goal-oriented
- * auto-continuation mode with Codex-like persistence instructions.
+ * Provides /goal commands for goal-oriented auto-continuation: the extension
+ * keeps an objective in view each turn and a small-model evaluator decides
+ * after every turn whether the goal is met, not yet met (its reason becomes
+ * the next continuation's guidance), or impossible (the goal pauses).
+ *
+ * Cache safety: the system prompt is never modified. The goal reminder is
+ * injected as a tail-position message each turn and stale copies are stripped
+ * from history, so the request prefix stays byte-stable across turns.
  */
 
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "pi";
 import { promptText } from "../../lib/input-modal.ts";
+import { extractToolCallBlocks } from "../../lib/session-utils.ts";
 import { formatStatusLine } from "../../lib/ui-format.ts";
-import { parseNewGoalArgs, parseTokenBudget, validateObjective } from "./src/command-parser.ts";
+import { parseNewGoalArgs, validateObjective } from "./src/command-parser.ts";
 import {
   COMPLETION_STATUS_DURATION,
+  DEFAULT_MAX_ITERATIONS,
+  GOAL_CONTEXT_TYPE,
   ICON_COLOR,
+  NO_TOOL_TURN_LIMIT,
   STATE_EVENT,
   STATUS_ICON,
   STATUS_KEY,
   TEXT_COLOR,
 } from "./src/constants.ts";
+import { type EvaluatorVerdict, evaluateGoal } from "./src/evaluator.ts";
 import { buildStatusLine, formatElapsed, formatTokens, getElapsedMs } from "./src/formatting.ts";
 import {
   buildContinuePrompt,
-  buildGoalSystemPrompt,
+  buildGoalContextPrompt,
   buildObjectiveUpdatedPrompt,
   buildResumePrompt,
   buildStartPrompt,
 } from "./src/prompts.ts";
-import { renderGoalCompleteResult } from "./src/renderer.ts";
 import { generateGoalId, reconstructState } from "./src/state.ts";
-import {
-  GOAL_COMPLETE_DESCRIPTION,
-  GOAL_COMPLETE_PARAMETERS,
-  GOAL_COMPLETE_PROMPT_GUIDELINES,
-  GOAL_COMPLETE_PROMPT_SNIPPET,
-} from "./src/tool.ts";
 import type { GoalState } from "./src/types.ts";
-
-export { ICON_COLOR, STATUS_ICON, TEXT_COLOR };
 
 // --- Extension ---
 
 export default async function goalExtension(pi: ExtensionAPI) {
   let state: GoalState | null = null;
-  let goalCompleteCalled = false;
   let continuationQueued = false;
+  let evaluating = false;
   let completionStatusTimer: NodeJS.Timeout | undefined;
 
   function persistState() {
@@ -51,7 +53,6 @@ export default async function goalExtension(pi: ExtensionAPI) {
 
   function resetContinuationGuard() {
     continuationQueued = false;
-    goalCompleteCalled = false;
   }
 
   function updateStatusLine(ctx: ExtensionContext) {
@@ -82,28 +83,32 @@ export default async function goalExtension(pi: ExtensionAPI) {
     ctx.ui.setStatus(STATUS_KEY, undefined);
   }
 
-  function enableGoalCompleteTool() {
-    const active = pi.getActiveTools();
-    if (!active.includes("goal_complete")) {
-      pi.setActiveTools([...active, "goal_complete"]);
-    }
+  function showCompletionStatus(ctx: ExtensionContext) {
+    updateStatusLine(ctx);
+    ctx.ui.setStatus(
+      STATUS_KEY,
+      formatStatusLine(ctx.ui.theme, {
+        icon: STATUS_ICON,
+        prefix: "Goal",
+        text: "complete",
+        iconColor: ICON_COLOR,
+        textColor: TEXT_COLOR,
+      }),
+    );
+    completionStatusTimer = setTimeout(() => {
+      completionStatusTimer = undefined;
+      ctx.ui.setStatus(STATUS_KEY, undefined);
+    }, COMPLETION_STATUS_DURATION);
   }
 
-  function disableGoalCompleteTool() {
-    const active = pi.getActiveTools();
-    pi.setActiveTools(active.filter((t) => t !== "goal_complete"));
-  }
-
-  function maybeQueueContinuation(ctx: ExtensionContext) {
-    if (state?.status !== "active") return;
-    if (continuationQueued) return;
-    if (ctx.hasPendingMessages()) return;
-
-    continuationQueued = true;
-    state.iteration++;
+  /** Pause the active goal and hand control back to the user. */
+  function pauseGoal(ctx: ExtensionContext, reason: string) {
+    if (!state) return;
+    state.status = "paused";
+    resetContinuationGuard();
     persistState();
-
-    pi.sendUserMessage(buildContinuePrompt(state), { deliverAs: "followUp" });
+    updateStatusLine(ctx);
+    ctx.ui.notify(reason, "warning");
   }
 
   // --- Event handlers ---
@@ -112,16 +117,15 @@ export default async function goalExtension(pi: ExtensionAPI) {
     state = reconstructState(ctx);
     if (state) {
       updateStatusLine(ctx);
-      enableGoalCompleteTool();
     } else {
       ctx.ui.setStatus(STATUS_KEY, undefined);
-      disableGoalCompleteTool();
     }
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
     if (state) persistState();
     resetContinuationGuard();
+    evaluating = false;
     clearCompletionStatus(ctx);
   });
 
@@ -129,10 +133,8 @@ export default async function goalExtension(pi: ExtensionAPI) {
     state = reconstructState(ctx);
     if (state) {
       updateStatusLine(ctx);
-      enableGoalCompleteTool();
     } else {
       ctx.ui.setStatus(STATUS_KEY, undefined);
-      disableGoalCompleteTool();
     }
   });
 
@@ -143,10 +145,32 @@ export default async function goalExtension(pi: ExtensionAPI) {
     }
   });
 
-  pi.on("before_agent_start", async (event, _ctx) => {
+  // Inject the goal reminder as a per-turn tail message. Stale copies are
+  // stripped by the context handler below, so the request prefix stays stable
+  // and the reminder itself carries no per-turn-varying content.
+  pi.on("before_agent_start", async (_event, _ctx) => {
     if (state?.status !== "active") return undefined;
     return {
-      systemPrompt: `${event.systemPrompt}\n\n${buildGoalSystemPrompt(state)}`,
+      message: {
+        customType: GOAL_CONTEXT_TYPE,
+        content: [{ type: "text", text: buildGoalContextPrompt(state) }],
+        display: false,
+      },
+    };
+  });
+
+  // Goal reminders are re-injected fresh every turn, so stale copies from
+  // earlier turns are dropped from context unconditionally. Nothing to strip
+  // when no goal is active, so skip the allocation.
+  pi.on("context", async (event) => {
+    const stales = (event.messages as Array<{ customType?: string }>).some(
+      (message) => message.customType === GOAL_CONTEXT_TYPE,
+    );
+    if (!stales) return undefined;
+    return {
+      messages: (event.messages as Array<{ customType?: string }>).filter(
+        (message) => message.customType !== GOAL_CONTEXT_TYPE,
+      ),
     };
   });
 
@@ -168,107 +192,86 @@ export default async function goalExtension(pi: ExtensionAPI) {
     updateStatusLine(ctx);
   });
 
-  pi.on("agent_end", async (_event, ctx) => {
+  pi.on("agent_end", async (event, ctx) => {
     if (state?.status !== "active") return;
+    if (continuationQueued || evaluating) return;
+    if (ctx.hasPendingMessages()) return;
 
-    if (goalCompleteCalled) {
-      goalCompleteCalled = false;
-      return;
-    }
-
-    // Budget check
-    if (state.tokenBudget && state.tokensUsed >= state.tokenBudget) {
-      state.status = "budget";
-      persistState();
-      updateStatusLine(ctx);
-      disableGoalCompleteTool();
+    evaluating = true;
+    let verdict: EvaluatorVerdict;
+    try {
+      verdict = await evaluateGoal(state.objective, ctx);
+    } catch (err) {
+      evaluating = false;
+      // Fail safe: keep the goal active and let the user's next message
+      // re-trigger evaluation, instead of looping on a broken evaluator.
       ctx.ui.notify(
-        `Token budget reached (${formatTokens(state.tokensUsed)}/${formatTokens(state.tokenBudget)}). Use /goal:budget <amount> to increase budget or /goal:reset to cancel.`,
+        `Goal evaluation failed: ${(err as Error).message}. The goal stays active; send a message to retry.`,
         "warning",
       );
       return;
     }
+    evaluating = false;
 
-    // Pending messages take priority
-    if (ctx.hasPendingMessages()) return;
+    // The goal may have been paused, reset, or replaced while evaluating.
+    if (state?.status !== "active") return;
+    state.lastEvaluatorReason = verdict.reason;
 
-    maybeQueueContinuation(ctx);
+    if (verdict.status === "met") {
+      state.status = "complete";
+      persistState();
+      showCompletionStatus(ctx);
+      ctx.ui.notify(`Goal complete: ${verdict.reason}`, "info");
+      return;
+    }
+
+    if (verdict.status === "impossible") {
+      pauseGoal(
+        ctx,
+        `Goal paused: the evaluator judged the objective impossible to satisfy. ${verdict.reason}`,
+      );
+      return;
+    }
+
+    // not_met: runaway guards, then queue the next continuation.
+    const cap = state.maxIterations ?? DEFAULT_MAX_ITERATIONS;
+    if (cap > 0 && state.iteration >= cap) {
+      pauseGoal(
+        ctx,
+        `Iteration cap reached (${cap}). Goal paused. Use /goal:resume to continue or /goal:reset to cancel.`,
+      );
+      return;
+    }
+
+    const turnHadToolUse = (event.messages as Array<{ content?: unknown }>).some(
+      (message) => extractToolCallBlocks(message?.content).length > 0,
+    );
+    state.consecutiveNoToolTurns = turnHadToolUse ? 0 : (state.consecutiveNoToolTurns ?? 0) + 1;
+    if (state.consecutiveNoToolTurns >= NO_TOOL_TURN_LIMIT) {
+      pauseGoal(
+        ctx,
+        `No progress detected (${NO_TOOL_TURN_LIMIT} consecutive turns without tool calls). Goal paused. Use /goal:resume to continue or /goal:reset to cancel.`,
+      );
+      return;
+    }
+
+    continuationQueued = true;
+    state.iteration += 1;
+    persistState();
+    updateStatusLine(ctx);
+    pi.sendUserMessage(buildContinuePrompt(state), { deliverAs: "followUp" });
   });
 
   pi.on("message_end", async (event, ctx) => {
-    const msg = event.message as any;
-    if (msg.role !== "assistant") return;
+    const msg = event.message as { role?: string; stopReason?: string } | undefined;
+    if (msg?.role !== "assistant") return;
 
     const stopReason = msg.stopReason;
     if (stopReason === "aborted" || stopReason === "error") {
       if (state && state.status === "active") {
-        state.status = "paused";
-        resetContinuationGuard();
-        persistState();
-        updateStatusLine(ctx);
-        disableGoalCompleteTool();
-        ctx.ui.notify(
-          "Goal paused due to interruption or error. Use /goal resume to continue.",
-          "warning",
-        );
+        pauseGoal(ctx, "Goal paused due to interruption or error. Use /goal:resume to continue.");
       }
     }
-  });
-
-  // --- Tool ---
-
-  pi.registerTool({
-    name: "goal_complete",
-    label: "Goal Complete",
-    description: GOAL_COMPLETE_DESCRIPTION,
-    promptSnippet: GOAL_COMPLETE_PROMPT_SNIPPET,
-    promptGuidelines: GOAL_COMPLETE_PROMPT_GUIDELINES,
-    parameters: GOAL_COMPLETE_PARAMETERS,
-    renderResult: renderGoalCompleteResult,
-
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      if (state?.status !== "active") {
-        return {
-          content: [{ type: "text", text: "No active goal to complete." }],
-          details: { error: "no_active_goal" },
-          terminate: true,
-        };
-      }
-
-      goalCompleteCalled = true;
-      state.status = "complete";
-      persistState();
-      updateStatusLine(ctx);
-      disableGoalCompleteTool();
-      resetContinuationGuard();
-      clearCompletionStatus(ctx);
-
-      ctx.ui.setStatus(
-        STATUS_KEY,
-        formatStatusLine(ctx.ui.theme, {
-          icon: STATUS_ICON,
-          prefix: "Goal",
-          text: "complete",
-          iconColor: ICON_COLOR,
-          textColor: TEXT_COLOR,
-        }),
-      );
-      completionStatusTimer = setTimeout(() => {
-        completionStatusTimer = undefined;
-        ctx.ui.setStatus(STATUS_KEY, undefined);
-      }, COMPLETION_STATUS_DURATION);
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: params.summary ? `Goal completed: ${params.summary}` : "Goal completed.",
-          },
-        ],
-        details: { status: "complete", summary: params.summary },
-        terminate: true,
-      };
-    },
   });
 
   // --- Commands ---
@@ -317,22 +320,24 @@ export default async function goalExtension(pi: ExtensionAPI) {
       iteration: 0,
       tokensUsed: 0,
       baselineTokens: usage?.tokens ?? 0,
-      lastTurnTimestamp: Date.now(),
+      consecutiveNoToolTurns: 0,
     };
-    if (parsed.budget !== undefined) {
-      state.tokenBudget = parsed.budget;
-    }
+    state.maxIterations = parsed.iterations ?? DEFAULT_MAX_ITERATIONS;
 
     clearCompletionStatus(ctx);
     resetContinuationGuard();
     persistState();
     updateStatusLine(ctx);
-    enableGoalCompleteTool();
 
     pi.sendUserMessage(buildStartPrompt(state), { deliverAs: "followUp" });
 
-    const budgetMsg = parsed.budget ? ` (budget: ${formatTokens(parsed.budget)})` : "";
-    ctx.ui.notify(`Goal started${budgetMsg}: ${objective}`, "info");
+    const capNote =
+      parsed.iterations === undefined
+        ? ""
+        : parsed.iterations === 0
+          ? " (unlimited iterations)"
+          : ` (max ${parsed.iterations} iterations)`;
+    ctx.ui.notify(`Goal started${capNote}: ${objective}`, "info");
   }
 
   pi.registerCommand("goal", {
@@ -341,7 +346,8 @@ export default async function goalExtension(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("goal:status", {
-    description: "Show the active goal, status, elapsed time, budget, and iteration count",
+    description:
+      "Show the active goal, status, elapsed time, token spend, iteration count, and last evaluator reason",
     handler: async (_args: string, ctx: ExtensionCommandContext) => {
       if (!ctx.hasUI) return;
       if (!state) {
@@ -349,19 +355,22 @@ export default async function goalExtension(pi: ExtensionAPI) {
         return;
       }
       const elapsed = formatElapsed(getElapsedMs(state));
-      const budget = state.tokenBudget
-        ? ` | Budget: ${formatTokens(state.tokensUsed)}/${formatTokens(state.tokenBudget)}`
-        : "";
-      const iter = ` | Iterations: ${state.iteration}`;
-      ctx.ui.notify(
-        `Goal: ${state.objective} | Status: ${state.status} | Elapsed: ${elapsed}${budget}${iter}`,
-        "info",
-      );
+      const cap = state.maxIterations ?? DEFAULT_MAX_ITERATIONS;
+      const capLabel = cap === 0 ? "unlimited" : String(cap);
+      const lines = [
+        `Goal: ${state.objective}`,
+        `Status: ${state.status} | Elapsed: ${elapsed} | Tokens: ${formatTokens(state.tokensUsed)} | Iterations: ${state.iteration}/${capLabel}`,
+      ];
+      if (state.lastEvaluatorReason) {
+        lines.push(`Last evaluator: ${state.lastEvaluatorReason}`);
+      }
+      ctx.ui.notify(lines.join("\n"), "info");
     },
   });
 
   pi.registerCommand("goal:new", {
-    description: "Start a goal and run it to completion: /goal:new [--tokens 100k] [objective]",
+    description:
+      "Start a goal and run it to completion: /goal:new [--iterations <count>] [objective]",
     handler: startGoal,
   });
 
@@ -393,6 +402,7 @@ export default async function goalExtension(pi: ExtensionAPI) {
       }
 
       state.objective = objective;
+      state.consecutiveNoToolTurns = 0;
       persistState();
       updateStatusLine(ctx);
       ctx.ui.notify(`Goal updated: ${objective}`, "info");
@@ -415,13 +425,12 @@ export default async function goalExtension(pi: ExtensionAPI) {
       resetContinuationGuard();
       persistState();
       updateStatusLine(ctx);
-      disableGoalCompleteTool();
       ctx.ui.notify("Goal paused. Use /goal:resume to continue.", "info");
     },
   });
 
   pi.registerCommand("goal:resume", {
-    description: "Resume a paused or budget-stopped goal",
+    description: "Resume a paused goal",
     handler: async (_args: string, ctx: ExtensionCommandContext) => {
       if (!ctx.hasUI) return;
       if (!state) {
@@ -436,61 +445,18 @@ export default async function goalExtension(pi: ExtensionAPI) {
         ctx.ui.notify("Goal is already complete.", "info");
         return;
       }
-      if (state.tokenBudget && state.tokensUsed >= state.tokenBudget) {
-        ctx.ui.notify(
-          `Cannot resume: token budget reached (${formatTokens(state.tokensUsed)}/${formatTokens(state.tokenBudget)}). Use /goal:budget <amount> to increase budget or /goal:reset to cancel.`,
-          "warning",
-        );
-        return;
-      }
 
       state.status = "active";
       state.lastTurnTimestamp = Date.now();
+      state.consecutiveNoToolTurns = 0;
       clearCompletionStatus(ctx);
       resetContinuationGuard();
       persistState();
       updateStatusLine(ctx);
-      enableGoalCompleteTool();
 
       pi.sendUserMessage(buildResumePrompt(state), { deliverAs: "followUp" });
 
       ctx.ui.notify("Goal resumed.", "info");
-    },
-  });
-
-  pi.registerCommand("goal:budget", {
-    description: "Set the goal token budget: /goal:budget <amount>",
-    handler: async (args: string, ctx: ExtensionCommandContext) => {
-      if (!ctx.hasUI) return;
-      if (!state) {
-        ctx.ui.notify("No active goal. Use /goal:new <objective> to start one.", "info");
-        return;
-      }
-      const tokens = args.trim().split(/\s+/);
-      if (tokens.length !== 1) {
-        ctx.ui.notify("Usage: /goal:budget <amount>", "warning");
-        return;
-      }
-      const budget = parseTokenBudget(tokens[0] ?? "");
-      if (budget === undefined) {
-        ctx.ui.notify(`Invalid token budget: ${tokens[0]}`, "warning");
-        return;
-      }
-      state.tokenBudget = budget;
-      persistState();
-      updateStatusLine(ctx);
-
-      if (state.status === "budget" && state.tokensUsed < budget) {
-        state.status = "active";
-        state.lastTurnTimestamp = Date.now();
-        resetContinuationGuard();
-        persistState();
-        enableGoalCompleteTool();
-        pi.sendUserMessage(buildResumePrompt(state), { deliverAs: "followUp" });
-        ctx.ui.notify(`Goal budget set to ${formatTokens(budget)}. Goal resumed.`, "info");
-      } else {
-        ctx.ui.notify(`Goal budget set to ${formatTokens(budget)}.`, "info");
-      }
     },
   });
 
@@ -516,7 +482,6 @@ export default async function goalExtension(pi: ExtensionAPI) {
       persistState();
       updateStatusLine(ctx);
       clearCompletionStatus(ctx);
-      disableGoalCompleteTool();
 
       ctx.ui.notify("Goal reset.", "info");
     },

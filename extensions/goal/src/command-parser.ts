@@ -27,46 +27,45 @@ function tokenize(input: string): string[] {
   return tokens;
 }
 
-export function parseTokenBudget(input: string): number | undefined {
-  const match = input.match(/^(\d+(?:\.\d+)?)([km]?)$/i);
-  if (!match || match[1] === undefined || match[2] === undefined) return undefined;
-  const value = Number.parseFloat(match[1]);
-  const suffix = match[2].toLowerCase();
-  if (suffix === "k") return Math.round(value * 1000);
-  if (suffix === "m") return Math.round(value * 1_000_000);
-  return Math.round(value);
+/**
+ * Parses an `--iterations` value: a non-negative integer cap on automatic
+ * continuations. 0 means unlimited.
+ */
+export function parseIterationCap(input: string): number | undefined {
+  if (!/^\d+$/.test(input)) return undefined;
+  return Number.parseInt(input, 10);
 }
 
 // --- Command parsing ---
 
 export interface ParsedGoalArgs {
   objective?: string;
-  budget?: number;
+  iterations?: number;
   error?: string;
 }
 
 /**
- * Parses `/goal:new` arguments: an objective, optionally preceded by a
- * `--tokens <amount>` budget flag. An empty objective means the handler should
+ * Parses `/goal:new` arguments: an objective, optionally preceded by an
+ * `--iterations <count>` cap flag. An empty objective means the handler should
  * prompt for one.
  */
 export function parseNewGoalArgs(raw: string): ParsedGoalArgs {
   const tokens = tokenize(raw.trim());
-  let tokenBudget: number | undefined;
+  let iterationCap: number | undefined;
 
-  if (tokens[0] === "--tokens") {
-    const rawBudget = tokens[1];
-    if (!rawBudget) return { error: "Usage: /goal:new --tokens 100k <objective>" };
-    const parsedBudget = parseTokenBudget(rawBudget);
-    if (parsedBudget === undefined) return { error: `Invalid token budget: ${rawBudget}` };
-    tokenBudget = parsedBudget;
+  if (tokens[0] === "--iterations") {
+    const rawCap = tokens[1];
+    if (!rawCap) return { error: "Usage: /goal:new --iterations <count> <objective>" };
+    const parsedCap = parseIterationCap(rawCap);
+    if (parsedCap === undefined) return { error: `Invalid iteration cap: ${rawCap}` };
+    iterationCap = parsedCap;
     tokens.splice(0, 2);
   }
 
   const objective = tokens.join(" ").trim();
   const result: ParsedGoalArgs = { objective };
-  if (tokenBudget !== undefined) {
-    result.budget = tokenBudget;
+  if (iterationCap !== undefined) {
+    result.iterations = iterationCap;
   }
   return result;
 }

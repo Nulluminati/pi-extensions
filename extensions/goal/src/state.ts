@@ -9,13 +9,23 @@ export function generateGoalId(): string {
 
 // --- State management ---
 
-function isGoal(value: unknown): value is GoalState {
+const VALID_STATUSES = new Set(["active", "paused", "budget", "complete"]);
+
+/**
+ * Persisted shape. "budget" is a legacy status from before the token budget
+ * was removed; it is normalized to "paused" on reconstruction.
+ */
+type PersistedGoalState = Omit<GoalState, "status"> & {
+  status: "active" | "paused" | "complete" | "budget";
+};
+
+function isGoal(value: unknown): value is PersistedGoalState {
   if (!value || typeof value !== "object") return false;
   const goal = value as Partial<GoalState>;
   return (
     typeof goal.id === "string" &&
     typeof goal.objective === "string" &&
-    ["active", "paused", "budget", "complete"].includes(String(goal.status)) &&
+    VALID_STATUSES.has(String(goal.status)) &&
     typeof goal.startTime === "number" &&
     typeof goal.elapsedMs === "number" &&
     typeof goal.iteration === "number" &&
@@ -29,8 +39,10 @@ export function reconstructState(ctx: ExtensionContext): GoalState | null {
   for (let i = branch.length - 1; i >= 0; i--) {
     const entry = branch[i];
     if (entry.type === "custom" && entry.customType === "goal-state") {
-      const data = entry.data as { goal?: GoalState | null } | null;
-      return isGoal(data?.goal) && data.goal.status !== "complete" ? data.goal : null;
+      const data = entry.data as { goal?: PersistedGoalState | null } | null;
+      if (!isGoal(data?.goal) || data.goal.status === "complete") return null;
+      const { status, ...rest } = data.goal;
+      return { ...rest, status: status === "budget" ? "paused" : status };
     }
   }
   return null;
