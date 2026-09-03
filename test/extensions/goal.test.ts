@@ -936,6 +936,64 @@ describe("goal-extension", () => {
       expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("goal", undefined);
     });
 
+    it("a delivered extension message resets the guard so the loop continues unattended", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await goalExtension(mockPi);
+      await getCommandHandler(mockPi, "goal:new")("implement snake game", mockCtx);
+      mockPi.sendUserMessage.mockClear();
+      const agentEndHandler = getEventHandler(mockPi, "agent_end");
+      const inputHandler = getEventHandler(mockPi, "input");
+      const toolMessages = [
+        {
+          role: "assistant",
+          content: [{ type: "toolCall", name: "bash", arguments: { command: "ls" } }],
+        },
+      ];
+
+      // Turn 1 ends: evaluator queues continuation #1.
+      mockVerdict("not_met", "not done yet");
+      await agentEndHandler({ type: "agent_end", messages: toolMessages }, mockCtx);
+      expect(mockPi.sendUserMessage).toHaveBeenCalledTimes(1);
+
+      // The queued continuation is delivered (input fires with source
+      // "extension") — no user input involved.
+      await inputHandler(
+        {
+          type: "input",
+          text: "Continue the active /goal",
+          source: "extension",
+          streamingBehavior: "followUp",
+        },
+        mockCtx,
+      );
+
+      // Turn 2 ends: the loop must evaluate and queue again, unattended.
+      mockVerdict("not_met", "still not done");
+      await agentEndHandler({ type: "agent_end", messages: toolMessages }, mockCtx);
+      expect(mockPi.sendUserMessage).toHaveBeenCalledTimes(2);
+      expect(mockPi.appendEntry).toHaveBeenLastCalledWith(
+        "goal-state",
+        expect.objectContaining({
+          goal: expect.objectContaining({ status: "active", iteration: 2 }),
+        }),
+      );
+    });
+
+    it("agent_end does not queue twice when no message was delivered in between", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await goalExtension(mockPi);
+      await getCommandHandler(mockPi, "goal:new")("implement snake game", mockCtx);
+      mockPi.sendUserMessage.mockClear();
+
+      mockVerdict("not_met", "not done yet");
+      await getEventHandler(mockPi, "agent_end")({ type: "agent_end", messages: [] }, mockCtx);
+      await getEventHandler(mockPi, "agent_end")({ type: "agent_end", messages: [] }, mockCtx);
+
+      expect(mockPi.sendUserMessage).toHaveBeenCalledTimes(1);
+    });
+
     it("input event cancels pending continuation and pending messages block re-queueing", async () => {
       const mockPi = createMockPi();
       const mockCtx = createMockCommandContext();

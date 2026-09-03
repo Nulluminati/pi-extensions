@@ -139,7 +139,14 @@ export default async function goalExtension(pi: ExtensionAPI) {
   });
 
   pi.on("input", async (event) => {
-    if (event.source !== "interactive") return;
+    const source = (event as { source?: string }).source;
+    if (source !== "interactive") {
+      // A queued message was delivered (source "extension" via sendUserMessage
+      // or "rpc") — reset the guard so this turn's agent_end evaluates again
+      // and the continuation loop keeps running unattended.
+      resetContinuationGuard();
+      return;
+    }
     if (continuationQueued && state) {
       resetContinuationGuard();
     }

@@ -71,7 +71,7 @@ Cancels the goal entirely, clears the status line, and resets all internal state
 
 3. **Evaluation** — On `agent_end`, while the goal is active and no messages are pending, the extension sends the objective plus a bounded recent transcript to the global small model (`lib/small-model.ts`) via `completeSimple`. The verdict must be a JSON object: `{"status":"met"|"not_met"|"impossible","reason":"..."}`.
 
-4. **Continuation** — On `not_met`, the extension queues a follow-up message carrying the evaluator's reason as guidance and increments the iteration count.
+4. **Continuation** — On `not_met`, the extension queues a follow-up message carrying the evaluator's reason as guidance and increments the iteration count. When pi delivers that message, the `input` event fires with source `"extension"`, which resets the queue guard — so the continuation turn's own end is evaluated again and the loop runs unattended until a verdict.
 
 5. **Completion** — On `met`, the goal is persisted as complete and the status line shows "complete" for 8 seconds.
 
@@ -115,7 +115,7 @@ The extension keeps state in closure variables (`state`, `continuationQueued`, `
 | `pi.on("turn_end")` | Tracks token spend and elapsed time |
 | `pi.on("session_start")` / `pi.on("session_tree")` | Reconstruct state from branch entries |
 | `pi.on("session_shutdown")` | Persists final state |
-| `pi.on("input")` | Cancels pending continuation on user input |
+| `pi.on("input")` | Resets the continuation guard when a queued message is delivered (source `"extension"`) or the user sends input |
 | `ctx.ui.setStatus()` | Status line (active, paused, complete); suppressed by the status-bar extension in favor of its **Goal** badge |
 | `pi.events.emit("goal:state-change")` | Publishes goal state; the status-bar extension shows a **Goal** badge in the editor frame while a goal is running |
 | `ctx.ui.confirm()` / `ctx.ui.notify()` | Confirmations and status messages |
