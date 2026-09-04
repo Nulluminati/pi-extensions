@@ -337,6 +337,7 @@ declare module "pi" {
     getBranch(): any[];
     getEntries(): any[];
     getLeafId(): string | undefined;
+    getSessionId(): string;
     getSessionFile(): string | undefined;
   }
 
@@ -357,6 +358,7 @@ declare module "pi" {
   export interface Model<T = any> {
     id: string;
     name: string;
+    baseUrl?: string;
     api: any;
     reasoning: boolean;
     input: ("text" | "image")[];

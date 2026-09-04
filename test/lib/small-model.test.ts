@@ -159,6 +159,77 @@ describe("resolveSmallModel", () => {
     });
   });
 
+  it("adds per-session routing headers for an OpenCode small model", async () => {
+    const path = modelConfigPath("opencode-go", "glm-5.3-flash");
+    const ctx = createMockCommandContext();
+    const smallModel = {
+      ...ctx.model,
+      id: "glm-5.3-flash",
+      provider: "opencode-go",
+      baseUrl: "https://opencode.ai/zen/go/v1",
+    };
+    ctx.modelRegistry.find = vi.fn(() => smallModel);
+    ctx.modelRegistry.getApiKeyAndHeaders = vi.fn(async () => ({
+      ok: true,
+      apiKey: "opencode-key",
+      headers: { "x-auth-source": "oauth" },
+    }));
+    ctx.sessionManager.getSessionId = vi.fn(() => "session-123");
+
+    const resolved = await resolveSmallModel(ctx, { configPath: path, env: {} });
+
+    expect(resolved.auth.headers).toEqual({
+      "x-opencode-session": "session-123",
+      "x-opencode-client": "pi",
+      "x-auth-source": "oauth",
+    });
+  });
+
+  it("adds OpenCode headers for a custom provider using the OpenCode host", async () => {
+    const path = modelConfigPath("custom", "flash");
+    const ctx = createMockCommandContext();
+    ctx.modelRegistry.find = vi.fn(() => ({
+      ...ctx.model,
+      id: "flash",
+      provider: "custom",
+      baseUrl: "https://opencode.ai/custom/v1",
+    }));
+    ctx.sessionManager.getSessionId = vi.fn(() => "session-custom");
+
+    const resolved = await resolveSmallModel(ctx, { configPath: path, env: {} });
+
+    expect(resolved.auth.headers).toEqual({
+      "x-opencode-session": "session-custom",
+      "x-opencode-client": "pi",
+    });
+  });
+
+  it("preserves explicitly configured OpenCode header overrides", async () => {
+    const path = modelConfigPath("opencode", "free-model");
+    const ctx = createMockCommandContext();
+    ctx.modelRegistry.find = vi.fn(() => ({
+      ...ctx.model,
+      id: "free-model",
+      provider: "opencode",
+      baseUrl: "https://opencode.ai/zen/v1",
+    }));
+    ctx.modelRegistry.getApiKeyAndHeaders = vi.fn(async () => ({
+      ok: true,
+      apiKey: "opencode-key",
+      headers: {
+        "x-opencode-session": "configured-session",
+        "x-opencode-client": "configured-client",
+      },
+    }));
+
+    const resolved = await resolveSmallModel(ctx, { configPath: path, env: {} });
+
+    expect(resolved.auth.headers).toEqual({
+      "x-opencode-session": "configured-session",
+      "x-opencode-client": "configured-client",
+    });
+  });
+
   it("does not fall back to the active model when the configured model is missing", async () => {
     const ctx = createMockCommandContext();
     ctx.modelRegistry.find = vi.fn(() => undefined);
@@ -217,12 +288,16 @@ function temporaryConfigPath(): string {
 }
 
 function configuredPath(): string {
+  return modelConfigPath("synthetic", "syn:small:text");
+}
+
+function modelConfigPath(provider: string, model: string): string {
   const path = temporaryConfigPath();
   writeFileSync(
     path,
     JSON.stringify({
-      provider: "synthetic",
-      model: "syn:small:text",
+      provider,
+      model,
       thinkingLevel: "minimal",
     }),
   );

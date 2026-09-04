@@ -158,7 +158,7 @@ Reach for these any time you walk `ctx.sessionManager.getBranch()` to build a tr
 Resolves the user's globally configured "small model" — a cheap, fast model used for background work (summaries, side questions, recaps) that shouldn't consume the main model's context or cost. Used by `btw`, `handoff`, `voice`, and `session-recap`.
 
 - `resolveSmallModel(ctx)` → `{ model, auth, config, source, reasoning }`. Throws descriptive errors when unconfigured, unknown, or missing credentials — **catch and surface via `ctx.ui.notify(..., "error")`**, then abort the operation.
-- Feed `complete` / `completeSimple` from `@earendil-works/pi-ai` with `auth.apiKey`, optional `auth.headers`/`auth.env`, and `reasoning` (pass it through; it's already `undefined` for non-reasoning models).
+- Feed `complete` / `completeSimple` from `@earendil-works/pi-ai` with `auth.apiKey`, optional `auth.headers`/`auth.env`, and `reasoning` (pass it through; it's already `undefined` for non-reasoning models). For OpenCode Zen/Go models, `auth.headers` includes Pi's current per-session routing headers and preserves explicit provider overrides.
 - Configuration: `PI_SMALL_MODEL` env var (`provider/model-id`, wins over file) or the config file at `PI_SMALL_MODEL_CONFIG` / `<agentDir>/small-model.json`. Thinking level via `PI_SMALL_MODEL_THINKING` or the config's `thinkingLevel`.
 - Only use `loadSmallModelConfig` / `saveSmallModelConfig` / `parseSmallModelSpec` when building a picker/configurator UI (the `small-model` extension owns this). Consumers should call `resolveSmallModel` and nothing else.
 

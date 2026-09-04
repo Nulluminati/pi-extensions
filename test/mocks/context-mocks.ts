@@ -73,6 +73,7 @@ export function createMockContext(): DeepMocked<ExtensionContext> {
       getBranch: vi.fn(() => []),
       getEntries: vi.fn(() => []),
       getLeafId: vi.fn(() => undefined),
+      getSessionId: vi.fn(() => "test-session"),
       getSessionFile: vi.fn(() => undefined),
     },
     modelRegistry: {

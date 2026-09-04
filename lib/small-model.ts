@@ -4,6 +4,7 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { ExtensionContext, Model, ThinkingLevel } from "pi";
 
 const DEFAULT_THINKING_LEVEL: ThinkingLevel = "minimal";
+const OPENCODE_HOST = "opencode.ai";
 const THINKING_LEVELS = new Set<ThinkingLevel>([
   "off",
   "minimal",
@@ -170,7 +171,10 @@ export async function resolveSmallModelFromConfig(
   }
 
   const auth: SmallModelAuth = { apiKey: authResult.apiKey };
-  if (authResult.headers) auth.headers = authResult.headers;
+  const sessionHeaders = getOpenCodeSessionHeaders(model, ctx);
+  if (sessionHeaders || authResult.headers) {
+    auth.headers = { ...sessionHeaders, ...authResult.headers };
+  }
   if (authResult.env) auth.env = authResult.env;
 
   return {
@@ -180,6 +184,26 @@ export async function resolveSmallModelFromConfig(
     source,
     reasoning: model.reasoning ? thinkingLevelToReasoning(config.thinkingLevel) : undefined,
   };
+}
+
+function getOpenCodeSessionHeaders(
+  model: Model<any>,
+  ctx: ExtensionContext,
+): Record<string, string> | undefined {
+  if (!isOpenCodeModel(model)) return undefined;
+  const sessionId = ctx.sessionManager.getSessionId();
+  if (!sessionId) return undefined;
+  return { "x-opencode-session": sessionId, "x-opencode-client": "pi" };
+}
+
+function isOpenCodeModel(model: Model<any>): boolean {
+  if (model.provider === "opencode" || model.provider === "opencode-go") return true;
+  if (!model.baseUrl) return false;
+  try {
+    return new URL(model.baseUrl).hostname === OPENCODE_HOST;
+  } catch {
+    return false;
+  }
 }
 
 function parseThinkingLevel(value: unknown, source: string): ThinkingLevel {
