@@ -17,8 +17,11 @@ export const GOAL_MAX_LENGTH = 4000;
 export const STATUS_KEY = "goal";
 
 // Event bus topic for goal state changes, consumed by the status-bar extension
-// ("Goal" badge in the editor frame while a goal is running). Payload:
-// { status: "active" | "paused" | "complete" | null }.
+// ("Goal N/cap" badge in the editor frame while a goal is running). Payload:
+// { status: "active" | "paused" | "complete" | null, iteration?: number,
+// maxIterations?: number } — iteration and cap are present whenever a goal
+// exists; maxIterations is undefined for goals started before caps existed
+// and 0 means unlimited.
 export const STATE_EVENT = "goal:state-change";
 
 export const COMPLETION_STATUS_DURATION = 8000;

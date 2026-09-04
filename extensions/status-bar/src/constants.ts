@@ -101,10 +101,10 @@ export const GOAL_STATUS_KEY = "goal";
 
 /**
  * Event the goal extension emits on pi.events whenever the goal state
- * changes. The editor frame shows a "Goal" badge in its top-right cell while
- * a goal is running. Defined here (not imported) so the status-bar extension
- * stays self-contained; the goal extension owns the contract and emits the
- * same string.
+ * changes. The editor frame shows a "Goal N/cap" badge in its top-right cell
+ * while a goal is running (cap omitted when unlimited). Defined here (not
+ * imported) so the status-bar extension stays self-contained; the goal
+ * extension owns the contract and emits the same string.
  */
 export const GOAL_STATE_EVENT = "goal:state-change";
 

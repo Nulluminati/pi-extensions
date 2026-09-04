@@ -351,7 +351,11 @@ describe("goal-extension", () => {
         expect.stringContaining("Goal complete"),
         "info",
       );
-      expect(mockPi.events.emit).toHaveBeenCalledWith("goal:state-change", { status: "complete" });
+      expect(mockPi.events.emit).toHaveBeenCalledWith("goal:state-change", {
+        status: "complete",
+        iteration: 0,
+        maxIterations: 25,
+      });
       expect(mockPi.sendUserMessage).not.toHaveBeenCalledWith(
         expect.stringContaining("Continue the active /goal"),
         expect.anything(),
@@ -856,7 +860,25 @@ describe("goal-extension", () => {
       );
 
       expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("goal", expect.stringContaining("active"));
-      expect(mockPi.events.emit).toHaveBeenCalledWith("goal:state-change", { status: "active" });
+      expect(mockPi.events.emit).toHaveBeenCalledWith("goal:state-change", {
+        status: "active",
+        iteration: 3,
+      });
+    });
+
+    it("publishes the iteration count and cap on the state event", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await goalExtension(mockPi);
+      await getCommandHandler(mockPi, "goal:new")("implement snake game", mockCtx);
+      mockVerdict("not_met", "not done yet");
+      await getEventHandler(mockPi, "agent_end")({ type: "agent_end", messages: [] }, mockCtx);
+
+      expect(mockPi.events.emit).toHaveBeenLastCalledWith("goal:state-change", {
+        status: "active",
+        iteration: 1,
+        maxIterations: 25,
+      });
     });
 
     it("reconstructs legacy budget-status goals as paused", async () => {
@@ -877,7 +899,10 @@ describe("goal-extension", () => {
       );
 
       expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("goal", expect.stringContaining("paused"));
-      expect(mockPi.events.emit).toHaveBeenCalledWith("goal:state-change", { status: "paused" });
+      expect(mockPi.events.emit).toHaveBeenCalledWith("goal:state-change", {
+        status: "paused",
+        iteration: 3,
+      });
     });
 
     it("reconstructState skips completed goals", async () => {

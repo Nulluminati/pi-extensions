@@ -1712,7 +1712,11 @@ function getGoalHandler(mockPi: ReturnType<typeof createMockPi>) {
   const calls = (mockPi.events.on as ReturnType<typeof vi.fn>).mock.calls;
   for (const [event, handler] of calls) {
     if (event === "goal:state-change") {
-      return handler as (payload: { status: string | null }) => void;
+      return handler as (payload: {
+        status: string | null;
+        iteration?: number;
+        maxIterations?: number;
+      }) => void;
     }
   }
   return undefined;
@@ -1754,13 +1758,37 @@ describe("status-bar goal badge", () => {
     expect(editor.render(100).some((l) => l.includes("Goal"))).toBe(false);
   });
 
+  it("shows the iteration count and cap in the Goal badge", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBar(mockPi, mockCtx);
+
+    getGoalHandler(mockPi)?.({ status: "active", iteration: 3, maxIterations: 25 });
+
+    const editor = renderInstalledEditor(mockCtx);
+    expect(editor.render(100)[0]).toContain("Goal 3/25");
+  });
+
+  it("shows the iteration count without a cap for unlimited goals", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBar(mockPi, mockCtx);
+
+    getGoalHandler(mockPi)?.({ status: "active", iteration: 4, maxIterations: 0 });
+
+    const editor = renderInstalledEditor(mockCtx);
+    const topLine = editor.render(100)[0] ?? "";
+    expect(topLine).toContain("Goal 4");
+    expect(topLine).not.toContain("Goal 4/");
+  });
+
   it("shows the Goal badge beside Plan Mode when both are active", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await enableBar(mockPi, mockCtx);
 
     getPlanModeHandler(mockPi)?.({ mode: "plan" });
-    getGoalHandler(mockPi)?.({ status: "active" });
+    getGoalHandler(mockPi)?.({ status: "active", iteration: 2, maxIterations: 25 });
 
     const editor = renderInstalledEditor(mockCtx);
     const topLine = editor.render(120)[0] ?? "";

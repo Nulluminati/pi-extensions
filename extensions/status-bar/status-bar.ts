@@ -67,6 +67,8 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     thinkingLevel: "none",
     smallModelLabel: "",
     goalRunning: false,
+    goalIteration: 0,
+    goalCap: null,
     gondolinVm: null,
     gitBranch: null,
     gitStatus: null,
@@ -90,11 +92,16 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
   // session_start-scoped listener, and the state would be missed on first
   // load. Load-time subscriptions are registered before any session events
   // dispatch.
-  pi.events.on(GOAL_STATE_EVENT, (payload: { status: string | null }) => {
-    state.goalRunning = payload.status === "active";
-    state.lastHandle?.requestRender();
-    editorRequestRender?.();
-  });
+  pi.events.on(
+    GOAL_STATE_EVENT,
+    (payload: { status: string | null; iteration?: number; maxIterations?: number }) => {
+      state.goalRunning = payload.status === "active";
+      state.goalIteration = payload.status === "active" ? (payload.iteration ?? 0) : 0;
+      state.goalCap = payload.status === "active" ? (payload.maxIterations ?? null) : null;
+      state.lastHandle?.requestRender();
+      editorRequestRender?.();
+    },
+  );
 
   function setFooter(ctx: ExtensionCommandContext): void {
     if (!ctx.hasUI) return;
@@ -169,7 +176,10 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
           () => {
             const parts: string[] = [];
             if (state.planModeActive) parts.push(ctx.ui.theme.fg("warning", "Plan Mode"));
-            if (state.goalRunning) parts.push(ctx.ui.theme.fg("mdHeading", "Goal"));
+            if (state.goalRunning) {
+              const capLabel = state.goalCap && state.goalCap > 0 ? `/${state.goalCap}` : "";
+              parts.push(ctx.ui.theme.fg("mdHeading", `Goal ${state.goalIteration}${capLabel}`));
+            }
             return parts.length > 0 ? parts.join(ctx.ui.theme.fg("dim", " · ")) : undefined;
           },
         );

@@ -58,7 +58,12 @@ export default async function goalExtension(pi: ExtensionAPI) {
   function updateStatusLine(ctx: ExtensionContext) {
     // Publish on the event bus for the status-bar extension's editor badge,
     // regardless of UI mode (the event is inert when nothing subscribes).
-    pi.events.emit(STATE_EVENT, { status: state?.status ?? null });
+    // Iteration and cap ride along so the badge can show "Goal 3/25".
+    pi.events.emit(STATE_EVENT, {
+      status: state?.status ?? null,
+      iteration: state?.iteration,
+      maxIterations: state?.maxIterations,
+    });
     if (!ctx.hasUI) return;
     const text = state ? buildStatusLine(state) : undefined;
     ctx.ui.setStatus(

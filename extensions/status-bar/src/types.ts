@@ -40,10 +40,15 @@ export interface State {
   // small model is configured.
   smallModelLabel: string;
   // True while the goal extension has a running goal (status "active"),
-  // published on the pi.events bus (see goal:state-change). Shown as a "Goal"
-  // badge in the editor frame's top-right cell, beside "Plan Mode" when both
-  // are active.
+  // published on the pi.events bus (see goal:state-change). Shown as a
+  // "Goal N/cap" badge in the editor frame's top-right cell, beside
+  // "Plan Mode" when both are active.
   goalRunning: boolean;
+  // Iteration count and cap from the goal:state-change payload, shown in the
+  // badge while the goal is running. goalIteration resets to 0 when no goal
+  // is active; goalCap is null when unset and 0 means unlimited.
+  goalIteration: number;
+  goalCap: number | null;
   // Gondolin sandbox VM state, published by the gondolin extension on the
   // pi.events bus (see gondolin:vm-state). Shown as a "with WS <id>" segment
   // on footer line 1 after the working directory; null when no VM exists.
