@@ -229,6 +229,13 @@ export function createRawRenderResult() {
     const cacheNote =
       cacheStatus === "fresh" ? " (fresh)" : cacheStatus === "stale" ? " (stale)" : "";
     const libraryName = String(details?.libraryName ?? args.libraryName ?? "unknown");
+    const startLine = Number(details?.startLine ?? 1);
+    const totalLines = Number(details?.totalLines ?? 0);
+    const endLine = Number(details?.endLine ?? 0);
+    const rangeNote =
+      totalLines > 0 && (startLine > 1 || Boolean(details?.truncated))
+        ? ` — lines ${startLine}-${endLine} of ${totalLines}`
+        : "";
 
     if (ambiguous) {
       return {
@@ -247,7 +254,7 @@ export function createRawRenderResult() {
         truncateToWidth(
           theme.fg(
             "success",
-            `📄 Raw: ${libraryName} — ${docRef.slice(0, 40)}${docRef.length > 40 ? "..." : ""}${cacheNote}`,
+            `📄 Raw: ${libraryName} — ${docRef.slice(0, 40)}${docRef.length > 40 ? "..." : ""}${cacheNote}${rangeNote}`,
           ),
           width,
         ),

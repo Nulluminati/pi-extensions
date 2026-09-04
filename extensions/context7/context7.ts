@@ -9,6 +9,7 @@ import type { ExtensionAPI } from "pi";
 import { findDocCacheCandidates, getDocCacheByRef, loadDocCacheObject } from "./src/cache.ts";
 import { loadSettings } from "./src/config.ts";
 import { formatCacheCandidates, getDocsEntry } from "./src/docs.ts";
+import { sliceRawDoc } from "./src/raw-output.ts";
 import {
   createDocsRenderResult,
   createRawRenderResult,
@@ -111,12 +112,13 @@ export default async function context7Extension(pi: ExtensionAPI) {
     name: "context7_get_cached_doc_raw",
     label: "Context7 Get Cached Raw Doc",
     description:
-      "Read the raw cached Context7 document for a previous docs fetch. Prefer context7_get_library_docs first.",
+      "Read the raw cached Context7 document for a previous docs fetch. Prefer context7_get_library_docs first. Documents larger than 2,000 lines / 40,000 chars are returned as bounded windows; page with offsetLine (from nextOffsetLine in a truncated result).",
     promptSnippet:
-      "Read the full raw cached Context7 document by docRef or semantic lookup when curated docs were insufficient.",
+      "Read the full raw cached Context7 document by docRef or semantic lookup when curated docs were insufficient; large docs page via offsetLine.",
     promptGuidelines: [
       "Use context7_get_cached_doc_raw only after context7_get_library_docs when you need the full cached raw documentation.",
       "When calling context7_get_cached_doc_raw, prefer docRef from an earlier tool result. If semantic lookup matches multiple cached docs, the tool will not guess.",
+      "Documents over 2,000 lines / 40,000 chars arrive as a bounded window: keep calling with offsetLine = nextOffsetLine until truncated is false.",
     ],
     parameters: GET_CACHED_DOC_RAW_PARAMS,
     renderResult: createRawRenderResult(),
@@ -139,8 +141,12 @@ export default async function context7Extension(pi: ExtensionAPI) {
             `No cached Context7 document found for docRef ${selector.docRef}. Call context7_get_library_docs first.`,
           );
         }
+        const rawWindow = sliceRawDoc(
+          cached.entry.rawText,
+          params.offsetLine as number | undefined,
+        );
         return {
-          content: [{ type: "text", text: cached.entry.rawText }],
+          content: [{ type: "text", text: rawWindow.text }],
           details: {
             docRef: cached.entry.docRef,
             libraryId: cached.entry.libraryId,
@@ -150,6 +156,12 @@ export default async function context7Extension(pi: ExtensionAPI) {
             query: cached.entry.query,
             topic: cached.entry.topic,
             page: cached.entry.page,
+            totalLines: rawWindow.totalLines,
+            totalChars: rawWindow.totalChars,
+            startLine: rawWindow.startLine,
+            endLine: rawWindow.endLine,
+            truncated: rawWindow.truncated,
+            nextOffsetLine: rawWindow.nextOffsetLine,
           },
         } as any;
       }
@@ -200,8 +212,9 @@ export default async function context7Extension(pi: ExtensionAPI) {
         );
       }
 
+      const rawWindow = sliceRawDoc(entry.rawText, params.offsetLine as number | undefined);
       return {
-        content: [{ type: "text", text: entry.rawText }],
+        content: [{ type: "text", text: rawWindow.text }],
         details: {
           docRef: entry.docRef,
           libraryId: entry.libraryId,
@@ -211,6 +224,12 @@ export default async function context7Extension(pi: ExtensionAPI) {
           query: entry.query,
           topic: entry.topic,
           page: entry.page,
+          totalLines: rawWindow.totalLines,
+          totalChars: rawWindow.totalChars,
+          startLine: rawWindow.startLine,
+          endLine: rawWindow.endLine,
+          truncated: rawWindow.truncated,
+          nextOffsetLine: rawWindow.nextOffsetLine,
         },
       } as any;
     },

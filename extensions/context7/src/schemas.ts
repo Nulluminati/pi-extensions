@@ -75,6 +75,11 @@ export const GET_CACHED_DOC_RAW_PARAMS = {
       type: "number",
       description: "Optional original logical page number.",
     },
+    offsetLine: {
+      type: "number",
+      description:
+        "Optional 1-based line offset for paging through documents larger than the per-call cap (2,000 lines / 40,000 chars). Use nextOffsetLine from a truncated result.",
+    },
   },
   required: [],
 };

@@ -226,7 +226,7 @@ describe("context7-extension", () => {
       const sourceFiles = await readActualDirectory(resolve(extensionDir, "src"));
 
       expect(rootTypeScriptFiles).toEqual(["context7.ts"]);
-      expect(sourceFiles.filter((file) => file.endsWith(".ts"))).toHaveLength(9);
+      expect(sourceFiles.filter((file) => file.endsWith(".ts"))).toHaveLength(10);
     });
   });
 
@@ -696,6 +696,100 @@ describe("context7-extension", () => {
       expect(result.content[0].text).toBe("# Raw Documentation\n\nFull uncurated content here.");
       expect(result.details.docRef).toBe("ctx7:docs:ref1");
       expect(result.details.cacheStatus).toBe("fresh");
+      expect(result.details.truncated).toBe(false);
+    });
+
+    it("caps documents over 2000 lines and reports the next offset", async () => {
+      const bigRaw = Array.from({ length: 2500 }, (_, i) => `line ${i + 1}`).join("\n");
+      setupFreshDocsCache("ctx7:docs:big", bigRaw, "curated");
+
+      const mockPi = createMockPi();
+      await context7Extension(mockPi);
+      const tool = getRegisteredTool(mockPi, "context7_get_cached_doc_raw");
+      const result = await tool.execute(
+        "id-1",
+        { docRef: "ctx7:docs:big" },
+        undefined,
+        undefined,
+        {},
+      );
+
+      const text = result.content[0].text as string;
+      expect(text).toContain("lines 1-2000 of 2500");
+      expect(text).toContain("offsetLine=2001");
+      expect(text).toContain("line 1");
+      expect(text).toContain("line 2000");
+      expect(text).not.toContain("line 2001");
+      expect(text.length).toBeLessThan(45_000);
+      expect(result.details.truncated).toBe(true);
+      expect(result.details.totalLines).toBe(2500);
+      expect(result.details.nextOffsetLine).toBe(2001);
+      expect(result.details.startLine).toBe(1);
+      expect(result.details.endLine).toBe(2000);
+    });
+
+    it("pages from offsetLine and reports end-of-document without a footer", async () => {
+      const bigRaw = Array.from({ length: 2500 }, (_, i) => `line ${i + 1}`).join("\n");
+      setupFreshDocsCache("ctx7:docs:big", bigRaw, "curated");
+
+      const mockPi = createMockPi();
+      await context7Extension(mockPi);
+      const tool = getRegisteredTool(mockPi, "context7_get_cached_doc_raw");
+      const result = await tool.execute(
+        "id-1",
+        { docRef: "ctx7:docs:big", offsetLine: 2001 },
+        undefined,
+        undefined,
+        {},
+      );
+
+      const text = result.content[0].text as string;
+      expect(text).toContain("lines 2001-2500 of 2500");
+      expect(text).toContain("line 2500");
+      expect(text).not.toContain("offsetLine=");
+      expect(result.details.truncated).toBe(false);
+      expect(result.details.nextOffsetLine).toBeUndefined();
+      expect(result.details.startLine).toBe(2001);
+      expect(result.details.endLine).toBe(2500);
+    });
+
+    it("rejects offsetLine beyond the end of the document", async () => {
+      setupFreshDocsCache("ctx7:docs:ref1", "short doc", "curated");
+
+      const mockPi = createMockPi();
+      await context7Extension(mockPi);
+      const tool = getRegisteredTool(mockPi, "context7_get_cached_doc_raw");
+      await expect(
+        tool.execute(
+          "id-1",
+          { docRef: "ctx7:docs:ref1", offsetLine: 999 },
+          undefined,
+          undefined,
+          {},
+        ),
+      ).rejects.toThrow(/beyond the end/);
+    });
+
+    it("caps a single oversized line by character budget", async () => {
+      const hugeRaw = `${"A".repeat(100_000)}\ntail`;
+      setupFreshDocsCache("ctx7:docs:huge", hugeRaw, "curated");
+
+      const mockPi = createMockPi();
+      await context7Extension(mockPi);
+      const tool = getRegisteredTool(mockPi, "context7_get_cached_doc_raw");
+      const result = await tool.execute(
+        "id-1",
+        { docRef: "ctx7:docs:huge" },
+        undefined,
+        undefined,
+        {},
+      );
+
+      const text = result.content[0].text as string;
+      expect(text).toContain("lines 1-1 of 2");
+      expect(text.length).toBeLessThan(41_000);
+      expect(result.details.truncated).toBe(true);
+      expect(result.details.nextOffsetLine).toBe(2);
     });
 
     it("throws when docRef not found", async () => {
