@@ -1,0 +1,37 @@
+# Autoresearch Extension
+
+Karpathy-style autonomous experiment loop, generalized to any measurable target: try an idea, measure it, keep improvements (git commit), discard regressions (git revert), repeat. Works for test speed, build time, bundle size, benchmark scores — anything a shell command can measure.
+
+## Usage
+
+```text
+autoresearch (action=init, objective="Reduce test runtime", metric="seconds", direction="lower",
+              measure="node scripts/bench.js  # prints 'METRIC seconds=12.3'", checks="npm test")
+```
+
+The agent then loops: edit code → `action=run` → `action=log` with `status=keep` (commits) or `status=discard` (reverts). While the loop is active the extension re-prompts the agent after each turn, with runaway guards.
+
+## How It Works
+
+- **State in `.auto/`**: `config.json` (metric, commands, cap), `prompt.md` (objective and notes so a fresh session can resume), `log.jsonl` (append-only run record), `pending.json` (an in-flight measurement). `.auto/` is excluded from git locally during init so revert cycles can never destroy the experiment record.
+- **Baseline first**: init measures the untouched state; every later result is compared against it.
+- **Correctness gate**: if `checks` is configured, it runs before measuring; a failure auto-reverts the changes and logs `checks_failed`.
+- **Confidence scoring**: after 3+ measured runs the tool reports `|best − baseline|` relative to the robust noise floor (1.4826 × MAD). Below 1x the improvement is within noise and the agent is told to re-measure before trusting it.
+- **Runaway guards**: iteration cap (`maxIterations`) stops the loop; two consecutive prompts without a newly logged experiment stop the loop and hand control back.
+- **Keeps are commits**: `git add -A && git commit` with the metric in the message; discards are `git reset --hard` after staging, which also removes files the experiment created.
+
+## Pi APIs Used
+
+| API | Purpose |
+|-----|---------|
+| `pi.registerTool("autoresearch")` | init / run / log / status / stop |
+| `pi.on("agent_end")` | Loop continuation with cap and stall guards |
+| `pi.sendUserMessage(..., { deliverAs: "followUp" })` | Continue the loop |
+| `pi.on("session_start")` | Resume loop state from `.auto/` |
+| `pi.events.emit("autoresearch:state")` | Publish state for the status bar |
+
+State lives in `<cwd>/.auto/` (locally git-excluded; keep it out of remotes).
+
+## Cost Control
+
+Experiment loops burn tokens. Set `maxIterations` at init, and prefer provider-side budgets for unattended runs.

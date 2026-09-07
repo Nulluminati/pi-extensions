@@ -1,0 +1,124 @@
+/** `.auto/` file storage: config.json and the append-only log.jsonl. The
+ * `.auto/` directory is excluded locally from git during init so keep/revert
+ * cycles can never destroy the experiment record. */
+
+import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import type { AutoConfig, RunEntry } from "./types.ts";
+
+// --- Paths ---
+
+export function autoDir(cwd: string): string {
+  return join(cwd, ".auto");
+}
+
+export function configPath(cwd: string): string {
+  return join(autoDir(cwd), "config.json");
+}
+
+export function logPath(cwd: string): string {
+  return join(autoDir(cwd), "log.jsonl");
+}
+
+export function promptPath(cwd: string): string {
+  return join(autoDir(cwd), "prompt.md");
+}
+
+// --- Config ---
+
+function isActiveConfig(value: unknown): value is AutoConfig {
+  if (!value || typeof value !== "object") return false;
+  const c = value as Partial<AutoConfig>;
+  return (
+    typeof c.objective === "string" &&
+    typeof c.metric === "string" &&
+    (c.direction === "lower" || c.direction === "higher") &&
+    typeof c.measure === "string"
+  );
+}
+
+export async function saveConfig(cwd: string, config: AutoConfig): Promise<void> {
+  await mkdir(autoDir(cwd), { recursive: true });
+  const tmp = `${configPath(cwd)}.${process.pid}.tmp`;
+  await writeFile(tmp, JSON.stringify(config, null, 2), "utf8");
+  await rename(tmp, configPath(cwd));
+}
+
+export async function loadConfig(cwd: string): Promise<AutoConfig | undefined> {
+  try {
+    const parsed: unknown = JSON.parse(await readFile(configPath(cwd), "utf8"));
+    return isActiveConfig(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// --- Log ---
+
+export async function readLog(cwd: string): Promise<RunEntry[]> {
+  let raw: string;
+  try {
+    raw = await readFile(logPath(cwd), "utf8");
+  } catch {
+    return [];
+  }
+  const entries: RunEntry[] = [];
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      entries.push(JSON.parse(line) as RunEntry);
+    } catch {
+      // Skip malformed lines; the log stays append-only.
+    }
+  }
+  return entries;
+}
+
+export async function appendLog(cwd: string, entry: RunEntry): Promise<void> {
+  await mkdir(autoDir(cwd), { recursive: true });
+  await appendFile(logPath(cwd), `${JSON.stringify(entry)}\n`, "utf8");
+}
+
+export function nextRunNumber(entries: RunEntry[]): number {
+  return entries.reduce((max, e) => Math.max(max, e.run), 0) + 1;
+}
+
+// --- prompt.md ---
+
+export async function savePrompt(
+  cwd: string,
+  config: AutoConfig,
+  extraNotes?: string,
+): Promise<void> {
+  await mkdir(autoDir(cwd), { recursive: true });
+  const lines = [
+    `# Autoresearch: ${config.objective}`,
+    "",
+    `- Metric: ${config.metric}${config.unit ? ` (${config.unit})` : ""} — ${config.direction === "lower" ? "lower is better" : "higher is better"}`,
+    `- Measure command: \`${config.measure}\``,
+    config.checks
+      ? `- Correctness checks: \`${config.checks}\``
+      : "- Correctness checks: none configured",
+    config.maxIterations
+      ? `- Iteration cap: ${config.maxIterations}`
+      : "- Iteration cap: unlimited",
+    "",
+    extraNotes?.trim() ? `## Notes\n\n${extraNotes.trim()}\n` : "",
+  ];
+  await writeFile(promptPath(cwd), `${lines.join("\n")}\n`, "utf8");
+}
+
+// --- Git hygiene ---
+
+/** Ensure `.auto/` never enters a commit, without touching .gitignore. */
+export async function excludeAutoFromGit(cwd: string): Promise<void> {
+  const exclude = join(cwd, ".git", "info", "exclude");
+  let current = "";
+  try {
+    current = await readFile(exclude, "utf8");
+  } catch {
+    // File may not exist yet; appendFile creates it (.git/info always exists).
+  }
+  if (current.split("\n").includes(".auto/")) return;
+  await appendFile(exclude, ".auto/\n", "utf8");
+}

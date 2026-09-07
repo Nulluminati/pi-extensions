@@ -476,6 +476,7 @@ declare module "pi" {
     };
     agent_start: { type: "agent_start" };
     agent_end: { type: "agent_end"; messages: any[] };
+    agent_settled: { type: "agent_settled" };
     turn_start: { type: "turn_start"; turnIndex: number; timestamp: number };
     turn_end: { type: "turn_end"; turnIndex: number; message: any; toolResults: any[] };
     message_start: { type: "message_start"; message: any };

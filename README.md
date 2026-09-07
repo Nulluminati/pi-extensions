@@ -40,6 +40,11 @@ pi -e git:github.com/Nulluminati/pi-extensions/extensions/goal/goal.ts
 | `clear/` | Aliases `/clear` to `/new` for muscle memory from Claude Code and `clear`-keyed tools. Discard confirmation is handled by the underlying `/new` behavior. |
 | [`voice/`](extensions/voice/README.md) | Local dictation and speech playback with sherpa-onnx and ONNX Runtime. `/voice` opens one settings modal for dictation, speech, voice, and connection status. Hold Space to dictate; use `/voice-speak` to summarize and read the latest response aloud. |
 | [`small-model/`](extensions/small-model/README.md) | One global model for handoff, BTW, session recap, and voice summaries. Use `/small-model` to select it; the current choice appears in the status bar. |
+| [`missions/`](extensions/missions/README.md) | Durable missions: long-lived objectives with a task graph, checkpoints, decisions, and budget, persisted in the project across restarts. `reconcile` re-runs done tasks' verification commands and flags regressions. |
+| [`messenger/`](extensions/messenger/README.md) | File-based coordination between Pi sessions sharing a project: presence, mailboxes with automatic delivery into the conversation, and path reservations that block other sessions' edits. |
+| [`agents/`](extensions/agents/README.md) | Multi-agent workflows: delegate bounded tasks to cheap-model worker Pi sessions in isolated git worktrees; collect patches and reports, cancel or list workers, durable registry. |
+| [`autoresearch/`](extensions/autoresearch/README.md) | Autonomous experiment loop: measure a metric, keep improvements (commit), discard regressions (revert), repeat with correctness gates and MAD-based confidence scoring. |
+| [`harness-evals/`](extensions/harness-evals/README.md) | Harness evaluation suite: reproducible coding tasks run noninteractively and graded by adversarial shell checks, so harness and model changes are measured, not vibes. Includes `scripts/eval-run.ts` for noninteractive runs. |
 
 Per-extension configuration (flags, env vars, config files) lives in each extension's own `README.md` under the **Configuration** section.
 
