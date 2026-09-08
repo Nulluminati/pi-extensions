@@ -11,6 +11,11 @@ Measures whether Pi (and this extension suite) actually completes coding tasks: 
 | `misleading-diagnosis` | Diagnosis depth; the failure message points at the wrong module (fixing the wrong one fails) |
 | `implement-to-spec` | From-spec implementation with edge cases |
 | `test-first-bugfix` | Test-writing discipline: the grader reverts the fix and verifies the new test actually catches the original bug |
+| `refactor-split` | Structure change under test protection; import-graph consistency |
+| `lru-cache-tdd` | From-spec implementation plus tests that must catch a known-broken eviction |
+| `async-race` | Async control flow; deterministic correctness across repeated runs |
+| `bug-chain` | Layered diagnosis; numeric correctness at rounding boundaries |
+| `parallel-modules` | Decomposition and integration; delegation benefit when a delegate tool is available |
 
 Checks are shell commands graded in the task workspace; several are adversarial (the "obvious" shortcut fails them by design).
 
