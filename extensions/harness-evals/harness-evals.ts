@@ -104,11 +104,23 @@ export default async function harnessEvalsExtension(pi: ExtensionAPI) {
             ? params.model.trim()
             : evalModel();
         const extensionPaths = suiteExtensionPaths();
+        let judge: { model: string } | undefined;
+        if (params.judge === true) {
+          const judgeModel = process.env.PI_EVAL_JUDGE_MODEL?.trim();
+          if (!judgeModel) {
+            throw new Error("judge=true requires $PI_EVAL_JUDGE_MODEL to name the judge model.");
+          }
+          judge = { model: judgeModel };
+        }
 
         const results = [];
         for (let i = 0; i < repeats; i++) {
           for (const task of tasks) {
-            const result = await runEvalTask(task, { model, extensionPaths });
+            const result = await runEvalTask(task, {
+              model,
+              extensionPaths,
+              ...(judge !== undefined ? { judge } : {}),
+            });
             await appendResult(ctx.cwd, result);
             results.push(result);
             if (ctx.hasUI) {

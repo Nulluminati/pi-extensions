@@ -6,12 +6,12 @@
  */
 
 import { execFile, spawn } from "node:child_process";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { cleanGitEnv } from "../../../lib/git.ts";
-import type { CheckResult, EvalResult, EvalTask } from "./types.ts";
+import type { CheckResult, EvalQuality, EvalResult, EvalTask } from "./types.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -179,6 +179,135 @@ export async function runCheck(
   }
 }
 
+// --- Quality judging ---
+
+const JUDGE_SKIP_DIRS = new Set([".git", ".broken", ".grader", ".pi", ".auto", "node_modules"]);
+const JUDGE_FILE_BYTES = 8_000;
+const JUDGE_TOTAL_BYTES = 48_000;
+const JUDGE_TIMEOUT_MS = 240_000;
+
+/** Collect workspace text files for the judge, bounded. */
+export async function collectWorkspace(dir: string): Promise<string> {
+  const parts: string[] = [];
+  let total = 0;
+  async function walk(current: string, rel: string): Promise<void> {
+    if (total >= JUDGE_TOTAL_BYTES) return;
+    let entries: string[] = [];
+    try {
+      entries = await readdir(current);
+    } catch {
+      return;
+    }
+    for (const entry of entries.sort()) {
+      if (total >= JUDGE_TOTAL_BYTES) return;
+      const full = join(current, entry);
+      const relPath = rel ? `${rel}/${entry}` : entry;
+      const s = await stat(full).catch(() => undefined);
+      if (!s) continue;
+      if (s.isDirectory()) {
+        if (!JUDGE_SKIP_DIRS.has(entry)) await walk(full, relPath);
+        continue;
+      }
+      if (s.size > 40_000) continue;
+      const content = await readFile(full, "utf8").catch(() => undefined);
+      if (content === undefined) continue; // binary
+      const bounded =
+        content.length > JUDGE_FILE_BYTES
+          ? `${content.slice(0, JUDGE_FILE_BYTES)}\n…[truncated]`
+          : content;
+      const budget = Math.min(bounded.length, JUDGE_TOTAL_BYTES - total);
+      total += budget;
+      parts.push(`=== ${relPath} ===\n${bounded.slice(0, budget)}`);
+    }
+  }
+  await walk(dir, "");
+  return parts.join("\n\n");
+}
+
+/** Parse the judge's JSON verdict out of its final message. */
+export function parseJudgeVerdict(text: string): EvalQuality | undefined {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start === -1 || end <= start) return undefined;
+  try {
+    const parsed = JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>;
+    const clamp = (v: unknown): number | undefined => {
+      const n = typeof v === "number" ? v : Number.parseFloat(String(v));
+      return Number.isFinite(n) ? Math.min(10, Math.max(0, n)) : undefined;
+    };
+    const specAdherence = clamp(parsed.specAdherence);
+    const codeQuality = clamp(parsed.codeQuality);
+    const robustness = clamp(parsed.robustness);
+    const overall = clamp(parsed.overall);
+    if (
+      specAdherence === undefined ||
+      codeQuality === undefined ||
+      robustness === undefined ||
+      overall === undefined
+    ) {
+      return undefined;
+    }
+    return {
+      specAdherence,
+      codeQuality,
+      robustness,
+      overall,
+      ...(typeof parsed.notes === "string" && parsed.notes.trim()
+        ? { notes: parsed.notes.trim() }
+        : {}),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function buildJudgePrompt(task: EvalTask, workspace: string): string {
+  return [
+    "You are grading an AI-generated solution to a coding task. Grade ONLY the final workspace contents.",
+    "You are not told which model or configuration produced it. Be rigorous and calibrated: 7 is good professional work, 10 is exceptional, 5 means usable but sloppy, below 5 means broken or badly off-spec.",
+    "",
+    `## Task given to the agent\n${task.prompt}`,
+    "",
+    `## Acceptance checks the workspace already passed or failed\n${task.checks.name}`,
+    "",
+    "## Final workspace files\n```\n" + workspace + "\n```",
+    "",
+    "Grade these axes from 0 to 10 (one decimal is fine):",
+    "- specAdherence: does the code fulfill exactly what was asked, including edge cases named in the task or spec files?",
+    "- codeQuality: readability, structure, naming, sensible error handling; professional quality.",
+    "- robustness: would this survive edge cases and small requirement changes, or is it overfit to the visible tests?",
+    "- overall: your weighted judgment of the solution's quality.",
+    "- notes: one short paragraph citing concrete evidence from the files.",
+    "",
+    'Respond with ONLY a JSON object: {"specAdherence":n,"codeQuality":n,"robustness":n,"overall":n,"notes":"..."}',
+  ].join("\n");
+}
+
+/**
+ * Blind quality judgment of a completed run. Runs a fixed judge model over
+ * the final workspace; the judge never sees which configuration produced it.
+ */
+export async function judgeRun(options: {
+  dir: string;
+  task: EvalTask;
+  judgeModel: string;
+  timeoutMs?: number;
+  piBin?: string;
+}): Promise<EvalQuality | undefined> {
+  const workspace = await collectWorkspace(options.dir);
+  const session = await runPiSession({
+    cwd: options.dir,
+    prompt: buildJudgePrompt(options.task, workspace),
+    model: options.judgeModel,
+    timeoutMs: options.timeoutMs ?? JUDGE_TIMEOUT_MS,
+    extensionPaths: [],
+    ...(options.piBin !== undefined ? { piBin: options.piBin } : {}),
+  });
+  const text = session.finalText;
+  if (text === undefined) return undefined;
+  return parseJudgeVerdict(text);
+}
+
 // --- Full task ---
 
 export interface RunTaskOptions {
@@ -188,6 +317,8 @@ export interface RunTaskOptions {
   piBin?: string;
   keepWorkspace?: boolean;
   workspaceDir?: string;
+  /** When set, a blind judge grades the final workspace after the run. */
+  judge?: { model: string; timeoutMs?: number; piBin?: string };
 }
 
 /** Run one eval task end to end and grade it. */
@@ -211,6 +342,17 @@ export async function runEvalTask(
       ? [{ name: task.checks.name, ok: false, output: "task timed out before checks could run" }]
       : [await runCheck(task.checks, workspace.dir)];
 
+    let quality: EvalQuality | undefined;
+    if (options.judge !== undefined) {
+      quality = await judgeRun({
+        dir: workspace.dir,
+        task,
+        judgeModel: options.judge.model,
+        ...(options.judge.timeoutMs !== undefined ? { timeoutMs: options.judge.timeoutMs } : {}),
+        ...(options.judge.piBin !== undefined ? { piBin: options.judge.piBin } : {}),
+      });
+    }
+
     return {
       taskId: task.id,
       model: options.model ?? "(default)",
@@ -222,6 +364,7 @@ export async function runEvalTask(
       inputTokens: session.inputTokens,
       outputTokens: session.outputTokens,
       ...(session.finalText !== undefined ? { finalText: session.finalText } : {}),
+      ...(quality !== undefined ? { quality } : {}),
       at,
     };
   } catch (err) {

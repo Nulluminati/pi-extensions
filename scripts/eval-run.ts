@@ -27,6 +27,7 @@ interface Args {
   timeoutMs?: number;
   extensions: boolean;
   keep: boolean;
+  judge?: string;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -45,7 +46,10 @@ function parseArgs(argv: string[]): Args {
     else if (arg === "--timeout-ms") args.timeoutMs = Number.parseInt(argv[++i] ?? "", 10);
     else if (arg === "--no-extensions") args.extensions = false;
     else if (arg === "--keep") args.keep = true;
-    else if (arg === "--help" || arg === "-h") {
+    else if (arg === "--judge") {
+      const v = argv[++i];
+      if (v !== undefined) args.judge = v;
+    } else if (arg === "--help" || arg === "-h") {
       console.log(
         "Usage: npx tsx scripts/eval-run.ts [--all | --task <id>] [--model provider/id] [--repeats N] [--timeout-ms N] [--no-extensions] [--keep]",
       );
@@ -91,12 +95,14 @@ async function main(): Promise<void> {
         ...(args.timeoutMs !== undefined ? { timeoutMs: args.timeoutMs } : {}),
         extensionPaths,
         keepWorkspace: args.keep,
+        ...(args.judge !== undefined ? { judge: { model: args.judge } } : {}),
       });
       await appendResult(cwd, result);
       results.push(result);
       console.log(result.pass ? "PASS" : "FAIL");
+      const q = result.quality !== undefined ? ` · quality ${result.quality.overall}/10` : "";
       console.log(
-        `  ${Math.round(result.durationMs / 1000)}s · ${result.inputTokens}in/${result.outputTokens}out tok`,
+        `  ${Math.round(result.durationMs / 1000)}s · ${result.inputTokens}in/${result.outputTokens}out tok${q}`,
       );
       if (!result.pass) {
         console.log(formatResult(result));

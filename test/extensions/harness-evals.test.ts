@@ -3,7 +3,9 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { summarize } from "../../extensions/harness-evals/src/format.ts";
 import {
+  collectWorkspace,
   materializeTask,
+  parseJudgeVerdict,
   runCheck,
   runEvalTask,
   runPiSession,
@@ -460,6 +462,104 @@ describe("harness-evals-runner", () => {
     } finally {
       await import("node:fs/promises").then((fs) => fs.rm(fixture, { force: true }));
     }
+  });
+
+  it("runEvalTask passes a blind judge verdict into the result when configured", async () => {
+    const task = findTask("bugfix-regression");
+    if (!task) throw new Error("missing task");
+    const solver = join(import.meta.dirname ?? ".", "fixture-pi-solve.sh");
+    const judge = join(import.meta.dirname ?? ".", "fixture-pi-judge.sh");
+    await writeFile(
+      solver,
+      `#!/bin/sh\nnode -e 'const fs=require("fs");let s=fs.readFileSync("stats.js","utf8");s=s.replace("i <= nums.length","i < nums.length");fs.writeFileSync("stats.js",s);'\necho '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"fixed"}]}}'\n`,
+    );
+    const verdict = JSON.stringify({
+      specAdherence: 8.5,
+      codeQuality: 7,
+      robustness: 9,
+      overall: 8,
+      notes: "clean fix",
+    });
+    const judgeEvent = `${JSON.stringify({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: `Verdict: ${verdict}` }],
+      },
+    })}\n`;
+    const judgeEventFile = `${judge}.event`;
+    await writeFile(judgeEventFile, judgeEvent);
+    await writeFile(judge, `#!/bin/sh\ncat "${judgeEventFile}"\n`);
+    await chmod(solver, 0o755);
+    await chmod(judge, 0o755);
+    try {
+      const result = await runEvalTask(task, {
+        piBin: solver,
+        model: "fixture/test",
+        judge: { model: "judge/deepseek", piBin: judge },
+      });
+      expect(result.pass).toBe(true);
+      expect(result.quality).toBeDefined();
+      expect(result.quality?.overall).toBe(8);
+      expect(result.quality?.specAdherence).toBe(8.5);
+      expect(result.quality?.notes).toBe("clean fix");
+    } finally {
+      const fs = await import("node:fs/promises");
+      await fs.rm(solver, { force: true });
+      await fs.rm(judge, { force: true });
+      await fs.rm(`${judge}.event`, { force: true });
+    }
+  });
+
+  it("runEvalTask omits quality when the judge returns no parseable verdict", async () => {
+    const task = findTask("bugfix-regression");
+    if (!task) throw new Error("missing task");
+    const solver = join(import.meta.dirname ?? ".", "fixture-pi-solve.sh");
+    const judge = join(import.meta.dirname ?? ".", "fixture-pi-judge-bad.sh");
+    await writeFile(
+      solver,
+      `#!/bin/sh\nnode -e 'const fs=require("fs");let s=fs.readFileSync("stats.js","utf8");s=s.replace("i <= nums.length","i < nums.length");fs.writeFileSync("stats.js",s);'\necho '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"fixed"}]}}'\n`,
+    );
+    await writeFile(judge, `#!/bin/sh\necho 'I cannot grade this.'\n`);
+    await chmod(solver, 0o755);
+    await chmod(judge, 0o755);
+    try {
+      const result = await runEvalTask(task, {
+        piBin: solver,
+        model: "fixture/test",
+        judge: { model: "judge/deepseek", piBin: judge },
+      });
+      expect(result.quality).toBeUndefined();
+    } finally {
+      const fs = await import("node:fs/promises");
+      await fs.rm(solver, { force: true });
+      await fs.rm(judge, { force: true });
+    }
+  });
+
+  it("collectWorkspace bounds output and skips grader directories", async () => {
+    const task = findTask("lru-cache-tdd");
+    if (!task) throw new Error("missing task");
+    const ws = await materializeTask(task);
+    try {
+      const text = await collectWorkspace(ws.dir);
+      expect(text).toContain("=== lru.js ===");
+      expect(text).toContain("=== SPEC.md ===");
+      expect(text.includes("Known-broken reference")).toBe(false);
+    } finally {
+      await ws.cleanup();
+    }
+  });
+
+  it("parseJudgeVerdict clamps and rejects malformed verdicts", () => {
+    const good = parseJudgeVerdict(
+      'blurb {"specAdherence":11,"codeQuality":-1,"robustness":7,"overall":8,"notes":"x"} tail',
+    );
+    expect(good?.specAdherence).toBe(10);
+    expect(good?.codeQuality).toBe(0);
+    expect(good?.overall).toBe(8);
+    expect(parseJudgeVerdict("no json here")).toBeUndefined();
+    expect(parseJudgeVerdict('{"specAdherence":"high"}')).toBeUndefined();
   });
 
   it("summarize aggregates pass rate and per-task stats", () => {

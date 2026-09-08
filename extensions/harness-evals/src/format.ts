@@ -10,8 +10,9 @@ export const EVALS_STATE_EVENT = "harness-evals:state";
 
 export function formatResult(result: EvalResult): string {
   const status = result.pass ? "PASS" : "FAIL";
+  const quality = result.quality ? `, quality ${result.quality.overall.toFixed(1)}` : "";
   const lines = [
-    `${status} ${result.taskId} (${Math.round(result.durationMs / 1000)}s, ${result.inputTokens}in/${result.outputTokens}out tokens, model ${result.model})`,
+    `${status} ${result.taskId} (${Math.round(result.durationMs / 1000)}s, ${result.inputTokens}in/${result.outputTokens}out tokens${quality}, model ${result.model})`,
   ];
   for (const check of result.checks) {
     lines.push(`  ${check.ok ? "✓" : "✗"} ${check.name}`);
@@ -28,12 +29,15 @@ export interface SuiteSummary {
   runs: number;
   passes: number;
   passRate: number;
+  /** Mean judge overall across runs that have a quality score. */
+  avgQuality?: number;
   byTask: Array<{
     taskId: string;
     runs: number;
     passes: number;
     avgSeconds: number;
     avgOutputTokens: number;
+    avgQuality?: number;
   }>;
 }
 
@@ -70,9 +74,13 @@ export function formatSummary(summary: SuiteSummary): string {
   const lines = [
     `Harness eval results: ${summary.passes}/${summary.runs} passed (${Math.round(summary.passRate * 100)}%)`,
   ];
+  const qualityNote =
+    summary.avgQuality !== undefined ? ` · avg quality ${summary.avgQuality}/10` : "";
+  lines[0] += qualityNote;
   for (const t of summary.byTask) {
+    const q = t.avgQuality !== undefined ? ` · quality ${t.avgQuality}` : "";
     lines.push(
-      `  ${t.taskId}: ${t.passes}/${t.runs} pass · avg ${t.avgSeconds}s · avg out ${t.avgOutputTokens} tok`,
+      `  ${t.taskId}: ${t.passes}/${t.runs} pass · avg ${t.avgSeconds}s · avg out ${t.avgOutputTokens} tok${q}`,
     );
   }
   return lines.join("\n");

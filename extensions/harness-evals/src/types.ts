@@ -46,6 +46,17 @@ export interface EvalResult {
   outputTokens: number;
   /** Final assistant text (the worker's report). */
   finalText?: string;
+  /** Blind LLM-judge rubric scores, when a judge was configured. */
+  quality?: EvalQuality;
   error?: string;
   at: number;
+}
+
+/** Judge rubric: three 0-10 axes plus a weighted overall. */
+export interface EvalQuality {
+  specAdherence: number;
+  codeQuality: number;
+  robustness: number;
+  overall: number;
+  notes?: string;
 }

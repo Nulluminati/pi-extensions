@@ -1,10 +1,1 @@
-{
-  "swift-falcon-53": {
-    "name": "swift-falcon-53",
-    "pid": 792106,
-    "cwd": "/home/natekift/Projects/pi-extensions",
-    "model": "synthetic/hf:zai-org/GLM-5.3-Flash",
-    "startedAt": 1788828755788,
-    "lastSeenAt": 1788828755788
-  }
-}
+{}
