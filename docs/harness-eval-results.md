@@ -82,3 +82,49 @@ Suite grew to **10 tasks** (added: `refactor-split`, `lru-cache-tdd`, `async-rac
 - Keep the suite extensions loaded for interactive work that uses their capabilities: missions on multi-session efforts, delegation on minute-scale subtasks, autoresearch on optimization problems.
 - Run cost-sensitive batch work (`pi -p`, evals, CI agents) with the suite off unless a task needs it.
 - In prompts, invite delegation only when subtasks are genuinely minute-scale; the invitation alone was enough to trigger 5x overhead here.
+
+---
+
+# Quality matrix: model x ways-of-working, blind-judged — 2026-09-04 (latest)
+
+Four configurations x 10 tasks, one sweep each (n=1 per cell — indicative, not conclusive), every run blind-judged by a fixed third-family model (`opencode-go/deepseek-v4-pro`; judges never see which config produced the code). New harness capability: `--judge <model>` / `judge=true` / `PI_EVAL_JUDGE_MODEL`.
+
+| Config | Coordinator | Suite | Workers |
+|---|---|---|---|
+| A | glm-5.3-flash | off | — |
+| B | glm-5.3-flash | on | — |
+| C | kimi-k3 | off | — |
+| D | kimi-k3 | on | glm-5.3-flash (delegate) |
+
+## Headline numbers (avg of 10 runs)
+
+| Config | Pass | Judge overall | Avg time | Avg in tok | Avg out tok |
+|---|---|---|---|---|---|
+| A glm/off | 10/10 | 8.9 (9 judged) | 87s | 6.9k | 2.1k |
+| B glm/on | 10/10 | 9.0 | 147s | 10.0k | 3.1k |
+| C kimi/off | 10/10 | 8.9 (9 judged) | 57s | 7.5k | 1.4k |
+| D kimi/on | 10/10 | 8.7 | 54s | 9.2k | 1.3k |
+
+Per-axis averages: specAdherence 9.4-9.8 everywhere; codeQuality 8.7-8.9; robustness 8.0-8.5 (lowest axis everywhere).
+
+## Findings
+
+1. **The blind judge caught what the binary checks cannot.** D `bug-chain`: worker code passed every check but scored 5/10 — the judge cited concrete evidence that `roundMoney` used an unexplained `Number.EPSILON` hack passing the visible test while 10.075 -> 10.07 and negative ties round toward zero: overfit to the visible test. B solved the same task with a documented nudge and scored 8 with a calibrated robustness critique. This is exactly the "passes checks, low quality" cell the pass/fail suite was blind to.
+2. **Correctness stayed saturated: 40/40 across all configs.** Binary pass/fail does not discriminate models or ways of working on this suite; the judge axis does.
+3. **Speed: kimi is 1.5-1.7x faster than glm** on identical configs (57s vs 87s off; 54s vs 147s on).
+4. **Suite-on cost is model-dependent:** it slowed glm +69% (147s vs 87s; bug-chain took 493s and 13.8k output tokens) but left kimi's average unchanged (54s vs 57s) — the stronger coordinator absorbs the extra tool surface without thrashing.
+5. **Delegated work needs verification teeth.** The one low-quality run (5/10) came through the delegation path: a worker cut a corner, checks passed, only the judge flagged it. Practical rule: worker-produced changes should get judge-level (or human) review, not just check-level review.
+6. **Judge coverage: 38/40 (95%).** Two runs produced no parseable verdict; a single retry on parse failure would close most of that gap.
+
+## Where the ways of working pay
+
+- **kimi solo (C)**: fastest path to passing, judge-quality equal to everything else. Best default for one-shot tasks.
+- **glm + suite (B)**: small quality edge (9.0 avg, the only 10/10 single score on multi-file-rename) at 1.7x glm-off's time. Worth it when robustness matters more than latency.
+- **kimi + suite + workers (D)**: fastest overall and correct, but produced the suite's first low-quality pass — use delegation for minute-scale subtasks and add judge/review on top of checks for worker output.
+- **glm solo (A)**: no reason to prefer it: slower than kimi, no quality edge.
+
+## Caveats
+
+- n=1 per cell: treat deltas under ~0.5 quality points as noise. D's 5.0 is a real signal because the judge cited specific counterexamples, not a hunch.
+- The judge is an LLM (deepseek-v4-pro); it may have family or style biases, mitigated partly by judging against files only, never against other solutions.
+- Two missing verdicts (A `test-first-bugfix`, C `implement-to-spec`) reduce coverage; retry-on-parse-failure is the fix.
