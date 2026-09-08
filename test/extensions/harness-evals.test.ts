@@ -69,6 +69,156 @@ assert.strictEqual(parseCount("1,234"), 1234, "thousands separators must parse")
 console.log("parse tests passed");
 `;
 
+// --- Advanced task solutions ---
+
+const REFACTOR_FILES: Array<[string, string]> = [
+  [
+    "math-basic.js",
+    `function clamp(n, lo, hi) {\n  return Math.min(hi, Math.max(lo, n));\n}\n\nfunction lerp(a, b, t) {\n  return a + (b - a) * t;\n}\n\nfunction roundTo(n, places) {\n  const f = 10 ** places;\n  return Math.round(n * f) / f;\n}\n\nmodule.exports = { clamp, lerp, roundTo };\n`,
+  ],
+  [
+    "stats.js",
+    `function sum(nums) {\n  return nums.reduce((a, b) => a + b, 0);\n}\n\nfunction mean(nums) {\n  return nums.length === 0 ? 0 : sum(nums) / nums.length;\n}\n\nfunction stddev(nums) {\n  if (nums.length === 0) return 0;\n  const m = mean(nums);\n  return Math.sqrt(mean(nums.map((x) => (x - m) ** 2)));\n}\n\nmodule.exports = { sum, mean, stddev };\n`,
+  ],
+  [
+    "util.js",
+    `module.exports = {\n  ...require("./math-basic.js"),\n  ...require("./stats.js"),\n};\n`,
+  ],
+];
+
+const LRU_SOLUTION = `class LRUCache {
+  constructor(capacity) {
+    if (!Number.isInteger(capacity) || capacity < 1) {
+      throw new RangeError("capacity must be an integer >= 1");
+    }
+    this.capacity = capacity;
+    this.map = new Map();
+  }
+
+  get(key) {
+    if (!this.map.has(key)) return null;
+    const value = this.map.get(key);
+    this.map.delete(key);
+    this.map.set(key, value);
+    return value;
+  }
+
+  put(key, value) {
+    if (this.map.has(key)) this.map.delete(key);
+    this.map.set(key, value);
+    if (this.map.size > this.capacity) {
+      this.map.delete(this.map.keys().next().value);
+    }
+  }
+}
+
+module.exports = { LRUCache };
+`;
+
+const LRU_CANONICAL_TEST = `const assert = require("node:assert");
+const { LRUCache } = require("./lru.js");
+
+assert.throws(() => new LRUCache(0), RangeError);
+
+const c = new LRUCache(2);
+c.put("a", 1);
+c.put("b", 2);
+c.put("a", 10); // update refreshes recency
+c.put("c", 3); // must evict "b"
+assert.strictEqual(c.get("a"), 10);
+assert.strictEqual(c.get("b"), null);
+console.log("lru tests passed");
+`;
+
+const ASYNC_FIX = `const { fetchScore } = require("./api.js");
+
+async function main() {
+  const ids = [1, 2, 3, 4];
+  const total = (await Promise.all(ids.map((id) => fetchScore(id)))).reduce((a, b) => a + b, 0);
+  console.log("DONE", total);
+}
+
+main();
+`;
+
+const BUG_CHAIN_FIXES: Array<[string, string]> = [
+  [
+    "money.js",
+    `function roundMoney(x) {
+  return Math.round(x * 100) / 100;
+}
+
+module.exports = { roundMoney };
+`,
+  ],
+  [
+    "cart.js",
+    `const { roundMoney } = require("./money.js");
+
+function parseDiscount(d) {
+  if (typeof d === "string") {
+    return parseFloat(d) / 100;
+  }
+  return d / 100;
+}
+
+function checkout(price, discount) {
+  const frac = parseDiscount(discount);
+  return roundMoney(price * (1 - frac));
+}
+
+module.exports = { parseDiscount, checkout };
+`,
+  ],
+];
+
+const PARALLEL_FILES: Array<[string, string]> = [
+  [
+    "roman.js",
+    `function toRoman(n) {
+  if (!Number.isInteger(n) || n < 1 || n > 3999) throw new RangeError("1..3999");
+  const table = [[1000, "M"], [900, "CM"], [500, "D"], [400, "CD"], [100, "C"], [90, "XC"], [50, "L"], [40, "XL"], [10, "X"], [9, "IX"], [5, "V"], [4, "IV"], [1, "I"]];
+  let out = "";
+  for (const [v, s] of table) {
+    while (n >= v) {
+      out += s;
+      n -= v;
+    }
+  }
+  return out;
+}
+
+module.exports = { toRoman };
+`,
+  ],
+  [
+    "tempconv.js",
+    `function cToF(c) {
+  return Number((c * 9 / 5 + 32).toFixed(1));
+}
+
+function fToC(f) {
+  return Number(((f - 32) * 5 / 9).toFixed(1));
+}
+
+module.exports = { cToF, fToC };
+`,
+  ],
+  [
+    "words.js",
+    `function initials(name) {
+  const words = name.trim().split(/\\s+/).filter(Boolean);
+  if (words.length === 0) return "";
+  const first = words[0] ?? "";
+  const last = words[words.length - 1] ?? "";
+  return (first[0] ?? "").toUpperCase() + (last[0] ?? "").toUpperCase();
+}
+
+module.exports = { initials };
+`,
+  ],
+];
+
 // --- Suite ---
 
 describe("harness-evals-tasks", () => {
@@ -152,6 +302,78 @@ describe("harness-evals-tasks", () => {
         writeFile(join(dir, "slug.js"), SLUGIFY_SOLUTION),
       ),
     ).toBe(true);
+  });
+
+  it("refactor-split: check rejects fixtures and accepts the full split", async () => {
+    expect(await checkFails("refactor-split")).toBe(false);
+    // Re-export added but logic NOT moved out must still fail.
+    const reexportOnly = await checkPassesWith("refactor-split", (dir) =>
+      writeFile(join(dir, "util.js"), `${REFACTOR_FILES[2][1]}\n${"function clamp() {}"}`),
+    );
+    expect(reexportOnly).toBe(false);
+    const fullSplit = await checkPassesWith("refactor-split", async (dir) => {
+      for (const [path, content] of REFACTOR_FILES) {
+        await writeFile(join(dir, path), content);
+      }
+    });
+    expect(fullSplit).toBe(true);
+  });
+
+  it("lru-cache-tdd: grader rejects stubs and broken eviction; tests must catch the broken impl", async () => {
+    expect(await checkFails("lru-cache-tdd")).toBe(false);
+    // Correct impl + tests that would NOT catch FIFO eviction must fail the swap.
+    const weakTests = await checkPassesWith("lru-cache-tdd", async (dir) => {
+      await writeFile(join(dir, "lru.js"), LRU_SOLUTION);
+      await writeFile(
+        join(dir, "lru.test.js"),
+        `const assert = require("node:assert");\nconst { LRUCache } = require("./lru.js");\nconst c = new LRUCache(2);\nc.put("a", 1);\nc.put("b", 2);\nassert.strictEqual(c.get("a"), 1);\nconsole.log("weak");\n`,
+      );
+    });
+    expect(weakTests).toBe(false);
+    const strong = await checkPassesWith("lru-cache-tdd", async (dir) => {
+      await writeFile(join(dir, "lru.js"), LRU_SOLUTION);
+      await writeFile(join(dir, "lru.test.js"), LRU_CANONICAL_TEST);
+    });
+    expect(strong).toBe(true);
+  });
+
+  it("async-race: check rejects the buggy fixture and accepts the await fix", async () => {
+    expect(await checkFails("async-race")).toBe(false);
+    expect(
+      await checkPassesWith("async-race", (dir) => writeFile(join(dir, "aggregate.js"), ASYNC_FIX)),
+    ).toBe(true);
+  });
+
+  it("bug-chain: check rejects partial fixes and accepts both fixes", async () => {
+    expect(await checkFails("bug-chain")).toBe(false);
+    // Fix only parseDiscount (bug 1): rounding case still fails.
+    const partial = await checkPassesWith("bug-chain", (dir) =>
+      writeFile(join(dir, "cart.js"), BUG_CHAIN_FIXES[1][1]),
+    );
+    expect(partial).toBe(false);
+    const both = await checkPassesWith("bug-chain", async (dir) => {
+      for (const [path, content] of BUG_CHAIN_FIXES) {
+        await writeFile(join(dir, path), content);
+      }
+    });
+    expect(both).toBe(true);
+  });
+
+  it("parallel-modules: check rejects partial implementation and accepts all three modules", async () => {
+    expect(await checkFails("parallel-modules")).toBe(false);
+    // Two of three modules implemented must still fail.
+    const partial = await checkPassesWith("parallel-modules", async (dir) => {
+      for (const [path, content] of PARALLEL_FILES.slice(0, 2)) {
+        await writeFile(join(dir, path), content);
+      }
+    });
+    expect(partial).toBe(false);
+    const full = await checkPassesWith("parallel-modules", async (dir) => {
+      for (const [path, content] of PARALLEL_FILES) {
+        await writeFile(join(dir, path), content);
+      }
+    });
+    expect(full).toBe(true);
   });
 
   it("test-first-bugfix: check demands both a fix and a catching regression test", async () => {
