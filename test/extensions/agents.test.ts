@@ -197,6 +197,68 @@ ${SUCCESS_WORKER}`,
     expect(status.content[0].text).toContain("JWT tokens");
   });
 
+  it("saveWorker ignores a stale running snapshot for a terminal record", async () => {
+    await saveWorker(cwd, {
+      id: "w-done",
+      name: "done",
+      task: "t",
+      model: "m",
+      pid: 999_999_999,
+      cwd,
+      status: "completed",
+      startedAt: Date.now(),
+      endedAt: Date.now(),
+      outputText: "the report",
+    });
+
+    // A late-arriving initial snapshot (parent bookkeeping) must not clobber
+    // the terminal record the runner already wrote.
+    await saveWorker(cwd, {
+      id: "w-done",
+      name: "done",
+      task: "t",
+      model: "m",
+      pid: 999_999_999,
+      cwd,
+      status: "running",
+      startedAt: Date.now(),
+    });
+
+    const record = await loadWorker(cwd, "w-done");
+    expect(record?.status).toBe("completed");
+    expect(record?.outputText).toBe("the report");
+  });
+
+  it("concurrent initial-save and completion-save keep the terminal record", async () => {
+    const running = saveWorker(cwd, {
+      id: "w-race",
+      name: "race",
+      task: "t",
+      model: "m",
+      pid: 999_999_999,
+      cwd,
+      status: "running",
+      startedAt: Date.now(),
+    });
+    await saveWorker(cwd, {
+      id: "w-race",
+      name: "race",
+      task: "t",
+      model: "m",
+      pid: 999_999_999,
+      cwd,
+      status: "completed",
+      startedAt: Date.now(),
+      endedAt: Date.now(),
+      outputText: "final report",
+    });
+    await running;
+
+    const record = await loadWorker(cwd, "w-race");
+    expect(record?.status).toBe("completed");
+    expect(record?.outputText).toBe("final report");
+  });
+
   it("session_start reconciles orphaned running workers", async () => {
     const id = generateWorkerId();
     await loadWorkers(cwd);

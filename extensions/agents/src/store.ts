@@ -66,14 +66,26 @@ export async function loadWorkers(cwd: string): Promise<Record<string, WorkerRec
   return workers;
 }
 
-export async function saveWorker(cwd: string, worker: WorkerRecord): Promise<void> {
-  const workers = await loadWorkers(cwd);
-  // The child may finish before the parent's initial running-snapshot lands;
-  // never overwrite a terminal record with a stale running one.
-  const existing = workers[worker.id];
-  if (existing && existing.status !== "running" && worker.status === "running") return;
-  workers[worker.id] = worker;
-  await writeAtomic(registryPath(cwd), { workers });
+// Registry writes are serialized per cwd: the initial running-snapshot save
+// and the terminal save race when fast children exit mid-bookkeeping, and
+// last-writer-wins would let the stale snapshot win.
+const saveQueues = new Map<string, Promise<void>>();
+
+export function saveWorker(cwd: string, worker: WorkerRecord): Promise<void> {
+  const task = (saveQueues.get(cwd) ?? Promise.resolve()).then(async () => {
+    const workers = await loadWorkers(cwd);
+    // The child may finish before the parent's initial running-snapshot lands;
+    // never overwrite a terminal record with a stale running one.
+    const existing = workers[worker.id];
+    if (existing && existing.status !== "running" && worker.status === "running") return;
+    workers[worker.id] = worker;
+    await writeAtomic(registryPath(cwd), { workers });
+  });
+  saveQueues.set(
+    cwd,
+    task.catch(() => {}),
+  );
+  return task;
 }
 
 export async function loadWorker(cwd: string, id: string): Promise<WorkerRecord | undefined> {
