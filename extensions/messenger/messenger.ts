@@ -15,6 +15,7 @@
 import { type FSWatcher, mkdirSync, watch } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "pi";
+import { resolveSessionIdentity } from "../../lib/session-identity.ts";
 import { checkToolCall } from "./src/enforce.ts";
 import {
   formatBlockReason,
@@ -51,36 +52,6 @@ export default async function messengerExtension(pi: ExtensionAPI) {
   let agentName = "";
   let delivering = false;
   let inboxWatcher: FSWatcher | undefined;
-
-  // --- Identity ---
-
-  /**
-   * Resolve this session's agent identity. Order: PI_MESSENGER_NAME (parents
-   * spawning workers set it), then the identity persisted in the session —
-   * so `pi -c` resumes under the same name without any env var — then a
-   * freshly generated name persisted for future resumes.
-   */
-  async function resolveSessionIdentity(pi: ExtensionAPI, ctx: ExtensionContext): Promise<string> {
-    const fromEnv = process.env.PI_MESSENGER_NAME?.trim();
-    if (fromEnv) return fromEnv;
-    const branch = ctx.sessionManager.getBranch() as Array<{
-      type?: string;
-      customType?: string;
-      data?: { name?: string };
-    }>;
-    for (const entry of [...branch].reverse()) {
-      if (
-        entry.type === "custom" &&
-        entry.customType === IDENTITY_CUSTOM_TYPE &&
-        entry.data?.name
-      ) {
-        return entry.data.name;
-      }
-    }
-    const name = resolveAgentName();
-    pi.appendEntry(IDENTITY_CUSTOM_TYPE, { name });
-    return name;
-  }
 
   // --- Publishing ---
 
@@ -310,7 +281,12 @@ export default async function messengerExtension(pi: ExtensionAPI) {
   // --- Lifecycle ---
 
   pi.on("session_start", async (_event, ctx) => {
-    agentName = await resolveSessionIdentity(pi, ctx);
+    agentName = await resolveSessionIdentity(pi, ctx, {
+      // "messenger-identity" keeps entries persisted by earlier versions.
+      customType: IDENTITY_CUSTOM_TYPE,
+      envVar: "PI_MESSENGER_NAME",
+      generate: resolveAgentName,
+    });
     const model = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined;
     await heartbeat(ctx.cwd, agentName, {
       pid: process.pid,
