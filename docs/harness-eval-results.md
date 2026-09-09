@@ -1,3 +1,8 @@
+> **Retired 2026-09-04.** The homegrown suite described below saturated (every
+> configuration passed everything) and was replaced by Terminal-Bench 2.0 via
+> Harbor — see [`eval/README.md`](../eval/README.md). Kept as the decision
+> record for the ablation methodology and the blind-judge design.
+
 # Harness Eval Results — 2026-09-04
 
 First effectiveness run of the `harness-evals` suite, end to end through the suite's own delegation stack.

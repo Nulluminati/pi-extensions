@@ -1,0 +1,15 @@
+# Curated Terminal-Bench 2.0 subset (12 tasks).
+# Selection criteria: spans languages/domains (js, git, sql, crypto, async),
+# moderate image sizes (fast container pulls), no GUI/multimedia monsters.
+break-filter-js-from-html
+cancel-async-tasks
+chess-best-move
+circuit-fibsqrt
+configure-git-webserver
+count-dataset-tokens
+filter-js-from-html
+fix-git
+git-multibranch
+openssl-selfsigned-cert
+regex-log
+sqlite-db-truncate

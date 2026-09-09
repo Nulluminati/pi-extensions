@@ -6,5 +6,12 @@
     "model": "synthetic/hf:zai-org/GLM-5.3-Flash",
     "startedAt": 1788974363089,
     "lastSeenAt": 1788974588036
+  },
+  "iron-raven-6f": {
+    "name": "iron-raven-6f",
+    "pid": 2499542,
+    "cwd": "/home/natekift/Projects/pi-extensions",
+    "startedAt": 1788983551176,
+    "lastSeenAt": 1788983563949
   }
 }

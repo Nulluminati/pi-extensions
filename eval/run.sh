@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Run Terminal-Bench 2.0 tasks with the pi coding agent.
+#
+# Usage:
+#   eval/run.sh [--model provider/model] [--tasks id1,id2,...] [--trials N] [--jobs N] [--oracle]
+#
+# Defaults: 12-task curated subset, openrouter/~z-ai/glm-flash-latest, 1 trial,
+# 3 parallel jobs. Requires eval/setup.sh to have been run and
+# OPENROUTER_API_KEY (or the provider key for your chosen model) in the env.
+
+set -euo pipefail
+cd "$(dirname "$0")"
+
+MODEL="openrouter/~z-ai/glm-flash-latest"
+TASKS=""
+TRIALS=1
+JOBS=3
+ORACLE=0
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --model) MODEL="$2"; shift 2 ;;
+    --tasks) TASKS="$2"; shift 2 ;;
+    --trials) TRIALS="$2"; shift 2 ;;
+    --jobs) JOBS="$2"; shift 2 ;;
+    --oracle) ORACLE=1; shift ;;
+    *) echo "Unknown option: $1"; exit 1 ;;
+  esac
+done
+
+export PATH="$HOME/.local/bin:$PATH"
+command -v harbor >/dev/null || { echo "ERROR: run eval/setup.sh first"; exit 1; }
+[ -d pi-terminal-bench ] || { echo "ERROR: run eval/setup.sh first"; exit 1; }
+
+if [ "$ORACLE" -eq 0 ] && [ -z "${OPENROUTER_API_KEY:-}" ] && [ -z "${ANTHROPIC_API_KEY:-}" ] && [ -z "${OPENAI_API_KEY:-}" ]; then
+  echo "ERROR: no provider API key in env (OPENROUTER_API_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY)"
+  exit 1
+fi
+
+TASK_ARGS=()
+if [ -n "$TASKS" ]; then
+  IFS=',' read -ra IDS <<< "$TASKS"
+  TASK_ARGS=(--task-ids "${IDS[@]}")
+fi
+
+AGENT_ARGS=()
+if [ "$ORACLE" -eq 1 ]; then
+  echo "==> Oracle smoke run (no LLM cost)"
+  AGENT_ARGS=(-a oracle)
+else
+  echo "==> Agent: pi ($MODEL)"
+  AGENT_ARGS=(--agent-import-path pi_terminal_bench:PiAgent -m "$MODEL")
+fi
+
+STAMP="$(date +%Y%m%d-%H%M%S)"
+JOBS_DIR="results/${STAMP}"
+mkdir -p "$JOBS_DIR"
+
+cd pi-terminal-bench
+echo "==> harbor run -> ../$JOBS_DIR"
+uv run harbor run \
+  -d terminal-bench@2.0 \
+  "${AGENT_ARGS[@]}" \
+  "${TASK_ARGS[@]+"${TASK_ARGS[@]}"}" \
+  -k "$TRIALS" \
+  -n "$JOBS" \
+  --jobs-dir "../$JOBS_DIR"
+
+echo
+echo "==> Done. Results in eval/$JOBS_DIR"
+echo "    Summary:  uv run harbor show-trial --job-dir ../$JOBS_DIR/<trial>"
+echo "    Compare:  see eval/README.md for the results parser."

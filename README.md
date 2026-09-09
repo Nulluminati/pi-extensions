@@ -44,9 +44,14 @@ pi -e git:github.com/Nulluminati/pi-extensions/extensions/goal/goal.ts
 | [`messenger/`](extensions/messenger/README.md) | File-based coordination between Pi sessions sharing a project: presence, mailboxes with automatic delivery into the conversation, and path reservations that block other sessions' edits. |
 | [`agents/`](extensions/agents/README.md) | Multi-agent workflows: delegate bounded tasks to cheap-model worker Pi sessions in isolated git worktrees; collect patches and reports, cancel or list workers, durable registry. |
 | [`autoresearch/`](extensions/autoresearch/README.md) | Autonomous experiment loop: measure a metric, keep improvements (commit), discard regressions (revert), repeat with correctness gates and MAD-based confidence scoring. |
-| [`harness-evals/`](extensions/harness-evals/README.md) | Harness evaluation suite: reproducible coding tasks run noninteractively and graded by adversarial shell checks, so harness and model changes are measured, not vibes. Includes `scripts/eval-run.ts` for noninteractive runs. |
 
 Per-extension configuration (flags, env vars, config files) lives in each extension's own `README.md` under the **Configuration** section.
+
+## Evaluation
+
+Harness evaluation runs on the real benchmark: Terminal-Bench 2.0 via Harbor
+with the official pi agent adapter. See [`eval/README.md`](eval/README.md) —
+setup, curated 12-task subset, cost notes, and results layout.
 
 ## Development
 
