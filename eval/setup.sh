@@ -10,20 +10,14 @@
 # Idempotent: safe to re-run. Requires: uv, docker (running), git.
 
 set -euo pipefail
-cd "$(dirname "$0")"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
 
 ADAPTER_DIR="pi-terminal-bench"
 
 echo "==> Checking prerequisites"
 command -v uv >/dev/null || { echo "ERROR: uv is required (https://docs.astral.sh/uv/)"; exit 1; }
 docker info >/dev/null 2>&1 || { echo "ERROR: docker must be installed and running"; exit 1; }
-
-echo "==> Installing Harbor (uv tool)"
-uv tool install harbor --force
-
-# Make harbor tools visible even if ~/.local/bin is not on PATH in this shell.
-export PATH="$HOME/.local/bin:$PATH"
-command -v harbor >/dev/null || { echo "ERROR: harbor not found on PATH after install"; exit 1; }
 
 echo "==> Fetching pi-terminal-bench adapter"
 if [ ! -d "$ADAPTER_DIR" ]; then
@@ -32,53 +26,33 @@ else
   echo "    already cloned"
 fi
 
+# Adapter fix: symlink pi into /usr/local/bin so the trial shell finds it
+# (npm-installed pi lives under nvm's node bin dir, off PATH at run time).
+TEMPLATE="$ADAPTER_DIR/src/pi_terminal_bench/install-pi.sh.j2"
+if ! grep -q '/usr/local/bin/pi' "$TEMPLATE"; then
+  sed -i 's|# Verify installation|ln -sf "$(npm prefix -g)/bin/pi" /usr/local/bin/pi\n\n# Verify installation|' "$TEMPLATE"
+  echo "    adapter template patched (pi symlink)"
+fi
+
 echo "==> Installing adapter (virtualenv)"
 cd "$ADAPTER_DIR"
+# Harbor is pinned to the 0.1.x line: the adapter targets its API
+# (ExecInput etc.); newer 0.2x CLI versions removed those symbols.
 if [ ! -d .venv ]; then
-  uv venv
+  uv venv --python 3.13
 fi
-# uv run resolves the project (install -e .[dev] equivalent) on each call.
-uv sync --extra dev >/dev/null 2>&1 || uv sync >/dev/null
+uv pip install -e ".[dev]" "harbor==0.1.45" >/dev/null
+VENV_PY="$PWD/.venv/bin/python"
 
-echo "==> Patching Harbor upload_dir bug (idempotent)"
-uv run python - <<'PYEOF'
-import harbor.environments.docker.docker as m
-
-p = m.__file__
-t = open(p).read()
-old = '''    async def upload_dir(self, source_dir: Path | str, target_dir: str):
-        await self._run_docker_compose_command(
-            [
-                "cp",
-                str(source_dir),
-                f"main:{target_dir}",
-            ],
-            check=True,
-        )'''
-new = '''    async def upload_dir(self, source_dir: Path | str, target_dir: str):
-        # Append /. to source to copy contents, not the directory itself
-        source = str(source_dir).rstrip('/') + '/.'
-        await self._run_docker_compose_command(
-            [
-                "cp",
-                str(source),
-                f"main:{target_dir}",
-            ],
-            check=True,
-        )'''
-if "rstrip('/') + '/.'" in t:
-    print("    already patched")
-elif old in t:
-    open(p, "w").write(t.replace(old, new))
-    print("    patch applied")
-else:
-    print("    WARNING: harbor source changed; apply the upload_dir fix manually")
-    print("    (see https://github.com/badlogic/pi-terminal-bench#required-apply-harbor-fix)")
-PYEOF
+echo "==> Checking Harbor upload_dir (verifier corruption bug)"
+"$VENV_PY" "$SCRIPT_DIR/patch_harbor.py"
+RET=$?
+if [ "$RET" -ne 0 ]; then echo "    setup incomplete (see above)"; exit "$RET"; fi
 
 echo "==> Verifying"
-uv run python -c "from harbor.environments.docker.docker import DockerEnvironment; import inspect; print('    harbor upload_dir:', 'PATCHED' if 'rstrip' in inspect.getsource(DockerEnvironment.upload_dir) else 'NOT PATCHED')"
-uv run python -c "import pi_terminal_bench; print('    adapter import: OK')"
+"$VENV_PY" -c "from harbor.environments.docker.docker import DockerEnvironment; import inspect; src = inspect.getsource(DockerEnvironment.upload_dir); print('    harbor upload_dir:', 'OK (contents-copy)' if ('source_dir}/.' in src or 'rstrip' in src) else 'NEEDS PATCH')"
+"$VENV_PY" -c "from pi_terminal_bench.pi_agent import PiAgent; print('    adapter import: OK')"
+"$PWD/.venv/bin/harbor" --version | sed 's/^/    harbor /' 
 
 echo
 echo "Setup complete. Next:"

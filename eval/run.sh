@@ -28,9 +28,8 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-export PATH="$HOME/.local/bin:$PATH"
-command -v harbor >/dev/null || { echo "ERROR: run eval/setup.sh first"; exit 1; }
-[ -d pi-terminal-bench ] || { echo "ERROR: run eval/setup.sh first"; exit 1; }
+HARBOR="$PWD/pi-terminal-bench/.venv/bin/harbor"
+[ -x "$HARBOR" ] || { echo "ERROR: run eval/setup.sh first"; exit 1; }
 
 if [ "$ORACLE" -eq 0 ] && [ -z "${OPENROUTER_API_KEY:-}" ] && [ -z "${ANTHROPIC_API_KEY:-}" ] && [ -z "${OPENAI_API_KEY:-}" ]; then
   echo "ERROR: no provider API key in env (OPENROUTER_API_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY)"
@@ -40,7 +39,7 @@ fi
 TASK_ARGS=()
 if [ -n "$TASKS" ]; then
   IFS=',' read -ra IDS <<< "$TASKS"
-  TASK_ARGS=(--task-ids "${IDS[@]}")
+  for id in "${IDS[@]}"; do TASK_ARGS+=(-t "$id"); done
 fi
 
 AGENT_ARGS=()
@@ -58,7 +57,7 @@ mkdir -p "$JOBS_DIR"
 
 cd pi-terminal-bench
 echo "==> harbor run -> ../$JOBS_DIR"
-uv run harbor run \
+"$HARBOR" run \
   -d terminal-bench@2.0 \
   "${AGENT_ARGS[@]}" \
   "${TASK_ARGS[@]+"${TASK_ARGS[@]}"}" \
