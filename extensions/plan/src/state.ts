@@ -50,7 +50,12 @@ export function reconstructState(entries: unknown[]): PlanState | undefined {
   if (typeof state !== "object" || state === null) return undefined;
 
   const candidate = state as PlanState;
-  if (candidate.mode !== "off" && candidate.mode !== "plan" && candidate.mode !== "executing") {
+  if (
+    candidate.mode !== "off" &&
+    candidate.mode !== "plan" &&
+    candidate.mode !== "executing" &&
+    candidate.mode !== "readonly"
+  ) {
     return undefined;
   }
   if (candidate.plan !== null && !isValidPlan(candidate.plan)) return undefined;
@@ -78,4 +83,14 @@ export function isPlanComplete(plan: Plan, items: TodoItem[]): boolean {
 /** Completed step count for status display. */
 export function completedStepCount(plan: Plan, items: TodoItem[]): number {
   return items.slice(0, plan.steps.length).filter((item) => item.completed).length;
+}
+
+/**
+ * True when the session owning these entries is currently in plan mode.
+ * Used by the agents extension: a delegate call made while planning must
+ * spawn read-only workers, or the worker would bypass plan mode's
+ * restrictions on the parent.
+ */
+export function isPlanModeActive(entries: unknown[]): boolean {
+  return reconstructState(entries)?.mode === "plan";
 }

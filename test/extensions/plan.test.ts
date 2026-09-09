@@ -335,9 +335,50 @@ describe("plan-extension", () => {
       expect(result2.details).toEqual({ error: "invalid_plan" });
     });
 
+    it("worker-readonly mode enforces the gate without planning machinery", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      mockPi.getFlag = vi.fn((name: string) => name === "worker-readonly");
+      mockPi.getActiveTools = vi.fn(() => ["read", "bash", "edit", "write"]);
+      await planExtension(mockPi);
+
+      const sessionStart = getEventHandler(mockPi, "session_start");
+      await sessionStart({ type: "session_start", reason: "startup" }, mockCtx);
+
+      // edit/write removed from the active tool set.
+      expect(mockPi.setActiveTools).toHaveBeenCalledWith(["read", "bash"]);
+      // plan_submit is not registered in headless workers.
+      const toolNames = mockPi.registerTool.mock.calls.map((call) => call[0].name);
+      expect(toolNames).not.toContain("plan_submit");
+
+      // The gate blocks mutations with the worker reason.
+      const gate = getEventHandler(mockPi, "tool_call");
+      const editBlock = await gate(
+        { type: "tool_call", toolName: "edit", toolCallId: "t", input: {} },
+        mockCtx,
+      );
+      expect(editBlock).toMatchObject({ block: true });
+      expect((editBlock as { reason: string }).reason).toContain("parent session is planning");
+
+      const bashBlock = await gate(
+        { type: "tool_call", toolName: "bash", toolCallId: "t", input: { command: "rm -rf /" } },
+        mockCtx,
+      );
+      expect(bashBlock).toMatchObject({ block: true });
+      const bashAllow = await gate(
+        { type: "tool_call", toolName: "bash", toolCallId: "t", input: { command: "cat file" } },
+        mockCtx,
+      );
+      expect(bashAllow).toBeUndefined();
+
+      // No plan-context injection in headless workers.
+      const beforeAgent = getEventHandler(mockPi, "before_agent_start");
+      await expect(beforeAgent({ type: "before_agent_start" }, mockCtx)).resolves.toBeUndefined();
+    });
+
     it("saves the plan without approval when there is no UI", async () => {
       const mockPi = createMockPi();
-      mockPi.getFlag = vi.fn(() => true);
+      mockPi.getFlag = vi.fn((name: string) => name === "plan");
       const mockCtx = createMockCommandContext();
       mockCtx.hasUI = false;
       await planExtension(mockPi);
@@ -861,7 +902,7 @@ describe("plan-extension", () => {
 
     it("starts in plan mode when the --plan flag is set", async () => {
       const mockPi = createMockPi();
-      mockPi.getFlag = vi.fn(() => true);
+      mockPi.getFlag = vi.fn((name: string) => name === "plan");
       const mockCtx = createMockCommandContext();
       await planExtension(mockPi);
 

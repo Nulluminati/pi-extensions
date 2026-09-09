@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { ExtensionAPI, ExtensionContext } from "pi";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import agentsExtension from "../../extensions/agents/agents.ts";
 import { extractAssistantText } from "../../extensions/agents/src/runner.ts";
 import {
@@ -116,6 +116,37 @@ describe("agents-extension", () => {
     const names = mockPi.registerTool.mock.calls.map((c) => c[0].name);
     expect(names).toContain("delegate");
     expect(names).toContain("workers");
+  });
+
+  it("delegate from a planning session forces read-only workers", async () => {
+    const argsFile = join(fixtureDir, "readonly-args.txt");
+    const fixture = await writeFixture(
+      fixtureDir,
+      "readonly-worker.sh",
+      `#!/bin/sh
+printf '%s\\n' "$@" > '${argsFile}'
+${SUCCESS_WORKER}`,
+    );
+    setEnv("PI_WORKER_COMMAND", fixture);
+    setEnv("PI_WORKER_EXTENSIONS", undefined);
+    // Parent is planning: a plan-state entry with mode "plan".
+    vi.mocked(mockCtx.sessionManager.getBranch).mockReturnValue([
+      {
+        type: "custom",
+        customType: "plan-state",
+        data: { state: { mode: "plan", plan: null, toolsBeforePlan: undefined } },
+      },
+    ]);
+
+    await executeTool("delegate", { task: "research", isolate: false, wait: true });
+
+    const args = (await readFile(argsFile, "utf8")).split("\n");
+    expect(args).toContain("--worker-readonly");
+    expect(args).not.toContain("--gondolin");
+    const planPathIndex = args.indexOf("-e", args.indexOf("-e") + 1);
+    const planPaths = args.filter((arg) => arg.includes("plan.ts"));
+    expect(planPaths.length).toBeGreaterThanOrEqual(1);
+    void planPathIndex;
   });
 
   it("delegate spawns workers with the resolved extension paths and --gondolin", async () => {

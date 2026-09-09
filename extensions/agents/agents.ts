@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext, ExtensionUIContext } from "pi";
 import { resolveWorkerExtensions } from "../../lib/worker-extensions.ts";
 import { resolveWorkerModelSpec } from "../../lib/worker-model.ts";
+import { isPlanModeActive } from "../plan/src/state.ts";
 import {
   AGENTS_STATE_EVENT,
   formatWorkerList,
@@ -161,8 +162,21 @@ export default async function agentsExtension(pi: ExtensionAPI) {
       const resolvedExtensions = resolveWorkerExtensions(requestedExtensions, {
         extensionsRoot: fileURLToPath(new URL("../../extensions/", import.meta.url)),
       });
-      const extensionPaths = resolvedExtensions.map((extension) => extension.path);
-      const sandbox = resolvedExtensions.some((extension) => extension.name === "gondolin");
+      // Plan-mode safety: a delegate call made while the parent is planning
+      // would bypass plan mode's read-only guarantees through the worker.
+      // Force the worker read-only (plan extension gate, no gondolin — its
+      // workspace write-through is a mutation channel).
+      const parentPlanning = isPlanModeActive((ctx.sessionManager.getBranch() ?? []) as unknown[]);
+      const effectiveExtensions = parentPlanning
+        ? resolvedExtensions.filter((extension) => extension.name !== "gondolin")
+        : resolvedExtensions;
+      const extensionPaths = effectiveExtensions.map((extension) => extension.path);
+      if (parentPlanning) {
+        extensionPaths.push(fileURLToPath(new URL("../plan/plan.ts", import.meta.url)));
+      }
+      const sandbox =
+        !parentPlanning && effectiveExtensions.some((extension) => extension.name === "gondolin");
+      const readOnly = parentPlanning;
 
       const runningWorker = startWorker({
         cwd: ctx.cwd,
@@ -173,6 +187,7 @@ export default async function agentsExtension(pi: ExtensionAPI) {
         workerId,
         extensionPaths,
         sandbox,
+        readOnly,
         ...(worktree !== undefined ? { worktree } : {}),
         events: makeEvents(ctx),
         onRecord: (worker) => saveWorker(ctx.cwd, worker),

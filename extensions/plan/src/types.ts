@@ -1,6 +1,6 @@
 /** Shared types for the plan extension. */
 
-export type PlanMode = "off" | "plan" | "executing";
+export type PlanMode = "off" | "plan" | "executing" | "readonly";
 
 export interface Plan {
   title: string;

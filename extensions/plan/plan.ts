@@ -40,10 +40,15 @@ import type { Plan, PlanState } from "./src/types.ts";
 
 export default async function planExtension(pi: ExtensionAPI) {
   let state: PlanState = { mode: "off", plan: null, toolsBeforePlan: undefined };
+  // Headless read-only mode for delegated workers: enforce the tool gate
+  // without the interactive planning machinery (no overlay, no plan_submit,
+  // no context injection, no persistence — workers run with --no-session).
+  const workerReadonly = pi.getFlag("worker-readonly") === true;
 
   // --- State persistence ---
 
   function persistState() {
+    if (workerReadonly) return; // workers run with --no-session; nothing to persist
     pi.appendEntry(ENTRY_TYPE, { state });
   }
 
@@ -115,10 +120,18 @@ export default async function planExtension(pi: ExtensionAPI) {
   // --- Tool gate: block mutations while planning ---
 
   pi.on("tool_call", async (event, _ctx) => {
-    if (state.mode !== "plan") return;
+    const enforcing = state.mode === "plan" || state.mode === "readonly";
+    if (!enforcing) return;
     if (MUTATING_TOOLS.has(event.toolName)) {
       // No terminate: the block reason is reported to the model and the turn
       // continues, so the agent keeps working read-only instead of stopping.
+      if (state.mode === "readonly") {
+        return {
+          block: true,
+          reason:
+            "This worker is read-only (the parent session is planning): edit and write are blocked. Research and report instead.",
+        };
+      }
       return {
         block: true,
         reason:
@@ -130,7 +143,10 @@ export default async function planExtension(pi: ExtensionAPI) {
       if (!isSafeBashCommand(command)) {
         return {
           block: true,
-          reason: `Plan mode: bash command blocked (not on the read-only allowlist). Call plan_submit to propose changes or exit plan mode with /plan.\nCommand: ${command}`,
+          reason:
+            state.mode === "readonly"
+              ? `This worker is read-only (the parent session is planning): bash is limited to read-only commands.\nCommand: ${command}`
+              : `Plan mode: bash command blocked (not on the read-only allowlist). Call plan_submit to propose changes or exit plan mode with /plan.\nCommand: ${command}`,
         };
       }
     }
@@ -140,6 +156,7 @@ export default async function planExtension(pi: ExtensionAPI) {
   // --- Context: inject per-turn mode instructions, strip stale copies ---
 
   pi.on("before_agent_start", async (_event, _ctx) => {
+    if (workerReadonly) return undefined;
     if (state.mode === "plan") {
       return {
         message: {
@@ -197,119 +214,121 @@ export default async function planExtension(pi: ExtensionAPI) {
 
   // --- Tool: plan_submit ---
 
-  pi.registerTool({
-    name: PLAN_SUBMIT_TOOL,
-    label: "Plan Submit",
-    description:
-      "Submit a plan for user approval. Call only after researching the request in plan mode. The user approves or rejects the plan before any changes are made.",
-    promptSnippet: "Submit a complete plan for user approval before making changes",
-    promptGuidelines: [
-      "In plan mode, research the request with read-only tools, then call plan_submit with a concise title and a numbered list of concrete steps.",
-      "Do not edit, write, or run mutating commands in plan mode; plan_submit is the only way to proceed.",
-    ],
-    parameters: {
-      type: "object",
-      properties: {
-        title: {
-          type: "string",
-          description: "Short title for the plan",
+  if (!workerReadonly) {
+    pi.registerTool({
+      name: PLAN_SUBMIT_TOOL,
+      label: "Plan Submit",
+      description:
+        "Submit a plan for user approval. Call only after researching the request in plan mode. The user approves or rejects the plan before any changes are made.",
+      promptSnippet: "Submit a complete plan for user approval before making changes",
+      promptGuidelines: [
+        "In plan mode, research the request with read-only tools, then call plan_submit with a concise title and a numbered list of concrete steps.",
+        "Do not edit, write, or run mutating commands in plan mode; plan_submit is the only way to proceed.",
+      ],
+      parameters: {
+        type: "object",
+        properties: {
+          title: {
+            type: "string",
+            description: "Short title for the plan",
+          },
+          steps: {
+            type: "array",
+            items: { type: "string", description: "One concrete step the plan will execute" },
+            minItems: 1,
+            description: "Ordered list of steps the plan will execute",
+          },
+          notes: {
+            type: "string",
+            description: "Optional context, risks, or open questions",
+          },
         },
-        steps: {
-          type: "array",
-          items: { type: "string", description: "One concrete step the plan will execute" },
-          minItems: 1,
-          description: "Ordered list of steps the plan will execute",
-        },
-        notes: {
-          type: "string",
-          description: "Optional context, risks, or open questions",
-        },
+        required: ["title", "steps"],
       },
-      required: ["title", "steps"],
-    },
 
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      if (state.mode !== "plan") {
+      async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+        if (state.mode !== "plan") {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "Not in plan mode. Enable plan mode first (/plan command or --plan flag).",
+              },
+            ],
+            details: { error: "not_in_plan_mode" },
+            terminate: true,
+          };
+        }
+
+        const title = typeof params.title === "string" ? params.title.trim() : "";
+        const steps = Array.isArray(params.steps)
+          ? params.steps
+              .map((step: unknown) => (typeof step === "string" ? step.trim() : ""))
+              .filter((step: string) => step.length > 0)
+          : [];
+        if (!title || steps.length === 0) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "Invalid plan: a non-empty title and at least one non-empty step are required.",
+              },
+            ],
+            details: { error: "invalid_plan" },
+            terminate: true,
+          };
+        }
+
+        const notes = typeof params.notes === "string" ? params.notes.trim() : "";
+        const plan: Plan = {
+          title,
+          steps,
+          notes: notes || undefined,
+        };
+        state = { ...state, plan };
+        persistState();
+
+        if (!ctx.hasUI) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "Plan approval requires an interactive session. The plan has been saved; call plan_submit again when a user can review it.",
+              },
+            ],
+            details: { status: "saved", plan: { title } },
+            terminate: true,
+          };
+        }
+
+        const choice = await promptPlanApproval(ctx.ui, plan);
+
+        if (choice === "approve") {
+          enterExecution(plan);
+          pi.sendUserMessage(buildKickoffMessage(plan), { deliverAs: "followUp" });
+          return {
+            content: [{ type: "text", text: `Plan approved: ${plan.title}.` }],
+            details: {
+              status: "approved",
+              plan: { title: plan.title, steps: plan.steps },
+            },
+            terminate: true,
+          };
+        }
+
         return {
           content: [
             {
               type: "text",
-              text: "Not in plan mode. Enable plan mode first (/plan command or --plan flag).",
+              text: "The plan was not approved. Ask the user what to change, or refine the plan.",
             },
           ],
-          details: { error: "not_in_plan_mode" },
+          details: { status: "cancelled" },
           terminate: true,
         };
-      }
-
-      const title = typeof params.title === "string" ? params.title.trim() : "";
-      const steps = Array.isArray(params.steps)
-        ? params.steps
-            .map((step: unknown) => (typeof step === "string" ? step.trim() : ""))
-            .filter((step: string) => step.length > 0)
-        : [];
-      if (!title || steps.length === 0) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: "Invalid plan: a non-empty title and at least one non-empty step are required.",
-            },
-          ],
-          details: { error: "invalid_plan" },
-          terminate: true,
-        };
-      }
-
-      const notes = typeof params.notes === "string" ? params.notes.trim() : "";
-      const plan: Plan = {
-        title,
-        steps,
-        notes: notes || undefined,
-      };
-      state = { ...state, plan };
-      persistState();
-
-      if (!ctx.hasUI) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: "Plan approval requires an interactive session. The plan has been saved; call plan_submit again when a user can review it.",
-            },
-          ],
-          details: { status: "saved", plan: { title } },
-          terminate: true,
-        };
-      }
-
-      const choice = await promptPlanApproval(ctx.ui, plan);
-
-      if (choice === "approve") {
-        enterExecution(plan);
-        pi.sendUserMessage(buildKickoffMessage(plan), { deliverAs: "followUp" });
-        return {
-          content: [{ type: "text", text: `Plan approved: ${plan.title}.` }],
-          details: {
-            status: "approved",
-            plan: { title: plan.title, steps: plan.steps },
-          },
-          terminate: true,
-        };
-      }
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: "The plan was not approved. Ask the user what to change, or refine the plan.",
-          },
-        ],
-        details: { status: "cancelled" },
-        terminate: true,
-      };
-    },
-  });
+      },
+    });
+  }
 
   // --- Commands ---
 
@@ -364,6 +383,12 @@ export default async function planExtension(pi: ExtensionAPI) {
     default: false,
   });
 
+  pi.registerFlag("worker-readonly", {
+    description: "Headless read-only enforcement for delegated workers (set by the agents runner)",
+    type: "boolean",
+    default: false,
+  });
+
   // --- Lifecycle ---
 
   function applyRestoredToolState() {
@@ -372,6 +397,7 @@ export default async function planExtension(pi: ExtensionAPI) {
     } else if (state.mode === "executing") {
       restorePrePlanTools();
     }
+    // "readonly" tools are applied directly in session_start.
   }
 
   pi.on("session_start", async (_event, ctx) => {
@@ -380,6 +406,16 @@ export default async function planExtension(pi: ExtensionAPI) {
       plan: null,
       toolsBeforePlan: undefined,
     };
+
+    if (workerReadonly) {
+      // Headless read-only enforcement: gate only, no planning machinery.
+      state = { mode: "readonly", plan: null, toolsBeforePlan: undefined };
+      const tools = pi.getActiveTools().filter((name) => !MUTATING_TOOLS.has(name));
+      pi.setActiveTools(tools);
+      applyRestoredToolState();
+      publishMode();
+      return;
+    }
 
     if (state.mode === "off" && pi.getFlag("plan") === true) {
       state = { mode: "plan", plan: null, toolsBeforePlan: undefined };

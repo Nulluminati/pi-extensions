@@ -68,6 +68,8 @@ export interface StartWorkerOptions {
   extensionPaths: string[];
   /** Route the worker's built-in tools through a Gondolin VM (--gondolin). */
   sandbox?: boolean;
+  /** Headless read-only enforcement (parent session is planning). */
+  readOnly?: boolean;
   /** Isolated worktree; when set the captured patch is stored on the record. */
   worktree?: { path: string; branch: string };
   events: WorkerEvents;
@@ -88,6 +90,7 @@ export function startWorker(options: StartWorkerOptions): RunningWorker {
   if (options.model) args.push("--model", options.model);
   for (const ext of options.extensionPaths) args.push("-e", ext);
   if (options.sandbox) args.push("--gondolin");
+  if (options.readOnly) args.push("--worker-readonly");
 
   const child = spawn(workerBinary(), args, {
     cwd: options.worktree?.path ?? options.cwd,
