@@ -2,18 +2,19 @@
   "id": "mission-mtumm844-f327",
   "title": "Multi-agent state primitives in lib/",
   "objective": "Promote the multi-agent state patterns proven in today's messenger/agents hardening into shared library code and adopt them across extensions. Deliverables: (1) lib/session-identity.ts — persisted per-session identity via custom entries (env override, generate-once-and-persist semantics), adopted by messenger; (2) lib/presence-shards.ts — sharded presence registry with dead-pid pruning and legacy migration, adopted by messenger; (3) generalized orphan-TTL lock semantics, adopted by the agents worker registry to fix its crash gap (stuck-running records, lost reports); (4) tests + README updates for each adoption. Done means: all three primitives exist in lib/ with tests, messenger and agents use them instead of hand-rolled equivalents, npm run check green, no behavior change for existing users beyond the documented crash-gap fix.",
-  "status": "planning",
+  "status": "active",
   "createdAt": 1788990271637,
-  "updatedAt": 1788990288367,
+  "updatedAt": 1788990681196,
   "tasks": [
     {
       "id": "task-971963",
       "title": "Extract lib/session-identity.ts from messenger and adopt it",
-      "status": "todo",
+      "status": "done",
       "dependsOn": [],
       "verification": {
         "command": "npx vitest run test/extensions/messenger.test.ts && npm run validate:one extensions/messenger/messenger.ts"
-      }
+      },
+      "summary": "lib/session-identity.ts extracted (env override → newest persisted custom entry → generate-and-persist), with 5 direct unit tests in test/lib/session-identity.test.ts (new directory). Messenger adopted it via resolveSessionIdentity(pi, ctx, { customType: \"messenger-identity\", envVar: \"PI_MESSENGER_NAME\", generate: resolveAgentName }) — persisted entries from before the refactor still resolve. Full check green: 37 files, 933 tests. Commit 611b749."
     },
     {
       "id": "task-a43a86",
@@ -25,6 +26,28 @@
       "verification": {
         "command": "npx vitest run test/extensions/messenger.test.ts && npm run validate:one extensions/messenger/messenger.ts"
       }
+    },
+    {
+      "id": "task-bd8e15",
+      "title": "Generalize orphan-TTL lock semantics and adopt in agents worker registry (fix crash gap)",
+      "status": "todo",
+      "dependsOn": [
+        "task-a43a86"
+      ],
+      "verification": {
+        "command": "npx vitest run test/extensions/agents.test.ts && npm run validate:one extensions/agents/agents.ts"
+      }
+    },
+    {
+      "id": "task-5160aa",
+      "title": "Update READMEs (messenger, agents, lib patterns) and run full check",
+      "status": "todo",
+      "dependsOn": [
+        "task-bd8e15"
+      ],
+      "verification": {
+        "command": "npm run check"
+      }
     }
   ],
   "checkpoints": [],
@@ -34,7 +57,9 @@
       "at": 1788990279981
     }
   ],
-  "budget": {},
+  "budget": {
+    "maxIterations": 40
+  },
   "spent": {
     "iterations": 0,
     "tokens": 0

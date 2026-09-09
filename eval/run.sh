@@ -19,6 +19,7 @@ TASKS="$(grep -v '^#' "$SCRIPT_DIR/tasks-subset.txt" | grep -v '^$' | tr '\n' ',
 TRIALS=1
 JOBS=3
 ORACLE=0
+SUITE=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -27,6 +28,7 @@ while [ $# -gt 0 ]; do
     --trials) TRIALS="$2"; shift 2 ;;
     --jobs) JOBS="$2"; shift 2 ;;
     --oracle) ORACLE=1; shift ;;
+    --suite) SUITE=1; shift ;;
     *) echo "Unknown option: $1"; exit 1 ;;
   esac
 done
@@ -50,13 +52,18 @@ if [ "$ORACLE" -eq 1 ]; then
   echo "==> Oracle smoke run (no LLM cost)"
   AGENT_ARGS=(-a oracle)
 else
-  echo "==> Agent: pi ($MODEL)"
+  echo "==> Agent: pi ($MODEL)$([ "$SUITE" -eq 1 ] && echo ' + extension suite baked')"
   AGENT_ARGS=(--agent-import-path pi_terminal_bench:PiAgent -m "$MODEL")
 fi
 
 STAMP="$(date +%Y%m%d-%H%M%S)"
-JOBS_DIR="results/${STAMP}"
+TAG=""; [ "$SUITE" -eq 1 ] && TAG="-suite"
+JOBS_DIR="results/${STAMP}${TAG}"
 mkdir -p "$JOBS_DIR"
+if [ "$SUITE" -eq 1 ]; then
+  # Repo root = parent of eval/
+  export PI_TB_SUITE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+fi
 
 cd pi-terminal-bench
 echo "==> harbor run -> ../$JOBS_DIR"
