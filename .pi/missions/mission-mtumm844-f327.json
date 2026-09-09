@@ -2,9 +2,9 @@
   "id": "mission-mtumm844-f327",
   "title": "Multi-agent state primitives in lib/",
   "objective": "Promote the multi-agent state patterns proven in today's messenger/agents hardening into shared library code and adopt them across extensions. Deliverables: (1) lib/session-identity.ts — persisted per-session identity via custom entries (env override, generate-once-and-persist semantics), adopted by messenger; (2) lib/presence-shards.ts — sharded presence registry with dead-pid pruning and legacy migration, adopted by messenger; (3) generalized orphan-TTL lock semantics, adopted by the agents worker registry to fix its crash gap (stuck-running records, lost reports); (4) tests + README updates for each adoption. Done means: all three primitives exist in lib/ with tests, messenger and agents use them instead of hand-rolled equivalents, npm run check green, no behavior change for existing users beyond the documented crash-gap fix.",
-  "status": "active",
+  "status": "complete",
   "createdAt": 1788990271637,
-  "updatedAt": 1788991516998,
+  "updatedAt": 1788991823622,
   "tasks": [
     {
       "id": "task-971963",
@@ -43,16 +43,24 @@
     {
       "id": "task-5160aa",
       "title": "Update READMEs (messenger, agents, lib patterns) and run full check",
-      "status": "todo",
+      "status": "done",
       "dependsOn": [
         "task-bd8e15"
       ],
       "verification": {
         "command": "npm run check"
-      }
+      },
+      "summary": "agents README now describes reconcile-on-read registry healing (any read, not just session_start); the shared-helpers skill documents lib/session-identity and lib/presence-shards with a quick-reference table row each, so future extensions adopt the primitives. Full check green. Commit 180779d (docs) + 5c0e24e (save serialization fixing the flaky delegate test found during this task)."
     }
   ],
-  "checkpoints": [],
+  "checkpoints": [
+    {
+      "id": "ckpt-bf7356",
+      "label": "Mission complete: state primitives in lib/",
+      "summary": "All 4 tasks done. lib/session-identity.ts (persisted per-session identity, adopted by messenger, 611b749); lib/presence-shards.ts (sharded presence registry with prune/migration, adopted by messenger, 21bc167); worker-registry crash-gap fix via reconcile-on-read + per-cwd save serialization + terminal-record guard (d6776f4, 5c0e24e); docs updated (180779d). Full check green: 38 files, 946 tests. Bonus fixes along the way: autoresearch stall guard (7a91f73) and autoresearch discard data-loss (7ead990).",
+      "at": 1788991815839
+    }
+  ],
   "decisions": [
     {
       "text": "Original mission-mtulbjdz-d294 was destroyed mid-campaign by an autoresearch discard: discardAll staged everything (git add -A) and hard-reset, deleting all untracked non-ignored files including .pi/missions/. Root cause fixed in 7ead990 (init-time untracked snapshot; discards remove only experiment-created files). Mission recreated verbatim as mission-mtumm844-f327. Lesson recorded: untracked non-ignored state is unsafe during autoresearch campaigns on versions before 7ead990.",

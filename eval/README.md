@@ -103,3 +103,30 @@ Notes for next runs:
   bump (`--timeout-multiplier`) for reasoning-heavy tasks.
 - Comparisons to run next: kimi-k3 coordinator, and suite-extensions-in-container
   (needs baking extensions into the adapter image; tracked as follow-up).
+
+## A/B: suite baked in vs plain pi — 2026-09-09
+
+Same subset, same model (`openrouter/~z-ai/glm-flash-latest`), 1 trial each.
+Suite ON = `--suite` (missions/messenger/agents/autoresearch baked into the
+container and loaded via `-e`). Raw runs: `results/20260909-141433` (OFF) and
+`results/20260909-145450-suite` (ON).
+
+| Metric | OFF | ON |
+|---|---|---|
+| Resolve | **6/12** | **6/12** |
+| Wall | 24.5 min | 22.5 min |
+| LLM cost | $0.45 | $0.58 (+29%) |
+| Suite tools used by the model | — | **0 calls in 12 runs** |
+
+Per-task flips: `fix-git` passed OFF / failed ON; `regex-log` failed OFF /
+passed ON. With n=1 these flips are single-trial noise, not signal — glm flash
+is pass-variance on both tasks.
+
+**Conclusion:** on short, one-shot benchmark tasks, the extension suite is
+outcome-neutral and costs ~30% more in tokens (bigger per-request context from
+four extra tool definitions). The model never reached for mission/delegate/
+autoresearch tools unprompted — and shouldn't: these tasks don't decompose.
+The suite's value case remains long-horizon, multi-session, and optimization
+work (missions/reconcile, delegation at minute-scale, autoresearch loops);
+measuring that on TB needs custom long-horizon tasks, which is the next
+follow-up. Practical default: run TB-style evaluations suite-off.
