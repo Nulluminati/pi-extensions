@@ -1,6 +1,6 @@
 ---
 name: shared-helpers
-description: Use the shared helper modules in lib/ when building or modifying Pi extensions in this repo. Covers session entry parsing (session-utils), cheap model resolution (small-model), modal frames (tui-frame), single-line input modals (input-modal), status lines and key hints (ui-format), tool result renderers (tool-renderer), searchable select modals (searchable-select), and editor factory layering (editor-factory). Use whenever an extension needs TUI rendering, a status line, a picker dialog, a text prompt, a custom editor wrapper, transcript parsing, or a cheap direct LLM call — import the lib/ helper instead of reimplementing the pattern.
+description: Use the shared helper modules in lib/ when building or modifying Pi extensions in this repo. Covers session entry parsing (session-utils), cheap model resolution (small-model), modal frames (tui-frame), single-line input modals (input-modal), status lines and key hints (ui-format), tool result renderers (tool-renderer), searchable select modals (searchable-select), editor factory layering (editor-factory), persisted per-session identity (session-identity), and sharded presence registries with dead-pid pruning (presence-shards). Use whenever an extension needs TUI rendering, a status line, a picker dialog, a text prompt, a custom editor wrapper, transcript parsing, or a cheap direct LLM call — import the lib/ helper instead of reimplementing the pattern.
 ---
 
 # Shared Helpers in `lib/`
@@ -33,6 +33,8 @@ import { renderModalFrame } from "../../../lib/tui-frame.ts";
 | Let the user fuzzy-pick from a list in a modal | `createSearchableSelectModal` | `lib/searchable-select.ts` |
 | Prompt for one line of text in a framed modal | `promptText`, `createInputModal` | `lib/input-modal.ts` |
 | Wrap/replace the editor component (`ctx.ui.setEditorComponent`) | `installEditorFactoryLayer`, `hasEditorFactoryLayer`, `removeEditorFactoryLayer` | `lib/editor-factory.ts` |
+| Give a session a stable agent name that survives `pi -c` and `/reload` | `resolveSessionIdentity` | `lib/session-identity.ts` |
+| Share live presence (who is online) between concurrent sessions | `writeShard`, `loadShards`, `removeShard`, `readShard` | `lib/presence-shards.ts` |
 
 ---
 
@@ -220,6 +222,22 @@ Mandatory rules (see `status-bar`, `voice`):
 2. **Check `hasEditorFactoryLayer` before installing** — installation must be idempotent (session reloads re-fire lifecycle events).
 3. **Always remove your layer on shutdown** with `removeEditorFactoryLayer`, and only call `setEditorComponent` when the stack actually changed (`restored !== current`).
 4. **Inside `instantiate`, call the parent factory** and wrap its editor; only ignore the parent when you are deliberately replacing the base editor itself (status-bar's visual layer pattern).
+
+## `lib/session-identity.ts` — persisted per-session identity
+
+Gives a session a stable agent name that survives process restarts and `/reload`: env override, then the name persisted as a custom entry in the session transcript (newest wins), then generate-once-and-persist. Used by `messenger`.
+
+- `resolveSessionIdentity(pi, ctx, { customType, envVar, generate })` → the agent name. Call in `session_start`; pass your extension's own `customType` (namespacing), the override env var, and your name generator.
+- Keep the `customType` stable across versions so previously persisted identities still resolve.
+
+## `lib/presence-shards.ts` — sharded presence registry
+
+Live presence shared by concurrent sessions. One shard file per agent: heartbeats only ever write the caller's own shard, so concurrent writers cannot clobber each other's entries. Reads merge all shards, drop corrupt shards, prune entries whose pid is dead, and can migrate a legacy single-file registry. Used by `messenger`.
+
+- `writeShard(dir, record)` / `readShard(dir, name)` / `removeShard(dir, name)` — per-agent operations.
+- `loadShards(dir, { legacyPath? })` → `Record<name, record>` after pruning dead pids.
+- Records must have `name: string` and `pid: number` plus whatever extra fields you need.
+- Never write presence as a single shared JSON file — heartbeats are read-modify-write and concurrent settles clobber each other.
 
 ## `lib/validate-extension.ts` — repo tooling, not extension code
 

@@ -20,7 +20,7 @@ You will be woken when a worker exits; read its report with `workers (action=sta
 - **Worker sessions**: `pi --mode json --no-session --no-extensions -p <task>` with the messenger extension loaded so workers can coordinate home. The final assistant text becomes the worker's report; usage is tracked per worker.
 - **Worktree isolation**: isolated workers branch from `HEAD` into `.pi/worktrees/<id>` on branch `agents/<id>`. The tree must be clean — otherwise the captured patch would silently miss uncommitted work. On completion everything the worker changed (including new files) is captured as a patch under `.pi/workers/patches/`; `collect` applies it to the main tree and removes the worktree. Worktrees provide *coordination* isolation, not security: workers run with user privileges.
 - **Trusted wakes**: wake messages carry only ids and status words, never worker output — output is read on demand via the workers tool, so a worker's stdout is never injected as user-authored content.
-- **Durable registry**: `.pi/workers/registry.json` survives restarts. On session start, records whose pid is gone are marked failed; on shutdown, running workers are cancelled (SIGTERM process group, then SIGKILL).
+- **Durable registry**: `.pi/workers/registry.json` survives restarts. Any read reconciles records stuck in `running` whose pid is dead (marked failed), so crashed parents leave no permanent ghosts and their concurrency slots are freed; on shutdown, running workers are cancelled (SIGTERM process group, then SIGKILL).
 - **Runaway guards**: default max 4 concurrent workers (`PI_MAX_WORKERS`), hard per-worker timeout (`PI_WORKER_TIMEOUT_S`, default 900s), unique running names.
 
 ## Model Tiering
