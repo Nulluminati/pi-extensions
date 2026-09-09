@@ -15,7 +15,7 @@ export const DELEGATE_PARAMETERS = {
     model: {
       type: "string",
       description:
-        "Model for the worker as provider/id. Defaults to $PI_WORKER_MODEL or the built-in cheap default.",
+        'Model for the worker as provider/id. Resolution: this parameter, then $PI_WORKER_MODEL or worker-model.json; "main" inherits the session model. Unconfigured delegates fail with a descriptive error.',
     },
     isolate: {
       type: "boolean",

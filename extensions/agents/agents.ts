@@ -17,6 +17,7 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext, ExtensionUIContext } from "pi";
+import { resolveWorkerModelSpec } from "../../lib/worker-model.ts";
 import {
   AGENTS_STATE_EVENT,
   formatWorkerList,
@@ -33,16 +34,11 @@ import { applyPatch, createWorktree, isGitRepo, removeWorktree } from "./src/wor
 // --- Constants ---
 
 const WAKE_CUSTOM_TYPE = "agents:wake";
-const DEFAULT_WORKER_MODEL = "opencode-go/glm-5.3-flash";
 const DEFAULT_TIMEOUT_MS = 900_000;
 
 function envMaxWorkers(): number {
   const parsed = Number.parseInt(process.env.PI_MAX_WORKERS ?? "", 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 4;
-}
-
-function envWorkerModel(): string {
-  return process.env.PI_WORKER_MODEL?.trim() || DEFAULT_WORKER_MODEL;
 }
 
 function envTimeoutMs(): number {
@@ -128,10 +124,11 @@ export default async function agentsExtension(pi: ExtensionAPI) {
         );
       }
 
-      const model =
-        typeof params.model === "string" && params.model.trim()
-          ? params.model.trim()
-          : envWorkerModel();
+      const explicitModel =
+        typeof params.model === "string" && params.model.trim() ? params.model.trim() : undefined;
+      // No hardcoded default: resolution is env -> config file, with "main"
+      // inheriting the session model. Unconfigured delegates fail descriptively.
+      const { model } = await resolveWorkerModelSpec(explicitModel, ctx);
       const timeoutMs =
         typeof params.timeout_seconds === "number" && params.timeout_seconds > 0
           ? params.timeout_seconds * 1000
