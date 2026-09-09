@@ -24,7 +24,7 @@
     "prepare": "husky",
     "format": "biome format --write .",
     "lint": "biome lint .",
-    "check": "biome check . && tsc --noEmit && tsc --noEmit -p tsconfig.test.json && npm run validate && npm run test",
+    "check": "biome check . && tsc --noEmit --incremental && tsc --noEmit --incremental -p tsconfig.test.json && npm run validate && npm run test",
     "check:ci": "biome ci . && tsc --noEmit && tsc --noEmit -p tsconfig.test.json && npm run validate && npm run test",
     "validate": "tsx scripts/validate-all.ts",
     "validate:one": "tsx scripts/validate-cli.ts",
