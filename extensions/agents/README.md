@@ -42,4 +42,6 @@ The default worker model is cheap on purpose — keep design decisions, integrat
 | `pi.on("session_start" / "session_shutdown")` | Reconcile orphaned records / cancel running workers |
 | `pi.events.emit("agents:state")` | Publish state for the status bar |
 
+**Worker sandbox**: workers load the gondolin extension and run with `--gondolin` by default (QEMU micro-VM; requires Node >= 23.6 and QEMU on PATH). A worker without a working sandbox fails its tool calls loudly rather than silently falling back to the host.
+
 State lives in `<cwd>/.pi/workers/` and `<cwd>/.pi/worktrees/` (gitignored runtime state).

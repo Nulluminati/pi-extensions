@@ -14,7 +14,6 @@
  * PI_WORKER_MODEL) — keep orchestration and judgment in the main session.
  */
 
-import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext, ExtensionUIContext } from "pi";
 import { resolveWorkerExtensions } from "../../lib/worker-extensions.ts";

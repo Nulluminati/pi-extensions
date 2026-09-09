@@ -82,6 +82,57 @@ describe("gondolin-extension", () => {
     );
   });
 
+  it("gondolin prereqs reject Node < 23.6 and accept newer", async () => {
+    const { assertGondolinPrereqs } = await import("../../extensions/gondolin/gondolin.ts");
+    expect(() => assertGondolinPrereqs("22.5.0")).toThrow(/23\.6\.0/);
+    expect(() => assertGondolinPrereqs("23.5.9")).toThrow(/23\.6\.0/);
+    expect(() => assertGondolinPrereqs("23.6.0")).not.toThrow();
+    expect(() => assertGondolinPrereqs("24.1.2")).not.toThrow();
+  });
+
+  it("a failed VM startup errors tool calls with QEMU guidance instead of host fallback", async () => {
+    const mockPi = createMockPi();
+    await gondolinExtension(mockPi);
+    mockPi.getFlag = vi.fn(() => true);
+    const { VM } = (await import("@earendil-works/gondolin")) as unknown as {
+      VM: { create: ReturnType<typeof vi.fn> };
+    };
+    VM.create.mockRejectedValue(new Error("qemu-system-x86_64: not found"));
+
+    const ctx = createMockCommandContext();
+    const sessionStart = getEventHandler(mockPi, "session_start");
+    await expect(sessionStart({ type: "session_start", reason: "startup" }, ctx)).rejects.toThrow(
+      /Gondolin VM failed to start/,
+    );
+
+    // Every tool call now fails loudly with the QEMU hint — never silently
+    // running against the host filesystem.
+    const tools = mockPi.registerTool.mock.calls.map((call) => call[0]);
+    const readTool = tools.find((tool) => tool.name === "read");
+    await expect(readTool.execute("id", { path: "x" }, undefined, undefined, ctx)).rejects.toThrow(
+      /QEMU/,
+    );
+  });
+
+  it("starts the VM headlessly without touching a missing UI", async () => {
+    const mockPi = createMockPi();
+    await gondolinExtension(mockPi);
+    mockPi.getFlag = vi.fn(() => true);
+    const { VM } = (await import("@earendil-works/gondolin")) as unknown as {
+      VM: { create: ReturnType<typeof vi.fn> };
+    };
+    VM.create.mockImplementation(() => Promise.resolve(mockVm));
+
+    const ctx = createMockCommandContext();
+    ctx.hasUI = false;
+
+    const sessionStart = getEventHandler(mockPi, "session_start");
+    await expect(
+      sessionStart({ type: "session_start", reason: "startup" }, ctx),
+    ).resolves.toBeUndefined();
+    expect(VM.create).toHaveBeenCalled();
+  });
+
   it("when disabled, registers tools and handlers but does not start VM", async () => {
     const mockPi = createMockPi();
     mockPi.getFlag = vi.fn(() => false);

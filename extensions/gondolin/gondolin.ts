@@ -44,6 +44,19 @@ import { createGondolinFindOps } from "./src/traversal.ts";
 
 export { ICON_COLOR, STATUS_ICON, TEXT_COLOR };
 
+// --- Prerequisites ---
+
+/** Loud prerequisite check: workers must fail visibly, never silently fall back to the host. */
+export function assertGondolinPrereqs(nodeVersion = process.versions.node): void {
+  const [major, minor] = nodeVersion.split(".").map(Number);
+  const ok = (major ?? 0) > 23 || ((major ?? 0) === 23 && (minor ?? 0) >= 6);
+  if (!ok) {
+    throw new Error(
+      `Gondolin requires Node.js >= 23.6.0 (found ${nodeVersion}). Upgrade Node or unset --gondolin.`,
+    );
+  }
+}
+
 // --- Extension ---
 
 export default async function gondolinExtension(pi: ExtensionAPI) {
@@ -64,51 +77,63 @@ export default async function gondolinExtension(pi: ExtensionAPI) {
 
   let vm: VM | undefined;
   let vmStarting: Promise<VM> | undefined;
+  let vmStartError: string | undefined;
   let shellPath = "/bin/sh";
 
+  /** Headless-safe status update: json/rpc modes have no UI surface. */
+  function setVmStatus(ctx: ExtensionContext | undefined, text: string): void {
+    if (!ctx?.hasUI) return;
+    ctx.ui.setStatus(
+      STATUS_KEY,
+      formatStatusLine(ctx.ui.theme, {
+        icon: STATUS_ICON,
+        prefix: "Gondolin",
+        text,
+        iconColor: ICON_COLOR,
+        textColor: TEXT_COLOR,
+      }),
+    );
+  }
+
   async function startVm(ctx?: ExtensionContext): Promise<VM> {
+    assertGondolinPrereqs();
     // Lazy-load the native addon so the ~36 MB krun runner only maps into the
     // process when a VM is actually started, not at extension import.
     const { VM, RealFSProvider } = await import("@earendil-works/gondolin");
     pi.events.emit(VM_EVENT, { state: "starting" });
-    ctx?.ui.setStatus(
-      STATUS_KEY,
-      formatStatusLine(ctx.ui.theme, {
-        icon: STATUS_ICON,
-        prefix: "Gondolin",
-        text: `starting ${GUEST_WORKSPACE}`,
-        iconColor: ICON_COLOR,
-        textColor: TEXT_COLOR,
-      }),
-    );
-    const created = await VM.create({
-      sessionLabel: `pi ${path.basename(localCwd)}`,
-      vfs: {
-        mounts: {
-          [GUEST_WORKSPACE]: new RealFSProvider(localCwd),
+    setVmStatus(ctx, `starting ${GUEST_WORKSPACE}`);
+    let created: VM;
+    try {
+      created = await VM.create({
+        sessionLabel: `pi ${path.basename(localCwd)}`,
+        vfs: {
+          mounts: {
+            [GUEST_WORKSPACE]: new RealFSProvider(localCwd),
+          },
         },
-      },
-    });
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      vmStartError = `Gondolin VM failed to start: ${message}. Check that QEMU is installed and on PATH (e.g. sudo dnf install qemu-system-x86).`;
+      vmStarting = undefined;
+      throw new Error(vmStartError);
+    }
     const bashProbe = await created.exec(["/bin/sh", "-lc", "command -v bash || true"]);
     shellPath = bashProbe.stdout.trim() || "/bin/sh";
     vm = created;
     pi.events.emit(VM_EVENT, { state: "ready", vmId: created.id });
-    ctx?.ui.setStatus(
-      STATUS_KEY,
-      formatStatusLine(ctx.ui.theme, {
-        icon: STATUS_ICON,
-        prefix: "Gondolin",
-        text: `${created.id.slice(0, 8)} (${GUEST_WORKSPACE})`,
-        iconColor: ICON_COLOR,
-        textColor: TEXT_COLOR,
-      }),
-    );
-    ctx?.ui.notify(`Gondolin VM ready. ${localCwd} is mounted at ${GUEST_WORKSPACE}.`, "info");
+    setVmStatus(ctx, `${created.id.slice(0, 8)} (${GUEST_WORKSPACE})`);
+    if (ctx?.hasUI) {
+      ctx.ui.notify(`Gondolin VM ready. ${localCwd} is mounted at ${GUEST_WORKSPACE}.`, "info");
+    }
     return created;
   }
 
   async function ensureVm(ctx?: ExtensionContext): Promise<VM> {
     if (vm) return vm;
+    // A recorded startup failure makes every subsequent tool call fail loudly:
+    // silently running on the host would defeat the sandbox the user asked for.
+    if (vmStartError) throw new Error(vmStartError);
     if (!vmStarting) {
       vmStarting = startVm(ctx).finally(() => {
         vmStarting = undefined;
@@ -132,6 +157,7 @@ export default async function gondolinExtension(pi: ExtensionAPI) {
     const activeVm = vm;
     vm = undefined;
     vmStarting = undefined;
+    vmStartError = undefined;
     if (!activeVm) return;
     pi.events.emit(VM_EVENT, { state: "stopping" });
     ctx.ui.setStatus(
