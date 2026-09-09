@@ -244,6 +244,14 @@ describe("messenger-store", () => {
     expect(normalizePathPrefix(cwd, "@src/y.ts")).toBe("src/y.ts");
   });
 
+  it("normalizePathPrefix accepts relative paths when cwd equals process.cwd()", () => {
+    // Real pi sessions pass their own cwd, which is the process cwd. Those
+    // paths must not be misclassified as outside the project.
+    expect(normalizePathPrefix(process.cwd(), "src/x.ts")).toBe("src/x.ts");
+    expect(normalizePathPrefix(process.cwd(), "extensions/missions")).toBe("extensions/missions");
+    expect(normalizePathPrefix(process.cwd(), "/etc/passwd")).toBeUndefined();
+  });
+
   it("findBlockingReservation covers directories by boundary", async () => {
     await reserve(cwd, "owner", ["src/auth"]);
     const reservations = await loadReservations(cwd);

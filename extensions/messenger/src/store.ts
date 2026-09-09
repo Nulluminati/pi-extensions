@@ -12,7 +12,7 @@
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { appendFile, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Message, PresenceRegistry, ReservationMap } from "./types.ts";
 
 // --- Paths ---
@@ -193,7 +193,7 @@ export function normalizePathPrefix(cwd: string, raw: string): string | undefine
   if (!trimmed) return undefined;
   const abs = resolve(cwd, trimmed);
   const rel = relative(cwd, abs);
-  if (!rel || rel.startsWith("..") || resolve(rel) === abs) {
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) {
     // Empty rel means cwd itself; outside-project paths get ".."-prefixed rel.
     if (rel === "") return ".";
     return undefined;
