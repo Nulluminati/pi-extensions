@@ -23,6 +23,20 @@ You will be woken when a worker exits; read its report with `workers (action=sta
 - **Durable registry**: `.pi/workers/registry.json` survives restarts. Any read reconciles records stuck in `running` whose pid is dead (marked failed), so crashed parents leave no permanent ghosts and their concurrency slots are freed; on shutdown, running workers are cancelled (SIGTERM process group, then SIGKILL).
 - **Runaway guards**: default max 4 concurrent workers (`PI_MAX_WORKERS`), hard per-worker timeout (`PI_WORKER_TIMEOUT_S`, default 900s), unique running names.
 
+## Configuration
+
+| Variable | Description |
+|----------|-------------|
+| `PI_WORKER_MODEL` | `provider/model-id` for workers; wins over `worker-model.json`. Unconfigured delegates fail descriptively — `/worker-model` manages the config; `main` as the delegate `model` inherits the session model |
+| `PI_WORKER_MODEL_CONFIG` | Alternative worker-model config-file path |
+| `PI_WORKER_EXTENSIONS` | Comma-separated extension names for workers; wins over `worker-extensions.json` |
+| `PI_WORKER_EXTENSIONS_CONFIG` | Alternative worker-extensions config-file path |
+| `PI_MAX_WORKERS` | Concurrent worker cap (default 4) |
+| `PI_WORKER_TIMEOUT_S` | Hard per-worker timeout (default 900) |
+| `PI_WORKER_COMMAND` | Worker binary override (testing) |
+
+Worker extensions resolve to `delegate` param → `PI_WORKER_EXTENSIONS` → `worker-extensions.json` → default set `[messenger, code-search, context7, web-search, synthetic, neuralwatt, gondolin]`. `messenger` is always included. Workflow extensions (`agents`, `missions`, `autoresearch`, `goal`, `plan`) are **forbidden in workers** and rejected outright. Delegating from a planning session forces read-only workers (`--worker-readonly`, gondolin excluded) so plan mode cannot be bypassed through a subagent.
+
 ## Model Tiering
 
 The default worker model is cheap on purpose — keep design decisions, integration, and review in the main session:

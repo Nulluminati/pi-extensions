@@ -21,6 +21,7 @@ import {
   ENTRY_TYPE,
   EXECUTION_CONTEXT_TYPE,
   MUTATING_TOOLS,
+  PLAN_BLOCKED_EXTENSION_TOOLS,
   PLAN_COMPLETE_TYPE,
   PLAN_CONTEXT_TYPE,
   PLAN_MODE_EVENT,
@@ -122,6 +123,20 @@ export default async function planExtension(pi: ExtensionAPI) {
   pi.on("tool_call", async (event, _ctx) => {
     const enforcing = state.mode === "plan" || state.mode === "readonly";
     if (!enforcing) return;
+    if (PLAN_BLOCKED_EXTENSION_TOOLS.has(event.toolName)) {
+      if (state.mode === "readonly") {
+        return {
+          block: true,
+          reason:
+            "This worker is read-only (the parent session is planning): mutation-capable extension tools are blocked. Research and report instead.",
+        };
+      }
+      return {
+        block: true,
+        reason:
+          "Plan mode is read-only: this extension tool can mutate state (shell commands, git operations, or project records) and is blocked until the plan is approved.",
+      };
+    }
     if (MUTATING_TOOLS.has(event.toolName)) {
       // No terminate: the block reason is reported to the model and the turn
       // continues, so the agent keeps working read-only instead of stopping.
