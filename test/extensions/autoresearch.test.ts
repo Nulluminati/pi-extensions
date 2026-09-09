@@ -197,11 +197,32 @@ describe("autoresearch-extension", () => {
     const agentEnd = getEventHandler("agent_end");
     const input = getEventHandler("input");
 
+    // Two consecutive continuations with zero tool activity → stop.
+    await agentEnd({ type: "agent_end", messages: [] }, mockCtx);
+    await input({ type: "input", text: "", source: "extension" }, mockCtx);
     await agentEnd({ type: "agent_end", messages: [] }, mockCtx);
     await input({ type: "input", text: "", source: "extension" }, mockCtx);
     await agentEnd({ type: "agent_end", messages: [] }, mockCtx);
     expect((await loadConfig(cwd))?.stopped).toBe(true);
-    expect(mockPi.sendUserMessage).toHaveBeenCalledTimes(1);
+    expect(mockPi.sendUserMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it("tool activity between continuations prevents a stall stop", async () => {
+    // The agent may legitimately interleave other work (mission tasks, user
+    // questions) between experiments; only two consecutive continuations
+    // with zero autoresearch tool activity should stop the loop.
+    await initSession();
+    const agentEnd = getEventHandler("agent_end");
+    const input = getEventHandler("input");
+
+    await agentEnd({ type: "agent_end", messages: [] }, mockCtx);
+    await input({ type: "input", text: "", source: "extension" }, mockCtx);
+    await executeTool({ action: "status" });
+    await agentEnd({ type: "agent_end", messages: [] }, mockCtx);
+    expect((await loadConfig(cwd))?.stopped).toBeUndefined();
+    await input({ type: "input", text: "", source: "extension" }, mockCtx);
+    await agentEnd({ type: "agent_end", messages: [] }, mockCtx);
+    expect((await loadConfig(cwd))?.stopped).toBeUndefined();
   });
 
   it("status and stop act on the stored config", async () => {

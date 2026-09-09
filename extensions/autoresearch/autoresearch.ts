@@ -56,7 +56,9 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
   let pending:
     | { run: number; metric?: number; durationMs: number; description: string; hypothesis?: string }
     | undefined;
-  let lastLogCount = 0;
+  // Autoresearch tool calls this session; engagement signal for the stall guard.
+  let toolActivity = 0;
+  let lastSeenActivity = 0;
   let continuationQueued = false;
   let idleWakes = 0;
 
@@ -139,6 +141,7 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
     ],
     parameters: AUTORESEARCH_PARAMETERS,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      toolActivity += 1;
       const cwd = ctx.cwd;
       const action = params.action;
 
@@ -203,7 +206,7 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
         };
         await appendLog(cwd, baselineEntry);
         entries.push(baselineEntry);
-        lastLogCount = entries.length;
+
         publish(ctx, config, entries);
 
         return {
@@ -322,7 +325,6 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
         await appendLog(cwd, entry);
         entries.push(entry);
         await clearPending(cwd);
-        lastLogCount = entries.length;
 
         const summary = buildSummary(config, entries);
         let stopNote = "";
@@ -407,24 +409,28 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
       return;
     }
 
-    // Stall guard: no new log entries since our last continuation.
-    if (entries.length === lastLogCount) {
-      idleWakes += 1;
-      if (idleWakes >= 2) {
-        config.stopped = true;
-        await saveConfig(ctx.cwd, config);
-        publish(ctx, config, entries);
-        if (ctx.hasUI) {
-          ctx.ui.notify(
-            "Autoresearch stopped: no new experiments were logged after repeated prompts.",
-            "warning",
-          );
-        }
-        return;
-      }
-    } else {
+    // Stall guard: two consecutive continuations with zero autoresearch tool
+    // activity mean the loop is not actually running — stop and hand control
+    // back. Log growth alone is the wrong signal: the agent legitimately
+    // interleaves other work (mission tasks, user questions) between
+    // experiments, and settle boundaries do not align with work boundaries.
+    if (toolActivity !== lastSeenActivity) {
+      lastSeenActivity = toolActivity;
       idleWakes = 0;
-      lastLogCount = entries.length;
+    } else {
+      idleWakes += 1;
+    }
+    if (idleWakes >= 2) {
+      config.stopped = true;
+      await saveConfig(ctx.cwd, config);
+      publish(ctx, config, entries);
+      if (ctx.hasUI) {
+        ctx.ui.notify(
+          "Autoresearch stopped: no new experiments were logged after repeated prompts.",
+          "warning",
+        );
+      }
+      return;
     }
 
     continuationQueued = true;
@@ -450,7 +456,7 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
     pending = undefined;
     const config = await loadConfig(ctx.cwd);
     const entries = await readLog(ctx.cwd);
-    lastLogCount = entries.length;
+
     publish(ctx, config, entries);
   });
 
