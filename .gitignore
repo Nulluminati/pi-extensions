@@ -7,6 +7,11 @@ auth.json
 settings.json
 TODO.md
 
+# Pi extension runtime state (per-project, never committed)
+.pi/messenger/
+.pi/workers/
+.pi/worktrees/
+
 # Claude Code local state
 .claude/settings.local.json
 .claude/plans/

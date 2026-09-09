@@ -128,6 +128,27 @@ describe("agents-extension", () => {
     expect(Object.values(stored)[0].outputText).toContain("JWT tokens");
   });
 
+  it("delegate sets PI_MESSENGER_NAME so workers are addressable by their worker name", async () => {
+    const envFile = join(fixtureDir, "captured-name.txt");
+    const fixture = await writeFixture(
+      fixtureDir,
+      "env-worker.sh",
+      `#!/bin/sh
+printf '%s' "$PI_MESSENGER_NAME" > '${envFile}'
+${SUCCESS_WORKER}`,
+    );
+    setEnv("PI_WORKER_COMMAND", fixture);
+
+    await executeTool("delegate", {
+      task: "say hi",
+      isolate: false,
+      wait: true,
+      name: "addressable",
+    });
+
+    expect(await readFile(envFile, "utf8")).toBe("addressable");
+  });
+
   it("delegate marks failed workers with stderr detail", async () => {
     const fixture = await writeFixture(fixtureDir, "fail-worker.sh", FAILING_WORKER);
     setEnv("PI_WORKER_COMMAND", fixture);
