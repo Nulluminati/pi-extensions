@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +9,7 @@ import { checkToolCall } from "../../extensions/messenger/src/enforce.ts";
 import {
   findBlockingReservation,
   heartbeat,
+  leaveRegistry,
   loadRegistry,
   loadReservations,
   normalizePathPrefix,
@@ -414,6 +416,52 @@ describe("messenger-store", () => {
     expect(
       findBlockingReservation(cwd, "src/auth/login.ts", "owner", reservations),
     ).toBeUndefined();
+  });
+
+  it("heartbeat writes one shard per agent and never rewrites another agent's shard", async () => {
+    await heartbeat(cwd, "agent-a", { pid: process.pid, cwd });
+    const shardA = join(cwd, ".pi/messenger/registry/agent-a.json");
+    await heartbeat(cwd, "agent-b", { pid: process.pid, cwd, status: "working" });
+    const aBefore = await readFile(shardA, "utf8");
+
+    // Concurrent agents heartbeating must not clobber each other: agent-b's
+    // update goes to agent-b's shard only.
+    await heartbeat(cwd, "agent-b", { pid: process.pid, cwd, status: "still working" });
+
+    expect(await readFile(shardA, "utf8")).toBe(aBefore);
+    const registry = await loadRegistry(cwd);
+    expect(registry["agent-a"]).toBeDefined();
+    expect(registry["agent-b"]?.status).toBe("still working");
+  });
+
+  it("legacy single-file registry migrates to shards on read", async () => {
+    await mkdir(join(cwd, ".pi/messenger"), { recursive: true });
+    const legacyPath = join(cwd, ".pi/messenger/registry.json");
+    const legacy = {
+      "live-agent": { name: "live-agent", pid: process.pid, cwd, startedAt: 1, lastSeenAt: 2 },
+      "dead-agent": { name: "dead-agent", pid: 999999999, cwd, startedAt: 1, lastSeenAt: 2 },
+    };
+    await writeFile(legacyPath, JSON.stringify(legacy), "utf8");
+
+    const registry = await loadRegistry(cwd);
+
+    expect(registry["live-agent"]).toBeDefined();
+    expect(registry["dead-agent"]).toBeUndefined();
+    expect(existsSync(legacyPath)).toBe(false);
+    expect(existsSync(join(cwd, ".pi/messenger/registry/live-agent.json"))).toBe(true);
+    expect(existsSync(join(cwd, ".pi/messenger/registry/dead-agent.json"))).toBe(false);
+  });
+
+  it("leaveRegistry removes only the agent's shard", async () => {
+    await heartbeat(cwd, "agent-a", { pid: process.pid, cwd });
+    await heartbeat(cwd, "agent-b", { pid: process.pid, cwd });
+
+    await leaveRegistry(cwd, "agent-a");
+
+    const registry = await loadRegistry(cwd);
+    expect(registry["agent-a"]).toBeUndefined();
+    expect(registry["agent-b"]).toBeDefined();
+    expect(existsSync(join(cwd, ".pi/messenger/registry/agent-a.json"))).toBe(false);
   });
 
   it("mailbox preserves malformed lines when marking read", async () => {
