@@ -40,8 +40,3 @@ __pycache__/
 
 # Logs
 *.log
-
-# Terminal-Bench evaluation workspace
-eval/pi-terminal-bench/
-eval/results/
-eval/pi-terminal-bench/.venv/

@@ -285,6 +285,13 @@ export default async function missionsExtension(pi: ExtensionAPI) {
           if (!status) throw new Error("set_status requires missionStatus.");
           setStatus(mission, status);
           await persist(ctx, mission);
+          // Completed and aborted missions free the active slot — otherwise
+          // they block every future create until manually deleted.
+          if (status === "complete" || status === "aborted") {
+            await setActiveMissionId(ctx.cwd, undefined);
+            active = undefined;
+            publish(ctx);
+          }
           return {
             content: [{ type: "text", text: `Mission is now ${status}.` }],
             details: { status },

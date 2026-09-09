@@ -47,12 +47,6 @@ pi -e git:github.com/Nulluminati/pi-extensions/extensions/goal/goal.ts
 
 Per-extension configuration (flags, env vars, config files) lives in each extension's own `README.md` under the **Configuration** section.
 
-## Evaluation
-
-Harness evaluation runs on the real benchmark: Terminal-Bench 2.0 via Harbor
-with the official pi agent adapter. See [`eval/README.md`](eval/README.md) —
-setup, curated 12-task subset, cost notes, and results layout.
-
 ## Development
 
 ### Type declarations

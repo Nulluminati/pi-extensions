@@ -131,6 +131,19 @@ describe("missions-extension", () => {
     expect(res.details.status).toBe("complete");
   });
 
+  it("completing or aborting a mission frees the active slot for a new one", async () => {
+    await executeTool({ action: "create", title: "first", objective: "o" });
+    await executeTool({ action: "set_status", missionStatus: "aborted" });
+
+    const second = await executeTool({ action: "create", title: "second", objective: "o" });
+    expect(second.details.missionId).toBeDefined();
+
+    // And completing the second frees the slot again.
+    await executeTool({ action: "set_status", missionStatus: "aborted" });
+    const third = await executeTool({ action: "create", title: "third", objective: "o" });
+    expect(third.details.missionId).toBeDefined();
+  });
+
   it("reconcile re-runs verification and marks failures as regressed", async () => {
     await executeTool({ action: "create", title: "t", objective: "o" });
     const pass = await executeTool({
