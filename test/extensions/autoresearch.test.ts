@@ -180,6 +180,21 @@ describe("autoresearch-extension", () => {
     expect(entries[entries.length - 1].status).toBe("checks_failed");
   });
 
+  it("git operations are immune to inherited GIT_INDEX_FILE (lint-staged)", async () => {
+    await initSession();
+    // Simulate lint-staged's environment: its temp index belongs to the outer
+    // repo and must never leak into the campaign repo's commits.
+    const oldIndex = process.env.GIT_INDEX_FILE;
+    process.env.GIT_INDEX_FILE = "/tmp/definitely-not-a-real-index";
+    try {
+      const log = await runAndLog("90", "keep", "env-poison keep");
+      expect(log.content[0].text).toContain("Kept (commit");
+    } finally {
+      if (oldIndex === undefined) delete process.env.GIT_INDEX_FILE;
+      else process.env.GIT_INDEX_FILE = oldIndex;
+    }
+  });
+
   it("reports confidence once enough runs exist", async () => {
     await initSession();
     await runAndLog("99.0", "keep", "big noisy improvement");

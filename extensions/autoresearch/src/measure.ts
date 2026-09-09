@@ -4,7 +4,7 @@ import { exec as execCb } from "node:child_process";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { runGit } from "../../../lib/git.ts";
+import { cleanGitEnv, runGit } from "../../../lib/git.ts";
 
 const execAsync = promisify(execCb);
 
@@ -103,10 +103,12 @@ export async function isGitRepo(cwd: string): Promise<boolean> {
 /** Stage everything and commit; returns the short commit id. */
 export async function commitAll(cwd: string, message: string): Promise<string> {
   await runGit(cwd, ["add", "-A"]);
-  // Message passed via env to avoid shell-quoting bugs.
+  // Message passed via env to avoid shell-quoting bugs. Git env must be
+  // sanitized: inherited GIT_INDEX_FILE (e.g. under lint-staged) makes this
+  // commit build its tree from the outer repo's index.
   await execAsync('git commit -q -m "$AR_MSG"', {
     cwd,
-    env: { ...process.env, AR_MSG: message },
+    env: { ...cleanGitEnv(), AR_MSG: message },
   });
   const id = await runGit(cwd, ["rev-parse", "--short", "HEAD"]);
   return id.trim();
