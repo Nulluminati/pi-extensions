@@ -1,1 +1,10 @@
-{}
+{
+  "north-birch-89": {
+    "name": "north-birch-89",
+    "pid": 2499542,
+    "cwd": "/home/natekift/Projects/pi-extensions",
+    "model": "synthetic/hf:zai-org/GLM-5.3-Flash",
+    "startedAt": 1788974363089,
+    "lastSeenAt": 1788974588036
+  }
+}

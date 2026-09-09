@@ -44,10 +44,22 @@ export interface EvalResult {
   /** Session usage summed over assistant messages. */
   inputTokens: number;
   outputTokens: number;
+  /** Cache read+write tokens from the session. */
+  cacheTokens: number;
+  /** Total USD cost reported by the session. */
+  costUsd: number;
   /** Final assistant text (the worker's report). */
   finalText?: string;
   /** Blind LLM-judge rubric scores, when a judge was configured. */
   quality?: EvalQuality;
+  /** Machine-recorded harness disclosure (compare-ability requirement). */
+  harness: {
+    piVersion: string;
+    model: string;
+    extensionPaths: string[];
+    judgeModel?: string;
+    timeoutMs: number;
+  };
   error?: string;
   at: number;
 }

@@ -585,6 +585,9 @@ describe("harness-evals-runner", () => {
       timedOut: false,
       inputTokens: 10,
       outputTokens: 20,
+      cacheTokens: 0,
+      costUsd: 0,
+      harness: { piVersion: "test", model: "m", extensionPaths: [], timeoutMs: 60000 },
       at: 0,
     };
   }

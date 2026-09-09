@@ -52,10 +52,14 @@ interface SessionOutcome {
   timedOut: boolean;
   inputTokens: number;
   outputTokens: number;
+  cacheTokens: number;
+  costUsd: number;
   finalText?: string;
 }
 
-/** Run `pi --mode json --no-session -p <prompt>` and summarize its events. */
+/** Run `pi --mode json -p <prompt>` and summarize its events. When
+ * sessionPath is set, the session JSONL is kept there for trajectory
+ * debugging (parity with the official pi terminal-bench adapter). */
 export async function runPiSession(options: {
   cwd: string;
   prompt: string;
@@ -64,8 +68,10 @@ export async function runPiSession(options: {
   extensionPaths: string[];
   piBin?: string;
   env?: Record<string, string>;
+  sessionPath?: string;
 }): Promise<SessionOutcome> {
-  const args = ["--mode", "json", "--no-session", "--no-extensions", "-nc", "-p", options.prompt];
+  const args = ["--mode", "json", "--no-extensions", "-nc", "-p", options.prompt];
+  if (options.sessionPath) args.push("--session", options.sessionPath);
   if (options.model) args.push("--model", options.model);
   for (const ext of options.extensionPaths) args.push("-e", ext);
 
@@ -78,6 +84,8 @@ export async function runPiSession(options: {
 
     let inputTokens = 0;
     let outputTokens = 0;
+    let cacheTokens = 0;
+    let costUsd = 0;
     let finalText: string | undefined;
     let timedOut = false;
     let stderrTail = "";
@@ -99,7 +107,13 @@ export async function runPiSession(options: {
           message?: {
             role?: string;
             content?: Array<{ type?: string; text?: string }>;
-            usage?: { input?: number; output?: number };
+            usage?: {
+              input?: number;
+              output?: number;
+              cacheRead?: number;
+              cacheWrite?: number;
+              cost?: { total?: number };
+            };
           };
         };
         if (event.type !== "message_end" || event.message?.role !== "assistant") return;
@@ -107,6 +121,8 @@ export async function runPiSession(options: {
         if (usage) {
           inputTokens += usage.input ?? 0;
           outputTokens += usage.output ?? 0;
+          cacheTokens += (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
+          costUsd += usage.cost?.total ?? 0;
         }
         const text = (event.message.content ?? [])
           .filter((block) => block.type === "text" && typeof block.text === "string")
@@ -138,6 +154,8 @@ export async function runPiSession(options: {
         timedOut,
         inputTokens,
         outputTokens,
+        cacheTokens,
+        costUsd,
         ...(finalText !== undefined ? { finalText } : {}),
         ...(stderrTail && timedOut ? { finalText: finalText ?? `stderr: ${stderrTail}` } : {}),
       });
@@ -149,6 +167,8 @@ export async function runPiSession(options: {
         timedOut: false,
         inputTokens: 0,
         outputTokens: 0,
+        cacheTokens: 0,
+        costUsd: 0,
       });
       void err;
     });
@@ -209,6 +229,7 @@ export async function collectWorkspace(dir: string): Promise<string> {
         continue;
       }
       if (s.size > 40_000) continue;
+      if (entry === "session.jsonl") continue; // agent transcript must not bias the judge
       const content = await readFile(full, "utf8").catch(() => undefined);
       if (content === undefined) continue; // binary
       const bounded =
@@ -283,9 +304,30 @@ function buildJudgePrompt(task: EvalTask, workspace: string): string {
   ].join("\n");
 }
 
+// --- Harness disclosure ---
+
+let cachedPiVersion: string | undefined;
+
+/** pi version, resolved once per process for harness disclosure records. */
+export async function getPiVersion(piBin = "pi"): Promise<string> {
+  if (cachedPiVersion !== undefined) return cachedPiVersion;
+  try {
+    const { stdout } = await execFileAsync(piBin, ["--version"], {
+      timeout: 30_000,
+      env: cleanGitEnv(),
+    });
+    cachedPiVersion = stdout.trim();
+  } catch (err) {
+    cachedPiVersion = `unknown (${(err as Error).message})`;
+  }
+  return cachedPiVersion;
+}
+
 /**
  * Blind quality judgment of a completed run. Runs a fixed judge model over
  * the final workspace; the judge never sees which configuration produced it.
+ * One retry on an unparseable verdict — judge output is JSON in prose and
+ * occasionally gets wrapped or truncated.
  */
 export async function judgeRun(options: {
   dir: string;
@@ -303,9 +345,21 @@ export async function judgeRun(options: {
     extensionPaths: [],
     ...(options.piBin !== undefined ? { piBin: options.piBin } : {}),
   });
-  const text = session.finalText;
-  if (text === undefined) return undefined;
-  return parseJudgeVerdict(text);
+  if (session.finalText !== undefined) {
+    const verdict = parseJudgeVerdict(session.finalText);
+    if (verdict !== undefined) return verdict;
+  }
+  // Retry once: malformed or empty verdicts are usually transient formatting.
+  const retry = await runPiSession({
+    cwd: options.dir,
+    prompt: buildJudgePrompt(options.task, workspace),
+    model: options.judgeModel,
+    timeoutMs: options.timeoutMs ?? JUDGE_TIMEOUT_MS,
+    extensionPaths: [],
+    ...(options.piBin !== undefined ? { piBin: options.piBin } : {}),
+  });
+  if (retry.finalText === undefined) return undefined;
+  return parseJudgeVerdict(retry.finalText);
 }
 
 // --- Full task ---
@@ -319,6 +373,8 @@ export interface RunTaskOptions {
   workspaceDir?: string;
   /** When set, a blind judge grades the final workspace after the run. */
   judge?: { model: string; timeoutMs?: number; piBin?: string };
+  /** Keep the pi session JSONL inside the workspace (default: kept with it). */
+  captureSession?: boolean;
 }
 
 /** Run one eval task end to end and grade it. */
@@ -336,6 +392,9 @@ export async function runEvalTask(
       timeoutMs: options.timeoutMs ?? task.timeoutMs,
       extensionPaths: options.extensionPaths ?? [],
       ...(options.piBin !== undefined ? { piBin: options.piBin } : {}),
+      ...(options.captureSession === false
+        ? {}
+        : { sessionPath: join(workspace.dir, "session.jsonl") }),
     });
 
     const checks: CheckResult[] = session.timedOut
@@ -344,6 +403,7 @@ export async function runEvalTask(
 
     let quality: EvalQuality | undefined;
     if (options.judge !== undefined) {
+      // (judge retries happen inside judgeRun)
       quality = await judgeRun({
         dir: workspace.dir,
         task,
@@ -365,6 +425,15 @@ export async function runEvalTask(
       outputTokens: session.outputTokens,
       ...(session.finalText !== undefined ? { finalText: session.finalText } : {}),
       ...(quality !== undefined ? { quality } : {}),
+      cacheTokens: session.cacheTokens,
+      costUsd: session.costUsd,
+      harness: {
+        piVersion: await getPiVersion(options.piBin),
+        model: options.model ?? "(default)",
+        extensionPaths: options.extensionPaths ?? [],
+        ...(options.judge !== undefined ? { judgeModel: options.judge.model } : {}),
+        timeoutMs: options.timeoutMs ?? task.timeoutMs,
+      },
       at,
     };
   } catch (err) {
@@ -378,6 +447,15 @@ export async function runEvalTask(
       timedOut: false,
       inputTokens: 0,
       outputTokens: 0,
+      cacheTokens: 0,
+      costUsd: 0,
+      harness: {
+        piVersion: await getPiVersion(options.piBin),
+        model: options.model ?? "(default)",
+        extensionPaths: options.extensionPaths ?? [],
+        ...(options.judge !== undefined ? { judgeModel: options.judge.model } : {}),
+        timeoutMs: options.timeoutMs ?? task.timeoutMs,
+      },
       error: (err as Error).message,
       at,
     };
