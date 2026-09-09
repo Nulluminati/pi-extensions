@@ -88,7 +88,13 @@ export function startWorker(options: StartWorkerOptions): RunningWorker {
 
   const child = spawn(workerBinary(), args, {
     cwd: options.worktree?.path ?? options.cwd,
-    env: { ...cleanGitEnv(), PI_WORKER: "1" },
+    env: {
+      ...cleanGitEnv(),
+      PI_WORKER: "1",
+      // Stable messenger identity: the worker is addressable in the mesh by
+      // its agents-registry name instead of a generated themed name.
+      PI_MESSENGER_NAME: options.name,
+    },
     detached: true,
     stdio: ["ignore", "pipe", "pipe"],
   });

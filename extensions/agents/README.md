@@ -42,4 +42,4 @@ The default worker model is cheap on purpose — keep design decisions, integrat
 | `pi.on("session_start" / "session_shutdown")` | Reconcile orphaned records / cancel running workers |
 | `pi.events.emit("agents:state")` | Publish state for the status bar |
 
-State lives in `<cwd>/.pi/workers/` and `<cwd>/.pi/worktrees/` (add both to `.gitignore`).
+State lives in `<cwd>/.pi/workers/` and `<cwd>/.pi/worktrees/` (gitignored runtime state).
