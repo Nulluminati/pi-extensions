@@ -33,6 +33,7 @@ export function buildEditorMetaSegments(
   flex: { on: boolean; capable: boolean },
   smallModelLabel: string,
   theme: any,
+  workerModelLabel = "",
 ): string[] {
   const segments: string[] = [];
   if (modelLabel) segments.push(theme.fg("accent", modelLabel));
@@ -48,6 +49,12 @@ export function buildEditorMetaSegments(
     // subordinate to the main model.
     segments.push(theme.fg("dim", "/"));
     segments.push(theme.fg("dim", smallModelLabel));
+  }
+  if (workerModelLabel) {
+    // The worker model label follows the small model, also grey: it configures
+    // delegated workers, not this session.
+    segments.push(theme.fg("dim", "/"));
+    segments.push(theme.fg("dim", workerModelLabel));
   }
   return segments;
 }
@@ -115,6 +122,7 @@ export class PolishedEditor extends CustomEditor {
   private readonly uiTheme: any;
   private readonly getModelLabel: () => string;
   private readonly getSmallModelLabel: () => string;
+  private readonly getWorkerModelLabel: () => string;
   private readonly getThinkingLevel: () => string;
   private readonly getFlexState: () => { on: boolean; capable: boolean };
   private readonly getBorderColor: () => string | undefined;
@@ -131,11 +139,13 @@ export class PolishedEditor extends CustomEditor {
     getFlexState: () => { on: boolean; capable: boolean },
     getBorderColor: () => string | undefined,
     getTitleRight: () => string | undefined,
+    getWorkerModelLabel?: () => string,
   ) {
     super(tui, theme, keybindings, { paddingX: 0 });
     this.uiTheme = uiTheme;
     this.getModelLabel = getModelLabel;
     this.getSmallModelLabel = getSmallModelLabel;
+    this.getWorkerModelLabel = getWorkerModelLabel ?? (() => "");
     this.getThinkingLevel = getThinkingLevel;
     this.getFlexState = getFlexState;
     this.getBorderColor = getBorderColor;
@@ -172,6 +182,7 @@ export class PolishedEditor extends CustomEditor {
       this.getFlexState(),
       this.getSmallModelLabel(),
       this.uiTheme,
+      this.getWorkerModelLabel(),
     )
       .filter(Boolean)
       .join(EDITOR_META_SEPARATOR);

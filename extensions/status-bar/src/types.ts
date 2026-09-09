@@ -39,6 +39,7 @@ export interface State {
   // meta line after a "/" separator, beside the main model. Empty when no
   // small model is configured.
   smallModelLabel: string;
+  workerModelLabel: string;
   // True while the goal extension has a running goal (status "active"),
   // published on the pi.events bus (see goal:state-change). Shown as a
   // "Goal N/cap" badge in the editor frame's top-right cell, beside

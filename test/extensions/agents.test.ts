@@ -90,7 +90,9 @@ describe("agents-extension", () => {
     mockPi = createMockPi() as DeepMocked<ExtensionAPI>;
     mockCtx = createMockContext();
     (mockCtx as { cwd: string }).cwd = cwd;
-    setEnv("PI_WORKER_MODEL", undefined);
+    // Default test configuration: most tests delegate, so a worker model
+    // must resolve. The unconfigured-error test clears it again.
+    setEnv("PI_WORKER_MODEL", "opencode-go/glm-5.3-flash");
     setEnv("PI_MAX_WORKERS", undefined);
     setEnv("PI_WORKER_TIMEOUT_S", undefined);
     await agentsExtension(mockPi);
@@ -114,6 +116,14 @@ describe("agents-extension", () => {
     const names = mockPi.registerTool.mock.calls.map((c) => c[0].name);
     expect(names).toContain("delegate");
     expect(names).toContain("workers");
+  });
+
+  it("delegate fails with a descriptive error when no worker model is configured", async () => {
+    setEnv("PI_WORKER_MODEL", undefined);
+    // No worker-model.json config exists in the temp cwd's agent dir.
+    await expect(
+      executeTool("delegate", { task: "anything", isolate: false, model: undefined }),
+    ).rejects.toThrow(/worker model is not configured/i);
   });
 
   it("delegate runs a worker and returns its report when wait=true", async () => {

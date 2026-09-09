@@ -37,6 +37,10 @@ import {
 import { loadSmallModelConfig, resolveSmallModelConfigPath } from "../../lib/small-model.ts";
 import { formatStatusLine } from "../../lib/ui-format.ts";
 import {
+  loadWorkerModelConfig,
+  resolveWorkerModelConfigPath as resolveWorkerModelConfigPathLib,
+} from "../../lib/worker-model.ts";
+import {
   FLEX_EVENT,
   GOAL_STATE_EVENT,
   GONDOLIN_VM_EVENT,
@@ -66,6 +70,7 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     turnCount: 0,
     thinkingLevel: "none",
     smallModelLabel: "",
+    workerModelLabel: "",
     goalRunning: false,
     goalIteration: 0,
     goalCap: null,
@@ -84,6 +89,8 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
   let currentCwd = "";
   let smallModelWatcher: FSWatcher | undefined;
   let smallModelWatchDebounce: ReturnType<typeof setTimeout> | undefined;
+  let workerModelWatcher: FSWatcher | undefined;
+  let workerModelWatchDebounce: ReturnType<typeof setTimeout> | undefined;
 
   // Track a running goal so the editor frame can show a "Goal" badge in its
   // top-right cell. Subscribed at load time rather than in session_start: the
@@ -182,6 +189,7 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
             }
             return parts.length > 0 ? parts.join(ctx.ui.theme.fg("dim", " · ")) : undefined;
           },
+          () => state.workerModelLabel,
         );
       },
     );
@@ -229,6 +237,7 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
    */
   function startSmallModelWatch(): void {
     stopSmallModelWatch();
+    stopWorkerModelWatch();
     let configPath: string;
     try {
       configPath = resolveSmallModelConfigPath();
@@ -243,6 +252,7 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
         smallModelWatchDebounce = setTimeout(() => {
           smallModelWatchDebounce = undefined;
           refreshSmallModel();
+          refreshWorkerModel();
           editorRequestRender?.();
         }, 25);
       });
@@ -258,6 +268,49 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     }
     smallModelWatcher?.close();
     smallModelWatcher = undefined;
+  }
+
+  function refreshWorkerModel(): void {
+    try {
+      const loaded = loadWorkerModelConfig();
+      state.workerModelLabel = `${loaded.config.provider}/${loaded.config.model}`;
+    } catch {
+      state.workerModelLabel = "";
+    }
+  }
+
+  /** Watch the global worker-model config file (mirrors the small-model watcher). */
+  function startWorkerModelWatch(): void {
+    stopWorkerModelWatch();
+    let configPath: string;
+    try {
+      configPath = resolveWorkerModelConfigPathLib();
+    } catch {
+      return;
+    }
+    const configDirectory = dirname(configPath);
+    try {
+      workerModelWatcher = watch(configDirectory, (_event, filename) => {
+        if (filename && filename.toString() !== basename(configPath)) return;
+        if (workerModelWatchDebounce) clearTimeout(workerModelWatchDebounce);
+        workerModelWatchDebounce = setTimeout(() => {
+          workerModelWatchDebounce = undefined;
+          refreshWorkerModel();
+          editorRequestRender?.();
+        }, 25);
+      });
+    } catch {
+      workerModelWatcher = undefined;
+    }
+  }
+
+  function stopWorkerModelWatch(): void {
+    if (workerModelWatchDebounce) {
+      clearTimeout(workerModelWatchDebounce);
+      workerModelWatchDebounce = undefined;
+    }
+    workerModelWatcher?.close();
+    workerModelWatcher = undefined;
   }
 
   function accumulateTokenUsage(): void {
@@ -322,6 +375,7 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     getBranch = () => ctx.sessionManager.getBranch();
     accumulateTokenUsage();
     refreshSmallModel();
+    refreshWorkerModel();
     refreshContextUsage(ctx as ExtensionCommandContext);
 
     // Install the UI components synchronously, before any async work, so the
@@ -396,12 +450,14 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     // Watch the small-model config so the editor title reflects `/smallmodel`
     // changes immediately rather than on the next turn.
     startSmallModelWatch();
+    startWorkerModelWatch();
 
     await refreshGitStatus();
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
     stopSmallModelWatch();
+    stopWorkerModelWatch();
     clearFooter(ctx as ExtensionCommandContext);
     restoreEditor(ctx as ExtensionCommandContext);
   });
@@ -409,6 +465,7 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
   pi.on("turn_start", async (_event, ctx) => {
     state.turnCount++;
     refreshSmallModel();
+    refreshWorkerModel();
     refreshContextUsage(ctx as ExtensionCommandContext);
     if (state.lastHandle) state.lastHandle.requestRender();
     editorRequestRender?.();
@@ -452,6 +509,7 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
         getBranch = () => ctx.sessionManager.getBranch();
         accumulateTokenUsage();
         refreshSmallModel();
+        refreshWorkerModel();
         refreshContextUsage(ctx);
         await refreshGitStatus();
         setFooter(ctx);

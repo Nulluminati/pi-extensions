@@ -1,0 +1,79 @@
+{
+  "id": "mission-mtup89os-0bd1",
+  "title": "Worker platform: model config, extension allowlist, sandboxing, plan-mode safety",
+  "objective": "Worker platform overhaul. (1) Worker model as first-class config: PI_WORKER_MODEL env wins, <agentDir>/worker-model.json next, NO hardcoded model anywhere — unconfigured delegate fails descriptively, 'main' inherits the session model; /worker-model picker + status-bar label mirroring small-model. (2) Worker extension allowlist: delegate param → PI_WORKER_EXTENSIONS env → config → defaults [messenger, code-search, context7, web-search, synthetic, neuralwatt, gondolin]; name→path resolution with validation; hard denylist (agents, missions, autoresearch, goal, plan). (3) Sandboxing: workers run under gondolin (--gondolin), headless-tolerant, fail fast without QEMU/Node>=23.6. (4) Plan-mode safety: delegate while planning forces read-only workers (--worker-readonly), plan extension gains headless read-only mode (tool gate only, no overlay), permission-bypass audit documented. Done: all implemented, READMEs updated, E2E drill passes, full check green.",
+  "status": "planning",
+  "createdAt": 1788994659340,
+  "updatedAt": 1788994720073,
+  "tasks": [
+    {
+      "id": "task-d9c0d5",
+      "title": "lib/worker-model.ts: env/config resolution, no hardcoded default, 'main' keyword; delete DEFAULT_WORKER_MODEL",
+      "status": "todo",
+      "dependsOn": [],
+      "verification": {
+        "command": "npx vitest run test/lib/worker-model.test.ts test/extensions/agents.test.ts"
+      }
+    },
+    {
+      "id": "task-0c92af",
+      "title": "{\"command\": \"npx vitest run test/extensions/small-model.test.ts test/extensions/status-bar.test.ts\", \"description\": \"Picker and status-bar tests green\"}",
+      "status": "todo",
+      "dependsOn": []
+    },
+    {
+      "id": "task-32abd1",
+      "title": "lib/worker-extensions.ts: allowlist resolution + hard denylist (agents, missions, autoresearch, goal, plan)",
+      "status": "todo",
+      "dependsOn": [],
+      "verification": {
+        "command": "npx vitest run test/lib/worker-extensions.test.ts"
+      }
+    },
+    {
+      "id": "task-3ff6cf",
+      "title": "Runner adopts worker-model + worker-extensions + --gondolin; spawn-arg tests",
+      "status": "todo",
+      "dependsOn": [],
+      "verification": {
+        "command": "npx vitest run test/extensions/agents.test.ts"
+      }
+    },
+    {
+      "id": "task-b8494a",
+      "title": "Gondolin headless hardening: json-mode ctx.ui tolerance, QEMU/Node fail-fast, prereq docs",
+      "status": "todo",
+      "dependsOn": [],
+      "verification": {
+        "command": "npx vitest run test/extensions/gondolin.test.ts && npm run validate:one extensions/gondolin/gondolin.ts"
+      }
+    },
+    {
+      "id": "task-92e3f3",
+      "title": "Plan-mode safety: delegate gate forces read-only workers; headless read-only mode in plan extension; bypass audit",
+      "status": "todo",
+      "dependsOn": [],
+      "verification": {
+        "command": "npx vitest run test/extensions/plan.test.ts test/extensions/agents.test.ts"
+      }
+    },
+    {
+      "id": "task-d6aaec",
+      "title": "E2E drill (synthetic-model worker under gondolin; plan-mode delegate read-only), READMEs, full check",
+      "status": "todo",
+      "dependsOn": [],
+      "verification": {
+        "command": "npm run check"
+      }
+    }
+  ],
+  "checkpoints": [],
+  "decisions": [],
+  "budget": {
+    "maxIterations": 60
+  },
+  "spent": {
+    "iterations": 0,
+    "tokens": 0
+  }
+}
