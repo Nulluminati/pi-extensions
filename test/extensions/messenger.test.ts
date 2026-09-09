@@ -71,6 +71,38 @@ describe("messenger-extension", () => {
     expect(registry["test-agent"].pid).toBe(process.pid);
   });
 
+  it("session_start reuses the identity persisted in the session", async () => {
+    vi.mocked(mockCtx.sessionManager.getBranch).mockReturnValue([
+      { type: "custom", customType: "messenger-identity", data: { name: "persisted-agent" } },
+    ]);
+    await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+
+    expect((await loadRegistry(cwd))["persisted-agent"]).toBeDefined();
+    expect(mockPi.appendEntry).not.toHaveBeenCalled();
+  });
+
+  it("session_start generates and persists an identity for future resumes", async () => {
+    await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+
+    expect(mockPi.appendEntry).toHaveBeenCalledWith(
+      "messenger-identity",
+      expect.objectContaining({ name: expect.any(String) }),
+    );
+    const persisted = mockPi.appendEntry.mock.calls[0][1] as { name: string };
+    expect((await loadRegistry(cwd))[persisted.name]).toBeDefined();
+  });
+
+  it("PI_MESSENGER_NAME overrides the persisted identity", async () => {
+    process.env.PI_MESSENGER_NAME = "env-agent";
+    vi.mocked(mockCtx.sessionManager.getBranch).mockReturnValue([
+      { type: "custom", customType: "messenger-identity", data: { name: "persisted-agent" } },
+    ]);
+    await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+
+    expect((await loadRegistry(cwd))["env-agent"]).toBeDefined();
+    expect((await loadRegistry(cwd))["persisted-agent"]).toBeUndefined();
+  });
+
   it("send delivers to a mailbox and inbox reads and clears it", async () => {
     process.env.PI_MESSENGER_NAME = "receiver";
     await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
@@ -241,42 +273,37 @@ describe("messenger-extension", () => {
     expect(mockPi.sendMessage).not.toHaveBeenCalled();
   });
 
-  it("session_shutdown leaves presence and releases generated-name reservations", async () => {
-    // No PI_MESSENGER_NAME: the generated identity cannot be re-adopted by a
-    // restarted session, so claims are released on shutdown.
+  it("session_shutdown leaves presence but keeps reservations for the next resume", async () => {
+    // Identity persists in the session (messenger-identity entry), so a
+    // resumed session re-adopts its claims; shutdown only drops presence.
+    process.env.PI_MESSENGER_NAME = "returning";
     await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
-    await executeTool({ action: "reserve", paths: ["src/leaver"] });
-    const ownName = Object.entries(await loadRegistry(cwd)).find(
-      ([, presence]) => presence.pid === process.pid,
-    )?.[0];
-    expect(ownName).toBeDefined();
+    await executeTool({ action: "reserve", paths: ["src/kept"] });
 
     await getEventHandler("session_shutdown")(
       { type: "session_shutdown", reason: "quit" },
       mockCtx,
     );
 
-    expect(Object.keys(await loadRegistry(cwd))).toHaveLength(0);
-    expect((await loadReservations(cwd))["src/leaver"]).toBeUndefined();
+    expect((await loadRegistry(cwd))["returning"]).toBeUndefined();
+    expect((await loadReservations(cwd))["src/kept"]).toBeDefined();
     // Mailbox survives on purpose.
-    await sendMessage(cwd, "leaver", "x", "late mail");
-    expect(await readInbox(cwd, "leaver")).toHaveLength(1);
+    await sendMessage(cwd, "returning", "x", "late mail");
+    expect(await readInbox(cwd, "returning")).toHaveLength(1);
   });
 
-  it("session_shutdown keeps reservations under a stable name for restart", async () => {
-    process.env.PI_MESSENGER_NAME = "stable-owner";
+  it("session_shutdown keeps claims for session-persisted identities too", async () => {
+    // No env name: identity comes from the persisted session entry, so the
+    // claim must survive shutdown for the resumed session to re-adopt.
     await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
-    await executeTool({ action: "reserve", paths: ["src/stable"] });
+    await executeTool({ action: "reserve", paths: ["src/persisted-claim"] });
 
     await getEventHandler("session_shutdown")(
       { type: "session_shutdown", reason: "quit" },
       mockCtx,
     );
 
-    // Presence is gone, but the claim survives so the restarted session can
-    // re-adopt it (pi -c with the same PI_MESSENGER_NAME).
-    expect((await loadRegistry(cwd))["stable-owner"]).toBeUndefined();
-    expect((await loadReservations(cwd))["src/stable"]).toBeDefined();
+    expect((await loadReservations(cwd))["src/persisted-claim"]).toBeDefined();
   });
 
   it("session_start re-adopts own reservations with the current pid", async () => {
@@ -335,20 +362,39 @@ describe("messenger-store", () => {
     expect(claims["src/a"]).toMatchObject({ owner: "owner", pid: process.pid });
   });
 
-  it("loadReservations prunes claims whose process died and left the registry", async () => {
-    // No registry entry: a dead pid means the owner is gone for good.
+  it("loadReservations marks freshly dead claims orphaned and keeps them", async () => {
+    // First read after the owner died: stamp orphanedAt so other sessions'
+    // reads during a death-to-resume gap cannot destroy the claim.
     await reserve(cwd, "crashed", ["src/dead"], undefined, 999999999);
     const claims = await loadReservations(cwd);
-    expect(claims["src/dead"]).toBeUndefined();
+    expect(claims["src/dead"]).toBeDefined();
+    expect(claims["src/dead"]?.orphanedAt).toBeDefined();
+  });
+
+  it("loadReservations prunes claims orphaned past the grace window", async () => {
+    await reserve(cwd, "crashed", ["src/dead"], undefined, 999999999);
+    await loadReservations(cwd); // stamps orphanedAt = now
+
+    // Age the orphan past the grace window.
+    const path = join(cwd, ".pi/messenger/reservations.json");
+    const claims = JSON.parse(await readFile(path, "utf8")) as Record<
+      string,
+      { orphanedAt?: number }
+    >;
+    claims["src/dead"].orphanedAt = Date.now() - 11 * 60_000;
+    await writeFile(path, JSON.stringify(claims), "utf8");
+
+    expect((await loadReservations(cwd))["src/dead"]).toBeUndefined();
   });
 
   it("loadReservations keeps claims whose owner is live in the registry", async () => {
-    // Stable-name restart: the recorded pid is stale but the owner has
+    // Stable identity restart: the recorded pid is stale but the owner has
     // re-heartbeated, so the claim must survive until re-adoption.
     await heartbeat(cwd, "live-owner", { pid: process.pid, cwd });
     await reserve(cwd, "live-owner", ["src/live"], undefined, 999999999);
     const claims = await loadReservations(cwd);
     expect(claims["src/live"]).toBeDefined();
+    expect(claims["src/live"]?.orphanedAt).toBeUndefined();
   });
 
   it("loadReservations keeps legacy claims without a pid", async () => {

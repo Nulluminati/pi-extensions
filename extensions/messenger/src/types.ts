@@ -27,6 +27,9 @@ export interface Reservation {
   owner: string;
   /** Owning process pid, used to expire claims from crashed sessions. */
   pid?: number;
+  /** When the claim was first seen with a dead owner; pruned after a grace
+   *  window so reads during a death-to-resume gap cannot destroy the claim. */
+  orphanedAt?: number;
   reason?: string;
   at: number;
 }

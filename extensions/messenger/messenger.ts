@@ -24,7 +24,7 @@ import {
   MESSENGER_STATUS_KEY,
   mailStatusText,
 } from "./src/format.ts";
-import { hasStableName, resolveAgentName } from "./src/identity.ts";
+import { resolveAgentName } from "./src/identity.ts";
 import { MESSENGER_PARAMETERS } from "./src/schemas.ts";
 import {
   heartbeat,
@@ -42,6 +42,8 @@ import {
 // --- Constants ---
 
 const INBOX_MESSAGE_TYPE = "messenger-inbox";
+/** Session entry that persists the agent identity across resumes (pi -c). */
+const IDENTITY_CUSTOM_TYPE = "messenger-identity";
 
 // --- Extension ---
 
@@ -49,6 +51,36 @@ export default async function messengerExtension(pi: ExtensionAPI) {
   let agentName = "";
   let delivering = false;
   let inboxWatcher: FSWatcher | undefined;
+
+  // --- Identity ---
+
+  /**
+   * Resolve this session's agent identity. Order: PI_MESSENGER_NAME (parents
+   * spawning workers set it), then the identity persisted in the session —
+   * so `pi -c` resumes under the same name without any env var — then a
+   * freshly generated name persisted for future resumes.
+   */
+  async function resolveSessionIdentity(pi: ExtensionAPI, ctx: ExtensionContext): Promise<string> {
+    const fromEnv = process.env.PI_MESSENGER_NAME?.trim();
+    if (fromEnv) return fromEnv;
+    const branch = ctx.sessionManager.getBranch() as Array<{
+      type?: string;
+      customType?: string;
+      data?: { name?: string };
+    }>;
+    for (const entry of [...branch].reverse()) {
+      if (
+        entry.type === "custom" &&
+        entry.customType === IDENTITY_CUSTOM_TYPE &&
+        entry.data?.name
+      ) {
+        return entry.data.name;
+      }
+    }
+    const name = resolveAgentName();
+    pi.appendEntry(IDENTITY_CUSTOM_TYPE, { name });
+    return name;
+  }
 
   // --- Publishing ---
 
@@ -278,15 +310,15 @@ export default async function messengerExtension(pi: ExtensionAPI) {
   // --- Lifecycle ---
 
   pi.on("session_start", async (_event, ctx) => {
-    agentName = resolveAgentName();
+    agentName = await resolveSessionIdentity(pi, ctx);
     const model = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined;
     await heartbeat(ctx.cwd, agentName, {
       pid: process.pid,
       cwd: ctx.cwd,
       ...(model !== undefined ? { model } : {}),
     });
-    // A stable identity may own claims left by a previous process of the
-    // same name; re-adopt them before prune-on-read can expire them.
+    // The identity persists across resumes, so claims held before quitting
+    // are re-adopted here before the orphan grace window can expire them.
     await readoptReservations(ctx.cwd, agentName);
     startInboxWatcher(ctx);
     await refreshStatus(ctx);
@@ -298,13 +330,11 @@ export default async function messengerExtension(pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
-    // Release our presence and, for generated names, our reservations so
-    // other agents aren't blocked by a dead session. A stable identity
-    // (PI_MESSENGER_NAME) may restart into the same name (pi -c), so its
-    // claims are kept for re-adoption; if it never comes back they expire
-    // via prune-on-read. Mailboxes are intentionally kept.
+    // Drop presence only. Claims and mailboxes persist: the identity is
+    // stored in the session, so a resumed session (pi -c) re-adopts its
+    // claims on session_start. If the session never resumes, claims expire
+    // via the orphan grace window in loadReservations.
     await leaveRegistry(ctx.cwd, agentName);
-    if (!hasStableName()) await release(ctx.cwd, agentName);
     stopInboxWatcher();
     if (ctx.hasUI) ctx.ui.setStatus(MESSENGER_STATUS_KEY, undefined);
   });

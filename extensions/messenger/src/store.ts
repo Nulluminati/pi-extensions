@@ -174,20 +174,25 @@ export async function markRead(cwd: string, name: string, ids: string[]): Promis
 
 // --- Reservations ---
 
+/** How long a claim whose owner is gone survives before pruning. Covers the
+ *  gap between a session dying and its identity resuming (pi -c). */
+const ORPHAN_TTL_MS = 10 * 60_000;
+
 export async function loadReservations(cwd: string): Promise<ReservationMap> {
   const reservations = (await readJson<ReservationMap>(reservationsPath(cwd))) ?? {};
   const registry = await loadRegistry(cwd);
   let changed = false;
+  const now = Date.now();
   for (const [prefix, claim] of Object.entries(reservations)) {
-    // Expire claims whose owning process is gone and whose identity is no
-    // longer in the registry (crashed session, or a stable-name session that
-    // never came back). Claims from live owners survive a stable-name restart
-    // until re-adoption; legacy pid-less claims are kept.
-    if (
-      claim.pid !== undefined &&
-      !isProcessAlive(claim.pid) &&
-      registry[claim.owner] === undefined
-    ) {
+    if (claim.pid === undefined || isProcessAlive(claim.pid)) continue;
+    if (registry[claim.owner] !== undefined) continue;
+    // The owning process is gone and its identity has left the registry.
+    // Stamp the first sighting and keep the claim for the grace window so
+    // other sessions' reads cannot destroy it before a resume re-adopts it.
+    if (claim.orphanedAt === undefined) {
+      claim.orphanedAt = now;
+      changed = true;
+    } else if (now - claim.orphanedAt >= ORPHAN_TTL_MS) {
       delete reservations[prefix];
       changed = true;
     }
@@ -254,17 +259,18 @@ export async function reserve(
 }
 
 /**
- * Re-adopt claims owned by `name` after a restart: update their pid to the
- * current process so prune-on-read does not expire them. Only meaningful
- * with a stable identity (PI_MESSENGER_NAME); generated names can never own
- * pre-existing claims.
+ * Re-adopt claims owned by `name` after a resume: update their pid to the
+ * current process and clear any orphan mark so the grace window restarts.
+ * Identities persist in the session (messenger-identity entry), so a resumed
+ * session re-adopts what it held before it quit.
  */
 export async function readoptReservations(cwd: string, name: string): Promise<void> {
   const reservations = await loadReservations(cwd);
   let changed = false;
   for (const claim of Object.values(reservations)) {
-    if (claim.owner === name && claim.pid !== process.pid) {
+    if (claim.owner === name && (claim.pid !== process.pid || claim.orphanedAt !== undefined)) {
       claim.pid = process.pid;
+      delete claim.orphanedAt;
       changed = true;
     }
   }
