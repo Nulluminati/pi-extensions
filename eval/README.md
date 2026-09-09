@@ -71,3 +71,35 @@ npm install, so `missions`/`messenger`/`agents`/`autoresearch` are not loaded.
 Evaluating the extension suite *on* Terminal-Bench requires baking the
 extensions into the adapter's container install (follow-up work; tracked in the
 branch notes). Until then, this harness measures pi itself, not the extensions.
+
+## Baseline results — 2026-09-09
+
+Curated 12-task subset, pi (npm latest) + `openrouter/~z-ai/glm-flash-latest`,
+1 trial, `-n 3`, wall **24.5 min**, total LLM cost **$0.45** (336k in / 44k out /
+314k cached — cache is 45% of the bill even at flash pricing).
+
+| Task | Reward | Time notes |
+|---|---|---|
+| break-filter-js-from-html | 1 | |
+| cancel-async-tasks | 1 | |
+| fix-git | 1 | |
+| git-multibranch | 1 | |
+| openssl-selfsigned-cert | 1 | |
+| sqlite-db-truncate | 1 | |
+| chess-best-move | 0 | agent timeout |
+| circuit-fibsqrt | 0 | |
+| configure-git-webserver | 0 | |
+| count-dataset-tokens | 0 | |
+| filter-js-from-html | 0 | priciest run ($0.16; 113k in) |
+| regex-log | 0 | |
+
+**Resolve rate 50%** — real discrimination at last (the retired homegrown
+suite scored 100% on every configuration). A bonus partial run of the full
+89-task set went 7/17 (41%) on non-subset tasks before being stopped.
+
+Notes for next runs:
+- 6/12 is small-n; rerun with `--trials 3` before drawing conclusions.
+- The one `AgentTimeoutError` (chess-best-move) suggests a per-task timeout
+  bump (`--timeout-multiplier`) for reasoning-heavy tasks.
+- Comparisons to run next: kimi-k3 coordinator, and suite-extensions-in-container
+  (needs baking extensions into the adapter image; tracked as follow-up).

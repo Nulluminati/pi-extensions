@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -135,6 +136,23 @@ describe("autoresearch-extension", () => {
 
     const gitLog = await execFileAsync("git", ["log", "--oneline"], { cwd });
     expect(gitLog.stdout).toContain("autoresearch");
+  });
+
+  it("discard removes only experiment-created files, not pre-existing untracked files", async () => {
+    // Untracked files that predate the campaign (agent state, scratch notes)
+    // must survive every discard — deleting them is data loss.
+    await writeFile(join(cwd, "keepme.txt"), "precise state\n");
+    await initSession();
+
+    await writeFile(join(cwd, "code.txt"), "experiment edit\n");
+    await writeFile(join(cwd, "experiment-only.txt"), "made by the experiment\n");
+    await executeTool({ action: "run", description: "adds a file", hypothesis: "h" });
+    await executeTool({ action: "log", status: "discard", description: "adds a file" });
+
+    expect(await readFile(join(cwd, "keepme.txt"), "utf8")).toContain("precise state");
+    expect(existsSync(join(cwd, "experiment-only.txt"))).toBe(false);
+    // Tracked files still revert.
+    expect(await readFile(join(cwd, "code.txt"), "utf8")).toBe("v1\n");
   });
 
   it("discard reverts the working tree", async () => {

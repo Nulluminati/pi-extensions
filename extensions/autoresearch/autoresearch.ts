@@ -29,6 +29,7 @@ import {
   commitAll,
   discardAll,
   isGitRepo,
+  listUntracked,
   MEASURE_TIMEOUT_MS,
   parseMetric,
   runCommand,
@@ -38,10 +39,12 @@ import {
   appendLog,
   excludeAutoFromGit,
   loadConfig,
+  loadUntrackedSnapshot,
   nextRunNumber,
   readLog,
   saveConfig,
   savePrompt,
+  saveUntrackedSnapshot,
 } from "./src/store.ts";
 import type { AutoConfig, RunEntry, RunStatus } from "./src/types.ts";
 
@@ -206,6 +209,9 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
         };
         await appendLog(cwd, baselineEntry);
         entries.push(baselineEntry);
+        // Baseline the untracked file set so discards can scope themselves to
+        // experiment-created files instead of wiping all untracked work.
+        await saveUntrackedSnapshot(cwd, await listUntracked(cwd));
 
         publish(ctx, config, entries);
 
@@ -233,7 +239,7 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
         if (config.checks) {
           const checks = await runCommand(config.checks, cwd, CHECKS_TIMEOUT_MS);
           if (!checks.ok) {
-            await discardAll(cwd);
+            await discardAll(cwd, await loadUntrackedSnapshot(cwd));
             const entries = await readLog(cwd);
             const entry: RunEntry = {
               run: nextRunNumber(entries),
@@ -308,7 +314,7 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
             `autoresearch: ${description} (${config.metric}=${pending.metric ?? "?"})`,
           );
         } else {
-          await discardAll(cwd);
+          await discardAll(cwd, await loadUntrackedSnapshot(cwd));
         }
 
         const entries = await readLog(cwd);
@@ -370,7 +376,7 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
       if (action === "stop") {
         if (pending) {
           // A pending run means uncommitted experiment changes; revert them.
-          await discardAll(cwd).catch(() => {});
+          await discardAll(cwd, await loadUntrackedSnapshot(cwd)).catch(() => {});
           await clearPending(cwd);
         }
         config.stopped = true;

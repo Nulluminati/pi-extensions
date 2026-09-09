@@ -1,6 +1,8 @@
 /** Measurement and git operations for the autoresearch loop. */
 
 import { exec as execCb } from "node:child_process";
+import { rm } from "node:fs/promises";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import { runGit } from "../../../lib/git.ts";
 
@@ -110,8 +112,30 @@ export async function commitAll(cwd: string, message: string): Promise<string> {
   return id.trim();
 }
 
-/** Revert all uncommitted changes, including newly created files. */
-export async function discardAll(cwd: string): Promise<void> {
-  await runGit(cwd, ["add", "-A"]);
+/**
+ * Untracked files (file-level, NUL-safe) relative to cwd.
+ */
+export async function listUntracked(cwd: string): Promise<string[]> {
+  const out = await runGit(cwd, ["status", "--porcelain", "--untracked-files=all", "-z"]);
+  return out
+    .split("\0")
+    .filter((entry) => entry.startsWith("?? "))
+    .map((entry) => entry.slice(3));
+}
+
+/**
+ * Revert the experiment: tracked modifications and deletions are restored,
+ * and untracked files created after the campaign's baseline snapshot are
+ * removed. Pre-existing untracked files (agent state, scratch notes, other
+ * sessions' work) are never touched — staging everything and hard-resetting
+ * would delete them, which is data loss. A missing snapshot (legacy
+ * campaigns) leaves untracked files alone for the same reason.
+ */
+export async function discardAll(cwd: string, baselineUntracked?: string[]): Promise<void> {
   await runGit(cwd, ["reset", "--hard", "HEAD"]);
+  if (baselineUntracked === undefined) return;
+  const baseline = new Set(baselineUntracked);
+  for (const rel of await listUntracked(cwd)) {
+    if (!baseline.has(rel)) await rm(join(cwd, rel), { force: true });
+  }
 }

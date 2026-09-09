@@ -122,3 +122,32 @@ export async function excludeAutoFromGit(cwd: string): Promise<void> {
   if (current.split("\n").includes(".auto/")) return;
   await appendFile(exclude, ".auto/\n", "utf8");
 }
+
+// --- JSON file helpers ---
+
+async function writeJson(path: string, data: unknown): Promise<void> {
+  await writeFile(path, JSON.stringify(data, null, 2), "utf8");
+}
+
+async function readJson<T>(path: string): Promise<T | undefined> {
+  try {
+    return JSON.parse(await readFile(path, "utf8")) as T;
+  } catch {
+    return undefined;
+  }
+}
+
+// --- Untracked baseline snapshot ---
+
+function untrackedSnapshotPath(cwd: string): string {
+  return join(cwd, ".auto", "untracked-snapshot.json");
+}
+
+/** Files untracked when the campaign was initialized: discard never touches these. */
+export async function saveUntrackedSnapshot(cwd: string, files: string[]): Promise<void> {
+  await writeJson(untrackedSnapshotPath(cwd), files);
+}
+
+export async function loadUntrackedSnapshot(cwd: string): Promise<string[] | undefined> {
+  return (await readJson<string[]>(untrackedSnapshotPath(cwd))) ?? undefined;
+}
