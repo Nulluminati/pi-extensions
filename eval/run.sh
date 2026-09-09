@@ -9,7 +9,8 @@
 # OPENROUTER_API_KEY (or the provider key for your chosen model) in the env.
 
 set -euo pipefail
-cd "$(dirname "$0")"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
 
 MODEL="openrouter/~z-ai/glm-flash-latest"
 # Default: the curated subset in tasks-subset.txt (NOT the full 89-task set).
