@@ -8,6 +8,7 @@
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { isProcessAlive } from "../../../lib/presence-shards.ts";
 import type { WorkerRecord, WorkerRegistryFile } from "./types.ts";
 
 // --- Paths ---
@@ -40,17 +41,37 @@ async function writeAtomic(path: string, data: unknown): Promise<void> {
 }
 
 export async function loadWorkers(cwd: string): Promise<Record<string, WorkerRecord>> {
+  let workers: Record<string, WorkerRecord> = {};
   try {
     const raw = await readFile(registryPath(cwd), "utf8");
     const parsed = JSON.parse(raw) as WorkerRegistryFile;
-    return parsed.workers ?? {};
+    workers = parsed.workers ?? {};
   } catch {
     return {};
   }
+  // Reconcile on read: a record stuck in "running" whose pid is dead means
+  // the parent died before the worker finished. Heal it on every read so the
+  // registry reflects reality without waiting for a session_start that may
+  // never come (workers are one-shot processes and cannot resume).
+  let changed = false;
+  for (const worker of Object.values(workers)) {
+    if (worker.status !== "running" || worker.pid === undefined) continue;
+    if (isProcessAlive(worker.pid)) continue;
+    worker.status = "failed";
+    worker.error = "worker process is gone (session ended before completion)";
+    worker.endedAt = Date.now();
+    changed = true;
+  }
+  if (changed) await writeAtomic(registryPath(cwd), { workers });
+  return workers;
 }
 
 export async function saveWorker(cwd: string, worker: WorkerRecord): Promise<void> {
   const workers = await loadWorkers(cwd);
+  // The child may finish before the parent's initial running-snapshot lands;
+  // never overwrite a terminal record with a stale running one.
+  const existing = workers[worker.id];
+  if (existing && existing.status !== "running" && worker.status === "running") return;
   workers[worker.id] = worker;
   await writeAtomic(registryPath(cwd), { workers });
 }

@@ -7,7 +7,12 @@ import type { ExtensionAPI, ExtensionContext } from "pi";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import agentsExtension from "../../extensions/agents/agents.ts";
 import { extractAssistantText } from "../../extensions/agents/src/runner.ts";
-import { generateWorkerId, loadWorker, loadWorkers } from "../../extensions/agents/src/store.ts";
+import {
+  generateWorkerId,
+  loadWorker,
+  loadWorkers,
+  saveWorker,
+} from "../../extensions/agents/src/store.ts";
 import {
   applyPatch,
   captureWorktreePatch,
@@ -212,6 +217,44 @@ ${SUCCESS_WORKER}`,
     const record = await loadWorker(cwd, id);
     expect(record?.status).toBe("failed");
     expect(record?.error).toContain("gone");
+  });
+
+  it("loadWorkers reconciles stuck-running records whose pid is dead on any read", async () => {
+    // The parent may have died with no session_start ever running again; the
+    // read itself must heal stuck-running records.
+    await saveWorker(cwd, {
+      id: "w-stuck",
+      name: "stuck",
+      task: "orphaned task",
+      model: "m",
+      pid: 999_999_999,
+      cwd,
+      status: "running",
+      startedAt: Date.now() - 5_000,
+    });
+
+    const workers = await loadWorkers(cwd);
+
+    expect(workers["w-stuck"].status).toBe("failed");
+    expect(workers["w-stuck"].error).toContain("gone");
+    expect(workers["w-stuck"].endedAt).toBeDefined();
+  });
+
+  it("loadWorkers leaves live running records alone", async () => {
+    await saveWorker(cwd, {
+      id: "w-live",
+      name: "live",
+      task: "live task",
+      model: "m",
+      pid: process.pid,
+      cwd,
+      status: "running",
+      startedAt: Date.now(),
+    });
+
+    const workers = await loadWorkers(cwd);
+
+    expect(workers["w-live"].status).toBe("running");
   });
 
   it("session_shutdown cancels running workers", async () => {
