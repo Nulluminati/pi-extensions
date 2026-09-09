@@ -11,8 +11,15 @@
 
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
-import { appendFile, mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import {
+  isProcessAlive,
+  loadShards,
+  readShard,
+  removeShard,
+  writeShard,
+} from "../../../lib/presence-shards.ts";
 import type { Message, Presence, PresenceRegistry, ReservationMap } from "./types.ts";
 
 // --- Paths ---
@@ -27,10 +34,6 @@ function registryPath(cwd: string): string {
 
 function registryDir(cwd: string): string {
   return join(messengerDir(cwd), "registry");
-}
-
-function agentShardPath(cwd: string, name: string): string {
-  return join(registryDir(cwd), `${encodeURIComponent(name)}.json`);
 }
 
 function reservationsPath(cwd: string): string {
@@ -60,56 +63,10 @@ async function readJson<T>(path: string): Promise<T | undefined> {
 
 // --- Presence ---
 
-export function isProcessAlive(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export async function loadRegistry(cwd: string): Promise<PresenceRegistry> {
-  const registry: PresenceRegistry = {};
-
-  // Migrate the legacy single-file registry to shards: one file per agent so
-  // concurrent heartbeats never rewrite each other's entries (lost updates).
-  const legacy = await readJson<PresenceRegistry>(registryPath(cwd));
-  if (legacy) {
-    for (const [name, presence] of Object.entries(legacy)) {
-      registry[name] = presence;
-      await writeJsonAtomic(agentShardPath(cwd, name), presence);
-    }
-    await unlink(registryPath(cwd)).catch(() => {});
-  }
-
-  let files: string[] = [];
-  try {
-    files = await readdir(registryDir(cwd));
-  } catch {
-    // No registry yet.
-  }
-  for (const file of files) {
-    if (!file.endsWith(".json")) continue;
-    const presence = await readJson<Presence>(join(registryDir(cwd), file));
-    if (!presence || typeof presence.name !== "string" || typeof presence.pid !== "number") {
-      // Corrupt shard: drop it rather than failing every read.
-      await unlink(join(registryDir(cwd), file)).catch(() => {});
-      continue;
-    }
-    registry[presence.name] = presence;
-  }
-
-  // Prune dead sessions by deleting their shard so `list` shows only live
-  // agents and orphans cannot accumulate.
-  for (const [name, presence] of Object.entries(registry)) {
-    if (!isProcessAlive(presence.pid)) {
-      await unlink(agentShardPath(cwd, name)).catch(() => {});
-      delete registry[name];
-    }
-  }
-  return registry;
+  // Sharded registry: one file per agent, dead pids pruned on read, legacy
+  // single-file registry migrated on first read. All in lib/presence-shards.
+  return loadShards<Presence>(registryDir(cwd), { legacyPath: registryPath(cwd) });
 }
 
 export async function heartbeat(
@@ -119,7 +76,7 @@ export async function heartbeat(
 ): Promise<void> {
   // One shard per agent: this write never touches another agent's entry, so
   // concurrent heartbeats cannot clobber each other.
-  const existing = await readJson<Presence>(agentShardPath(cwd, name));
+  const existing = await readShard<Presence>(registryDir(cwd), name);
   const model = info.model ?? existing?.model;
   const status = info.status ?? existing?.status;
   const presence: Presence = {
@@ -131,11 +88,11 @@ export async function heartbeat(
     startedAt: existing?.startedAt ?? Date.now(),
     lastSeenAt: Date.now(),
   };
-  await writeJsonAtomic(agentShardPath(cwd, name), presence);
+  await writeShard(registryDir(cwd), presence);
 }
 
 export async function leaveRegistry(cwd: string, name: string): Promise<void> {
-  await unlink(agentShardPath(cwd, name)).catch(() => {});
+  await removeShard(registryDir(cwd), name);
 }
 
 // --- Mailbox ---
