@@ -12,7 +12,9 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 MODEL="openrouter/~z-ai/glm-flash-latest"
-TASKS=""
+# Default: the curated subset in tasks-subset.txt (NOT the full 89-task set).
+TASKS="$(grep -v '^#' "$SCRIPT_DIR/tasks-subset.txt" | grep -v '^$' | tr '\n' ',' | sed 's/,$//')"
+
 TRIALS=1
 JOBS=3
 ORACLE=0
