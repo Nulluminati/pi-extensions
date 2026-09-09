@@ -66,6 +66,8 @@ export interface StartWorkerOptions {
   workerId: string;
   /** Extra `-e` extension paths loaded by the worker session. */
   extensionPaths: string[];
+  /** Route the worker's built-in tools through a Gondolin VM (--gondolin). */
+  sandbox?: boolean;
   /** Isolated worktree; when set the captured patch is stored on the record. */
   worktree?: { path: string; branch: string };
   events: WorkerEvents;
@@ -85,6 +87,7 @@ export function startWorker(options: StartWorkerOptions): RunningWorker {
   const args = ["--mode", "json", "--no-session", "--no-extensions", "-p", options.task];
   if (options.model) args.push("--model", options.model);
   for (const ext of options.extensionPaths) args.push("-e", ext);
+  if (options.sandbox) args.push("--gondolin");
 
   const child = spawn(workerBinary(), args, {
     cwd: options.worktree?.path ?? options.cwd,

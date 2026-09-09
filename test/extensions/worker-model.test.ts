@@ -25,7 +25,6 @@ function configPath(): string {
 describe("worker-model-extension", () => {
   it("registers the command and lifecycle handlers", async () => {
     const pi = createMockPi();
-    const ctx = createMockContext();
     await workerModelExtension(pi);
 
     expect(pi.registerCommand).toHaveBeenCalledWith(

@@ -17,6 +17,12 @@ export const DELEGATE_PARAMETERS = {
       description:
         'Model for the worker as provider/id. Resolution: this parameter, then $PI_WORKER_MODEL or worker-model.json; "main" inherits the session model. Unconfigured delegates fail with a descriptive error.',
     },
+    extensions: {
+      type: "array",
+      items: { type: "string" },
+      description:
+        "Extension names for the worker to load (resolution: this param, then $PI_WORKER_EXTENSIONS, then worker-extensions.json, then the default set). messenger is always loaded. Workflow extensions (agents, missions, autoresearch, goal, plan) are forbidden in workers.",
+    },
     isolate: {
       type: "boolean",
       description:

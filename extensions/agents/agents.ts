@@ -17,6 +17,7 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext, ExtensionUIContext } from "pi";
+import { resolveWorkerExtensions } from "../../lib/worker-extensions.ts";
 import { resolveWorkerModelSpec } from "../../lib/worker-model.ts";
 import {
   AGENTS_STATE_EVENT,
@@ -51,7 +52,6 @@ function envTimeoutMs(): number {
 export default async function agentsExtension(pi: ExtensionAPI) {
   const running = new Map<string, RunningWorker>();
   let lastUi: ExtensionUIContext | undefined;
-  const messengerPath = fileURLToPath(new URL("../messenger/messenger.ts", import.meta.url));
 
   // --- Publishing ---
 
@@ -153,7 +153,17 @@ export default async function agentsExtension(pi: ExtensionAPI) {
       );
       if (duplicate) throw new Error(`A running worker named "${name}" already exists.`);
 
-      const extensionPaths = existsSync(messengerPath) ? [messengerPath] : [];
+      // Worker extension allowlist: delegate param -> PI_WORKER_EXTENSIONS ->
+      // worker-extensions.json -> default set. messenger is always included;
+      // denylisted workflow extensions are rejected outright.
+      const requestedExtensions = Array.isArray(params.extensions)
+        ? params.extensions.map(String)
+        : undefined;
+      const resolvedExtensions = resolveWorkerExtensions(requestedExtensions, {
+        extensionsRoot: fileURLToPath(new URL("../../extensions/", import.meta.url)),
+      });
+      const extensionPaths = resolvedExtensions.map((extension) => extension.path);
+      const sandbox = resolvedExtensions.some((extension) => extension.name === "gondolin");
 
       const runningWorker = startWorker({
         cwd: ctx.cwd,
@@ -163,6 +173,7 @@ export default async function agentsExtension(pi: ExtensionAPI) {
         timeoutMs,
         workerId,
         extensionPaths,
+        sandbox,
         ...(worktree !== undefined ? { worktree } : {}),
         events: makeEvents(ctx),
         onRecord: (worker) => saveWorker(ctx.cwd, worker),

@@ -118,6 +118,36 @@ describe("agents-extension", () => {
     expect(names).toContain("workers");
   });
 
+  it("delegate spawns workers with the resolved extension paths and --gondolin", async () => {
+    const argsFile = join(fixtureDir, "captured-args.txt");
+    const fixture = await writeFixture(
+      fixtureDir,
+      "args-worker.sh",
+      `#!/bin/sh
+printf '%s\\n' "$@" > '${argsFile}'
+${SUCCESS_WORKER}`,
+    );
+    setEnv("PI_WORKER_COMMAND", fixture);
+    setEnv("PI_WORKER_EXTENSIONS", undefined);
+
+    await executeTool("delegate", { task: "say hi", isolate: false, wait: true });
+
+    const args = (await readFile(argsFile, "utf8")).split("\n");
+    expect(args).toContain("--gondolin");
+    const messengerIndex = args.indexOf("-e");
+    expect(messengerIndex).toBeGreaterThanOrEqual(0);
+    expect(args[messengerIndex + 1]).toContain("messenger.ts");
+    expect(args.some((arg) => arg.includes("code-search"))).toBe(true);
+  });
+
+  it("delegate rejects forbidden worker extensions outright", async () => {
+    setEnv("PI_WORKER_COMMAND", join(fixtureDir, "unused.sh"));
+
+    await expect(
+      executeTool("delegate", { task: "anything", isolate: false, extensions: ["agents"] }),
+    ).rejects.toThrow(/forbidden/);
+  });
+
   it("delegate fails with a descriptive error when no worker model is configured", async () => {
     setEnv("PI_WORKER_MODEL", undefined);
     // No worker-model.json config exists in the temp cwd's agent dir.
