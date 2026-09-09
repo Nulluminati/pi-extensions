@@ -73,8 +73,10 @@ describe("messenger-extension", () => {
 
   it("send delivers to a mailbox and inbox reads and clears it", async () => {
     process.env.PI_MESSENGER_NAME = "receiver";
-    const start = getEventHandler("session_start");
-    await start({ type: "session_start", reason: "startup" }, mockCtx);
+    await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+    // Busy while the mail arrives, so the watcher does not auto-deliver and
+    // the manual inbox read below has something to read.
+    mockCtx.isIdle = vi.fn(() => false);
 
     await executeTool({ action: "send", to: "receiver", text: "hello from tests" });
     expect(await readInbox(cwd, "receiver")).toHaveLength(1);
@@ -177,6 +179,8 @@ describe("messenger-extension", () => {
   it("agent_settled delivers unread mail into the conversation and marks it read", async () => {
     process.env.PI_MESSENGER_NAME = "busy";
     await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+    // Mail arrives mid-turn: the watcher must defer to the settle handler.
+    mockCtx.isIdle = vi.fn(() => false);
     await sendMessage(cwd, "busy", "peer", "please sync on the API shape");
 
     mockCtx.isIdle = vi.fn(() => true);
@@ -197,21 +201,94 @@ describe("messenger-extension", () => {
     expect(await readInbox(cwd, "busy")).toHaveLength(0);
   });
 
-  it("session_shutdown leaves presence and releases reservations", async () => {
-    process.env.PI_MESSENGER_NAME = "leaver";
+  it("incoming mail wakes an idle session without a settle", async () => {
+    process.env.PI_MESSENGER_NAME = "watched";
+    mockCtx.isIdle = vi.fn(() => true);
+    await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+
+    // No turn has ever run; only the inbox watcher can deliver this.
+    await sendMessage(cwd, "watched", "peer", "wake up call");
+    await vi.waitFor(() =>
+      expect(mockPi.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ customType: "messenger-inbox" }),
+        { triggerTurn: true },
+      ),
+    );
+    expect(await readInbox(cwd, "watched")).toHaveLength(0);
+  });
+
+  it("inbox watcher ignores other agents' mailboxes", async () => {
+    process.env.PI_MESSENGER_NAME = "watched";
+    mockCtx.isIdle = vi.fn(() => true);
+    await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+
+    await sendMessage(cwd, "someone-else", "peer", "not for you");
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(mockPi.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("inbox watcher stops after session_shutdown", async () => {
+    process.env.PI_MESSENGER_NAME = "watched";
+    mockCtx.isIdle = vi.fn(() => true);
+    await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+    await getEventHandler("session_shutdown")(
+      { type: "session_shutdown", reason: "quit" },
+      mockCtx,
+    );
+
+    await sendMessage(cwd, "watched", "peer", "too late");
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(mockPi.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("session_shutdown leaves presence and releases generated-name reservations", async () => {
+    // No PI_MESSENGER_NAME: the generated identity cannot be re-adopted by a
+    // restarted session, so claims are released on shutdown.
     await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
     await executeTool({ action: "reserve", paths: ["src/leaver"] });
+    const ownName = Object.entries(await loadRegistry(cwd)).find(
+      ([, presence]) => presence.pid === process.pid,
+    )?.[0];
+    expect(ownName).toBeDefined();
 
     await getEventHandler("session_shutdown")(
       { type: "session_shutdown", reason: "quit" },
       mockCtx,
     );
 
-    expect((await loadRegistry(cwd)).leaver).toBeUndefined();
+    expect(Object.keys(await loadRegistry(cwd))).toHaveLength(0);
     expect((await loadReservations(cwd))["src/leaver"]).toBeUndefined();
     // Mailbox survives on purpose.
     await sendMessage(cwd, "leaver", "x", "late mail");
     expect(await readInbox(cwd, "leaver")).toHaveLength(1);
+  });
+
+  it("session_shutdown keeps reservations under a stable name for restart", async () => {
+    process.env.PI_MESSENGER_NAME = "stable-owner";
+    await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+    await executeTool({ action: "reserve", paths: ["src/stable"] });
+
+    await getEventHandler("session_shutdown")(
+      { type: "session_shutdown", reason: "quit" },
+      mockCtx,
+    );
+
+    // Presence is gone, but the claim survives so the restarted session can
+    // re-adopt it (pi -c with the same PI_MESSENGER_NAME).
+    expect((await loadRegistry(cwd))["stable-owner"]).toBeUndefined();
+    expect((await loadReservations(cwd))["src/stable"]).toBeDefined();
+  });
+
+  it("session_start re-adopts own reservations with the current pid", async () => {
+    process.env.PI_MESSENGER_NAME = "returning";
+    // Simulate a claim left behind by a previous process that died.
+    await reserve(cwd, "returning", ["src/kept"], "before restart", 999999999);
+
+    await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+
+    const claim = (await loadReservations(cwd))["src/kept"];
+    expect(claim).toBeDefined();
+    expect(claim?.pid).toBe(process.pid);
   });
 
   it("list shows online agents from the registry", async () => {
@@ -250,6 +327,34 @@ describe("messenger-store", () => {
     expect(normalizePathPrefix(process.cwd(), "src/x.ts")).toBe("src/x.ts");
     expect(normalizePathPrefix(process.cwd(), "extensions/missions")).toBe("extensions/missions");
     expect(normalizePathPrefix(process.cwd(), "/etc/passwd")).toBeUndefined();
+  });
+
+  it("reserve records the owning pid", async () => {
+    await reserve(cwd, "owner", ["src/a"], "refactor", process.pid);
+    const claims = await loadReservations(cwd);
+    expect(claims["src/a"]).toMatchObject({ owner: "owner", pid: process.pid });
+  });
+
+  it("loadReservations prunes claims whose process died and left the registry", async () => {
+    // No registry entry: a dead pid means the owner is gone for good.
+    await reserve(cwd, "crashed", ["src/dead"], undefined, 999999999);
+    const claims = await loadReservations(cwd);
+    expect(claims["src/dead"]).toBeUndefined();
+  });
+
+  it("loadReservations keeps claims whose owner is live in the registry", async () => {
+    // Stable-name restart: the recorded pid is stale but the owner has
+    // re-heartbeated, so the claim must survive until re-adoption.
+    await heartbeat(cwd, "live-owner", { pid: process.pid, cwd });
+    await reserve(cwd, "live-owner", ["src/live"], undefined, 999999999);
+    const claims = await loadReservations(cwd);
+    expect(claims["src/live"]).toBeDefined();
+  });
+
+  it("loadReservations keeps legacy claims without a pid", async () => {
+    await reserve(cwd, "old-owner", ["src/legacy"]);
+    const claims = await loadReservations(cwd);
+    expect(claims["src/legacy"]).toBeDefined();
   });
 
   it("findBlockingReservation covers directories by boundary", async () => {

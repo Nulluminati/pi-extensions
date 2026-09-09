@@ -25,6 +25,8 @@ export interface Message {
 
 export interface Reservation {
   owner: string;
+  /** Owning process pid, used to expire claims from crashed sessions. */
+  pid?: number;
   reason?: string;
   at: number;
 }

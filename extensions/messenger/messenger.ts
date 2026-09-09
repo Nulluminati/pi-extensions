@@ -12,6 +12,8 @@
  * polling.
  */
 
+import { type FSWatcher, mkdirSync, watch } from "node:fs";
+import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "pi";
 import { checkToolCall } from "./src/enforce.ts";
 import {
@@ -22,7 +24,7 @@ import {
   MESSENGER_STATUS_KEY,
   mailStatusText,
 } from "./src/format.ts";
-import { resolveAgentName } from "./src/identity.ts";
+import { hasStableName, resolveAgentName } from "./src/identity.ts";
 import { MESSENGER_PARAMETERS } from "./src/schemas.ts";
 import {
   heartbeat,
@@ -31,6 +33,7 @@ import {
   loadReservations,
   markRead,
   readInbox,
+  readoptReservations,
   release,
   reserve,
   sendMessage,
@@ -45,6 +48,7 @@ const INBOX_MESSAGE_TYPE = "messenger-inbox";
 export default async function messengerExtension(pi: ExtensionAPI) {
   let agentName = "";
   let delivering = false;
+  let inboxWatcher: FSWatcher | undefined;
 
   // --- Publishing ---
 
@@ -98,6 +102,47 @@ export default async function messengerExtension(pi: ExtensionAPI) {
       delivering = false;
     }
     await refreshStatus(ctx);
+  }
+
+  // --- Inbox watcher ---
+
+  /**
+   * Deliver unread mail when the session is idle. Settle-time delivery only
+   * runs after a completed turn, so a session that is open but never prompted
+   * would never check its mailbox; the watcher closes that gap by delivering
+   * as soon as mail arrives while idle.
+   */
+  async function deliverWhenIdle(ctx: ExtensionContext): Promise<void> {
+    try {
+      if (!ctx.isIdle()) return;
+      await deliverInbox(ctx);
+    } catch {
+      // ctx can go stale after session replacement; settle-time delivery
+      // still works.
+    }
+  }
+
+  function stopInboxWatcher(): void {
+    inboxWatcher?.close();
+    inboxWatcher = undefined;
+  }
+
+  function startInboxWatcher(ctx: ExtensionContext): void {
+    if (!agentName) return;
+    stopInboxWatcher();
+    try {
+      const inboxDir = join(ctx.cwd, ".pi", "messenger", "inbox");
+      mkdirSync(inboxDir, { recursive: true });
+      inboxWatcher = watch(inboxDir, (_event, filename) => {
+        if (filename && filename !== `${agentName}.jsonl`) return;
+        void deliverWhenIdle(ctx);
+      });
+      // The watched directory can vanish (project cleanup) or the watcher can
+      // hit resource limits; delivery still works at settle time.
+      inboxWatcher.on("error", () => {});
+    } catch {
+      // Watching is best-effort; agent_settled delivery remains.
+    }
   }
 
   // --- Tool ---
@@ -163,7 +208,13 @@ export default async function messengerExtension(pi: ExtensionAPI) {
         const paths = Array.isArray(params.paths) ? params.paths.map(String) : [];
         if (paths.length === 0) throw new Error("reserve requires paths (array of paths).");
         const reason = typeof params.reason === "string" ? params.reason : undefined;
-        const { reserved, conflicts } = await reserve(ctx.cwd, agentName, paths, reason);
+        const { reserved, conflicts } = await reserve(
+          ctx.cwd,
+          agentName,
+          paths,
+          reason,
+          process.pid,
+        );
         const lines: string[] = [];
         for (const p of reserved) lines.push(`Reserved ${p}.`);
         for (const c of conflicts) {
@@ -234,6 +285,10 @@ export default async function messengerExtension(pi: ExtensionAPI) {
       cwd: ctx.cwd,
       ...(model !== undefined ? { model } : {}),
     });
+    // A stable identity may own claims left by a previous process of the
+    // same name; re-adopt them before prune-on-read can expire them.
+    await readoptReservations(ctx.cwd, agentName);
+    startInboxWatcher(ctx);
     await refreshStatus(ctx);
   });
 
@@ -243,10 +298,14 @@ export default async function messengerExtension(pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
-    // Release our reservations and presence so other agents aren't blocked by
-    // a dead session. Mailboxes are intentionally kept.
+    // Release our presence and, for generated names, our reservations so
+    // other agents aren't blocked by a dead session. A stable identity
+    // (PI_MESSENGER_NAME) may restart into the same name (pi -c), so its
+    // claims are kept for re-adoption; if it never comes back they expire
+    // via prune-on-read. Mailboxes are intentionally kept.
     await leaveRegistry(ctx.cwd, agentName);
-    await release(ctx.cwd, agentName);
+    if (!hasStableName()) await release(ctx.cwd, agentName);
+    stopInboxWatcher();
     if (ctx.hasUI) ctx.ui.setStatus(MESSENGER_STATUS_KEY, undefined);
   });
 }

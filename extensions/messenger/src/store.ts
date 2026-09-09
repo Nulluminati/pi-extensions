@@ -175,7 +175,25 @@ export async function markRead(cwd: string, name: string, ids: string[]): Promis
 // --- Reservations ---
 
 export async function loadReservations(cwd: string): Promise<ReservationMap> {
-  return (await readJson<ReservationMap>(reservationsPath(cwd))) ?? {};
+  const reservations = (await readJson<ReservationMap>(reservationsPath(cwd))) ?? {};
+  const registry = await loadRegistry(cwd);
+  let changed = false;
+  for (const [prefix, claim] of Object.entries(reservations)) {
+    // Expire claims whose owning process is gone and whose identity is no
+    // longer in the registry (crashed session, or a stable-name session that
+    // never came back). Claims from live owners survive a stable-name restart
+    // until re-adoption; legacy pid-less claims are kept.
+    if (
+      claim.pid !== undefined &&
+      !isProcessAlive(claim.pid) &&
+      registry[claim.owner] === undefined
+    ) {
+      delete reservations[prefix];
+      changed = true;
+    }
+  }
+  if (changed) await saveReservations(cwd, reservations);
+  return reservations;
 }
 
 async function saveReservations(cwd: string, reservations: ReservationMap): Promise<void> {
@@ -207,6 +225,7 @@ export async function reserve(
   name: string,
   paths: string[],
   reason?: string,
+  pid?: number,
 ): Promise<{ reserved: string[]; conflicts: Array<{ path: string; owner: string }> }> {
   const reservations = await loadReservations(cwd);
   const reserved: string[] = [];
@@ -224,6 +243,7 @@ export async function reserve(
     }
     reservations[prefix] = {
       owner: name,
+      ...(pid !== undefined ? { pid } : {}),
       ...(reason?.trim() ? { reason: reason.trim() } : {}),
       at: Date.now(),
     };
@@ -231,6 +251,24 @@ export async function reserve(
   }
   await saveReservations(cwd, reservations);
   return { reserved, conflicts };
+}
+
+/**
+ * Re-adopt claims owned by `name` after a restart: update their pid to the
+ * current process so prune-on-read does not expire them. Only meaningful
+ * with a stable identity (PI_MESSENGER_NAME); generated names can never own
+ * pre-existing claims.
+ */
+export async function readoptReservations(cwd: string, name: string): Promise<void> {
+  const reservations = await loadReservations(cwd);
+  let changed = false;
+  for (const claim of Object.values(reservations)) {
+    if (claim.owner === name && claim.pid !== process.pid) {
+      claim.pid = process.pid;
+      changed = true;
+    }
+  }
+  if (changed) await saveReservations(cwd, reservations);
 }
 
 export async function release(cwd: string, name: string, paths?: string[]): Promise<string[]> {
