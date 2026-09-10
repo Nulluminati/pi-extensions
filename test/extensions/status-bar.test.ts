@@ -1918,6 +1918,45 @@ describe("status-bar flex badge", () => {
     expect(metaLine).toContain("on");
   });
 
+  it("prompt history survives editor recreation (the /reload case)", async () => {
+    // Simulate: submit prompts in one editor instance, then /reload recreates
+    // the editor — the new instance must inherit the previous history.
+    const { PolishedEditor } = await import("../../extensions/status-bar/src/editor.ts");
+    const theme = { fg: vi.fn((_c: string, t: string) => t) };
+    const tui = { requestRender: vi.fn() };
+
+    const first = new PolishedEditor(
+      tui,
+      theme,
+      {},
+      theme,
+      () => "main",
+      () => "",
+      () => "none",
+      () => ({ on: false, capable: false }),
+      () => undefined,
+      () => undefined,
+    );
+    first.addToHistory("prompt before reload");
+
+    const second = new PolishedEditor(
+      tui,
+      theme,
+      {},
+      theme,
+      () => "main",
+      () => "",
+      () => "none",
+      () => ({ on: false, capable: false }),
+      () => undefined,
+      () => undefined,
+    );
+    const history = (second as unknown as { history: string[] }).history;
+    expect(history).toContain("prompt before reload");
+    // Newest first: the mirrored entry is reachable within the first few.
+    expect(history.indexOf("prompt before reload")).toBeLessThanOrEqual(1);
+  });
+
   it("installed editor hides the flex badge when flexCapable is false", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();

@@ -122,6 +122,36 @@ export function renderEditorModalFrame(input: EditorModalFrameInput): string[] {
  * keybindings, autocomplete, and history are inherited; only render() is
  * overridden to add the frame.
  */
+
+// --- Prompt history persistence ---
+
+/**
+ * The app stores prompt history per editor instance, and recreates the editor
+ * whenever the editor component is re-set (extension reload, /reload) — the
+ * swap carries only the current text, so the history buffer would reset. The
+ * store below mirrors submitted prompts in the process (globalThis-keyed, so
+ * extension re-imports cannot lose it) and every new PolishedEditor replays
+ * it into its own buffer on construction.
+ */
+const HISTORY_STORE_KEY = Symbol.for("status-bar.prompt-history");
+const HISTORY_LIMIT = 100;
+
+function promptHistoryStore(): string[] {
+  const g = globalThis as Record<symbol, unknown>;
+  let store = g[HISTORY_STORE_KEY] as string[] | undefined;
+  if (!store) {
+    store = [];
+    g[HISTORY_STORE_KEY] = store;
+  }
+  return store;
+}
+
+function mirrorPrompt(text: string): void {
+  const store = promptHistoryStore();
+  if (store[0] !== text) store.unshift(text);
+  if (store.length > HISTORY_LIMIT) store.length = HISTORY_LIMIT;
+}
+
 export class PolishedEditor extends CustomEditor {
   private readonly uiTheme: any;
   private readonly getModelLabel: () => string;
@@ -146,6 +176,11 @@ export class PolishedEditor extends CustomEditor {
     getWorkerModelLabel?: () => string,
   ) {
     super(tui, theme, keybindings, { paddingX: 0 });
+    // Restore prompts recorded by previous editor instances (oldest first, so
+    // the newest entry lands at the top of the history buffer).
+    for (const entry of [...promptHistoryStore()].reverse()) {
+      super.addToHistory?.(entry);
+    }
     this.uiTheme = uiTheme;
     this.getModelLabel = getModelLabel;
     this.getSmallModelLabel = getSmallModelLabel;
@@ -156,6 +191,13 @@ export class PolishedEditor extends CustomEditor {
     this.getTitleRight = getTitleRight;
     // The base editor's own borders are discarded by render(); the modal frame
     // supplies its own borderAccent border, so no borderColor override needed.
+  }
+
+  /** Mirror submitted prompts into the process-wide store for successors. */
+  override addToHistory(text: string): void {
+    super.addToHistory?.(text);
+    const trimmed = text.trim();
+    if (trimmed) mirrorPrompt(trimmed);
   }
 
   render(width: number): string[] {
