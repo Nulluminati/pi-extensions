@@ -33,7 +33,7 @@ export const ICON_FLEX = "⚡";
 
 // Glyphs specified by Zero Cool.
 export const ICON_SMALL_MODEL = "󰧟";
-export const ICON_WORKER_MODEL = String.fromCodePoint(0xf06ad); // nf-md-robot
+export const ICON_WORKER_MODEL = String.fromCodePoint(0xf52e); // nf-md-robot-industrial
 export const FLEX_ON_COLOR = "success"; // green — the discounted tier is active
 export const FLEX_OFF_COLOR = "dim";
 export const ICON_TURN = "↻";
