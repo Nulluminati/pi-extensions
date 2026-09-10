@@ -2,10 +2,10 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import workerModelExtension, { STATUS_ICON } from "../../extensions/worker-model/worker-model.ts";
-import { createMockCommandContext, createMockContext } from "../mocks/context-mocks.ts";
+import workerModelExtension from "../../extensions/worker-model/worker-model.ts";
+import { createMockCommandContext } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
-import { getCommandHandler, getEventHandler } from "../mocks/test-helpers.ts";
+import { getCommandHandler } from "../mocks/test-helpers.ts";
 
 const temporaryDirectories: string[] = [];
 
@@ -23,7 +23,7 @@ function configPath(): string {
 }
 
 describe("worker-model-extension", () => {
-  it("registers the command and lifecycle handlers", async () => {
+  it("registers the worker-model command", async () => {
     const pi = createMockPi();
     await workerModelExtension(pi);
 
@@ -31,8 +31,6 @@ describe("worker-model-extension", () => {
       "worker-model",
       expect.objectContaining({ description: expect.any(String), handler: expect.any(Function) }),
     );
-    expect(pi.on).toHaveBeenCalledWith("session_start", expect.any(Function));
-    expect(pi.on).toHaveBeenCalledWith("session_shutdown", expect.any(Function));
   });
 
   it("filters the model picker and publishes the selected worker model", async () => {
@@ -142,33 +140,6 @@ describe("worker-model-extension", () => {
       expect.stringContaining("synthetic/hf:zai-org/GLM-5.3-Flash"),
       "info",
     );
-  });
-
-  it("publishes a status line on session start and clears it on shutdown", async () => {
-    const path = configPath();
-    vi.stubEnv("PI_WORKER_MODEL_CONFIG", path);
-    vi.stubEnv("PI_WORKER_MODEL", "");
-    const { saveWorkerModelConfig } = await import("../../lib/worker-model.ts");
-    saveWorkerModelConfig({ provider: "synthetic", model: "hf:zai-org/GLM-5.3-Flash" }, path);
-    const pi = createMockPi();
-    const ctx = createMockContext();
-    await workerModelExtension(pi);
-
-    await getEventHandler(pi, "session_start")({ type: "session_start", reason: "startup" }, ctx);
-    expect(ctx.ui.setStatus).toHaveBeenCalledWith(
-      "worker-model",
-      expect.stringContaining("synthetic/hf:zai-org/GLM-5.3-Flash"),
-    );
-
-    await getEventHandler(pi, "session_shutdown")(
-      { type: "session_shutdown", reason: "quit" },
-      ctx,
-    );
-    expect(ctx.ui.setStatus).toHaveBeenCalledWith("worker-model", undefined);
-  });
-
-  it("exports a distinct status icon", () => {
-    expect(STATUS_ICON).not.toBe("");
   });
 });
 

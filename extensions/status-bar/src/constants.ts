@@ -30,6 +30,10 @@ export const ICON_THINKING = String.fromCodePoint(0xf09d1);
 // Lightning bolt marks the Neuralwatt flex pricing tier, shown next to the
 // thinking level in the editor meta line when the selected model is flex-capable.
 export const ICON_FLEX = "⚡";
+
+// Glyphs specified by Zero Cool.
+export const ICON_SMALL_MODEL = "󰧟";
+export const ICON_WORKER_MODEL = String.fromCodePoint(0xf06ad); // nf-md-robot
 export const FLEX_ON_COLOR = "success"; // green — the discounted tier is active
 export const FLEX_OFF_COLOR = "dim";
 export const ICON_TURN = "↻";

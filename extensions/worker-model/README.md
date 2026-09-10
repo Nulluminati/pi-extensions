@@ -15,7 +15,7 @@ The agents extension resolves each delegate's model through `lib/worker-model.ts
 ## How It Works
 
 - **Config file**: `<agentDir>/worker-model.json` (override with `PI_WORKER_MODEL_CONFIG`), written atomically; `PI_WORKER_MODEL` env var overrides the file.
-- **Status**: a `Worker Model` status entry and a grey `/ provider/model` segment in the status bar's editor meta line (alongside the small model), refreshed by a config-file watcher.
+- **Display**: a grey `/ <icon> provider/model` segment on the status bar's editor meta line, right next to the small model (owned by the status-bar extension, which watches the config file).
 - **Picker**: same searchable model list as `/smallmodel`, filtered to authenticated text models.
 
 ## Pi APIs Used

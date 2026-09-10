@@ -5,6 +5,8 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import statusBarExtension, {
   buildEditorMetaSegments,
+  ICON_SMALL_MODEL,
+  ICON_WORKER_MODEL,
   renderEditorModalFrame,
   STATUS_ICON,
 } from "../../extensions/status-bar/status-bar.ts";
@@ -1624,7 +1626,7 @@ describe("status-bar editor install", () => {
     editor.render(100);
 
     expect(fgMock).toHaveBeenCalledWith("dim", "/");
-    expect(fgMock).toHaveBeenCalledWith("dim", "synthetic/haiku");
+    expect(fgMock).toHaveBeenCalledWith("dim", expect.stringContaining("synthetic/haiku"));
     expect(italicMock).not.toHaveBeenCalled();
   });
 
@@ -1873,6 +1875,11 @@ describe("status-bar flex badge", () => {
     expect(workerIndex).toBe(smallIndex + 2);
     // The "/" separator sits between the two secondary labels.
     expect(segments[smallIndex + 1]).toBe("/");
+    // Each secondary label carries its own distinguishing icon.
+    console.log("SEGMENTS", JSON.stringify(segments));
+    console.log("ICONS", JSON.stringify(ICON_SMALL_MODEL), JSON.stringify(ICON_WORKER_MODEL));
+    expect(segments[smallIndex].startsWith(ICON_SMALL_MODEL)).toBe(true);
+    expect(segments[workerIndex].startsWith(ICON_WORKER_MODEL)).toBe(true);
   });
 
   it("buildEditorMetaSegments omits the flex badge when the model is not flex-capable", () => {
@@ -1995,7 +2002,7 @@ describe("status-bar small model segment", () => {
     expect(segments.length).toBe(smallIdx + 1);
   });
 
-  it("renders the small label grey with a dim slash, no prefix or italic", () => {
+  it("renders the small label grey with a dim slash and icon prefix, no italic", () => {
     const fgMock = vi.fn((_color: string, text: string) => text);
     const italicMock = vi.fn((text: string) => text);
     buildEditorMetaSegments(
@@ -2007,9 +2014,12 @@ describe("status-bar small model segment", () => {
     );
 
     expect(fgMock).toHaveBeenCalledWith("dim", "/");
-    expect(fgMock).toHaveBeenCalledWith("dim", "synthetic/haiku");
-    // No "small" prefix and no italicization.
-    expect(fgMock).not.toHaveBeenCalledWith("dim", expect.stringContaining("small "));
+    expect(fgMock).toHaveBeenCalledWith("dim", expect.stringContaining("synthetic/haiku"));
+    // The small-model icon prefixes the label; no italicization.
+    expect(fgMock).toHaveBeenCalledWith(
+      "dim",
+      expect.stringContaining(String.fromCodePoint(0xf09df)),
+    );
     expect(italicMock).not.toHaveBeenCalled();
   });
 

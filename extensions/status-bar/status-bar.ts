@@ -55,7 +55,13 @@ import { buildFooterLines } from "./src/footer.ts";
 import { parseGitStatus } from "./src/git.ts";
 import type { State } from "./src/types.ts";
 
-export { ICON_COLOR, STATUS_ICON, TEXT_COLOR } from "./src/constants.ts";
+export {
+  ICON_COLOR,
+  ICON_SMALL_MODEL,
+  ICON_WORKER_MODEL,
+  STATUS_ICON,
+  TEXT_COLOR,
+} from "./src/constants.ts";
 export {
   buildEditorMetaSegments,
   type EditorModalFrameInput,

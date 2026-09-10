@@ -1,58 +1,22 @@
 /**
  * Worker Model Extension
  *
- * Selects one global model for delegated worker sessions and publishes the
- * selection in Pi's status area. The agents extension resolves the model for
- * every `delegate` call through lib/worker-model.ts: this config (or the
- * PI_WORKER_MODEL environment variable) is the source of truth — there is no
- * hardcoded worker model anywhere.
+ * Selects one global model for delegated worker sessions. The agents
+ * extension resolves the model for every `delegate` call through
+ * lib/worker-model.ts: this config (or the PI_WORKER_MODEL environment
+ * variable) is the source of truth — there is no hardcoded worker model
+ * anywhere. The status-bar extension renders the selection next to the
+ * small model on the editor meta line.
  */
 
-import { type FSWatcher, mkdirSync, watch } from "node:fs";
-import { basename, dirname } from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "pi";
-import {
-  loadWorkerModelConfig,
-  resolveWorkerModelConfigPath,
-  WORKER_MODEL_ENV_VAR,
-} from "../../lib/worker-model.ts";
+import type { ExtensionAPI } from "pi";
+import { loadWorkerModelConfig, WORKER_MODEL_ENV_VAR } from "../../lib/worker-model.ts";
 import { applyWorkerConfig } from "./src/config.ts";
-import { STATUS_ICON, STATUS_KEY } from "./src/constants.ts";
 import { selectWorkerModel } from "./src/picker.ts";
-import { updateStatus } from "./src/status.ts";
-
-export { STATUS_ICON };
 
 // --- Extension ---
 
 export default async function workerModelExtension(pi: ExtensionAPI) {
-  let configWatcher: FSWatcher | undefined;
-  let watcherDebounce: ReturnType<typeof setTimeout> | undefined;
-
-  function stopWatching(): void {
-    if (watcherDebounce) {
-      clearTimeout(watcherDebounce);
-      watcherDebounce = undefined;
-    }
-    configWatcher?.close();
-    configWatcher = undefined;
-  }
-
-  function startWatching(ctx: ExtensionContext): void {
-    stopWatching();
-    const configPath = resolveWorkerModelConfigPath();
-    const configDirectory = dirname(configPath);
-    mkdirSync(configDirectory, { recursive: true });
-    configWatcher = watch(configDirectory, (_event, filename) => {
-      if (filename && filename.toString() !== basename(configPath)) return;
-      if (watcherDebounce) clearTimeout(watcherDebounce);
-      watcherDebounce = setTimeout(() => {
-        watcherDebounce = undefined;
-        void updateStatus(ctx);
-      }, 25);
-    });
-  }
-
   pi.registerCommand("worker-model", {
     description: "Select the global model used by delegated worker sessions",
     handler: async (args, ctx) => {
@@ -61,7 +25,6 @@ export default async function workerModelExtension(pi: ExtensionAPI) {
           `${WORKER_MODEL_ENV_VAR} is overriding the global config. Unset it before using /worker-model.`,
           "warning",
         );
-        await updateStatus(ctx);
         return;
       }
 
@@ -89,25 +52,15 @@ export default async function workerModelExtension(pi: ExtensionAPI) {
         }
         return;
       }
-      await applyWorkerConfig(config, ctx);
+      applyWorkerConfig(config, ctx);
     },
   });
+}
 
-  pi.on("session_start", async (_event, ctx) => {
-    await updateStatus(ctx);
-    startWatching(ctx);
-  });
-
-  pi.on("session_shutdown", async (_event, ctx) => {
-    stopWatching();
-    if (ctx.hasUI) ctx.ui.setStatus(STATUS_KEY, undefined);
-  });
-
-  function parseArgs(args: string): { provider: string; model: string } | undefined {
-    const [provider, ...rest] = args.split("/");
-    if (!provider?.trim() || rest.length === 0 || rest.some((part) => !part.trim())) {
-      return undefined;
-    }
-    return { provider: provider.trim(), model: rest.join("/").trim() };
+function parseArgs(args: string): { provider: string; model: string } | undefined {
+  const [provider, ...rest] = args.split("/");
+  if (!provider?.trim() || rest.length === 0 || rest.some((part) => !part.trim())) {
+    return undefined;
   }
+  return { provider: provider.trim(), model: rest.join("/").trim() };
 }

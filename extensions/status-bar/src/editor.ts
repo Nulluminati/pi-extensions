@@ -7,7 +7,9 @@ import {
   FLEX_OFF_COLOR,
   FLEX_ON_COLOR,
   ICON_FLEX,
+  ICON_SMALL_MODEL,
   ICON_THINKING,
+  ICON_WORKER_MODEL,
   MODAL_PADDING_X,
   MODAL_PADDING_Y,
   THINKING_THEME_COLOR,
@@ -48,13 +50,13 @@ export function buildEditorMetaSegments(
     // The small model label sits after a dim "/" separator, grey to read as
     // subordinate to the main model.
     segments.push(theme.fg("dim", "/"));
-    segments.push(theme.fg("dim", smallModelLabel));
+    segments.push(theme.fg("dim", `${ICON_SMALL_MODEL} ${smallModelLabel}`));
   }
   if (workerModelLabel) {
     // The worker model label sits next to the small model, same dim
     // treatment: it configures delegated workers, not this session.
     segments.push(theme.fg("dim", "/"));
-    segments.push(theme.fg("dim", workerModelLabel));
+    segments.push(theme.fg("dim", `${ICON_WORKER_MODEL} ${workerModelLabel}`));
   }
   return segments;
 }
