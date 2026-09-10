@@ -56,7 +56,9 @@ export function buildEditorMetaSegments(
     // The worker model label sits next to the small model, same dim
     // treatment: it configures delegated workers, not this session.
     segments.push(theme.fg("dim", "/"));
-    segments.push(theme.fg("dim", `${ICON_WORKER_MODEL} ${workerModelLabel}`));
+    // The filled robot-industrial glyph is wider than the outline one; an
+    // extra space keeps the icon-to-label gap visually consistent.
+    segments.push(theme.fg("dim", `${ICON_WORKER_MODEL}  ${workerModelLabel}`));
   }
   return segments;
 }
