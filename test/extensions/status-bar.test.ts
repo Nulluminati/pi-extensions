@@ -1858,6 +1858,23 @@ describe("status-bar flex badge", () => {
     expect(segments.some((s) => s.includes("off"))).toBe(true);
   });
 
+  it("buildEditorMetaSegments renders the worker model next to the small model", () => {
+    const segments = buildEditorMetaSegments(
+      "synthetic/hf:zai-org/GLM-5.3-Flash",
+      "high",
+      { on: true, capable: true },
+      "synthetic/syn:small:text",
+      plainTheme(),
+      "opencode-go/glm-5.3-flash",
+    );
+    const smallIndex = segments.findIndex((s) => s.includes("syn:small:text"));
+    const workerIndex = segments.findIndex((s) => s.includes("glm-5.3-flash"));
+    expect(smallIndex).toBeGreaterThanOrEqual(0);
+    expect(workerIndex).toBe(smallIndex + 2);
+    // The "/" separator sits between the two secondary labels.
+    expect(segments[smallIndex + 1]).toBe("/");
+  });
+
   it("buildEditorMetaSegments omits the flex badge when the model is not flex-capable", () => {
     const segments = buildEditorMetaSegments(
       "anthropic/claude-sonnet-4-6",
