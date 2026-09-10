@@ -13,12 +13,25 @@ export const PLAN_SUBMIT_TOOL = "plan_submit";
 export const MUTATING_TOOLS = new Set(["edit", "write"]);
 
 /**
- * Extension tools with mutation channels that must not run while planning:
- * `background` spawns arbitrary shell commands (bypassing the bash gate),
- * autoresearch performs git commits, and mission reconcile runs arbitrary
- * verification commands. Blocked by name alongside the built-ins.
+ * Plan mode is DEFAULT-DENY: the active tool set while planning is the
+ * intersection of the session's tools with this allowlist (plus plan_submit).
+ * Anything not listed — including tools from extensions added later — is
+ * unavailable while planning, so new mutation channels fail closed.
+ * `bash` stays active but is gated by the read-only command allowlist.
  */
-export const PLAN_BLOCKED_EXTENSION_TOOLS = new Set(["background", "autoresearch", "mission"]);
+export const PLAN_ALLOWED_TOOLS = new Set([
+  "read",
+  "grep",
+  "find",
+  "ls",
+  "bash",
+  "todo",
+  "ask-user",
+  "messenger",
+  "code-search",
+  "context7",
+  "web-search",
+]);
 
 /**
  * Event emitted on pi.events when plan mode changes. The status-bar extension

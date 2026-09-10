@@ -50,19 +50,17 @@ No configuration. `--plan` is the only flag.
 
 ## Plan-mode safety guarantees
 
-The gate covers every known mutation channel:
+Plan mode is **default-deny**: while planning, the active tool set is the intersection of the session's tools with a read-only allowlist (`read`, `grep`, `find`, `ls`, `bash`, `todo`, `ask-user`, `messenger`, `code-search`, `context7`, `web-search`) plus `plan_submit`. Tools not on the allowlist — including anything from extensions added later — are unavailable while planning, so new mutation channels fail closed instead of needing blocklist additions.
 
 | Channel | Enforcement |
 |---|---|
-| Built-in `edit` / `write` | Removed from the tool set and blocked at `tool_call` |
-| `bash` | Read-only allowlist; destructive patterns blocked |
-| `background` (background-jobs) | Blocked by name — it spawns arbitrary shell commands, bypassing the bash gate |
-| `autoresearch` | Blocked by name — init/keep perform git commits |
-| `mission` | Blocked by name — reconcile runs arbitrary verification commands |
+| Built-in `edit` / `write` | Excluded by the allowlist and blocked at `tool_call` |
+| `bash` | Tool stays active, but the command is gated by a read-only allowlist; destructive patterns blocked |
 | `delegate` (agents) | **Forced read-only workers**: the parent's plan-state is checked at delegate time; the worker runs with `--worker-readonly`, loads the plan extension's headless gate, and never gets gondolin (its workspace write-through is a mutation channel) |
-| `messenger` | Allowed — coordination state (mail, reservations), not workspace files |
+| `messenger` | Allowlisted — coordination state (mail, reservations), not workspace files |
+| Unknown / future extension tools | Default-deny: not on the allowlist, not active while planning |
 
-Residual limits, stated plainly: tools from *future* extensions with their own mutation channels need adding to `PLAN_BLOCKED_EXTENSION_TOOLS`; workers run with user privileges, so gondolin-class isolation (not available in read-only workers) is the boundary for anything outside the workspace; and the bash allowlist is conservative — occasionally a read-only command is blocked (exit plan mode to run it).
+Residual limits, stated plainly: extension tools that are genuinely read-only must be added to `PLAN_ALLOWED_TOOLS` to be usable while planning (deliberate friction — allowlisting is a reviewable decision); workers run with user privileges, so gondolin-class isolation (not available in read-only workers) is the boundary for anything outside the workspace; and the bash allowlist is conservative — occasionally a read-only command is blocked (exit plan mode to run it).
 - **The bash allowlist is conservative.** Anything not on it is blocked, which occasionally blocks unusual-but-read-only commands (e.g. `git stash show`). Blocked commands report the reason; exit plan mode to run them.
 - **Approval needs an interactive session.** In headless modes `plan_submit` saves the plan and asks the agent to retry when a user can review it.
 - **Completion relies on the agent checking items off with the `todo` tool.** If the model never calls it, execution stays active — toggle `/plan` to abort back into plan mode. Only the first `steps.length` items count toward completion, so extra agent-added items don't block it.

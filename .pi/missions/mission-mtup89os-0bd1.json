@@ -2,72 +2,86 @@
   "id": "mission-mtup89os-0bd1",
   "title": "Worker platform: model config, extension allowlist, sandboxing, plan-mode safety",
   "objective": "Worker platform overhaul. (1) Worker model as first-class config: PI_WORKER_MODEL env wins, <agentDir>/worker-model.json next, NO hardcoded model anywhere — unconfigured delegate fails descriptively, 'main' inherits the session model; /worker-model picker + status-bar label mirroring small-model. (2) Worker extension allowlist: delegate param → PI_WORKER_EXTENSIONS env → config → defaults [messenger, code-search, context7, web-search, synthetic, neuralwatt, gondolin]; name→path resolution with validation; hard denylist (agents, missions, autoresearch, goal, plan). (3) Sandboxing: workers run under gondolin (--gondolin), headless-tolerant, fail fast without QEMU/Node>=23.6. (4) Plan-mode safety: delegate while planning forces read-only workers (--worker-readonly), plan extension gains headless read-only mode (tool gate only, no overlay), permission-bypass audit documented. Done: all implemented, READMEs updated, E2E drill passes, full check green.",
-  "status": "planning",
+  "status": "complete",
   "createdAt": 1788994659340,
-  "updatedAt": 1788994720073,
+  "updatedAt": 1788998180065,
   "tasks": [
     {
       "id": "task-d9c0d5",
       "title": "lib/worker-model.ts: env/config resolution, no hardcoded default, 'main' keyword; delete DEFAULT_WORKER_MODEL",
-      "status": "todo",
+      "status": "done",
       "dependsOn": [],
       "verification": {
         "command": "npx vitest run test/lib/worker-model.test.ts test/extensions/agents.test.ts"
-      }
+      },
+      "summary": "lib/worker-model.ts delivered: PI_WORKER_MODEL env wins, <agentDir>/worker-model.json (PI_WORKER_MODEL_CONFIG override), no hardcoded default, descriptive unconfigured error, 'main' keyword inherits session model. DEFAULT_WORKER_MODEL deleted from agents.ts; agents tests set PI_WORKER_MODEL explicitly + new unconfigured-error test. 11 direct unit tests. Commit 0790581."
     },
     {
       "id": "task-0c92af",
       "title": "{\"command\": \"npx vitest run test/extensions/small-model.test.ts test/extensions/status-bar.test.ts\", \"description\": \"Picker and status-bar tests green\"}",
-      "status": "todo",
-      "dependsOn": []
+      "status": "done",
+      "dependsOn": [],
+      "summary": "Title clarification: this is the /worker-model command + status-bar worker label task (JSON accidentally pasted into the title at registration). Delivered in commit 88cecf3: worker-model extension (picker/args/status), PI_WORKER_MODEL override warning, config watcher, Worker Model status entry, status-bar grey worker-model segment. small-model + status-bar suites green."
     },
     {
       "id": "task-32abd1",
       "title": "lib/worker-extensions.ts: allowlist resolution + hard denylist (agents, missions, autoresearch, goal, plan)",
-      "status": "todo",
+      "status": "done",
       "dependsOn": [],
       "verification": {
         "command": "npx vitest run test/lib/worker-extensions.test.ts"
-      }
+      },
+      "summary": "lib/worker-extensions.ts delivered: delegate param → PI_WORKER_EXTENSIONS (comma-separated) → worker-extensions.json → default set [messenger, code-search, context7, web-search, synthetic, neuralwatt, gondolin]; messenger force-included; hard denylist (agents, missions, autoresearch, goal, plan) rejected even when requested; name→path resolution with existence validation; descriptive errors for malformed config/env. 8 direct unit tests. Commit 1accecf (adoption) — resolution landed with the allowlist commit."
     },
     {
       "id": "task-3ff6cf",
       "title": "Runner adopts worker-model + worker-extensions + --gondolin; spawn-arg tests",
-      "status": "todo",
+      "status": "done",
       "dependsOn": [],
       "verification": {
         "command": "npx vitest run test/extensions/agents.test.ts"
-      }
+      },
+      "summary": "Runner: workers spawn with resolved -e paths (allowlist), --model from worker-model resolution, --gondolin when gondolin is in the set, --worker-readonly when the parent is planning. Provider extensions (synthetic, neuralwatt) load in workers so PI_WORKER_MODEL targets any configured provider. Spawn-args test asserts --gondolin + -e paths; denylist and planning-forced-readonly tests cover rejection paths. Commits 1accecf, 0f167c6."
     },
     {
       "id": "task-b8494a",
       "title": "Gondolin headless hardening: json-mode ctx.ui tolerance, QEMU/Node fail-fast, prereq docs",
-      "status": "todo",
+      "status": "done",
       "dependsOn": [],
       "verification": {
         "command": "npx vitest run test/extensions/gondolin.test.ts && npm run validate:one extensions/gondolin/gondolin.ts"
-      }
+      },
+      "summary": "Gondolin headless hardening: all status/notify calls in startVm guarded on ctx.hasUI (json-mode workers tolerate missing UI); Node >= 23.6 checked at startup (assertGondolinPrereqs, exported + unit-tested); VM.create failures wrapped with QEMU guidance and recorded — every subsequent tool call fails loudly instead of silently running on the host; failures clear on session shutdown. Prerequisites documented in gondolin + agents READMEs. Commit bcaf3ae, 23 gondolin tests green."
     },
     {
       "id": "task-92e3f3",
       "title": "Plan-mode safety: delegate gate forces read-only workers; headless read-only mode in plan extension; bypass audit",
-      "status": "todo",
+      "status": "done",
       "dependsOn": [],
       "verification": {
         "command": "npx vitest run test/extensions/plan.test.ts test/extensions/agents.test.ts"
-      }
+      },
+      "summary": "Plan-mode delegate safety: agents detects a planning parent (plan-state entry) and forces read-only workers — runner passes --worker-readonly, plan extension loaded in the worker for enforcement, gondolin excluded (workspace write-through is a mutation channel). Headless read-only mode in the plan extension (--worker-readonly flag): same tool_call gate + bash allowlist, no plan_submit/overlay/context-injection/persistence. PlanMode gains a readonly state. Tests: readonly enforcement, plan_submit absence, gate reasons, delegate-forces-readonly. Commit 0f167c6."
     },
     {
       "id": "task-d6aaec",
       "title": "E2E drill (synthetic-model worker under gondolin; plan-mode delegate read-only), READMEs, full check",
-      "status": "todo",
+      "status": "done",
       "dependsOn": [],
       "verification": {
         "command": "npm run check"
-      }
+      },
+      "summary": "Plan-mode delegate gate + headless readonly enforcement implemented (0f167c6); bypass audit gated background/autoresearch/mission tools, documented channel-by-channel in plan README (2b0241e). E2E drill PASSED: worker platform-probe-2 ran on synthetic/hf:zai-org/GLM-5.3-Flash under the gondolin micro-VM (guest kernel 6.18.22-0-virt, workspace mounted at /workspace), identity platform-probe-2, no files modified. Read-only enforcement verified by unit tests asserting --worker-readonly + plan.ts in worker args + no --gondolin when the parent is planning."
     }
   ],
-  "checkpoints": [],
+  "checkpoints": [
+    {
+      "id": "ckpt-df74bb",
+      "label": "Worker platform complete",
+      "summary": "All 4 workstreams delivered across 9 commits: worker-model config (0790581, 88cecf3 — no hardcoded model anywhere, /worker-model picker, status-bar label, 'main' keyword); extension allowlist with denylist (1accecf); gondolin sandboxing with headless hardening and prereq fail-fast (bcaf3ae); plan-mode delegate safety with forced read-only workers, headless readonly mode, and the permission-bypass audit (0f167c6, 2b0241e). Supporting fixes: missions active-slot release (a6b5ee0). E2E drill passed live: synthetic-model worker under the gondolin micro-VM (guest kernel confirmed), identity stable, zero file mutations. Final state: 41 test files, 981 tests, full check green, 25 extensions validated.",
+      "at": 1788998121126
+    }
+  ],
   "decisions": [],
   "budget": {
     "maxIterations": 60

@@ -3,14 +3,16 @@
  * safe to run while planning. Pure functions, unit-tested in isolation.
  */
 
-import { MUTATING_TOOLS, PLAN_SUBMIT_TOOL } from "./constants.ts";
+import { PLAN_ALLOWED_TOOLS, PLAN_SUBMIT_TOOL } from "./constants.ts";
 
 /**
- * The active tool set while in plan mode: everything that was active, minus
- * mutating tools, plus plan_submit so the model can propose a plan.
+ * The active tool set while in plan mode: the intersection of the session's
+ * tools with the plan allowlist (default-deny — unknown tools are excluded),
+ * plus plan_submit so the model can propose a plan. Built-in bash stays
+ * active but is gated by the read-only command allowlist.
  */
 export function buildPlanModeTools(activeToolNames: string[]): string[] {
-  const kept = activeToolNames.filter((name) => !MUTATING_TOOLS.has(name));
+  const kept = activeToolNames.filter((name) => PLAN_ALLOWED_TOOLS.has(name));
   return [...new Set([...kept, PLAN_SUBMIT_TOOL])];
 }
 

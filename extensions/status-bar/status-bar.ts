@@ -189,7 +189,6 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
             }
             return parts.length > 0 ? parts.join(ctx.ui.theme.fg("dim", " · ")) : undefined;
           },
-          () => state.workerModelLabel,
         );
       },
     );
