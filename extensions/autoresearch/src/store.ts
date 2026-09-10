@@ -1,5 +1,5 @@
-/** `.auto/` file storage: config.json and the append-only log.jsonl. The
- * `.auto/` directory is excluded locally from git during init so keep/revert
+/** `.pi/autoresearch/` file storage: config.json and the append-only log.jsonl. The
+ * `.pi/autoresearch/` directory is excluded locally from git during init so keep/revert
  * cycles can never destroy the experiment record. */
 
 import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
@@ -8,8 +8,10 @@ import type { AutoConfig, RunEntry } from "./types.ts";
 
 // --- Paths ---
 
+const GIT_EXCLUDE_PATTERN = ".pi/autoresearch/";
+
 export function autoDir(cwd: string): string {
-  return join(cwd, ".auto");
+  return join(cwd, ".pi", "autoresearch");
 }
 
 export function configPath(cwd: string): string {
@@ -110,7 +112,7 @@ export async function savePrompt(
 
 // --- Git hygiene ---
 
-/** Ensure `.auto/` never enters a commit, without touching .gitignore. */
+/** Ensure `.pi/autoresearch/` never enters a commit, without touching .gitignore. */
 export async function excludeAutoFromGit(cwd: string): Promise<void> {
   const exclude = join(cwd, ".git", "info", "exclude");
   let current = "";
@@ -119,8 +121,8 @@ export async function excludeAutoFromGit(cwd: string): Promise<void> {
   } catch {
     // File may not exist yet; appendFile creates it (.git/info always exists).
   }
-  if (current.split("\n").includes(".auto/")) return;
-  await appendFile(exclude, ".auto/\n", "utf8");
+  if (current.split("\n").includes(GIT_EXCLUDE_PATTERN)) return;
+  await appendFile(exclude, `${GIT_EXCLUDE_PATTERN}\n`, "utf8");
 }
 
 // --- JSON file helpers ---
@@ -140,7 +142,7 @@ async function readJson<T>(path: string): Promise<T | undefined> {
 // --- Untracked baseline snapshot ---
 
 function untrackedSnapshotPath(cwd: string): string {
-  return join(cwd, ".auto", "untracked-snapshot.json");
+  return join(autoDir(cwd), "untracked-snapshot.json");
 }
 
 /** Files untracked when the campaign was initialized: discard never touches these. */

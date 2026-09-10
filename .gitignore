@@ -8,7 +8,9 @@ settings.json
 TODO.md
 
 # Pi extension runtime state (per-project, never committed)
+.pi/autoresearch/
 .pi/messenger/
+.pi/missions/
 .pi/workers/
 .pi/worktrees/
 

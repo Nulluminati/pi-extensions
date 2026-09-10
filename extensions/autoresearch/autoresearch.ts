@@ -4,9 +4,9 @@
  * Karpathy-style autonomous experiment loop, generalized to any measurable
  * target: try an idea, measure it against a baseline, keep improvements
  * (git commit), discard regressions (git revert), repeat. State lives in
- * `.auto/` (config, prompt, append-only log) so a fresh session resumes from
- * files alone; `.auto/` is excluded from git locally so revert cycles can
- * never destroy the experiment record.
+ * `.pi/autoresearch/` (config, prompt, append-only log) so a fresh session
+ * resumes from files alone; `.pi/autoresearch/` is excluded from git locally
+ * so revert cycles can never destroy the experiment record.
  *
  * Continuation: while the loop is active the extension re-prompts the agent
  * after each turn, with runaway guards (iteration cap, stall detection).
@@ -37,6 +37,7 @@ import {
 import { AUTORESEARCH_PARAMETERS } from "./src/schemas.ts";
 import {
   appendLog,
+  autoDir,
   excludeAutoFromGit,
   loadConfig,
   loadUntrackedSnapshot,
@@ -85,7 +86,7 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
     // Restore a pending measurement left by a previous session.
     if (!pending) {
       try {
-        const raw = await readFile(join(cwd, ".auto", PENDING_FILE), "utf8");
+        const raw = await readFile(join(autoDir(cwd), PENDING_FILE), "utf8");
         pending = JSON.parse(raw) as typeof pending;
       } catch {
         // No pending run.
@@ -107,13 +108,13 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
 
   async function savePending(cwd: string): Promise<void> {
     if (pending) {
-      await writeFile(join(cwd, ".auto", PENDING_FILE), JSON.stringify(pending), "utf8");
+      await writeFile(join(autoDir(cwd), PENDING_FILE), JSON.stringify(pending), "utf8");
     }
   }
 
   async function clearPending(cwd: string): Promise<void> {
     pending = undefined;
-    await unlink(join(cwd, ".auto", PENDING_FILE)).catch(() => {});
+    await unlink(join(autoDir(cwd), PENDING_FILE)).catch(() => {});
   }
 
   function publish(
@@ -384,7 +385,12 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
         const entries = await readLog(cwd);
         publish(ctx, config, entries);
         return {
-          content: [{ type: "text", text: "Autoresearch stopped. Config and log kept in .auto/." }],
+          content: [
+            {
+              type: "text",
+              text: "Autoresearch stopped. Config and log kept in .pi/autoresearch/.",
+            },
+          ],
           details: { active: false },
         };
       }
@@ -441,7 +447,7 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
 
     continuationQueued = true;
     pi.sendUserMessage(
-      "Continue the autoresearch loop. Re-read .auto/prompt.md and the tail of .auto/log.jsonl, then: pick the next hypothesis, edit the code, run the autoresearch tool (action=run), and log the result (action=log, keep or discard). If the cap is reached or you genuinely cannot improve further, call action=stop.",
+      "Continue the autoresearch loop. Re-read .pi/autoresearch/prompt.md and the tail of .pi/autoresearch/log.jsonl, then: pick the next hypothesis, edit the code, run the autoresearch tool (action=run), and log the result (action=log, keep or discard). If the cap is reached or you genuinely cannot improve further, call action=stop.",
       { deliverAs: "followUp" },
     );
   });

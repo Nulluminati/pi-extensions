@@ -1,6 +1,6 @@
 /** Autoresearch state: experiment configuration and the append-only run log.
- * Everything lives under `<cwd>/.auto/` so a fresh session can resume from
- * files alone. */
+ * Everything lives under `<cwd>/.pi/autoresearch/` so a fresh session can
+ * resume from files alone. */
 
 // --- Types ---
 

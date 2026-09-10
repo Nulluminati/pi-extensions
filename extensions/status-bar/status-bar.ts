@@ -465,7 +465,9 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     stopSmallModelWatch();
     stopWorkerModelWatch();
     clearFooter(ctx as ExtensionCommandContext);
-    restoreEditor(ctx as ExtensionCommandContext);
+    // The editor layer persists across extension rebinds: restoring it would
+    // recreate the editor on the next /reload and reset the prompt history
+    // buffer. The instance is reused via the install-time layer dedupe.
   });
 
   pi.on("turn_start", async (_event, ctx) => {

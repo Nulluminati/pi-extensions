@@ -13,7 +13,7 @@ The agent then loops: edit code → `action=run` → `action=log` with `status=k
 
 ## How It Works
 
-- **State in `.auto/`**: `config.json` (metric, commands, cap), `prompt.md` (objective and notes so a fresh session can resume), `log.jsonl` (append-only run record), `pending.json` (an in-flight measurement). `.auto/` is excluded from git locally during init so revert cycles can never destroy the experiment record.
+- **State in `.pi/autoresearch/`**: `config.json` (metric, commands, cap), `prompt.md` (objective and notes so a fresh session can resume), `log.jsonl` (append-only run record), `pending.json` (an in-flight measurement). `.pi/autoresearch/` is excluded from git locally during init so revert cycles can never destroy the experiment record.
 - **Baseline first**: init measures the untouched state; every later result is compared against it.
 - **Correctness gate**: if `checks` is configured, it runs before measuring; a failure auto-reverts the changes and logs `checks_failed`.
 - **Confidence scoring**: after 3+ measured runs the tool reports `|best − baseline|` relative to the robust noise floor (1.4826 × MAD). Below 1x the improvement is within noise and the agent is told to re-measure before trusting it.
@@ -27,10 +27,10 @@ The agent then loops: edit code → `action=run` → `action=log` with `status=k
 | `pi.registerTool("autoresearch")` | init / run / log / status / stop |
 | `pi.on("agent_end")` | Loop continuation with cap and stall guards |
 | `pi.sendUserMessage(..., { deliverAs: "followUp" })` | Continue the loop |
-| `pi.on("session_start")` | Resume loop state from `.auto/` |
+| `pi.on("session_start")` | Resume loop state from `.pi/autoresearch/` |
 | `pi.events.emit("autoresearch:state")` | Publish state for the status bar |
 
-State lives in `<cwd>/.auto/` (locally git-excluded; keep it out of remotes).
+State lives in `<cwd>/.pi/autoresearch/` (locally git-excluded; keep it out of remotes).
 
 ## Cost Control
 

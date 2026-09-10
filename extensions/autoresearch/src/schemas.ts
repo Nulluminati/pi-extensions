@@ -30,7 +30,10 @@ export const AUTORESEARCH_PARAMETERS = {
       type: "number",
       description: "init: stop after this many logged experiments.",
     },
-    notes: { type: "string", description: "init: optional guidance recorded in .auto/prompt.md." },
+    notes: {
+      type: "string",
+      description: "init: optional guidance recorded in .pi/autoresearch/prompt.md.",
+    },
     description: {
       type: "string",
       description: "run/log: what this experiment changes or changed.",

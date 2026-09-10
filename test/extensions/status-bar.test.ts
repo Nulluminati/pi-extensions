@@ -1452,7 +1452,7 @@ describe("status-bar editor install", () => {
     expect(mockCtx.ui.setEditorComponent).toHaveBeenCalledWith(expect.any(Function));
   });
 
-  it("session_shutdown restores the previous (default) editor", async () => {
+  it("session_shutdown keeps the editor layer so /reload preserves prompt history", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await enableBar(mockPi, mockCtx);
@@ -1460,8 +1460,16 @@ describe("status-bar editor install", () => {
     const shutdownHandler = getEventHandler(mockPi, "session_shutdown");
     await shutdownHandler({ type: "session_shutdown", reason: "quit" }, mockCtx);
 
-    // Default editor is restored (undefined = Pi's default).
-    expect(mockCtx.ui.setEditorComponent).toHaveBeenLastCalledWith(undefined);
+    // The layer persists: no setEditorComponent call on shutdown, so the
+    // reloaded session reuses the same editor instance (and its prompt
+    // history) instead of recreating it empty.
+    const startIdx = mockCtx.ui.setEditorComponent.mock.calls.length;
+    await getEventHandler(mockPi, "session_start")(
+      { type: "session_start", reason: "reload" },
+      mockCtx,
+    );
+    expect(mockCtx.ui.setEditorComponent.mock.calls.length).toBe(startIdx);
+    expect(hasEditorFactoryLayer(mockCtx.ui.getEditorComponent(), "status-bar")).toBe(true);
   });
 
   it("/statusbar:toggle disable restores the default editor and re-enable reinstalls", async () => {
