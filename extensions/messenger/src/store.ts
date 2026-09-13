@@ -135,7 +135,11 @@ export async function sendMessage(
 ): Promise<Message> {
   assertValidMailboxName(to);
   const message: Message = {
-    id: `msg-${Date.now().toString(36)}-${randomBytes(2).toString("hex")}`,
+    // 8 random bytes: markRead deletes every message matching an id it is
+    // given, so a duplicate id would silently drop unread mail. Two bytes
+    // collided inside a single busy millisecond (30-message bursts hit this
+    // in practice); 64 bits makes a same-millisecond collision negligible.
+    id: `msg-${Date.now().toString(36)}-${randomBytes(8).toString("hex")}`,
     from,
     to,
     text,

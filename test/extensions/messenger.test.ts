@@ -622,6 +622,24 @@ describe("messenger-store", () => {
     expect(remaining.filter((m) => m.text.startsWith("old-"))).toHaveLength(15);
   });
 
+  it("sendMessage ids stay unique for sends in the same millisecond", async () => {
+    // A duplicate id makes markRead delete every message sharing it, so ids
+    // must carry enough entropy to survive a burst inside one millisecond.
+    // Freeze time so every send draws from the same id timestamp bucket; the
+    // random suffix alone must keep the ids apart.
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
+    try {
+      const messages: Array<{ id: string }> = [];
+      for (let i = 0; i < 1000; i += 1) {
+        messages.push(await sendMessage(cwd, "a", "peer", `burst-${i}`));
+      }
+      const ids = new Set(messages.map((m) => m.id));
+      expect(ids.size).toBe(messages.length);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
   it("file lock serializes overlapping critical sections", async () => {
     const lockPath = join(cwd, "test.lock");
     const events: string[] = [];
