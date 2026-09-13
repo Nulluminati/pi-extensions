@@ -14,11 +14,11 @@ The agent then loops: edit code → `action=run` → `action=log` with `status=k
 ## How It Works
 
 - **State in `.pi/autoresearch/`**: `config.json` (metric, commands, cap), `prompt.md` (objective and notes so a fresh session can resume), `log.jsonl` (append-only run record), `pending.json` (an in-flight measurement). `.pi/autoresearch/` is excluded from git locally during init so revert cycles can never destroy the experiment record.
-- **Baseline first**: init measures the untouched state; every later result is compared against it.
+- **Baseline first**: init requires a clean worktree (commit or stash first) and measures the untouched state; every later result is compared against it.
 - **Correctness gate**: if `checks` is configured, it runs before measuring; a failure auto-reverts the changes and logs `checks_failed`.
 - **Confidence scoring**: after 3+ measured runs the tool reports `|best − baseline|` relative to the robust noise floor (1.4826 × MAD). Below 1x the improvement is within noise and the agent is told to re-measure before trusting it.
 - **Runaway guards**: iteration cap (`maxIterations`) stops the loop; two consecutive prompts without a newly logged experiment stop the loop and hand control back.
-- **Keeps are commits**: `git add -A && git commit` with the metric in the message; discards are `git reset --hard` after staging, which also removes files the experiment created.
+- **Keeps are commits**: only the current experiment's changes are staged and committed with the metric in the message; discards restore only those changes. Work that predates the experiment is never consumed.
 
 ## Pi APIs Used
 

@@ -94,6 +94,6 @@ These tools walk the guest filesystem via `walkGuestFiles()`, which mirrors the 
 
 - Node.js `>= 23.6.0` (for `@earendil-works/gondolin`) — checked at startup; a missing version fails loudly, never silently falls back to the host
 - QEMU installed and on `PATH` (e.g. `brew install qemu` on macOS, `sudo dnf install qemu-system-x86` on Fedora) — a failed VM start records the error and every subsequent tool call fails with the QEMU hint instead of silently running on the host
-- Headless-safe: json/rpc sessions (worker mode) tolerate the missing UI surface; status updates are skipped, the sandbox is not
+- Headless-safe: JSON/RPC sessions have no UI surface, so status updates and notifications are skipped. The VM still starts, and tool calls stay routed through it.
 
 When the flag is not set, this extension is a no-op: it registers the same tool definitions as the built-ins, the flag-gated VM is never created, and tool calls run against the host filesystem exactly as they would without the extension loaded.

@@ -6,7 +6,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { mkdir, open, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Mission, MissionSummary, TaskStatus } from "./types.ts";
 
@@ -14,6 +14,9 @@ import type { Mission, MissionSummary, TaskStatus } from "./types.ts";
 
 const MISSIONS_DIR = ".pi/missions";
 const ACTIVE_FILE = "active.json";
+const LOCK_RETRY_MS = 10;
+const LOCK_TIMEOUT_MS = 5_000;
+const LOCK_STALE_MS = 30_000;
 const ALL_TASK_STATUSES: TaskStatus[] = [
   "todo",
   "in_progress",
@@ -43,6 +46,42 @@ export function generateCheckpointId(): string {
 
 function missionPath(cwd: string, id: string): string {
   return join(missionsDir(cwd), `${id}.json`);
+}
+
+function missionLockPath(cwd: string, id: string): string {
+  return join(missionsDir(cwd), ".locks", `${encodeURIComponent(id)}.lock`);
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error;
+}
+
+async function acquireMissionLock(cwd: string, id: string): Promise<() => Promise<void>> {
+  const path = missionLockPath(cwd, id);
+  await mkdir(join(missionsDir(cwd), ".locks"), { recursive: true });
+  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+
+  while (true) {
+    try {
+      const handle = await open(path, "wx", 0o600);
+      await handle.writeFile(`${process.pid}\n`, "utf8");
+      return async () => {
+        await handle.close();
+        await unlink(path).catch(() => {});
+      };
+    } catch (error) {
+      if (!isNodeError(error) || error.code !== "EEXIST") throw error;
+      const lockStat = await stat(path).catch(() => undefined);
+      if (lockStat && Date.now() - lockStat.mtimeMs >= LOCK_STALE_MS) {
+        await unlink(path).catch(() => {});
+        continue;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(`Timed out waiting to update mission ${id}; another session is saving it.`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS));
+    }
+  }
 }
 
 function isActiveMission(value: unknown): value is Mission {
@@ -92,8 +131,20 @@ export async function setActiveMissionId(cwd: string, id: string | undefined): P
 
 export async function saveMission(cwd: string, mission: Mission): Promise<void> {
   await mkdir(missionsDir(cwd), { recursive: true });
-  mission.updatedAt = Date.now();
-  await writeJsonAtomic(missionPath(cwd, mission.id), mission);
+  const release = await acquireMissionLock(cwd, mission.id);
+  try {
+    const stored = await loadMission(cwd, mission.id);
+    if (stored && stored.updatedAt !== mission.updatedAt) {
+      throw new Error(
+        `Mission ${mission.id} changed by another session. Run mission status, then retry your update.`,
+      );
+    }
+    const updatedAt = Math.max(Date.now(), mission.updatedAt + 1);
+    await writeJsonAtomic(missionPath(cwd, mission.id), { ...mission, updatedAt });
+    mission.updatedAt = updatedAt;
+  } finally {
+    await release();
+  }
 }
 
 export async function loadMission(cwd: string, id: string): Promise<Mission | undefined> {

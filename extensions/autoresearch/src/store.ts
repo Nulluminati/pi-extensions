@@ -3,7 +3,8 @@
  * cycles can never destroy the experiment record. */
 
 import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
+import { runGit } from "../../../lib/git.ts";
 import type { AutoConfig, RunEntry } from "./types.ts";
 
 // --- Paths ---
@@ -81,6 +82,15 @@ export async function appendLog(cwd: string, entry: RunEntry): Promise<void> {
   await appendFile(logPath(cwd), `${JSON.stringify(entry)}\n`, "utf8");
 }
 
+/** Move the current campaign log aside so a new campaign starts clean. */
+export async function archiveLog(cwd: string): Promise<void> {
+  try {
+    await rename(logPath(cwd), join(autoDir(cwd), `log.${Date.now()}.jsonl`));
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+  }
+}
+
 export function nextRunNumber(entries: RunEntry[]): number {
   return entries.reduce((max, e) => Math.max(max, e.run), 0) + 1;
 }
@@ -112,9 +122,12 @@ export async function savePrompt(
 
 // --- Git hygiene ---
 
-/** Ensure `.pi/autoresearch/` never enters a commit, without touching .gitignore. */
+/** Ensure `.pi/autoresearch/` never enters a commit, without touching .gitignore.
+ * The exclude path is resolved through git so linked worktrees — where `.git`
+ * is a file, not a directory — work correctly. */
 export async function excludeAutoFromGit(cwd: string): Promise<void> {
-  const exclude = join(cwd, ".git", "info", "exclude");
+  const reported = (await runGit(cwd, ["rev-parse", "--git-path", "info/exclude"])).trim();
+  const exclude = isAbsolute(reported) ? reported : resolve(cwd, reported);
   let current = "";
   try {
     current = await readFile(exclude, "utf8");
@@ -145,7 +158,8 @@ function untrackedSnapshotPath(cwd: string): string {
   return join(autoDir(cwd), "untracked-snapshot.json");
 }
 
-/** Files untracked when the campaign was initialized: discard never touches these. */
+/** Untracked files present when the experiment base was captured: discards
+ * never remove these and keeps never stage them. */
 export async function saveUntrackedSnapshot(cwd: string, files: string[]): Promise<void> {
   await writeJson(untrackedSnapshotPath(cwd), files);
 }

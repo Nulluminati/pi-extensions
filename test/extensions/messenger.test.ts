@@ -1,25 +1,35 @@
+import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import type { ExtensionAPI, ExtensionContext } from "pi";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import messengerExtension from "../../extensions/messenger/messenger.ts";
 import { checkToolCall } from "../../extensions/messenger/src/enforce.ts";
+import { withFileLock } from "../../extensions/messenger/src/lock.ts";
 import {
   findBlockingReservation,
   heartbeat,
+  inboxPath,
   leaveRegistry,
   loadRegistry,
   loadReservations,
+  markRead,
   normalizePathPrefix,
   readInbox,
+  release,
   reserve,
   sendMessage,
 } from "../../extensions/messenger/src/store.ts";
 import { createMockContext } from "../mocks/context-mocks.ts";
 import type { DeepMocked } from "../mocks/mock-types.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
+
+const execFileAsync = promisify(execFile);
+const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
 describe("messenger-extension", () => {
   let cwd: string;
@@ -210,6 +220,24 @@ describe("messenger-extension", () => {
     expect(reservations["src/b"]).toBeDefined();
   });
 
+  it("agent_settled delivers concurrently arriving mail exactly once", async () => {
+    process.env.PI_MESSENGER_NAME = "busy";
+    // Busy at start so the inbox watcher cannot deliver first.
+    mockCtx.isIdle = vi.fn(() => false);
+    await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+    await sendMessage(cwd, "busy", "peer", "deliver once");
+
+    mockCtx.isIdle = vi.fn(() => true);
+    const settled = getEventHandler("agent_settled");
+    await Promise.all([
+      settled({ type: "agent_settled" }, mockCtx),
+      settled({ type: "agent_settled" }, mockCtx),
+    ]);
+
+    expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
+    expect(await readInbox(cwd, "busy")).toHaveLength(0);
+  });
+
   it("agent_settled delivers unread mail into the conversation and marks it read", async () => {
     process.env.PI_MESSENGER_NAME = "busy";
     await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
@@ -248,7 +276,7 @@ describe("messenger-extension", () => {
         { triggerTurn: true },
       ),
     );
-    expect(await readInbox(cwd, "watched")).toHaveLength(0);
+    await vi.waitFor(async () => expect(await readInbox(cwd, "watched")).toHaveLength(0));
   });
 
   it("inbox watcher ignores other agents' mailboxes", async () => {
@@ -473,10 +501,151 @@ describe("messenger-store", () => {
     const unread = await readInbox(cwd, "a");
     expect(unread).toHaveLength(1);
 
-    const { markRead } = await import("../../extensions/messenger/src/store.ts");
     await markRead(cwd, "a", ["m1"]);
     const raw = await readFile(path, "utf8");
     expect(raw).toContain("not-json");
     expect(raw).not.toContain("m1");
+  });
+
+  it("inboxPath encodes the agent name so traversal names stay inside the inbox", () => {
+    const inbox = join(cwd, ".pi", "messenger", "inbox");
+    const path = inboxPath(cwd, "../../escape");
+
+    expect(path).toBe(join(inbox, `${encodeURIComponent("../../escape")}.jsonl`));
+    expect(path.startsWith(`${inbox}${sep}`)).toBe(true);
+  });
+
+  it("sendMessage rejects a recipient name that would escape the inbox", async () => {
+    await expect(sendMessage(cwd, "../escape", "me", "hi")).rejects.toThrow(/recipient/i);
+    await expect(sendMessage(cwd, "..\\escape", "me", "hi")).rejects.toThrow(/recipient/i);
+    expect(existsSync(join(cwd, ".pi", "messenger", "escape.jsonl"))).toBe(false);
+    expect(existsSync(join(cwd, ".pi", "escape.jsonl"))).toBe(false);
+  });
+
+  it("concurrent reserve calls keep every claim", async () => {
+    await Promise.all(
+      Array.from({ length: 8 }, (_, i) => reserve(cwd, `agent-${i}`, [`src/dir-${i}`])),
+    );
+
+    const claims = await loadReservations(cwd);
+    for (let i = 0; i < 8; i += 1) {
+      expect(claims[`src/dir-${i}`]).toMatchObject({ owner: `agent-${i}` });
+    }
+  });
+
+  it("concurrent reserve and release do not clobber each other", async () => {
+    await reserve(cwd, "keeper", ["src/kept"]);
+    await reserve(cwd, "dropper", ["src/dropped"]);
+
+    await Promise.all([release(cwd, "dropper"), reserve(cwd, "newcomer", ["src/fresh"])]);
+
+    const claims = await loadReservations(cwd);
+    expect(claims["src/kept"]).toBeDefined();
+    expect(claims["src/dropped"]).toBeUndefined();
+    expect(claims["src/fresh"]).toMatchObject({ owner: "newcomer" });
+  });
+
+  it("reservations from separate processes keep every claim", async () => {
+    const storeUrl = new URL("../../extensions/messenger/src/store.ts", import.meta.url).href;
+    const script = [
+      `const { reserve } = await import(${JSON.stringify(storeUrl)});`,
+      "const [dir, owner, path] = process.argv.slice(1);",
+      "await reserve(dir, owner, [path]);",
+    ].join("\n");
+
+    await Promise.all(
+      Array.from({ length: 4 }, (_, i) =>
+        execFileAsync(
+          process.execPath,
+          [
+            "--import",
+            "tsx",
+            "--input-type=module",
+            "-e",
+            script,
+            cwd,
+            `proc-${i}`,
+            `src/proc-${i}`,
+          ],
+          { cwd: REPO_ROOT },
+        ),
+      ),
+    );
+
+    const claims = await loadReservations(cwd);
+    for (let i = 0; i < 4; i += 1) {
+      expect(claims[`src/proc-${i}`]).toMatchObject({ owner: `proc-${i}` });
+    }
+  });
+
+  it("reserve rejects a claim under another agent's prefix", async () => {
+    await reserve(cwd, "owner", ["src/auth"]);
+
+    const result = await reserve(cwd, "other", ["src/auth/login.ts"]);
+
+    expect(result.reserved).toEqual([]);
+    expect(result.conflicts).toEqual([{ path: "src/auth/login.ts", owner: "owner" }]);
+  });
+
+  it("reserve rejects a claim that would cover another agent's prefix", async () => {
+    await reserve(cwd, "owner", ["src/auth/login.ts"]);
+
+    const result = await reserve(cwd, "other", ["src/auth"]);
+
+    expect(result.reserved).toEqual([]);
+    expect(result.conflicts).toEqual([{ path: "src/auth", owner: "owner" }]);
+  });
+
+  it("reserve lets an agent extend its own prefix", async () => {
+    await reserve(cwd, "owner", ["src/auth"]);
+
+    const result = await reserve(cwd, "owner", ["src/auth/login.ts"]);
+
+    expect(result.reserved).toEqual(["src/auth/login.ts"]);
+    expect(result.conflicts).toEqual([]);
+  });
+
+  it("concurrent markRead and sendMessage keep newly arrived mail", async () => {
+    await Promise.all(
+      Array.from({ length: 30 }, (_, i) => sendMessage(cwd, "a", "peer", `old-${i}`)),
+    );
+    const unread = await readInbox(cwd, "a");
+    const oldIds = unread.slice(0, 15).map((m) => m.id);
+
+    await Promise.all([
+      markRead(cwd, "a", oldIds),
+      ...Array.from({ length: 15 }, (_, i) => sendMessage(cwd, "a", "peer", `new-${i}`)),
+    ]);
+
+    const remaining = await readInbox(cwd, "a");
+    expect(remaining.filter((m) => m.text.startsWith("new-"))).toHaveLength(15);
+    expect(remaining.filter((m) => m.text.startsWith("old-"))).toHaveLength(15);
+  });
+
+  it("file lock serializes overlapping critical sections", async () => {
+    const lockPath = join(cwd, "test.lock");
+    const events: string[] = [];
+    let releaseFirst = () => {};
+    const gate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+
+    const first = withFileLock(lockPath, async () => {
+      events.push("first-start");
+      await gate;
+      events.push("first-end");
+    });
+    await vi.waitFor(() => expect(events).toContain("first-start"));
+
+    const second = withFileLock(lockPath, async () => {
+      events.push("second");
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(events).not.toContain("second");
+
+    releaseFirst();
+    await Promise.all([first, second]);
+    expect(events).toEqual(["first-start", "first-end", "second"]);
   });
 });

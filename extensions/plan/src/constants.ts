@@ -13,25 +13,34 @@ export const PLAN_SUBMIT_TOOL = "plan_submit";
 export const MUTATING_TOOLS = new Set(["edit", "write"]);
 
 /**
- * Plan mode is DEFAULT-DENY: the active tool set while planning is the
- * intersection of the session's tools with this allowlist (plus plan_submit).
- * Anything not listed — including tools from extensions added later — is
- * unavailable while planning, so new mutation channels fail closed.
- * `bash` stays active but is gated by the read-only command allowlist.
+ * Research tools available to both the planning session and its read-only
+ * workers. Anything not listed is unavailable in a worker, so configured
+ * extension tools cannot create a new mutation channel. `bash` stays active
+ * but is gated by the read-only command allowlist.
  */
-export const PLAN_ALLOWED_TOOLS = new Set([
+export const PLAN_WORKER_ALLOWED_TOOLS = new Set([
   "read",
   "grep",
   "find",
   "ls",
   "bash",
   "todo",
-  "ask-user",
+  "ask_user",
   "messenger",
-  "code-search",
-  "context7",
-  "web-search",
+  "code_search",
+  "context7_resolve_library_id",
+  "context7_get_library_docs",
+  "context7_get_cached_doc_raw",
+  "web_search",
+  "web_fetch",
 ]);
+
+/**
+ * Plan mode is DEFAULT-DENY: it keeps research tools plus worker orchestration.
+ * The `workers` tool is gated separately so status/list/cancel remain available
+ * while patch collection, which can modify the workspace, is blocked.
+ */
+export const PLAN_ALLOWED_TOOLS = new Set([...PLAN_WORKER_ALLOWED_TOOLS, "delegate", "workers"]);
 
 /**
  * Event emitted on pi.events when plan mode changes. The status-bar extension

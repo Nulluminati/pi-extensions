@@ -114,7 +114,7 @@ describe("gondolin-extension", () => {
     );
   });
 
-  it("starts the VM headlessly without touching a missing UI", async () => {
+  it("starts and stops the VM headlessly without touching a missing UI", async () => {
     const mockPi = createMockPi();
     await gondolinExtension(mockPi);
     mockPi.getFlag = vi.fn(() => true);
@@ -125,12 +125,19 @@ describe("gondolin-extension", () => {
 
     const ctx = createMockCommandContext();
     ctx.hasUI = false;
+    (ctx as unknown as { ui: undefined }).ui = undefined;
 
     const sessionStart = getEventHandler(mockPi, "session_start");
     await expect(
       sessionStart({ type: "session_start", reason: "startup" }, ctx),
     ).resolves.toBeUndefined();
     expect(VM.create).toHaveBeenCalled();
+
+    const sessionShutdown = getEventHandler(mockPi, "session_shutdown");
+    await expect(
+      sessionShutdown({ type: "session_shutdown", reason: "exit" }, ctx),
+    ).resolves.toBeUndefined();
+    expect(mockVm.close).toHaveBeenCalled();
   });
 
   it("when disabled, registers tools and handlers but does not start VM", async () => {

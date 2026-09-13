@@ -26,8 +26,9 @@ import {
 } from "./src/format.ts";
 import {
   CHECKS_TIMEOUT_MS,
-  commitAll,
-  discardAll,
+  changedFiles,
+  commitExperiment,
+  discardExperiment,
   isGitRepo,
   listUntracked,
   MEASURE_TIMEOUT_MS,
@@ -37,6 +38,7 @@ import {
 import { AUTORESEARCH_PARAMETERS } from "./src/schemas.ts";
 import {
   appendLog,
+  archiveLog,
   autoDir,
   excludeAutoFromGit,
   loadConfig,
@@ -81,17 +83,20 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
     return config;
   }
 
+  /** Rehydrate a pending measurement left on disk by a reload or fresh instance. */
+  async function loadPending(cwd: string): Promise<void> {
+    if (pending) return;
+    try {
+      const raw = await readFile(join(autoDir(cwd), PENDING_FILE), "utf8");
+      pending = JSON.parse(raw) as typeof pending;
+    } catch {
+      // No pending run.
+    }
+  }
+
   async function entriesAndPending(cwd: string): Promise<RunEntry[]> {
     const entries = await readLog(cwd);
-    // Restore a pending measurement left by a previous session.
-    if (!pending) {
-      try {
-        const raw = await readFile(join(autoDir(cwd), PENDING_FILE), "utf8");
-        pending = JSON.parse(raw) as typeof pending;
-      } catch {
-        // No pending run.
-      }
-    }
+    await loadPending(cwd);
     if (pending) {
       entries.push({
         run: pending.run,
@@ -175,6 +180,25 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
             "autoresearch requires a git repository (keeps are commits, discards are reverts).",
           );
         }
+        // Clean-tree precondition, checked before any campaign state is written:
+        // keeps stage worktree changes and discards restore tracked files from
+        // HEAD, so pre-existing edits must be committed or stashed first.
+        const dirty = await changedFiles(cwd);
+        const blocking = [...dirty.tracked, ...dirty.untracked].filter(
+          (path) => path !== ".pi/autoresearch" && !path.startsWith(".pi/autoresearch/"),
+        );
+        if (blocking.length > 0) {
+          const shown = blocking.slice(0, 10).join("\n");
+          const more = blocking.length > 10 ? `\n…and ${blocking.length - 10} more` : "";
+          throw new Error(
+            `autoresearch requires a clean worktree. Commit or stash these changes first:\n${shown}${more}`,
+          );
+        }
+        if (existing?.stopped) {
+          // A stop only deactivates the campaign; archive its log so the new
+          // campaign starts with a clean baseline and run numbering.
+          await archiveLog(cwd);
+        }
         const config: AutoConfig = {
           objective,
           metric,
@@ -198,7 +222,9 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
 
         // Baseline measurement of the current state.
         const measured = await runCommand(measure, cwd, MEASURE_TIMEOUT_MS);
-        const metricValue = measured.ok ? parseMetric(measured.output, metric) : undefined;
+        // Parse the full retained output: a measure command may print the
+        // metric and still exit non-zero (or overflow a buffer).
+        const metricValue = parseMetric(measured.metricOutput, metric);
         const entries = await readLog(cwd);
         const baselineEntry: RunEntry = {
           run: nextRunNumber(entries),
@@ -227,12 +253,31 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
         };
       }
 
+      // Status works without an active campaign, and reports a stopped one
+      // rather than being blocked by the active-session precondition.
+      if (action === "status") {
+        const config2 = await loadConfig(cwd);
+        if (!config2) {
+          return {
+            content: [{ type: "text", text: "No autoresearch session in this project." }],
+            details: { active: false },
+          };
+        }
+        const entries = await entriesAndPending(cwd);
+        publish(ctx, config2, entries);
+        return {
+          content: [{ type: "text", text: formatSummary(buildSummary(config2, entries), entries) }],
+          details: { summary: buildSummary(config2, entries) },
+        };
+      }
+
       const config = await requireActiveConfig(cwd);
 
       if (action === "run") {
         const description = typeof params.description === "string" ? params.description.trim() : "";
         if (!description)
           throw new Error("run requires description (what this experiment changes).");
+        await loadPending(cwd);
         if (pending)
           throw new Error("A run is already pending. Log it (action=log) before running again.");
 
@@ -240,7 +285,8 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
         if (config.checks) {
           const checks = await runCommand(config.checks, cwd, CHECKS_TIMEOUT_MS);
           if (!checks.ok) {
-            await discardAll(cwd, await loadUntrackedSnapshot(cwd));
+            await discardExperiment(cwd, await loadUntrackedSnapshot(cwd));
+            await saveUntrackedSnapshot(cwd, await listUntracked(cwd));
             const entries = await readLog(cwd);
             const entry: RunEntry = {
               run: nextRunNumber(entries),
@@ -266,7 +312,7 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
         }
 
         const measured = await runCommand(config.measure, cwd, MEASURE_TIMEOUT_MS);
-        const metricValue = measured.ok ? parseMetric(measured.output, config.metric) : undefined;
+        const metricValue = parseMetric(measured.metricOutput, config.metric);
         const runNumber = nextRunNumber(await readLog(cwd));
         pending = {
           run: runNumber,
@@ -299,6 +345,7 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
       }
 
       if (action === "log") {
+        await loadPending(cwd);
         if (!pending) throw new Error("Nothing to log. Run an experiment first (action=run).");
         const status =
           params.status === "keep" ? "keep" : params.status === "discard" ? "discard" : undefined;
@@ -310,13 +357,17 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
 
         let commit: string | undefined;
         if (status === "keep") {
-          commit = await commitAll(
+          commit = await commitExperiment(
             cwd,
             `autoresearch: ${description} (${config.metric}=${pending.metric ?? "?"})`,
+            await loadUntrackedSnapshot(cwd),
           );
         } else {
-          await discardAll(cwd, await loadUntrackedSnapshot(cwd));
+          await discardExperiment(cwd, await loadUntrackedSnapshot(cwd));
         }
+        // Re-baseline the untracked set so the next experiment's keep/discard
+        // scope starts from the state this log left behind.
+        await saveUntrackedSnapshot(cwd, await listUntracked(cwd));
 
         const entries = await readLog(cwd);
         const entry: RunEntry = {
@@ -358,26 +409,12 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
         };
       }
 
-      if (action === "status") {
-        const config2 = await loadConfig(cwd);
-        if (!config2) {
-          return {
-            content: [{ type: "text", text: "No autoresearch session in this project." }],
-            details: { active: false },
-          };
-        }
-        const entries = await entriesAndPending(cwd);
-        publish(ctx, config2, entries);
-        return {
-          content: [{ type: "text", text: formatSummary(buildSummary(config2, entries), entries) }],
-          details: { summary: buildSummary(config2, entries) },
-        };
-      }
-
       if (action === "stop") {
+        await loadPending(cwd);
         if (pending) {
           // A pending run means uncommitted experiment changes; revert them.
-          await discardAll(cwd, await loadUntrackedSnapshot(cwd)).catch(() => {});
+          // Failures surface instead of being swallowed so state stays honest.
+          await discardExperiment(cwd, await loadUntrackedSnapshot(cwd));
           await clearPending(cwd);
         }
         config.stopped = true;
@@ -463,16 +500,28 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
   // --- Lifecycle ---
 
   pi.on("session_start", async (_event, ctx) => {
+    // Reload starts fresh guards but rebuilds state from disk so an experiment
+    // that was pending before the reload can still be logged.
     continuationQueued = false;
     idleWakes = 0;
+    toolActivity = 0;
+    lastSeenActivity = 0;
     pending = undefined;
     const config = await loadConfig(ctx.cwd);
-    const entries = await readLog(ctx.cwd);
+    const entries = await entriesAndPending(ctx.cwd);
 
     publish(ctx, config, entries);
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
+    // Drop per-session state and tell listeners the loop is no longer running;
+    // pending.json on disk keeps a mid-experiment reload resumable.
+    pending = undefined;
+    continuationQueued = false;
+    idleWakes = 0;
+    toolActivity = 0;
+    lastSeenActivity = 0;
+    pi.events.emit(AUTORESEARCH_STATE_EVENT, { active: false, iterations: 0 });
     if (ctx.hasUI) ctx.ui.setStatus(AUTORESEARCH_STATUS_KEY, undefined);
   });
 }

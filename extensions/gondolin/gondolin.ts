@@ -160,21 +160,12 @@ export default async function gondolinExtension(pi: ExtensionAPI) {
     vmStartError = undefined;
     if (!activeVm) return;
     pi.events.emit(VM_EVENT, { state: "stopping" });
-    ctx.ui.setStatus(
-      STATUS_KEY,
-      formatStatusLine(ctx.ui.theme, {
-        icon: STATUS_ICON,
-        prefix: "Gondolin",
-        text: "stopping",
-        iconColor: ICON_COLOR,
-        textColor: TEXT_COLOR,
-      }),
-    );
+    setVmStatus(ctx, "stopping");
     try {
       await activeVm.close();
     } finally {
       pi.events.emit(VM_EVENT, { state: "stopped" });
-      ctx.ui.setStatus(STATUS_KEY, undefined);
+      if (ctx.hasUI) ctx.ui.setStatus(STATUS_KEY, undefined);
     }
   });
 

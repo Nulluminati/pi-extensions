@@ -1,8 +1,9 @@
 /**
  * File-backed messenger store under `<cwd>/.pi/messenger/`:
- * - registry.json   — live presence (agent name → presence record)
- * - reservations.json — path prefix → claim
- * - inbox/<name>.jsonl — per-agent mailbox, one JSON message per line
+ * - registry/<name>.json — live presence, one shard per agent
+ * - reservations.json — path prefix → claim, writes guarded by reservations.lock
+ * - inbox/<name>.jsonl — per-agent mailbox, one JSON message per line; names
+ *   are percent-encoded and writes are guarded by a per-mailbox lock
  *
  * All coordination is file-based; no daemon. Stale presence entries (dead
  * pids) are pruned on read. Writes are atomic per file; mailbox appends are
@@ -20,6 +21,7 @@ import {
   removeShard,
   writeShard,
 } from "../../../lib/presence-shards.ts";
+import { withFileLock } from "./lock.ts";
 import type { Message, Presence, PresenceRegistry, ReservationMap } from "./types.ts";
 
 // --- Paths ---
@@ -40,8 +42,22 @@ function reservationsPath(cwd: string): string {
   return join(messengerDir(cwd), "reservations.json");
 }
 
+function reservationsLockPath(cwd: string): string {
+  return join(messengerDir(cwd), "reservations.lock");
+}
+
+function mailboxLockPath(cwd: string, name: string): string {
+  return join(messengerDir(cwd), "inbox", `${encodeURIComponent(name)}.lock`);
+}
+
+/** Mailbox filename for an agent name. Percent-encoding keeps a recipient
+ *  like "../escape" from addressing a file outside the inbox directory. */
+export function inboxFileName(name: string): string {
+  return `${encodeURIComponent(name)}.jsonl`;
+}
+
 export function inboxPath(cwd: string, name: string): string {
-  return join(messengerDir(cwd), "inbox", `${name}.jsonl`);
+  return join(messengerDir(cwd), "inbox", inboxFileName(name));
 }
 
 // --- Atomic JSON helpers ---
@@ -97,12 +113,27 @@ export async function leaveRegistry(cwd: string, name: string): Promise<void> {
 
 // --- Mailbox ---
 
+const MAX_MAILBOX_NAME_LENGTH = 200;
+
+/**
+ * Reject mailbox identities that cannot be a single path segment even after
+ * percent-encoding (separators, NUL) or that are empty/absurdly long. Name
+ * encoding alone keeps traversal inside the inbox; validation fails closed
+ * at the address boundary instead of creating a mailbox nobody can read.
+ */
+function assertValidMailboxName(name: string): void {
+  if (!name || name.length > MAX_MAILBOX_NAME_LENGTH || /[\\/\0]/.test(name)) {
+    throw new Error(`Invalid recipient mailbox name: ${JSON.stringify(name)}`);
+  }
+}
+
 export async function sendMessage(
   cwd: string,
   to: string,
   from: string,
   text: string,
 ): Promise<Message> {
+  assertValidMailboxName(to);
   const message: Message = {
     id: `msg-${Date.now().toString(36)}-${randomBytes(2).toString("hex")}`,
     from,
@@ -110,8 +141,11 @@ export async function sendMessage(
     text,
     at: Date.now(),
   };
-  await mkdir(dirname(inboxPath(cwd, to)), { recursive: true });
-  await appendFile(inboxPath(cwd, to), `${JSON.stringify(message)}\n`, "utf8");
+  // Appends take the mailbox lock so a concurrent markRead cannot read the
+  // mailbox before this append and rename the file without it after.
+  await withFileLock(mailboxLockPath(cwd, to), async () => {
+    await appendFile(inboxPath(cwd, to), `${JSON.stringify(message)}\n`, "utf8");
+  });
   return message;
 }
 
@@ -138,29 +172,36 @@ export async function readInbox(cwd: string, name: string): Promise<Message[]> {
 
 /** Mark messages read by rewriting the mailbox without them. */
 export async function markRead(cwd: string, name: string, ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
   const path = inboxPath(cwd, name);
-  let raw: string;
-  try {
-    raw = await readFile(path, "utf8");
-  } catch {
-    return;
-  }
-  const idSet = new Set(ids);
-  const kept: string[] = [];
-  for (const line of raw.split("\n")) {
-    if (!line.trim()) continue;
+  // The lock makes read-filter-write atomic with sendMessage appends: mail
+  // arriving while we compact is appended after our rename and stays unread.
+  await withFileLock(mailboxLockPath(cwd, name), async () => {
+    let raw: string;
     try {
-      const parsed = JSON.parse(line) as Message;
-      if (!idSet.has(parsed.id)) kept.push(line);
+      raw = await readFile(path, "utf8");
     } catch {
-      kept.push(line); // preserve malformed lines
+      return;
     }
-  }
-  if (kept.length === 0) {
-    await unlink(path).catch(() => {});
-  } else {
-    await writeFile(path, `${kept.join("\n")}\n`, "utf8");
-  }
+    const idSet = new Set(ids);
+    const kept: string[] = [];
+    for (const line of raw.split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        const parsed = JSON.parse(line) as Message;
+        if (!idSet.has(parsed.id)) kept.push(line);
+      } catch {
+        kept.push(line); // preserve malformed lines
+      }
+    }
+    if (kept.length === 0) {
+      await unlink(path).catch(() => {});
+      return;
+    }
+    const tmp = `${path}.${process.pid}.${randomBytes(2).toString("hex")}.tmp`;
+    await writeFile(tmp, `${kept.join("\n")}\n`, "utf8");
+    await rename(tmp, path);
+  });
 }
 
 // --- Reservations ---
@@ -170,6 +211,10 @@ export async function markRead(cwd: string, name: string, ids: string[]): Promis
 const ORPHAN_TTL_MS = 10 * 60_000;
 
 export async function loadReservations(cwd: string): Promise<ReservationMap> {
+  return withFileLock(reservationsLockPath(cwd), () => loadReservationsUnlocked(cwd));
+}
+
+async function loadReservationsUnlocked(cwd: string): Promise<ReservationMap> {
   const reservations = (await readJson<ReservationMap>(reservationsPath(cwd))) ?? {};
   const registry = await loadRegistry(cwd);
   let changed = false;
@@ -216,6 +261,27 @@ export function normalizePathPrefix(cwd: string, raw: string): string | undefine
   return posix === "" ? "." : posix;
 }
 
+/**
+ * Whether two normalized path prefixes cover any of the same tree: equal,
+ * one nested under the other, or either being the project root (".").
+ */
+function overlapsPrefix(a: string, b: string): boolean {
+  if (a === "." || b === ".") return true;
+  return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+}
+
+function findOverlappingOwner(
+  reservations: ReservationMap,
+  prefix: string,
+  selfName: string,
+): string | undefined {
+  for (const [key, claim] of Object.entries(reservations)) {
+    if (claim.owner === selfName) continue;
+    if (overlapsPrefix(prefix, key)) return claim.owner;
+  }
+  return undefined;
+}
+
 export async function reserve(
   cwd: string,
   name: string,
@@ -223,30 +289,39 @@ export async function reserve(
   reason?: string,
   pid?: number,
 ): Promise<{ reserved: string[]; conflicts: Array<{ path: string; owner: string }> }> {
-  const reservations = await loadReservations(cwd);
-  const reserved: string[] = [];
-  const conflicts: Array<{ path: string; owner: string }> = [];
-  for (const raw of paths) {
-    const prefix = normalizePathPrefix(cwd, raw);
-    if (prefix === undefined) {
-      conflicts.push({ path: raw, owner: "(outside project)" });
-      continue;
+  return withFileLock(reservationsLockPath(cwd), async () => {
+    const reservations = await loadReservationsUnlocked(cwd);
+    const reserved: string[] = [];
+    const conflicts: Array<{ path: string; owner: string }> = [];
+    for (const raw of paths) {
+      const prefix = normalizePathPrefix(cwd, raw);
+      if (prefix === undefined) {
+        conflicts.push({ path: raw, owner: "(outside project)" });
+        continue;
+      }
+      const existing = reservations[prefix];
+      if (existing && existing.owner !== name) {
+        conflicts.push({ path: prefix, owner: existing.owner });
+        continue;
+      }
+      // Claims may not overlap an ancestor or descendant claim held by
+      // another agent, so reservation matching stays unambiguous.
+      const overlappingOwner = findOverlappingOwner(reservations, prefix, name);
+      if (overlappingOwner) {
+        conflicts.push({ path: prefix, owner: overlappingOwner });
+        continue;
+      }
+      reservations[prefix] = {
+        owner: name,
+        ...(pid !== undefined ? { pid } : {}),
+        ...(reason?.trim() ? { reason: reason.trim() } : {}),
+        at: Date.now(),
+      };
+      reserved.push(prefix);
     }
-    const existing = reservations[prefix];
-    if (existing && existing.owner !== name) {
-      conflicts.push({ path: prefix, owner: existing.owner });
-      continue;
-    }
-    reservations[prefix] = {
-      owner: name,
-      ...(pid !== undefined ? { pid } : {}),
-      ...(reason?.trim() ? { reason: reason.trim() } : {}),
-      at: Date.now(),
-    };
-    reserved.push(prefix);
-  }
-  await saveReservations(cwd, reservations);
-  return { reserved, conflicts };
+    if (reserved.length > 0) await saveReservations(cwd, reservations);
+    return { reserved, conflicts };
+  });
 }
 
 /**
@@ -256,38 +331,42 @@ export async function reserve(
  * session re-adopts what it held before it quit.
  */
 export async function readoptReservations(cwd: string, name: string): Promise<void> {
-  const reservations = await loadReservations(cwd);
-  let changed = false;
-  for (const claim of Object.values(reservations)) {
-    if (claim.owner === name && (claim.pid !== process.pid || claim.orphanedAt !== undefined)) {
-      claim.pid = process.pid;
-      delete claim.orphanedAt;
-      changed = true;
+  await withFileLock(reservationsLockPath(cwd), async () => {
+    const reservations = await loadReservationsUnlocked(cwd);
+    let changed = false;
+    for (const claim of Object.values(reservations)) {
+      if (claim.owner === name && (claim.pid !== process.pid || claim.orphanedAt !== undefined)) {
+        claim.pid = process.pid;
+        delete claim.orphanedAt;
+        changed = true;
+      }
     }
-  }
-  if (changed) await saveReservations(cwd, reservations);
+    if (changed) await saveReservations(cwd, reservations);
+  });
 }
 
 export async function release(cwd: string, name: string, paths?: string[]): Promise<string[]> {
-  const reservations = await loadReservations(cwd);
-  const released: string[] = [];
-  for (const [prefix, claim] of Object.entries(reservations)) {
-    if (claim.owner !== name) continue;
-    if (paths === undefined) {
-      delete reservations[prefix];
-      released.push(prefix);
-      continue;
+  return withFileLock(reservationsLockPath(cwd), async () => {
+    const reservations = await loadReservationsUnlocked(cwd);
+    const released: string[] = [];
+    for (const [prefix, claim] of Object.entries(reservations)) {
+      if (claim.owner !== name) continue;
+      if (paths === undefined) {
+        delete reservations[prefix];
+        released.push(prefix);
+        continue;
+      }
+      const wanted = paths
+        .map((p) => normalizePathPrefix(cwd, p))
+        .filter((p): p is string => p !== undefined);
+      if (wanted.includes(prefix)) {
+        delete reservations[prefix];
+        released.push(prefix);
+      }
     }
-    const wanted = paths
-      .map((p) => normalizePathPrefix(cwd, p))
-      .filter((p): p is string => p !== undefined);
-    if (wanted.includes(prefix)) {
-      delete reservations[prefix];
-      released.push(prefix);
-    }
-  }
-  await saveReservations(cwd, reservations);
-  return released;
+    if (released.length > 0) await saveReservations(cwd, reservations);
+    return released;
+  });
 }
 
 export interface ReservationBlock {

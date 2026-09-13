@@ -29,7 +29,7 @@ Tool actions: `create`, `status`, `list`, `switch`, `task_add`, `task_update`, `
 
 ## How It Works
 
-- **Storage**: one JSON file per mission under `.pi/missions/`, atomic writes, plus an `active.json` pointer. Add `.pi/missions/` to the project's `.gitignore` if you don't want mission records committed.
+- **Storage**: one JSON file per mission under `.pi/missions/`, plus an `active.json` pointer. Mission writes are atomic and serialized across processes. An update based on stale data fails with instructions to reload mission status instead of overwriting another session's work. Add `.pi/missions/` to the project's `.gitignore` if you don't want mission records committed.
 - **Task graph**: tasks declare `dependsOn` ids; a task cannot be marked done while dependencies are open, and `done` requires a delivery summary.
 - **Verification**: tasks may carry a `verification` command. `reconcile` re-runs every done task's command; failures move the task to `regressed` so the record matches reality instead of optimism.
 - **Budget**: `maxIterations`/`maxTokens` with a `spend` action that reports over-budget explicitly.

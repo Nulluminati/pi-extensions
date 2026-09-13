@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -40,8 +40,8 @@ describe("autoresearch-extension", () => {
     return tool.execute("call-1", params as never, undefined, undefined, mockCtx);
   };
 
-  const getEventHandler = (eventType: string) => {
-    for (const call of mockPi.on.mock.calls) {
+  const getEventHandler = (eventType: string, pi: DeepMocked<ExtensionAPI> = mockPi) => {
+    for (const call of pi.on.mock.calls) {
       if (call[0] === eventType) return call[1];
     }
     throw new Error(`handler for ${eventType} not found`);
@@ -130,6 +130,31 @@ describe("autoresearch-extension", () => {
     await expect(initSession()).rejects.toThrow(/already exists|active autoresearch/);
   });
 
+  it("init rejects tracked pre-existing work without writing campaign state", async () => {
+    // A modified tracked file predates the campaign; a later discard must not
+    // reset it and a later keep must not commit it.
+    await writeFile(join(cwd, "code.txt"), "pre-existing edit\n");
+
+    await expect(initSession()).rejects.toThrow(/clean worktree/i);
+
+    // The pre-existing edit is preserved and no state was written.
+    expect(await readFile(join(cwd, "code.txt"), "utf8")).toBe("pre-existing edit\n");
+    expect(existsSync(join(cwd, ".pi", "autoresearch"))).toBe(false);
+    const exclude = await readFile(join(cwd, ".git/info/exclude"), "utf8").catch(() => "");
+    expect(exclude).not.toContain(".pi/autoresearch/");
+  });
+
+  it("init rejects pre-existing untracked work", async () => {
+    await writeFile(join(cwd, "scratch.txt"), "agent state that must survive\n");
+
+    await expect(initSession()).rejects.toThrow(/clean worktree/i);
+
+    expect(await readFile(join(cwd, "scratch.txt"), "utf8")).toBe(
+      "agent state that must survive\n",
+    );
+    expect(existsSync(join(cwd, ".pi", "autoresearch"))).toBe(false);
+  });
+
   it("keep commits the change and records the improvement", async () => {
     await initSession();
     const log = await runAndLog("90", "keep", "narrow the loop");
@@ -145,21 +170,190 @@ describe("autoresearch-extension", () => {
     expect(gitLog.stdout).toContain("autoresearch");
   });
 
-  it("discard removes only experiment-created files, not pre-existing untracked files", async () => {
-    // Untracked files that predate the campaign (agent state, scratch notes)
-    // must survive every discard — deleting them is data loss.
-    await writeFile(join(cwd, "keepme.txt"), "precise state\n");
-    await initSession();
+  it("discard reverts the current experiment without removing baseline files", async () => {
+    // The measure command creates a cache file alongside the metric; the
+    // campaign baseline must protect it from later discards.
+    await initSession({ measure: "touch baseline-cache.txt; cat metric.txt" });
+    expect(existsSync(join(cwd, "baseline-cache.txt"))).toBe(true);
 
     await writeFile(join(cwd, "code.txt"), "experiment edit\n");
     await writeFile(join(cwd, "experiment-only.txt"), "made by the experiment\n");
     await executeTool({ action: "run", description: "adds a file", hypothesis: "h" });
     await executeTool({ action: "log", status: "discard", description: "adds a file" });
 
-    expect(await readFile(join(cwd, "keepme.txt"), "utf8")).toContain("precise state");
+    expect(existsSync(join(cwd, "baseline-cache.txt"))).toBe(true);
     expect(existsSync(join(cwd, "experiment-only.txt"))).toBe(false);
-    // Tracked files still revert.
+    // Tracked files revert to the committed experiment base.
     expect(await readFile(join(cwd, "code.txt"), "utf8")).toBe("v1\n");
+  });
+
+  it("discard removes a new file staged during the experiment", async () => {
+    await initSession();
+    await writeFile(join(cwd, "staged-experiment.txt"), "temporary\n");
+    await execFileAsync("git", ["add", "staged-experiment.txt"], gitOpts(cwd));
+
+    await executeTool({ action: "run", description: "staged file" });
+    await executeTool({ action: "log", status: "discard", description: "staged file" });
+
+    expect(existsSync(join(cwd, "staged-experiment.txt"))).toBe(false);
+    const status = await execFileAsync("git", ["status", "--porcelain"], gitOpts(cwd));
+    expect(status.stdout).toBe("");
+  });
+
+  it("keep commits only the current experiment changes", async () => {
+    // The baseline contains the measure command's side artifact; a keep must
+    // not absorb it even though the experiment ran the same command again.
+    await initSession({ measure: "touch unrelated.txt; cat metric.txt" });
+    expect(existsSync(join(cwd, "unrelated.txt"))).toBe(true);
+
+    await writeFile(join(cwd, "code.txt"), "second experiment\n");
+    await writeFile(join(cwd, "experiment.txt"), "created by second experiment\n");
+    await executeTool({ action: "run", description: "second experiment" });
+    const log = await executeTool({
+      action: "log",
+      status: "keep",
+      description: "second experiment",
+    });
+    expect(log.content[0].text).toContain("Kept (commit");
+
+    const shown = await execFileAsync(
+      "git",
+      ["show", "--pretty=", "--name-only", "HEAD"],
+      gitOpts(cwd),
+    );
+    const committed = shown.stdout.split("\n").filter(Boolean);
+    expect(committed).toContain("code.txt");
+    expect(committed).toContain("experiment.txt");
+    expect(committed).not.toContain("unrelated.txt");
+    expect(existsSync(join(cwd, "unrelated.txt"))).toBe(true);
+  });
+
+  it("session reload restores a pending experiment so log can finish it", async () => {
+    await initSession();
+    await writeFile(join(cwd, "code.txt"), "pending edit\n");
+    await executeTool({ action: "run", description: "pending experiment" });
+    expect(existsSync(join(cwd, ".pi", "autoresearch", "pending.json"))).toBe(true);
+
+    // Simulate a reload: a fresh extension instance over the same cwd.
+    const mockPi2 = createMockPi() as DeepMocked<ExtensionAPI>;
+    const mockCtx2 = createMockContext();
+    (mockCtx2 as { cwd: string }).cwd = cwd;
+    await autoresearchExtension(mockPi2);
+    await getEventHandler("session_start", mockPi2)(
+      { type: "session_start", reason: "reload" },
+      mockCtx2,
+    );
+    const tool2 = mockPi2.registerTool.mock.calls[0][0];
+    const log = await tool2.execute(
+      "call-relog",
+      { action: "log", status: "discard", description: "pending experiment" } as never,
+      undefined,
+      undefined,
+      mockCtx2,
+    );
+
+    expect(log.content[0].text).toContain("Discarded");
+    expect(await readFile(join(cwd, "code.txt"), "utf8")).toBe("v1\n");
+    expect(existsSync(join(cwd, ".pi", "autoresearch", "pending.json"))).toBe(false);
+  });
+
+  it("session shutdown clears the status line and lifecycle state", async () => {
+    await initSession();
+    await writeFile(join(cwd, "code.txt"), "pending edit\n");
+    await executeTool({ action: "run", description: "pending experiment" });
+
+    const shutdown = getEventHandler("session_shutdown");
+    await shutdown({ type: "session_shutdown", reason: "reload" }, mockCtx);
+    expect(mockCtx.ui.setStatus).toHaveBeenLastCalledWith("autoresearch", undefined);
+    expect(mockPi.events.emit).toHaveBeenLastCalledWith("autoresearch:state", {
+      active: false,
+      iterations: 0,
+    });
+
+    // Even without a session_start, running again must rehydrate and refuse.
+    await expect(executeTool({ action: "run", description: "again" })).rejects.toThrow(/pending/i);
+  });
+
+  it("status reports without an active campaign and after stop", async () => {
+    const fresh = await executeTool({ action: "status" });
+    expect(fresh.content[0].text).toContain("No autoresearch session");
+    expect(fresh.details.active).toBe(false);
+
+    await initSession();
+    await executeTool({ action: "stop" });
+    const stopped = await executeTool({ action: "status" });
+    expect(stopped.content[0].text).toContain("STOPPED");
+    expect(stopped.details.summary.active).toBe(false);
+  });
+
+  it("re-init after stop starts a fresh campaign log", async () => {
+    await initSession();
+    await runAndLog("90", "keep", "first campaign");
+    await executeTool({ action: "stop" });
+
+    await initSession();
+    const entries = await readLog(cwd);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].status).toBe("baseline");
+    expect(entries[0].metric).toBe(90);
+
+    // The previous campaign log is archived, not merged into the new one.
+    const archived = await readdir(join(cwd, ".pi", "autoresearch"));
+    expect(archived.some((name) => name.startsWith("log.") && name !== "log.jsonl")).toBe(true);
+  });
+
+  it("init works in a linked git worktree", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "autoresearch-wt-"));
+    const wt = join(parent, "wt");
+    try {
+      await execFileAsync("git", ["worktree", "add", "--detach", "-q", wt, "HEAD"], gitOpts(cwd));
+      (mockCtx as { cwd: string }).cwd = wt;
+
+      const res = await initSession();
+      expect(res.content[0].text).toContain("Baseline: 100");
+
+      const excludePath = (
+        await execFileAsync("git", ["rev-parse", "--git-path", "info/exclude"], gitOpts(wt))
+      ).stdout.trim();
+      const exclude = await readFile(excludePath, "utf8");
+      expect(exclude.split("\n")).toContain(".pi/autoresearch/");
+    } finally {
+      await execFileAsync("git", ["worktree", "remove", "--force", wt], gitOpts(cwd)).catch(
+        () => {},
+      );
+      await rm(parent, { recursive: true, force: true });
+    }
+  });
+
+  it("parses retained metric output even when the measure command exits non-zero", async () => {
+    const res = await initSession({ measure: "printf 'METRIC time=42\\n'; exit 3" });
+
+    expect(res.content[0].text).toContain("Baseline: 42");
+    let entries = await readLog(cwd);
+    expect(entries[0].status).toBe("baseline");
+    expect(entries[0].metric).toBe(42);
+
+    const run = await executeTool({ action: "run", description: "failed command with result" });
+    expect(run.content[0].text).toContain("time=42");
+    await executeTool({ action: "log", status: "discard" });
+    entries = await readLog(cwd);
+    expect(entries[1].metric).toBe(42);
+  });
+
+  it("does not mistake a process error code for a reported metric", async () => {
+    const res = await initSession({ measure: "exit 3" });
+
+    expect(res.content[0].text).toContain("unparseable");
+    const entries = await readLog(cwd);
+    expect(entries[0].status).toBe("invalid");
+    expect(entries[0].metric).toBeUndefined();
+  });
+
+  it("keeps stdout and stderr separate when parsing the metric", async () => {
+    await initSession({ measure: "printf 'time=17'; printf '0000 errors' >&2" });
+
+    const entries = await readLog(cwd);
+    expect(entries[0].metric).toBe(17);
   });
 
   it("discard reverts the working tree", async () => {

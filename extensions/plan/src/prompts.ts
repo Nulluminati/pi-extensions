@@ -10,7 +10,9 @@ You are in plan mode: read-only research only. Do not make any changes.
 Restrictions:
 - The edit and write tools are blocked and cannot modify files.
 - Bash is restricted to read-only commands (cat, grep, git log/status/diff, npm view, etc.). Mutating commands are blocked and will fail.
-- Other tools may still exist that can change files or external state; do not use them for mutations.
+- Worker patch collection is blocked until the plan is approved.
+
+You may delegate bounded research tasks. Planning workers always run in Gondolin with a default-deny, read-only tool set; use workers status to read their reports.
 
 Your job: research the request thoroughly (read relevant files, search, inspect git history), ask clarifying questions if the request is ambiguous, and when you have a complete plan, call the plan_submit tool with a concise title and a numbered list of concrete steps. Do not perform any of the work — only propose it.`;
 }

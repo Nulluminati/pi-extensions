@@ -9,10 +9,10 @@
  *
  * Resolution order: the delegate call's explicit list, then
  * PI_WORKER_EXTENSIONS (comma-separated names), then the config file, then
- * the default set. `messenger` is always included — it is the coordination
- * channel to the parent. A hard denylist rejects workflow extensions that
- * would break the one-level delegation model, even when explicitly
- * requested.
+ * the default set. `messenger` and `gondolin` are always included: messenger
+ * is the coordination channel to the parent, and Gondolin is the mandatory
+ * worker sandbox. A hard denylist rejects workflow extensions that would
+ * break the one-level delegation model, even when explicitly requested.
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -50,8 +50,8 @@ export const FORBIDDEN_WORKER_EXTENSIONS = [
   "plan",
 ] as const;
 
-/** Coordination channel to the parent; always loaded, never removed. */
-const FORCED_WORKER_EXTENSION = "messenger";
+/** Coordination and sandbox extensions loaded by every worker. */
+export const REQUIRED_WORKER_EXTENSIONS = ["messenger", "gondolin"] as const;
 
 export interface ResolvedWorkerExtension {
   name: string;
@@ -100,7 +100,14 @@ export function resolveWorkerExtensions(
   }
 
   const forbidden = new Set<string>(FORBIDDEN_WORKER_EXTENSIONS);
-  const unique = new Set<string>([FORCED_WORKER_EXTENSION, ...names.map((name) => name.trim())]);
+  const requestedNames = names.map((name) => name.trim());
+  // Gondolin loads last so its built-in tool overrides cannot be shadowed by
+  // an optional worker extension loaded afterward.
+  const unique = new Set<string>([
+    REQUIRED_WORKER_EXTENSIONS[0],
+    ...requestedNames.filter((name) => name !== "gondolin"),
+    REQUIRED_WORKER_EXTENSIONS[1],
+  ]);
   const resolved: ResolvedWorkerExtension[] = [];
   for (const name of unique) {
     if (forbidden.has(name)) {

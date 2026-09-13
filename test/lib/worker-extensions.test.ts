@@ -42,7 +42,7 @@ describe("worker-extensions", () => {
     await rm(root, { recursive: true, force: true });
   });
 
-  it("defaults to the default set plus forced messenger, resolved to paths", () => {
+  it("defaults to the default set plus mandatory extensions, resolved to paths", () => {
     const resolved = resolveWorkerExtensions(undefined, {
       extensionsRoot: root,
       configPath,
@@ -50,6 +50,7 @@ describe("worker-extensions", () => {
 
     const names = resolved.map((r) => r.name);
     expect(names[0]).toBe("messenger");
+    expect(names.at(-1)).toBe("gondolin");
     for (const name of DEFAULT_WORKER_EXTENSIONS) expect(names).toContain(name);
     for (const r of resolved) expect(existsSync(r.path)).toBe(true);
   });
@@ -63,7 +64,7 @@ describe("worker-extensions", () => {
       configPath,
     });
 
-    expect(resolved.map((r) => r.name)).toEqual(["messenger", "context7"]);
+    expect(resolved.map((r) => r.name)).toEqual(["messenger", "context7", "gondolin"]);
   });
 
   it("parses the environment list (comma-separated, trimmed)", () => {
@@ -74,7 +75,7 @@ describe("worker-extensions", () => {
       configPath,
     });
 
-    expect(resolved.map((r) => r.name)).toEqual(["messenger", "web-search"]);
+    expect(resolved.map((r) => r.name)).toEqual(["messenger", "web-search", "gondolin"]);
   });
 
   it("loads the config file when no env or explicit set", () => {
@@ -85,17 +86,30 @@ describe("worker-extensions", () => {
       configPath,
     });
 
-    expect(resolved.map((r) => r.name)).toEqual(["messenger", "web-search"]);
+    expect(resolved.map((r) => r.name)).toEqual(["messenger", "web-search", "gondolin"]);
   });
 
-  it("force-includes messenger and dedupes", () => {
-    const resolved = resolveWorkerExtensions(["web-search", "web-search"], {
+  it("force-includes messenger and gondolin even when the explicit list is empty", () => {
+    const resolved = resolveWorkerExtensions([], {
       extensionsRoot: root,
       configPath,
     });
 
+    expect(resolved.map((r) => r.name)).toEqual(["messenger", "gondolin"]);
+  });
+
+  it("dedupes mandatory and requested extensions", () => {
+    const resolved = resolveWorkerExtensions(
+      ["messenger", "gondolin", "web-search", "web-search"],
+      {
+        extensionsRoot: root,
+        configPath,
+      },
+    );
+
     const names = resolved.map((r) => r.name);
     expect(names.filter((n) => n === "messenger")).toHaveLength(1);
+    expect(names.filter((n) => n === "gondolin")).toHaveLength(1);
     expect(names.filter((n) => n === "web-search")).toHaveLength(1);
   });
 

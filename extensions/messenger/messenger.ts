@@ -29,6 +29,7 @@ import { resolveAgentName } from "./src/identity.ts";
 import { MESSENGER_PARAMETERS } from "./src/schemas.ts";
 import {
   heartbeat,
+  inboxFileName,
   leaveRegistry,
   loadRegistry,
   loadReservations,
@@ -76,15 +77,17 @@ export default async function messengerExtension(pi: ExtensionAPI) {
    * model sees exactly what arrived — no polling tools required.
    */
   async function deliverInbox(ctx: ExtensionContext): Promise<void> {
+    // Single-flight gate is set before the first await so a watcher event and
+    // a settle event that arrive together cannot both deliver the same mail.
     if (!agentName || delivering) return;
-    const unread = await readInbox(ctx.cwd, agentName);
-    if (unread.length === 0) return;
-    if (!ctx.isIdle()) {
-      await refreshStatus(ctx);
-      return;
-    }
     delivering = true;
     try {
+      const unread = await readInbox(ctx.cwd, agentName);
+      if (unread.length === 0) return;
+      if (!ctx.isIdle()) {
+        await refreshStatus(ctx);
+        return;
+      }
       const body = unread.map((m) => `From ${m.from}: ${m.text}`).join("\n");
       pi.sendMessage(
         {
@@ -101,10 +104,10 @@ export default async function messengerExtension(pi: ExtensionAPI) {
         agentName,
         unread.map((m) => m.id),
       );
+      await refreshStatus(ctx);
     } finally {
       delivering = false;
     }
-    await refreshStatus(ctx);
   }
 
   // --- Inbox watcher ---
@@ -137,7 +140,7 @@ export default async function messengerExtension(pi: ExtensionAPI) {
       const inboxDir = join(ctx.cwd, ".pi", "messenger", "inbox");
       mkdirSync(inboxDir, { recursive: true });
       inboxWatcher = watch(inboxDir, (_event, filename) => {
-        if (filename && filename !== `${agentName}.jsonl`) return;
+        if (filename && filename !== inboxFileName(agentName)) return;
         void deliverWhenIdle(ctx);
       });
       // The watched directory can vanish (project cleanup) or the watcher can

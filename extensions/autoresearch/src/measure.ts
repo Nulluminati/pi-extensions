@@ -58,7 +58,10 @@ export function parseMetric(output: string, metric: string): number | undefined 
 
 export interface CommandOutcome {
   ok: boolean;
+  /** Full diagnostic output, including the process error when execution fails. */
   output: string;
+  /** Process stdout and stderr only; safe to inspect for a reported metric. */
+  metricOutput: string;
   durationMs: number;
 }
 
@@ -74,16 +77,22 @@ export async function runCommand(
       timeout: timeoutMs,
       maxBuffer: 16 * 1024 * 1024,
     });
+    // Keep stdout and stderr as separate lines: concatenating them can merge
+    // a stdout metric with digits at the start of stderr.
+    const metricOutput = [stdout, stderr].filter(Boolean).join("\n").trim();
     return {
       ok: true,
-      output: `${stdout}${stderr}`.trim(),
+      output: metricOutput,
+      metricOutput,
       durationMs: Date.now() - started,
     };
   } catch (err) {
     const e = err as { stdout?: string; stderr?: string; message: string };
+    const metricOutput = [e.stdout, e.stderr].filter(Boolean).join("\n").trim();
     return {
       ok: false,
-      output: [e.stdout, e.stderr, e.message].filter(Boolean).join("\n").trim(),
+      output: [metricOutput, e.message].filter(Boolean).join("\n").trim(),
+      metricOutput,
       durationMs: Date.now() - started,
     };
   }
@@ -100,9 +109,66 @@ export async function isGitRepo(cwd: string): Promise<boolean> {
   }
 }
 
-/** Stage everything and commit; returns the short commit id. */
-export async function commitAll(cwd: string, message: string): Promise<string> {
-  await runGit(cwd, ["add", "-A"]);
+export interface ChangedFiles {
+  tracked: string[];
+  untracked: string[];
+}
+
+/**
+ * Worktree paths with uncommitted changes (modified, renamed, deleted, or
+ * untracked files), NUL-safe and relative to cwd. Ignored files — including
+ * the campaign's own `.pi/autoresearch/` when locally excluded — are not
+ * reported.
+ */
+export async function changedFiles(cwd: string): Promise<ChangedFiles> {
+  const out = await runGit(cwd, ["status", "--porcelain", "-z", "--untracked-files=all"]);
+  const tokens = out.split("\0");
+  const tracked = new Set<string>();
+  const untracked = new Set<string>();
+  for (let i = 0; i < tokens.length; i += 1) {
+    const entry = tokens[i];
+    if (!entry) continue;
+    const status = entry.slice(0, 2);
+    const path = entry.slice(3);
+    if (!path) continue;
+    if (status === "??") untracked.add(path);
+    else tracked.add(path);
+    // Renames and copies carry the original path as the next NUL token.
+    if (status.includes("R") || status.includes("C")) {
+      i += 1;
+      const original = tokens[i];
+      if (original) tracked.add(original);
+    }
+  }
+  return {
+    tracked: [...tracked].sort(),
+    untracked: [...untracked].sort(),
+  };
+}
+
+/**
+ * Untracked files (file-level, NUL-safe) relative to cwd.
+ */
+export async function listUntracked(cwd: string): Promise<string[]> {
+  return (await changedFiles(cwd)).untracked;
+}
+
+/**
+ * Commit the current experiment's changes only: tracked worktree changes plus
+ * untracked files created after the campaign's baseline snapshot. Files that
+ * existed before the experiment — unrelated tracked edits or untracked state —
+ * are never staged. Returns the short commit id.
+ */
+export async function commitExperiment(
+  cwd: string,
+  message: string,
+  baselineUntracked?: string[],
+): Promise<string> {
+  const { tracked, untracked } = await changedFiles(cwd);
+  const baseline = new Set(baselineUntracked ?? []);
+  const paths = [...new Set([...tracked, ...untracked.filter((p) => !baseline.has(p))])];
+  if (paths.length === 0) throw new Error("No experiment changes to commit.");
+  await runGit(cwd, ["add", "--", ...paths]);
   // Message passed via env to avoid shell-quoting bugs. Git env must be
   // sanitized: inherited GIT_INDEX_FILE (e.g. under lint-staged) makes this
   // commit build its tree from the outer repo's index.
@@ -115,29 +181,22 @@ export async function commitAll(cwd: string, message: string): Promise<string> {
 }
 
 /**
- * Untracked files (file-level, NUL-safe) relative to cwd.
+ * Revert the current experiment: tracked changes are restored from HEAD, and
+ * untracked files created after the campaign's baseline snapshot are removed.
+ * Pre-existing work — unrelated tracked edits or untracked files captured in
+ * the baseline — is never touched. A missing snapshot (legacy campaigns)
+ * leaves untracked files alone for the same reason.
  */
-export async function listUntracked(cwd: string): Promise<string[]> {
-  const out = await runGit(cwd, ["status", "--porcelain", "--untracked-files=all", "-z"]);
-  return out
-    .split("\0")
-    .filter((entry) => entry.startsWith("?? "))
-    .map((entry) => entry.slice(3));
-}
-
-/**
- * Revert the experiment: tracked modifications and deletions are restored,
- * and untracked files created after the campaign's baseline snapshot are
- * removed. Pre-existing untracked files (agent state, scratch notes, other
- * sessions' work) are never touched — staging everything and hard-resetting
- * would delete them, which is data loss. A missing snapshot (legacy
- * campaigns) leaves untracked files alone for the same reason.
- */
-export async function discardAll(cwd: string, baselineUntracked?: string[]): Promise<void> {
-  await runGit(cwd, ["reset", "--hard", "HEAD"]);
+export async function discardExperiment(cwd: string, baselineUntracked?: string[]): Promise<void> {
+  const { tracked, untracked } = await changedFiles(cwd);
+  if (tracked.length > 0) {
+    // Restore both index and worktree so an experiment that staged a new file
+    // is discarded just as safely as an unstaged edit or deletion.
+    await runGit(cwd, ["restore", "--source=HEAD", "--staged", "--worktree", "--", ...tracked]);
+  }
   if (baselineUntracked === undefined) return;
   const baseline = new Set(baselineUntracked);
-  for (const rel of await listUntracked(cwd)) {
+  for (const rel of untracked) {
     if (!baseline.has(rel)) await rm(join(cwd, rel), { force: true });
   }
 }

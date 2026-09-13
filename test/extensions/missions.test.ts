@@ -78,6 +78,39 @@ describe("missions-extension", () => {
     ).rejects.toThrow(/already exists/);
   });
 
+  it("rejects a stale mutation instead of overwriting another session's update", async () => {
+    await executeTool({ action: "create", title: "shared", objective: "coordinate sessions" });
+
+    const secondPi = createBasePi() as DeepMocked<ExtensionAPI>;
+    const secondCtx = createMockCommandContext();
+    (secondCtx as { cwd: string }).cwd = cwd;
+    await missionsExtension(secondPi);
+    const secondStart = secondPi.on.mock.calls.find((call) => call[0] === "session_start")?.[1];
+    if (!secondStart) throw new Error("second session_start handler not found");
+    await secondStart({ type: "session_start", reason: "startup" }, secondCtx);
+
+    await executeTool({ action: "task_add", taskTitle: "First session task" });
+
+    const secondTool = secondPi.registerTool.mock.calls[0][0];
+    await expect(
+      secondTool.execute(
+        "call-2",
+        { action: "task_add", taskTitle: "Stale second session task" },
+        undefined,
+        undefined,
+        secondCtx,
+      ),
+    ).rejects.toThrow(/changed by another session/);
+
+    const pointer = JSON.parse(await readFile(join(cwd, ".pi/missions/active.json"), "utf8"));
+    const stored = JSON.parse(
+      await readFile(join(cwd, ".pi/missions", `${pointer.id}.json`), "utf8"),
+    );
+    expect(stored.tasks.map((task: { title: string }) => task.title)).toEqual([
+      "First session task",
+    ]);
+  });
+
   it("enforces dependency ordering and summaries on task_update", async () => {
     await executeTool({ action: "create", title: "t", objective: "o" });
     const a = await executeTool({ action: "task_add", taskTitle: "Task A" });
