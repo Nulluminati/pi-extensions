@@ -15,14 +15,14 @@ Replaces Pi's default footer with a denser, more information-rich two-line statu
 **Footer line 2** (transient events):
 - Third-party extension statuses published via `ctx.ui.setStatus()`
 
-The small model is deliberately excluded from line 2; it lives in the editor title instead (see below), so it is not shown twice. The Gondolin VM status is excluded too — the Gondolin VM renders as the line 1 workspace segment, and a running goal is the **Goal** badge in the editor frame (both keep their `setStatus` entries as the fallback for Pi's default footer).
+Small- and worker-model labels live in the editor title and are omitted from the footer, so they are not shown twice. The Gondolin VM status is excluded too: the VM renders as the line 1 workspace segment, and a running goal is the **Goal** badge in the editor frame. Their `setStatus` entries remain as fallbacks for Pi's default footer.
 
 The whole second line is omitted when there's nothing transient to show.
 
 **Editor**:
 - The input box is wrapped in the same rounded accent modal frame the voice/handoff overlays use (`renderModalFrame`), with side borders and padding
 - The title (top border) shows the main model and its thinking level (color-coded per level), plus a flex badge when the model is flex-capable
-- When a global small model is configured (`/smallmodel`), a grey `/` separator introduces its label, rendered grey to read as subordinate to the main model
+- Configured small and worker models appear as grey, icon-labelled segments after the main model, separated by `/`
 - While a goal is running, a **Goal** badge shows in the frame's top-right cell (same place as the **Plan Mode** badge, joined by a dim `·` when both are active)
 
 ## Usage
@@ -55,7 +55,7 @@ The right block has a usage bar, a `tokens/contextWindow` ratio, the token break
 
 ### Editor
 
-The editor is a `CustomEditor` subclass that overrides only `render()`. It renders the base editor at the modal's inner content width, strips the base editor's own top and bottom borders, and wraps the remaining content in the shared `renderModalFrame` chrome (rounded `╭╯` corners, `borderAccent` color, side `│` borders, padding) — the same frame voice/handoff use. The title in the top border is built from the main model + thinking level (+ flex badge when capable) and, when a global small model is configured, a grey `/`-separated small model label; the title is passed `rawTitle` so its pre-colored segments aren't re-wrapped. The frame's top-right cell shows **Plan Mode** (warning color) while plan mode is active and **Goal** while a goal is running, joined by a dim `·` when both apply. The small model label is read from the small-model config (`lib/small-model.ts`) on session start, refreshed at the start of each turn, and watched live — so changing it via `/smallmodel` (or an external edit) updates the title immediately, without waiting for the next turn. Autocomplete dropdown lines from the base editor are preserved below the box instead of being absorbed into the frame.
+The editor is a `CustomEditor` subclass that overrides only `render()`. It renders the base editor at the modal's inner content width, strips the base editor's own top and bottom borders, and wraps the remaining content in the shared `renderModalFrame` chrome (rounded `╭╯` corners, `borderAccent` color, side `│` borders, padding). The title contains the main model, thinking level, optional flex badge, and configured small- and worker-model labels. The secondary labels use icons and grey `/` separators. The title is passed as `rawTitle` so its colored segments are not wrapped again. The frame's top-right cell shows **Plan Mode** (warning color) while plan mode is active and **Goal** while a goal is running, joined by a dim `·` when both apply. The extension reads both model configs on session start, refreshes them at the start of each turn, and watches their files. Changes from `/smallmodel`, `/worker-model`, or an external edit appear without waiting for the next turn. Autocomplete dropdown lines from the base editor remain below the box instead of being absorbed into the frame.
 
 On `session_start` the extension captures whatever editor factory is currently registered (typically undefined, meaning Pi's default) and installs its own. On `session_shutdown` it restores the captured factory. `/statusbar:toggle` does the same swap, on demand.
 

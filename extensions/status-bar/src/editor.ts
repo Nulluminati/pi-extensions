@@ -129,25 +129,30 @@ export function renderEditorModalFrame(input: EditorModalFrameInput): string[] {
  * The app stores prompt history per editor instance, and recreates the editor
  * whenever the editor component is re-set (extension reload, /reload) — the
  * swap carries only the current text, so the history buffer would reset. The
- * store below mirrors submitted prompts in the process (globalThis-keyed, so
+ * store below mirrors submitted prompts by session (globalThis-keyed, so
  * extension re-imports cannot lose it) and every new PolishedEditor replays
- * it into its own buffer on construction.
+ * only that session's entries into its own buffer on construction.
  */
-const HISTORY_STORE_KEY = Symbol.for("status-bar.prompt-history");
+const HISTORY_STORES_KEY = Symbol.for("status-bar.prompt-history-by-session");
 const HISTORY_LIMIT = 100;
 
-function promptHistoryStore(): string[] {
+function promptHistoryStore(sessionId: string): string[] {
   const g = globalThis as Record<symbol, unknown>;
-  let store = g[HISTORY_STORE_KEY] as string[] | undefined;
+  let stores = g[HISTORY_STORES_KEY] as Map<string, string[]> | undefined;
+  if (!stores) {
+    stores = new Map();
+    g[HISTORY_STORES_KEY] = stores;
+  }
+  let store = stores.get(sessionId);
   if (!store) {
     store = [];
-    g[HISTORY_STORE_KEY] = store;
+    stores.set(sessionId, store);
   }
   return store;
 }
 
-function mirrorPrompt(text: string): void {
-  const store = promptHistoryStore();
+function mirrorPrompt(sessionId: string, text: string): void {
+  const store = promptHistoryStore(sessionId);
   if (store[0] !== text) store.unshift(text);
   if (store.length > HISTORY_LIMIT) store.length = HISTORY_LIMIT;
 }
@@ -161,6 +166,7 @@ export class PolishedEditor extends CustomEditor {
   private readonly getFlexState: () => { on: boolean; capable: boolean };
   private readonly getBorderColor: () => string | undefined;
   private readonly getTitleRight: () => string | undefined;
+  private readonly historySessionId: string;
 
   constructor(
     tui: any,
@@ -174,11 +180,13 @@ export class PolishedEditor extends CustomEditor {
     getBorderColor: () => string | undefined,
     getTitleRight: () => string | undefined,
     getWorkerModelLabel?: () => string,
+    historySessionId = "default",
   ) {
     super(tui, theme, keybindings, { paddingX: 0 });
-    // Restore prompts recorded by previous editor instances (oldest first, so
-    // the newest entry lands at the top of the history buffer).
-    for (const entry of [...promptHistoryStore()].reverse()) {
+    this.historySessionId = historySessionId;
+    // Restore prompts recorded by previous editor instances for this session
+    // (oldest first, so the newest entry lands at the top of the history buffer).
+    for (const entry of [...promptHistoryStore(historySessionId)].reverse()) {
       super.addToHistory?.(entry);
     }
     this.uiTheme = uiTheme;
@@ -197,7 +205,7 @@ export class PolishedEditor extends CustomEditor {
   override addToHistory(text: string): void {
     super.addToHistory?.(text);
     const trimmed = text.trim();
-    if (trimmed) mirrorPrompt(trimmed);
+    if (trimmed) mirrorPrompt(this.historySessionId, trimmed);
   }
 
   render(width: number): string[] {

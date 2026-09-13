@@ -164,6 +164,10 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
   const editorLayerId = "status-bar";
   let editorRequestRender: (() => void) | undefined;
 
+  function editorHistorySessionId(ctx: ExtensionCommandContext): string {
+    return ctx.sessionManager.getSessionId();
+  }
+
   function installEditor(ctx: ExtensionCommandContext): void {
     if (!ctx.hasUI) return;
     const current = ctx.ui.getEditorComponent() as EditorFactory | undefined;
@@ -196,6 +200,7 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
             return parts.length > 0 ? parts.join(ctx.ui.theme.fg("dim", " · ")) : undefined;
           },
           () => state.workerModelLabel,
+          editorHistorySessionId(ctx),
         );
       },
     );
@@ -465,9 +470,7 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     stopSmallModelWatch();
     stopWorkerModelWatch();
     clearFooter(ctx as ExtensionCommandContext);
-    // The editor layer persists across extension rebinds: restoring it would
-    // recreate the editor on the next /reload and reset the prompt history
-    // buffer. The instance is reused via the install-time layer dedupe.
+    restoreEditor(ctx as ExtensionCommandContext);
   });
 
   pi.on("turn_start", async (_event, ctx) => {

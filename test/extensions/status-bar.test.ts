@@ -16,6 +16,7 @@ import {
   installEditorFactoryLayer,
 } from "../../lib/editor-factory.ts";
 import { loadSmallModelConfig, resolveSmallModelConfigPath } from "../../lib/small-model.ts";
+import { loadWorkerModelConfig } from "../../lib/worker-model.ts";
 import { createMockCommandContext } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
 import { getEventHandler } from "../mocks/test-helpers.ts";
@@ -25,6 +26,11 @@ vi.mock("../../lib/small-model.ts", () => ({
   resolveSmallModelConfigPath: vi.fn(() => "/agent/small-model.json"),
 }));
 
+vi.mock("../../lib/worker-model.ts", () => ({
+  loadWorkerModelConfig: vi.fn(),
+  resolveWorkerModelConfigPath: vi.fn(() => "/agent/worker-model.json"),
+}));
+
 /**
  * Default the small-model config mock to "not configured" so the editor meta
  * line omits the small model segment unless a test opts in. Called after
@@ -32,6 +38,12 @@ vi.mock("../../lib/small-model.ts", () => ({
  */
 function unconfigureSmallModel(): void {
   vi.mocked(loadSmallModelConfig).mockImplementation(() => {
+    throw new Error("not configured");
+  });
+}
+
+function unconfigureWorkerModel(): void {
+  vi.mocked(loadWorkerModelConfig).mockImplementation(() => {
     throw new Error("not configured");
   });
 }
@@ -79,7 +91,7 @@ function footerData(opts: { branch?: string | null; statuses?: Map<string, strin
 function getEventsHandler(mockPi: ReturnType<typeof createMockPi>, eventName: string) {
   const call = mockPi.events.on.mock.calls.find((c) => c[0] === eventName);
   if (!call) throw new Error(`No pi.events handler for ${eventName}`);
-  return call[1] as (payload: any) => void;
+  return call[1] as (payload: unknown) => void;
 }
 
 /**
@@ -120,6 +132,7 @@ describe("status-bar-extension", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     unconfigureSmallModel();
+    unconfigureWorkerModel();
   });
 
   it("registers /statusbar:toggle command", async () => {
@@ -282,6 +295,41 @@ describe("status-bar-extension", () => {
     const lines = component.render(120);
 
     expect(lines[0]).not.toContain("openai/gpt-4o");
+  });
+
+  it("footer omits the worker model because it lives in the editor box", async () => {
+    vi.mocked(loadWorkerModelConfig).mockReturnValue({
+      config: { provider: "opencode-go", model: "deepseek-flash", thinkingLevel: "high" },
+      source: "config",
+    });
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBar(mockPi, mockCtx);
+
+    const component = getFooterFactory(mockCtx)(
+      { requestRender: vi.fn() },
+      plainTheme(),
+      footerData({ branch: "main" }),
+    );
+    const lines = component.render(120);
+
+    expect(lines[0]).not.toContain("via");
+    expect(lines[0]).not.toContain("opencode-go/deepseek-flash");
+    expect(lines[0]).toContain("main");
+  });
+
+  it("editor box keeps the configured worker model", async () => {
+    vi.mocked(loadWorkerModelConfig).mockReturnValue({
+      config: { provider: "opencode-go", model: "deepseek-flash", thinkingLevel: "high" },
+      source: "config",
+    });
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBar(mockPi, mockCtx);
+
+    const lines = renderInstalledEditor(mockCtx).render(120);
+
+    expect(lines.some((line) => line.includes("opencode-go/deepseek-flash"))).toBe(true);
   });
 
   it("footer shows working directory basename on line 1", async () => {
@@ -1452,24 +1500,35 @@ describe("status-bar editor install", () => {
     expect(mockCtx.ui.setEditorComponent).toHaveBeenCalledWith(expect.any(Function));
   });
 
-  it("session_shutdown keeps the editor layer so /reload preserves prompt history", async () => {
-    const mockPi = createMockPi();
+  it("session reload replaces the editor layer with a factory bound to the new extension instance", async () => {
+    const firstPi = createMockPi();
     const mockCtx = createMockCommandContext();
-    await enableBar(mockPi, mockCtx);
+    mockCtx.model = {
+      ...mockCtx.model,
+      id: "old-model",
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+    } as any;
+    await enableBar(firstPi, mockCtx);
 
-    const shutdownHandler = getEventHandler(mockPi, "session_shutdown");
-    await shutdownHandler({ type: "session_shutdown", reason: "quit" }, mockCtx);
+    const shutdownHandler = getEventHandler(firstPi, "session_shutdown");
+    await shutdownHandler({ type: "session_shutdown", reason: "reload" }, mockCtx);
+    expect(hasEditorFactoryLayer(mockCtx.ui.getEditorComponent(), "status-bar")).toBe(false);
 
-    // The layer persists: no setEditorComponent call on shutdown, so the
-    // reloaded session reuses the same editor instance (and its prompt
-    // history) instead of recreating it empty.
-    const startIdx = mockCtx.ui.setEditorComponent.mock.calls.length;
-    await getEventHandler(mockPi, "session_start")(
+    const reboundPi = createMockPi();
+    mockCtx.model = {
+      ...mockCtx.model,
+      id: "rebound-model",
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+    } as any;
+    await statusBarExtension(reboundPi);
+    await getEventHandler(reboundPi, "session_start")(
       { type: "session_start", reason: "reload" },
       mockCtx,
     );
-    expect(mockCtx.ui.setEditorComponent.mock.calls.length).toBe(startIdx);
-    expect(hasEditorFactoryLayer(mockCtx.ui.getEditorComponent(), "status-bar")).toBe(true);
+
+    const lines = renderInstalledEditor(mockCtx).render(100);
+    expect(lines.some((line) => line.includes("rebound-model"))).toBe(true);
+    expect(lines.some((line) => line.includes("old-model"))).toBe(false);
   });
 
   it("/statusbar:toggle disable restores the default editor and re-enable reinstalls", async () => {
@@ -1884,8 +1943,6 @@ describe("status-bar flex badge", () => {
     // The "/" separator sits between the two secondary labels.
     expect(segments[smallIndex + 1]).toBe("/");
     // Each secondary label carries its own distinguishing icon.
-    console.log("SEGMENTS", JSON.stringify(segments));
-    console.log("ICONS", JSON.stringify(ICON_SMALL_MODEL), JSON.stringify(ICON_WORKER_MODEL));
     expect(segments[smallIndex].startsWith(ICON_SMALL_MODEL)).toBe(true);
     expect(segments[workerIndex].startsWith(ICON_WORKER_MODEL)).toBe(true);
   });
@@ -1918,43 +1975,36 @@ describe("status-bar flex badge", () => {
     expect(metaLine).toContain("on");
   });
 
-  it("prompt history survives editor recreation (the /reload case)", async () => {
-    // Simulate: submit prompts in one editor instance, then /reload recreates
-    // the editor — the new instance must inherit the previous history.
+  it("prompt history survives editor recreation only within the same session", async () => {
     const { PolishedEditor } = await import("../../extensions/status-bar/src/editor.ts");
     const theme = { fg: vi.fn((_c: string, t: string) => t) };
     const tui = { requestRender: vi.fn() };
+    const makeEditor = (sessionId: string) =>
+      new PolishedEditor(
+        tui,
+        theme,
+        {},
+        theme,
+        () => "main",
+        () => "",
+        () => "none",
+        () => ({ on: false, capable: false }),
+        () => undefined,
+        () => undefined,
+        undefined,
+        sessionId,
+      );
 
-    const first = new PolishedEditor(
-      tui,
-      theme,
-      {},
-      theme,
-      () => "main",
-      () => "",
-      () => "none",
-      () => ({ on: false, capable: false }),
-      () => undefined,
-      () => undefined,
-    );
+    const first = makeEditor("history-session-a");
     first.addToHistory("prompt before reload");
 
-    const second = new PolishedEditor(
-      tui,
-      theme,
-      {},
-      theme,
-      () => "main",
-      () => "",
-      () => "none",
-      () => ({ on: false, capable: false }),
-      () => undefined,
-      () => undefined,
-    );
-    const history = (second as unknown as { history: string[] }).history;
-    expect(history).toContain("prompt before reload");
-    // Newest first: the mirrored entry is reachable within the first few.
-    expect(history.indexOf("prompt before reload")).toBeLessThanOrEqual(1);
+    const reloaded = makeEditor("history-session-a");
+    const reloadedHistory = (reloaded as unknown as { history: string[] }).history;
+    expect(reloadedHistory).toContain("prompt before reload");
+
+    const unrelated = makeEditor("history-session-b");
+    const unrelatedHistory = (unrelated as unknown as { history: string[] }).history;
+    expect(unrelatedHistory).not.toContain("prompt before reload");
   });
 
   it("installed editor hides the flex badge when flexCapable is false", async () => {

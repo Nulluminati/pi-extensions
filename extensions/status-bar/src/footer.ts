@@ -183,12 +183,6 @@ export function buildFooterLines(
     );
   }
 
-  // Worker model, when configured: "via <provider/model>" after the branch —
-  // it configures delegated worker sessions, not this session's model.
-  if (state.workerModelLabel) {
-    leftSegments.push(`${theme.fg("dim", "via")} ${theme.fg("dim", state.workerModelLabel)}`);
-  }
-
   // Right block: context usage bar + window, token breakdown, cost. Shed in
   // tiers when narrow (see rightBlockVariants) so the static left block wins.
   // Reads the cached snapshot (refreshed on message boundaries) so a render —
