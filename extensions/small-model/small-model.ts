@@ -7,14 +7,14 @@
 
 import { type FSWatcher, mkdirSync, watch } from "node:fs";
 import { basename, dirname } from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "pi";
+import type { ExtensionAPI, ExtensionContext, ThinkingLevel } from "pi";
 import {
   loadSmallModelConfig,
   resolveSmallModelConfigPath,
   SMALL_MODEL_ENV_VAR,
 } from "../../lib/small-model.ts";
-import { applyConfig, parseCommandConfig } from "./src/config.ts";
-import { STATUS_ICON, STATUS_KEY } from "./src/constants.ts";
+import { applyConfig, applyThinkingLevel, parseCommandConfig } from "./src/config.ts";
+import { STATUS_ICON, STATUS_KEY, THINKING_LEVELS } from "./src/constants.ts";
 import { selectModel } from "./src/picker.ts";
 import { updateStatus } from "./src/status.ts";
 
@@ -76,11 +76,29 @@ export default async function smallModelExtension(pi: ExtensionAPI) {
         return;
       }
 
+      const tokens = trimmed.split(/\s+/).filter(Boolean);
+      if (tokens[0] === "thinking") {
+        const requestedLevel = tokens[1];
+        if (
+          tokens.length !== 2 ||
+          !requestedLevel ||
+          !THINKING_LEVELS.has(requestedLevel as ThinkingLevel)
+        ) {
+          ctx.ui.notify(
+            "Usage: /smallmodel thinking <off|minimal|low|medium|high|xhigh|max>",
+            "warning",
+          );
+          return;
+        }
+        await applyThinkingLevel(requestedLevel as ThinkingLevel, ctx);
+        return;
+      }
+
       const config = trimmed ? parseCommandConfig(trimmed) : await selectModel(ctx);
       if (!config) {
         if (trimmed) {
           ctx.ui.notify(
-            "Usage: /smallmodel [provider/model-id [off|minimal|low|medium|high|xhigh|max] | status]",
+            "Usage: /smallmodel [provider/model-id [level] | thinking <level> | status]",
             "warning",
           );
         }

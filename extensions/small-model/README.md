@@ -10,10 +10,11 @@ Run `/smallmodel` to choose from the authenticated text models registered with P
 /smallmodel
 ```
 
-Set one directly, with an optional thinking level:
+Set one directly, with an optional thinking level, or change only the level:
 
 ```text
 /smallmodel synthetic/syn:small:text minimal
+/smallmodel thinking high
 ```
 
 Show the current setting:
@@ -22,7 +23,7 @@ Show the current setting:
 /smallmodel status
 ```
 
-The selection appears in the footer through `ctx.ui.setStatus()`. The bundled status bar displays it on its second line.
+The bundled status bar shows the selection in the input bar next to the main model. Its custom footer suppresses the extension's fallback `ctx.ui.setStatus()` entry, so the model is not shown twice.
 
 ## Configuration
 
@@ -70,4 +71,4 @@ Consumers do not fall back to the active chat model. A missing model or credenti
 | `ctx.modelRegistry.getAvailable()` | Lists authenticated text models |
 | `ctx.modelRegistry.find()` | Resolves the configured provider and model ID |
 | `ctx.modelRegistry.getApiKeyAndHeaders()` | Validates credentials for consumers |
-| `ctx.ui.setStatus()` | Shows the effective small model in the footer |
+| `ctx.ui.setStatus()` | Publishes the fallback status used when the bundled status bar is disabled |

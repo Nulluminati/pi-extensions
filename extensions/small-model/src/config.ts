@@ -40,6 +40,20 @@ export async function applyConfig(
   return true;
 }
 
+export async function applyThinkingLevel(
+  thinkingLevel: ThinkingLevel,
+  ctx: ExtensionCommandContext,
+): Promise<boolean> {
+  let current: SmallModelConfig;
+  try {
+    current = loadSmallModelConfig().config;
+  } catch (error) {
+    ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+    return false;
+  }
+  return applyConfig({ ...current, thinkingLevel }, ctx);
+}
+
 export function currentThinkingLevel(): ThinkingLevel {
   try {
     return loadSmallModelConfig().config.thinkingLevel;
