@@ -27,6 +27,7 @@ const EXPECTED_MODEL_IDS = [
   "hf:Qwen/Qwen3.8-27B",
   "hf:zai-org/GLM-4.7-Flash",
   "hf:nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4",
+  "hf:deepseek-ai/DeepSeek-V4.1-Flash",
   "hf:openai/gpt-oss-120b",
 ];
 

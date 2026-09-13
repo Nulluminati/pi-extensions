@@ -221,6 +221,22 @@ export const STATIC_MODELS: ProviderModelConfig[] = [
     maxTokens: 65536,
     compat: SYNTHETIC_COMPAT,
   },
+  // DeepSeek-V4.1-Flash — probed 2026-09: none disables thinking and every pi
+  // level is accepted (medium/high/xhigh engage), so the identity map applies
+  // despite the catalog's always_on flag. The gateway returns the thinking
+  // block under `reasoning` rather than DeepSeek's usual `reasoning_content`.
+  {
+    id: "hf:deepseek-ai/DeepSeek-V4.1-Flash",
+    name: "DeepSeek-V4.1-Flash",
+    api: "openai-completions",
+    reasoning: true,
+    thinkingLevelMap: DISABLEABLE_THINKING_MAP,
+    input: ["text"],
+    cost: { input: 0.8, output: 1.2, cacheRead: 0.16, cacheWrite: 0 },
+    contextWindow: 524288,
+    maxTokens: 65536,
+    compat: SYNTHETIC_COMPAT,
+  },
 
   // --- gpt-oss (reasoning, always on) ---
   {
