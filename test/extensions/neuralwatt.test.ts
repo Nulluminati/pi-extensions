@@ -45,10 +45,12 @@ const EXPECTED_MODEL_IDS = [
   "glm-5.2-short",
   "glm-5.2-short-fast",
   "glm-5.3",
+  "glm-5.3-flash",
   "kimi-k2.7-code",
   "kimi-k2.7-code-fast",
   "kimi-k3",
   "kimi-k3-fast",
+  "qwen-3.8-27b",
   "qwen3.6-35b",
   "qwen3.6-35b-fast",
 ];
@@ -142,6 +144,31 @@ describe("neuralwatt-extension", () => {
         cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 0 },
         contextWindow: 1048560,
         maxTokens: 65536,
+      }),
+    );
+  });
+
+  it("configures GLM-5.3 Flash and Qwen 3.8 27B from live metadata and probed reasoning behavior", () => {
+    const byId = Object.fromEntries(STATIC_MODELS.map((model) => [model.id, model]));
+
+    expect(byId["glm-5.3-flash"]).toEqual(
+      expect.objectContaining({
+        name: "GLM-5.3 Flash",
+        reasoning: true,
+        input: ["text", "image"],
+        cost: { input: 0.15, output: 0.5, cacheRead: 0.03, cacheWrite: 0 },
+        contextWindow: 1048560,
+        maxTokens: 65536,
+      }),
+    );
+    expect(byId["qwen-3.8-27b"]).toEqual(
+      expect.objectContaining({
+        name: "Qwen3.8 27B",
+        reasoning: true,
+        input: ["text", "image"],
+        cost: { input: 0.45, output: 3.2, cacheRead: 0.25, cacheWrite: 0 },
+        contextWindow: 262128,
+        maxTokens: 131072,
       }),
     );
   });
@@ -242,6 +269,17 @@ describe("neuralwatt-extension", () => {
       high: "high",
       xhigh: "xhigh",
     });
+    // qwen-3.8-27b (2026-09 probe): full enum accepted, none disables
+    // thinking. The catalog aliases max -> xhigh, so identity through xhigh is
+    // the real top level.
+    expect(byId["qwen-3.8-27b"].thinkingLevelMap).toEqual({
+      off: "none",
+      minimal: "minimal",
+      low: "low",
+      medium: "medium",
+      high: "high",
+      xhigh: "xhigh",
+    });
 
     // Disableable + accepts full enum (incl. max); xhigh -> "max" for deepest
     // tier.
@@ -286,6 +324,17 @@ describe("neuralwatt-extension", () => {
     // reasoning block even at `none`, so off is hidden. Accepts the full
     // enum incl. max, so xhigh -> "max" as on the other GLM entries.
     expect(byId["glm-5.3"].thinkingLevelMap).toEqual({
+      off: null,
+      minimal: "minimal",
+      low: "low",
+      medium: "medium",
+      high: "high",
+      xhigh: "max",
+    });
+    // glm-5.3-flash (2026-09 probe): same always-on behavior as glm-5.3 —
+    // reasoning block even at `none`, full enum accepted, so off is hidden and
+    // xhigh maps to "max" (the catalog aliases xhigh -> max).
+    expect(byId["glm-5.3-flash"].thinkingLevelMap).toEqual({
       off: null,
       minimal: "minimal",
       low: "low",

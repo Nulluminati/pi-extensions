@@ -42,12 +42,12 @@ const NEURALWATT_REASONING_COMPAT = {
  *      maps to `max` so pi's deepest tier engages the deepest thinking. The
  *      probe-model skill warns `max` is usually rejected by OpenAI-compatible
  *      shims; Neuralwatt's vLLM gateway is an exception.
- *   2. Every reasoning model except glm-5.3 is disableable: `none` disables
- *      thinking (verified 2026-08, including kimi-k2.7-code and qwen3.6-35b,
- *      which were always-on and restricted in earlier probes). glm-5.3 is the
- *      exception: its catalog entry marks reasoning mandatory and the probe
- *      shows thinking output even at `none`, so it uses ALWAYS_ON_FULL_MAP
- *      with off:null.
+ *   2. Every reasoning model except the glm-5.3 family is disableable: `none`
+ *      disables thinking (verified 2026-08 for kimi-k2.7-code and qwen3.6-35b,
+ *      which were always-on and restricted in earlier probes, and 2026-09 for
+ *      qwen-3.8-27b). glm-5.3 and glm-5.3-flash are the exceptions: their
+ *      catalog entries mark reasoning mandatory and the probes show thinking
+ *      output even at `none`, so they use ALWAYS_ON_FULL_MAP with off:null.
  *
  * The published pi-neuralwatt extension exposes only `medium` for Kimi/Qwen,
  * but that restriction came from probing with the wrong key
@@ -56,7 +56,7 @@ const NEURALWATT_REASONING_COMPAT = {
  */
 
 // Disableable with identity mapping through xhigh (DeepSeek V4 Flash,
-// gemma-4-31b, kimi-k3, qwen3.6-35b).
+// gemma-4-31b, kimi-k3, qwen3.6-35b, qwen-3.8-27b).
 const DISABLEABLE_IDENTITY_MAP: ThinkingLevelMap = {
   off: "none",
   minimal: "minimal",
@@ -78,10 +78,10 @@ const DISABLEABLE_FULL_MAP: ThinkingLevelMap = {
   xhigh: "max",
 };
 
-// Always-on, accepts the full enum including `max` (glm-5.3). The catalog
-// marks reasoning mandatory and omits `none` from accepted_efforts, and the
-// probe shows a reasoning block even when `none` is sent, so thinking cannot
-// be turned off: off is hidden. xhigh maps to `max` like the other
+// Always-on, accepts the full enum including `max` (glm-5.3, glm-5.3-flash).
+// The catalog marks reasoning mandatory and omits `none` from accepted_efforts,
+// and the probes show a reasoning block even when `none` is sent, so thinking
+// cannot be turned off: off is hidden. xhigh maps to `max` like the other
 // full-enum models.
 const ALWAYS_ON_FULL_MAP: ThinkingLevelMap = {
   off: null,
@@ -101,12 +101,14 @@ const ALWAYS_ON_FULL_MAP: ThinkingLevelMap = {
  * (see the DISABLEABLE map constants below); each map's comment records how
  * that model's levels were probed against the gateway.
  *
- * The GLM, Kimi, and Qwen reasoning/fast pairs share pricing; their "-fast"
- * variants are non-reasoning. Neuralwatt publishes both DeepSeek ids for the
- * same 0731 checkpoint. glm-5.3 (gated preview) forces always-on thinking
- * (catalog marks reasoning mandatory; see its entry); every other reasoning
- * model is disableable (qwen3.6-35b's previous restriction was lifted in
- * 2026-08).
+ * The GLM-5.2, Kimi, and Qwen3.6 reasoning/fast pairs share pricing; their
+ * "-fast" variants are non-reasoning. glm-5.3-flash is the exception: it is a
+ * reasoning fast variant at its own pricing. Neuralwatt publishes both DeepSeek
+ * ids for the same 0731 checkpoint. The glm-5.3 family (gated glm-5.3 preview,
+ * glm-5.3-flash) forces always-on thinking (catalog marks reasoning mandatory;
+ * see their entries); every other reasoning model is disableable
+ * (qwen3.6-35b's previous restriction was lifted in 2026-08, and qwen-3.8-27b
+ * shipped disableable in 2026-09).
  */
 export const STATIC_MODELS: ProviderModelConfig[] = [
   // --- Gemma 4 (Google/NVIDIA) ---
@@ -200,6 +202,25 @@ export const STATIC_MODELS: ProviderModelConfig[] = [
     thinkingLevelMap: ALWAYS_ON_FULL_MAP,
     input: ["text"],
     cost: { input: 1.45, output: 4.5, cacheRead: 0.145, cacheWrite: 0 },
+    contextWindow: 1048560,
+    maxTokens: 65536,
+    compat: NEURALWATT_REASONING_COMPAT,
+  },
+
+  // GLM-5.3 Flash — fast glm5_next sibling of glm-5.3 (exited preview
+  // 2026-09-11). Probed 2026-09: every effort including `max` returns HTTP 200
+  // with reasoning output, but the catalog marks reasoning mandatory (no
+  // `none` in accepted_efforts) and the disable check shows a reasoning block
+  // even at `none`, so thinking cannot be turned off: off is hidden. The
+  // catalog aliases xhigh -> max, so xhigh maps to `max` like glm-5.3.
+  {
+    id: "glm-5.3-flash",
+    name: "GLM-5.3 Flash",
+    api: "openai-completions",
+    reasoning: true,
+    thinkingLevelMap: ALWAYS_ON_FULL_MAP,
+    input: ["text", "image"],
+    cost: { input: 0.15, output: 0.5, cacheRead: 0.03, cacheWrite: 0 },
     contextWindow: 1048560,
     maxTokens: 65536,
     compat: NEURALWATT_REASONING_COMPAT,
@@ -325,6 +346,23 @@ export const STATIC_MODELS: ProviderModelConfig[] = [
     contextWindow: 131056,
     maxTokens: 65536,
     compat: NEURALWATT_COMPAT,
+  },
+  // Probed 2026-09: the full enum is accepted (every effort returns HTTP 200)
+  // and `none` disables thinking, so the identity map with off:"none" is
+  // correct. The catalog aliases max -> xhigh, so xhigh (not max) is the
+  // gateway's real deepest level — identity through xhigh, unlike the
+  // GLM/Kimi full-enum models.
+  {
+    id: "qwen-3.8-27b",
+    name: "Qwen3.8 27B",
+    api: "openai-completions",
+    reasoning: true,
+    thinkingLevelMap: DISABLEABLE_IDENTITY_MAP,
+    input: ["text", "image"],
+    cost: { input: 0.45, output: 3.2, cacheRead: 0.25, cacheWrite: 0 },
+    contextWindow: 262128,
+    maxTokens: 131072,
+    compat: NEURALWATT_REASONING_COMPAT,
   },
 ];
 

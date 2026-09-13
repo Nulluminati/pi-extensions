@@ -4,7 +4,7 @@ Registers [Neuralwatt](https://neuralwatt.com) as a Pi model provider using thei
 
 ## What It Does
 
-Registers the `neuralwatt` provider so you can use Neuralwatt's hosted open-source models (DeepSeek V4 Flash, Gemma 4, GLM-5.2/5.3, Kimi K2.7/K3, and Qwen3.6) in Pi. It:
+Registers the `neuralwatt` provider so you can use Neuralwatt's hosted open-source models (DeepSeek V4 Flash, Gemma 4, GLM-5.2/5.3, Kimi K2.7/K3, and Qwen3.6/3.8) in Pi. It:
 
 1. Registers the provider at load time with a hardcoded catalog of public models, so Pi starts even when the API is unreachable or no key is configured.
 2. On `session_start`, fetches the public `/v1/models` view and warns when Neuralwatt publishes models the static list lacks.
@@ -58,14 +58,16 @@ The catalog comes from Neuralwatt's `/v1/models` metadata. Pricing is per millio
 | glm-5.2-short | 200K | yes | — | $1.45 / $4.50 |
 | glm-5.2-short-fast | 200K | no | — | $1.45 / $4.50 |
 | glm-5.3 | 1M | yes | — | $1.45 / $4.50 |
+| glm-5.3-flash | 1M | yes | yes | $0.15 / $0.50 |
 | kimi-k2.7-code | 256K | yes | yes | $0.95 / $4.00 |
 | kimi-k2.7-code-fast | 256K | yes | yes | $0.95 / $4.00 |
 | kimi-k3 | 1M | yes | yes | $3.00 / $15.00 |
 | kimi-k3-fast | 1M | no | yes | $3.00 / $15.00 |
 | qwen3.6-35b | 128K | yes | yes | $0.29 / $1.15 |
 | qwen3.6-35b-fast | 128K | no | yes | $0.29 / $1.15 |
+| qwen-3.8-27b | 256K | yes | yes | $0.45 / $3.20 |
 
-The GLM, Kimi, and Qwen reasoning models pair with `-fast` non-reasoning variants that share pricing. `glm-5.3` is a gated preview at GLM-5.2 parity pricing with no fast variant. Neuralwatt publishes both DeepSeek ids for the same 0731 checkpoint. Gemma has no listed fast variant; its catalog metadata lists reasoning support and direct probes confirm levels through `xhigh` are accepted and `none` disables it. Flex siblings are not separate entries because `/neuralwatt:flex` selects that service tier without changing the model id. The K2.5 and K2.6 families were removed from `/v1/models` (K2.5 ids now return HTTP 410 "has been deprecated"), and Qwen3.5 dropped from the catalog, so their entries were removed to mirror the live list.
+The GLM-5.2, Kimi, and Qwen3.6 reasoning models pair with `-fast` non-reasoning variants that share pricing. `glm-5.3-flash` is the exception: a reasoning fast variant (exited preview 2026-09-11) with native vision at its own pricing. `glm-5.3` remains a gated preview at GLM-5.2 parity pricing with no fast variant, and `qwen-3.8-27b` is a dense VL model with no fast variant. Neuralwatt publishes both DeepSeek ids for the same 0731 checkpoint. Gemma has no listed fast variant; its catalog metadata lists reasoning support and direct probes confirm levels through `xhigh` are accepted and `none` disables it. Flex siblings are not separate entries because `/neuralwatt:flex` selects that service tier without changing the model id. The K2.5 and K2.6 families were removed from `/v1/models` (K2.5 ids now return HTTP 410 "has been deprecated"), and Qwen3.5 dropped from the catalog, so their entries were removed to mirror the live list.
 
 ### Startup staleness check
 
@@ -80,10 +82,10 @@ The key is resolved in this order:
 
 ## Thinking levels
 
-Reasoning models carry per-model `thinkingLevelMap` values verified by probing the gateway (see `.pi/skills/probe-model`). Two findings drive the maps as of the 2026-08 re-probe:
+Reasoning models carry per-model `thinkingLevelMap` values verified by probing the gateway (see `.pi/skills/probe-model`). Two findings drive the maps as of the 2026-09 probe:
 
-- Neuralwatt's gateway accepts `max` for the GLM, Kimi K2.7, and gated GLM-5.3 preview families, and it produces deeper reasoning than `xhigh` there. Where accepted, `xhigh` maps to `max` so pi's deepest tier engages the deepest thinking.
-- Every reasoning model is disableable except glm-5.3: `none` turns thinking off (verified 2026-08, including kimi-k2.7-code and qwen3.6-35b, which were always-on in earlier probes). glm-5.3's catalog entry marks reasoning mandatory and the probe shows thinking output even at `none`, so its `off` level is hidden.
+- Neuralwatt's gateway accepts `max` for the GLM and Kimi K2.7 families, and it produces deeper reasoning than `xhigh` there. Where accepted, `xhigh` maps to `max` so pi's deepest tier engages the deepest thinking.
+- Every reasoning model is disableable except the glm-5.3 family: `none` turns thinking off (verified 2026-08 for kimi-k2.7-code and qwen3.6-35b, which were always-on in earlier probes, and 2026-09 for qwen-3.8-27b). glm-5.3's catalog entry marks reasoning mandatory and the probe shows thinking output even at `none`, so its `off` level is hidden; glm-5.3-flash behaves the same (probed 2026-09).
 
 | Model | off | minimal | low | medium | high | xhigh |
 |-------|-----|---------|-----|--------|------|-------|
@@ -93,10 +95,14 @@ Reasoning models carry per-model `thinkingLevelMap` values verified by probing t
 | glm-5.2 | none | minimal | low | medium | high | max |
 | glm-5.2-short | none | minimal | low | medium | high | max |
 | glm-5.3 | — | minimal | low | medium | high | max |
+| glm-5.3-flash | — | minimal | low | medium | high | max |
 | kimi-k2.7-code | none | minimal | low | medium | high | max |
 | kimi-k2.7-code-fast | none | minimal | low | medium | high | max |
 | kimi-k3 | none | minimal | low | medium | high | xhigh |
 | qwen3.6-35b | none | minimal | low | medium | high | xhigh |
+| qwen-3.8-27b | none | minimal | low | medium | high | xhigh |
+
+qwen-3.8-27b's catalog aliases `max -> xhigh`, so `xhigh` is its real deepest level; glm-5.3 and glm-5.3-flash alias `xhigh -> max`.
 
 Neuralwatt returns thinking under a top-level `reasoning` field, not `reasoning_content`. Pi's openai-completions provider reads reasoning from any of `reasoning_content`, `reasoning`, or `reasoning_text`, so thinking parses and replays correctly with no special compat flag. `compat.supportsReasoningEffort` is `true` on every reasoning model so pi sends `reasoning_effort` on the wire.
 
