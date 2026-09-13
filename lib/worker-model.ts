@@ -2,36 +2,48 @@
  * Worker model configuration.
  *
  * Mirrors the small-model config pattern: an environment variable wins over a
- * JSON config file, and nothing is hardcoded — delegate fails with a
- * descriptive error when no worker model is configured. The value is a
- * `provider/model-id` string passed to the worker process as `--model`; the
- * child resolves its own auth. The special keyword `main` inherits the
- * current session's model.
+ * JSON config file, and nothing is hardcoded. Delegate fails with a descriptive
+ * error when no worker model is configured. The selected model and thinking
+ * level are passed to every worker process as `--model` and `--thinking`; the
+ * child resolves its own auth.
  */
 
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import type { ExtensionContext } from "pi";
+import type { ThinkingLevel } from "pi";
 import { parseSmallModelSpec } from "./small-model.ts";
 
 // --- Constants ---
 
 export const WORKER_MODEL_ENV_VAR = "PI_WORKER_MODEL";
+export const WORKER_MODEL_THINKING_ENV_VAR = "PI_WORKER_MODEL_THINKING";
 export const WORKER_MODEL_CONFIG_ENV_VAR = "PI_WORKER_MODEL_CONFIG";
-export const WORKER_MODEL_MAIN = "main";
+export const DEFAULT_WORKER_THINKING_LEVEL: ThinkingLevel = "high";
+
+const THINKING_LEVELS = new Set<ThinkingLevel>([
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+]);
 
 // --- Types ---
 
 export interface WorkerModelConfig {
   provider: string;
   model: string;
+  thinkingLevel: ThinkingLevel;
 }
 
 export interface WorkerModelSelection {
   /** `provider/model-id` string for the worker's --model flag. */
   model: string;
-  source: "explicit" | "environment" | "config" | "main";
+  thinkingLevel: ThinkingLevel;
+  source: "environment" | "config";
 }
 
 interface ConfigOptions {
@@ -67,7 +79,16 @@ export function loadWorkerModelConfig(options: ConfigOptions = {}): {
         `Invalid ${WORKER_MODEL_ENV_VAR} value "${environmentSpec}". Expected provider/model-id.`,
       );
     }
-    return { config: parsed, source: "environment" };
+    return {
+      config: {
+        ...parsed,
+        thinkingLevel: parseThinkingLevel(
+          env[WORKER_MODEL_THINKING_ENV_VAR],
+          WORKER_MODEL_THINKING_ENV_VAR,
+        ),
+      },
+      source: "environment",
+    };
   }
 
   const configPath = options.configPath ?? resolveWorkerModelConfigPath(env);
@@ -77,7 +98,7 @@ export function loadWorkerModelConfig(options: ConfigOptions = {}): {
   } catch (error) {
     if (isNodeError(error) && error.code === "ENOENT") {
       throw new Error(
-        `Global worker model is not configured. Run /worker-model to select one, set ${WORKER_MODEL_ENV_VAR}, or pass the delegate tool's model parameter (${configPath}).`,
+        `Global worker model is not configured. Run /worker-model to select one or set ${WORKER_MODEL_ENV_VAR} (${configPath}).`,
       );
     }
     const message = error instanceof Error ? error.message : String(error);
@@ -100,7 +121,11 @@ export function loadWorkerModelConfig(options: ConfigOptions = {}): {
   }
 
   return {
-    config: { provider: value.provider.trim(), model: value.model.trim() },
+    config: {
+      provider: value.provider.trim(),
+      model: value.model.trim(),
+      thinkingLevel: parseThinkingLevel(value.thinkingLevel, "thinkingLevel"),
+    },
     source: "config",
   };
 }
@@ -120,43 +145,35 @@ export function saveWorkerModelConfig(config: WorkerModelConfig, configPath: str
 // --- Resolution ---
 
 /**
- * Resolve the model for a delegated worker. Order: explicit parameter
- * (including the `main` keyword, which inherits the session model), then the
- * environment/config stack. Throws when nothing resolves.
+ * Resolve the configured model for a delegated worker. PI_WORKER_MODEL wins
+ * over the config file. Throws when neither source provides a valid model.
  */
 export async function resolveWorkerModelSpec(
-  explicit: string | undefined,
-  ctx?: ExtensionContext,
   options: ConfigOptions = {},
 ): Promise<WorkerModelSelection> {
-  const trimmed = explicit?.trim();
-  if (trimmed) {
-    if (trimmed.toLowerCase() === WORKER_MODEL_MAIN) {
-      const sessionModel = ctx?.model;
-      if (!sessionModel) {
-        throw new Error(
-          `Worker model "${WORKER_MODEL_MAIN}" requires the session to have a model, but none is set.`,
-        );
-      }
-      return {
-        model: `${sessionModel.provider}/${sessionModel.id}`,
-        source: "main",
-      };
-    }
-    const parsed = parseSmallModelSpec(trimmed);
-    if (!parsed) {
-      throw new Error(
-        `Invalid worker model "${trimmed}". Expected provider/model-id, or "main" to inherit the session model.`,
-      );
-    }
-    return { model: `${parsed.provider}/${parsed.model}`, source: "explicit" };
-  }
-
   const loaded = loadWorkerModelConfig(options);
-  return { model: `${loaded.config.provider}/${loaded.config.model}`, source: loaded.source };
+  return {
+    model: `${loaded.config.provider}/${loaded.config.model}`,
+    thinkingLevel: loaded.config.thinkingLevel,
+    source: loaded.source,
+  };
 }
 
 // --- Helpers ---
+
+export function isWorkerThinkingLevel(value: string): value is ThinkingLevel {
+  return THINKING_LEVELS.has(value as ThinkingLevel);
+}
+
+function parseThinkingLevel(value: unknown, source: string): ThinkingLevel {
+  if (value === undefined || value === null || value === "") {
+    return DEFAULT_WORKER_THINKING_LEVEL;
+  }
+  if (typeof value === "string" && isWorkerThinkingLevel(value)) return value;
+  throw new Error(
+    `Invalid ${source} value "${String(value)}". Expected off, minimal, low, medium, high, xhigh, or max.`,
+  );
+}
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;

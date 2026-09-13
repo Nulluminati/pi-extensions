@@ -93,6 +93,7 @@ describe("agents-extension", () => {
     // Default test configuration: most tests delegate, so a worker model
     // must resolve. The unconfigured-error test clears it again.
     setEnv("PI_WORKER_MODEL", "opencode-go/glm-5.3-flash");
+    setEnv("PI_WORKER_MODEL_THINKING", undefined);
     setEnv("PI_MAX_WORKERS", undefined);
     setEnv("PI_WORKER_TIMEOUT_S", undefined);
     await agentsExtension(mockPi);
@@ -112,13 +113,16 @@ describe("agents-extension", () => {
     await rm(fixtureDir, { recursive: true, force: true });
   });
 
-  it("registers delegate and workers tools", () => {
-    const names = mockPi.registerTool.mock.calls.map((c) => c[0].name);
-    expect(names).toContain("delegate");
-    expect(names).toContain("workers");
+  it("registers delegate and workers tools without a per-call model override", () => {
+    const definitions = mockPi.registerTool.mock.calls.map((c) => c[0]);
+    const delegate = definitions.find((definition) => definition.name === "delegate");
+    expect(delegate).toBeDefined();
+    expect(delegate?.parameters.properties).not.toHaveProperty("model");
+    expect(definitions.some((definition) => definition.name === "workers")).toBe(true);
   });
 
-  it("delegate from a planning session forces read-only workers", async () => {
+  it("delegate from a planning session forces read-only Gondolin workers without worktrees", async () => {
+    await initGitRepo(cwd);
     const argsFile = join(fixtureDir, "readonly-args.txt");
     const fixture = await writeFixture(
       fixtureDir,
@@ -138,15 +142,107 @@ ${SUCCESS_WORKER}`,
       },
     ]);
 
-    await executeTool("delegate", { task: "research", isolate: false, wait: true });
+    const result = await executeTool("delegate", { task: "research", wait: true });
 
     const args = (await readFile(argsFile, "utf8")).split("\n");
     expect(args).toContain("--worker-readonly");
-    expect(args).not.toContain("--gondolin");
+    expect(args).toContain("--gondolin");
+    expect(args.some((arg) => arg.includes("gondolin.ts"))).toBe(true);
+    expect(result.details.worker.worktree).toBeUndefined();
     const planPathIndex = args.indexOf("-e", args.indexOf("-e") + 1);
     const planPaths = args.filter((arg) => arg.includes("plan.ts"));
     expect(planPaths.length).toBeGreaterThanOrEqual(1);
     void planPathIndex;
+  });
+
+  it("delegate enforces the environment worker model when a caller supplies another model", async () => {
+    const argsFile = join(fixtureDir, "model-args.txt");
+    const fixture = await writeFixture(
+      fixtureDir,
+      "model-worker.sh",
+      `#!/bin/sh
+printf '%s\\n' "$@" > '${argsFile}'
+${SUCCESS_WORKER}`,
+    );
+    setEnv("PI_WORKER_COMMAND", fixture);
+    setEnv("PI_WORKER_MODEL_THINKING", "xhigh");
+
+    const result = await executeTool("delegate", {
+      task: "say hi",
+      model: "synthetic/hf:zai-org/GLM-5.3-Flash",
+      isolate: false,
+      wait: true,
+    });
+
+    const args = (await readFile(argsFile, "utf8")).split("\n");
+    const modelIndex = args.indexOf("--model");
+    const thinkingIndex = args.indexOf("--thinking");
+    expect(args[modelIndex + 1]).toBe("opencode-go/glm-5.3-flash");
+    expect(args[thinkingIndex + 1]).toBe("xhigh");
+    expect(result.details.worker.model).toBe("opencode-go/glm-5.3-flash");
+    expect(result.details.worker.thinkingLevel).toBe("xhigh");
+  });
+
+  it("delegate enforces the saved worker model when a caller supplies another model", async () => {
+    const argsFile = join(fixtureDir, "saved-model-args.txt");
+    const configPath = join(fixtureDir, "worker-model.json");
+    const fixture = await writeFixture(
+      fixtureDir,
+      "saved-model-worker.sh",
+      `#!/bin/sh
+printf '%s\\n' "$@" > '${argsFile}'
+${SUCCESS_WORKER}`,
+    );
+    await writeFile(
+      configPath,
+      `${JSON.stringify({
+        provider: "synthetic",
+        model: "configured-worker",
+        thinkingLevel: "low",
+      })}\n`,
+    );
+    setEnv("PI_WORKER_COMMAND", fixture);
+    setEnv("PI_WORKER_MODEL", undefined);
+    setEnv("PI_WORKER_MODEL_CONFIG", configPath);
+
+    const result = await executeTool("delegate", {
+      task: "say hi",
+      model: "opencode-go/different-model",
+      isolate: false,
+      wait: true,
+    });
+
+    const args = (await readFile(argsFile, "utf8")).split("\n");
+    const modelIndex = args.indexOf("--model");
+    const thinkingIndex = args.indexOf("--thinking");
+    expect(args[modelIndex + 1]).toBe("synthetic/configured-worker");
+    expect(args[thinkingIndex + 1]).toBe("low");
+    expect(result.details.worker.model).toBe("synthetic/configured-worker");
+    expect(result.details.worker.thinkingLevel).toBe("low");
+  });
+
+  it("delegate enforces messenger, Gondolin, and --gondolin when extensions are empty", async () => {
+    const argsFile = join(fixtureDir, "mandatory-args.txt");
+    const fixture = await writeFixture(
+      fixtureDir,
+      "mandatory-worker.sh",
+      `#!/bin/sh
+printf '%s\\n' "$@" > '${argsFile}'
+${SUCCESS_WORKER}`,
+    );
+    setEnv("PI_WORKER_COMMAND", fixture);
+
+    await executeTool("delegate", {
+      task: "say hi",
+      extensions: [],
+      isolate: false,
+      wait: true,
+    });
+
+    const args = (await readFile(argsFile, "utf8")).split("\n");
+    expect(args).toContain("--gondolin");
+    expect(args.some((arg) => arg.includes("messenger.ts"))).toBe(true);
+    expect(args.some((arg) => arg.includes("gondolin.ts"))).toBe(true);
   });
 
   it("delegate spawns workers with the resolved extension paths and --gondolin", async () => {
@@ -232,6 +328,82 @@ ${SUCCESS_WORKER}`,
     const result = await executeTool("delegate", { task: "do it", isolate: false, wait: true });
     expect(result.details.worker.status).toBe("failed");
     expect(result.details.worker.error).toContain("boom");
+  });
+
+  it("marks a worker failed when it exits without producing a report", async () => {
+    const fixture = await writeFixture(fixtureDir, "silent-worker.sh", "#!/bin/sh\nexit 0\n");
+    setEnv("PI_WORKER_COMMAND", fixture);
+
+    const result = await executeTool("delegate", { task: "silent", isolate: false, wait: true });
+
+    expect(result.details.worker.status).toBe("failed");
+    expect(result.details.worker.error).toMatch(/report/i);
+    expect(result.details.worker.outputText).toBeUndefined();
+  });
+
+  it("reassembles a worker report split across stdout chunks", async () => {
+    // Two writes with a pause between: Node receives the JSON line in two
+    // separate data events, neither of which parses on its own.
+    const fixture = await writeFixture(
+      fixtureDir,
+      "split-worker.sh",
+      `#!/bin/sh
+printf '%s' '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"split '
+sleep 0.3
+printf '%s\n' 'report"}]}}'
+exit 0
+`,
+    );
+    setEnv("PI_WORKER_COMMAND", fixture);
+
+    const result = await executeTool("delegate", { task: "split", isolate: false, wait: true });
+
+    expect(result.details.worker.status).toBe("completed");
+    expect(result.details.worker.outputText).toBe("split report");
+  });
+
+  it("captures a final report line without a trailing newline", async () => {
+    const report =
+      '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"no newline"}]}}';
+    const fixture = await writeFixture(
+      fixtureDir,
+      "no-newline-worker.sh",
+      `#!/bin/sh\nprintf '%s' '${report}'\nexit 0\n`,
+    );
+    setEnv("PI_WORKER_COMMAND", fixture);
+
+    const result = await executeTool("delegate", { task: "tail", isolate: false, wait: true });
+
+    expect(result.details.worker.status).toBe("completed");
+    expect(result.details.worker.outputText).toBe("no newline");
+  });
+
+  it("captures a timed-out isolated worker's patch after the process stops", async () => {
+    await initGitRepo(cwd);
+    // The trap runs after SIGTERM reaches the shell (i.e. after the worker is
+    // stopped); its file only appears in the patch when capture happens after
+    // the child has fully exited.
+    const fixture = await writeFixture(
+      fixtureDir,
+      "trap-worker.sh",
+      `#!/bin/sh
+trap 'echo late > late.txt' TERM
+sleep 30
+`,
+    );
+    setEnv("PI_WORKER_COMMAND", fixture);
+
+    const result = await executeTool("delegate", {
+      task: "slow write",
+      isolate: true,
+      wait: true,
+      timeout_seconds: 1,
+    });
+
+    expect(result.details.worker.status).toBe("timeout");
+    expect(result.details.worker.patchPath).toBeTruthy();
+    const patch = await readFile(result.details.worker.patchPath as string, "utf8");
+    expect(patch).toContain("late.txt");
   });
 
   it("enforces the worker concurrency limit", async () => {
@@ -438,6 +610,23 @@ ${SUCCESS_WORKER}`,
     expect(record?.collectedAt).toBeDefined();
   });
 
+  it("workers collect keeps the worktree when the patch file is missing", async () => {
+    await initGitRepo(cwd);
+    const fixture = await writeFixture(fixtureDir, "ok-worker.sh", SUCCESS_WORKER);
+    setEnv("PI_WORKER_COMMAND", fixture);
+
+    const started = await executeTool("delegate", { task: "t", isolate: true, wait: true });
+    const worker = started.details.worker;
+    await rm(worker.patchPath as string, { force: true });
+
+    await expect(
+      executeTool("workers", { action: "collect", id: worker.id, apply: false }),
+    ).rejects.toThrow(/missing/i);
+
+    const { existsSync } = await import("node:fs");
+    expect(existsSync(worker.worktree as string)).toBe(true);
+  });
+
   it("workers collect refuses to apply twice", async () => {
     await initGitRepo(cwd);
     const fixture = await writeFixture(fixtureDir, "ok-worker.sh", SUCCESS_WORKER);
@@ -512,6 +701,37 @@ describe("agents-units", () => {
       await removeWorktree(repo, "w-test");
       const { existsSync } = await import("node:fs");
       expect(existsSync(wt.path)).toBe(false);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("captureWorktreePatch captures committed and uncommitted changes since the worktree base", async () => {
+    const repo = await mkdtemp(join(tmpdir(), "agents-wt-committed-"));
+    try {
+      await initGitRepo(repo);
+      const wt = await createWorktree(repo, "w-committed");
+
+      // The worker commits one change on its branch...
+      await writeFile(join(wt.path, "committed.ts"), "export const committed = true;\n");
+      await execFileAsync("git", ["add", "."], gitOpts(wt.path));
+      await execFileAsync("git", ["commit", "-qm", "worker commit"], gitOpts(wt.path));
+      // ...and leaves another uncommitted.
+      await writeFile(join(wt.path, "uncommitted.ts"), "export const uncommitted = true;\n");
+
+      const patchPath = join(repo, "committed.patch.diff");
+      await captureWorktreePatch(wt.path, patchPath);
+      const patch = await readFile(patchPath, "utf8");
+      expect(patch).toContain("committed.ts");
+      expect(patch).toContain("uncommitted.ts");
+
+      await applyPatch(repo, patchPath);
+      expect(await readFile(join(repo, "committed.ts"), "utf8")).toBe(
+        "export const committed = true;\n",
+      );
+      expect(await readFile(join(repo, "uncommitted.ts"), "utf8")).toBe(
+        "export const uncommitted = true;\n",
+      );
     } finally {
       await rm(repo, { recursive: true, force: true });
     }

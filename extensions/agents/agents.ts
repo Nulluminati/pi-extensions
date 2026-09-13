@@ -10,10 +10,11 @@
  * via the workers tool.
  *
  * Isolation is for coordination, not security: workers run with user
- * privileges. Default worker model is a cheap fast model (configurable via
- * PI_WORKER_MODEL) — keep orchestration and judgment in the main session.
+ * privileges. The worker model is selected globally through PI_WORKER_MODEL
+ * or worker-model.json; keep orchestration and judgment in the main session.
  */
 
+import { access } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext, ExtensionUIContext } from "pi";
 import { resolveWorkerExtensions } from "../../lib/worker-extensions.ts";
@@ -102,11 +103,11 @@ export default async function agentsExtension(pi: ExtensionAPI) {
     name: "delegate",
     label: "Delegate Worker",
     description:
-      "Hand a bounded, self-contained task to a cheap-model worker Pi session. The worker gets its own context (and by default its own git worktree + branch); it reports back and, when isolated, produces a patch you collect with the workers tool. Use for parallelizable investigation and well-specified implementation work; keep design decisions, integration, and review in this session.",
+      "Hand a bounded, self-contained task to a cheap-model worker Pi session with built-in file and shell tools routed through Gondolin. The worker gets its own context and, outside plan mode, its own git worktree by default. Planning workers are read-only and report-only. Use for parallelizable investigation and well-specified implementation work; keep design decisions, integration, and review in this session.",
     promptGuidelines: [
       "Use delegate when a task is separable and well-specified: scouting a subsystem, mechanical edits across files, or trying an approach in isolation. Write the task so a fresh session with no conversation history can succeed: goal, files, constraints, verification.",
-      "Do not delegate vague or judgment-heavy work; workers are cheap models. Escalate to the main session (or a stronger model via the model parameter) when a worker fails twice or the task turns ambiguous.",
-      "After delegating, do not block: you are woken when the worker exits. Read its report with the workers tool (action=status) and apply its patch with action=collect.",
+      "Do not delegate vague or judgment-heavy work; workers use the globally configured worker model. Escalate to the main session when a worker fails twice or the task turns ambiguous.",
+      "After delegating, do not block: you are woken when the worker exits. Read its report with workers (action=status). Apply an implementation worker's patch with action=collect; planning workers are read-only and produce no patch.",
     ],
     parameters: DELEGATE_PARAMETERS,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -124,18 +125,20 @@ export default async function agentsExtension(pi: ExtensionAPI) {
         );
       }
 
-      const explicitModel =
-        typeof params.model === "string" && params.model.trim() ? params.model.trim() : undefined;
-      // No hardcoded default: resolution is env -> config file, with "main"
-      // inheriting the session model. Unconfigured delegates fail descriptively.
-      const { model } = await resolveWorkerModelSpec(explicitModel, ctx);
+      // The global environment/config selection is authoritative. Individual
+      // delegate calls cannot silently substitute another model.
+      const { model, thinkingLevel } = await resolveWorkerModelSpec();
       const timeoutMs =
         typeof params.timeout_seconds === "number" && params.timeout_seconds > 0
           ? params.timeout_seconds * 1000
           : envTimeoutMs();
+      const parentPlanning = isPlanModeActive((ctx.sessionManager.getBranch() ?? []) as unknown[]);
 
       let worktree: { path: string; branch: string } | undefined;
-      const wantIsolate = params.isolate !== false;
+      // Read-only planning workers inspect the parent's current files through
+      // Gondolin and never need a branch or patch. Avoid changing git metadata
+      // merely to perform research during plan mode.
+      const wantIsolate = !parentPlanning && params.isolate !== false;
       if (wantIsolate) {
         if (!(await isGitRepo(ctx.cwd))) {
           if (params.isolate === true) {
@@ -154,34 +157,29 @@ export default async function agentsExtension(pi: ExtensionAPI) {
       if (duplicate) throw new Error(`A running worker named "${name}" already exists.`);
 
       // Worker extension allowlist: delegate param -> PI_WORKER_EXTENSIONS ->
-      // worker-extensions.json -> default set. messenger is always included;
-      // denylisted workflow extensions are rejected outright.
+      // worker-extensions.json -> default set. Messenger and Gondolin are
+      // mandatory; denylisted workflow extensions are rejected outright.
       const requestedExtensions = Array.isArray(params.extensions)
         ? params.extensions.map(String)
         : undefined;
       const resolvedExtensions = resolveWorkerExtensions(requestedExtensions, {
         extensionsRoot: fileURLToPath(new URL("../../extensions/", import.meta.url)),
       });
-      // Plan-mode safety: a delegate call made while the parent is planning
-      // would bypass plan mode's read-only guarantees through the worker.
-      // Force the worker read-only (plan extension gate, no gondolin — its
-      // workspace write-through is a mutation channel).
-      const parentPlanning = isPlanModeActive((ctx.sessionManager.getBranch() ?? []) as unknown[]);
-      const effectiveExtensions = parentPlanning
-        ? resolvedExtensions.filter((extension) => extension.name !== "gondolin")
-        : resolvedExtensions;
-      const extensionPaths = effectiveExtensions.map((extension) => extension.path);
+      // Every worker routes built-in file and shell tools through Gondolin.
+      // Planning workers additionally load the headless plan gate, which
+      // reduces active tools to the research allowlist and enforces read-only Bash.
+      const extensionPaths = resolvedExtensions.map((extension) => extension.path);
       if (parentPlanning) {
         extensionPaths.push(fileURLToPath(new URL("../plan/plan.ts", import.meta.url)));
       }
-      const sandbox =
-        !parentPlanning && effectiveExtensions.some((extension) => extension.name === "gondolin");
+      const sandbox = true;
       const readOnly = parentPlanning;
 
       const runningWorker = startWorker({
         cwd: ctx.cwd,
         task,
         model,
+        thinkingLevel,
         name,
         timeoutMs,
         workerId,
@@ -198,9 +196,11 @@ export default async function agentsExtension(pi: ExtensionAPI) {
       await saveWorker(ctx.cwd, runningWorker.record);
       await publish(ctx);
 
-      const isolateNote = worktree
-        ? `Isolated in worktree ${worktree.branch}. Its patch is collected with workers (action=collect, id=${workerId}).`
-        : "Not isolated: the worker edits this working tree directly.";
+      const isolateNote = parentPlanning
+        ? "Read-only planning worker: Gondolin is enforced and workspace mutation is blocked."
+        : worktree
+          ? `Isolated in worktree ${worktree.branch}. Its patch is collected with workers (action=collect, id=${workerId}).`
+          : "Not isolated: the worker edits this working tree directly.";
       const waitNote = params.wait === true ? "" : " You will be woken when it exits.";
 
       if (params.wait === true) {
@@ -303,6 +303,17 @@ export default async function agentsExtension(pi: ExtensionAPI) {
           lines.push(`Patch left unapplied at ${record.patchPath}.`);
         }
         if (shouldCleanup && record.worktree) {
+          // Never remove a worktree whose changes are not durably captured:
+          // if the patch file is gone, removal would destroy the only copy.
+          const patchMissing = await access(record.patchPath).then(
+            () => false,
+            () => true,
+          );
+          if (patchMissing) {
+            throw new Error(
+              `Patch file ${record.patchPath} is missing; keeping worktree ${record.worktree} so the worker's changes are not lost.`,
+            );
+          }
           await removeWorktree(ctx.cwd, id);
           lines.push("Worktree and branch removed.");
         }

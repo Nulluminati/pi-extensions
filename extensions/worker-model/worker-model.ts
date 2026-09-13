@@ -1,17 +1,21 @@
 /**
  * Worker Model Extension
  *
- * Selects one global model for delegated worker sessions. The agents
- * extension resolves the model for every `delegate` call through
+ * Selects one global model and thinking level for delegated worker sessions.
+ * The agents extension resolves every `delegate` call through
  * lib/worker-model.ts: this config (or the PI_WORKER_MODEL environment
- * variable) is the source of truth — there is no hardcoded worker model
- * anywhere. The status-bar extension renders the selection next to the
- * small model on the editor meta line.
+ * variables) is the source of truth; there is no hardcoded worker model.
+ * The status-bar extension renders the selection next to the small model on
+ * the editor meta line.
  */
 
-import type { ExtensionAPI } from "pi";
-import { loadWorkerModelConfig, WORKER_MODEL_ENV_VAR } from "../../lib/worker-model.ts";
-import { applyWorkerConfig } from "./src/config.ts";
+import type { ExtensionAPI, ThinkingLevel } from "pi";
+import {
+  isWorkerThinkingLevel,
+  loadWorkerModelConfig,
+  WORKER_MODEL_ENV_VAR,
+} from "../../lib/worker-model.ts";
+import { applyWorkerConfig, applyWorkerThinkingLevel, parseWorkerModelSpec } from "./src/config.ts";
 import { selectWorkerModel } from "./src/picker.ts";
 
 // --- Extension ---
@@ -33,7 +37,7 @@ export default async function workerModelExtension(pi: ExtensionAPI) {
         try {
           const loaded = loadWorkerModelConfig();
           ctx.ui.notify(
-            `Global worker model is ${loaded.config.provider}/${loaded.config.model} (${loaded.source}).`,
+            `Global worker model is ${loaded.config.provider}/${loaded.config.model} (${loaded.config.thinkingLevel}, ${loaded.source}).`,
             "info",
           );
         } catch (error) {
@@ -42,11 +46,25 @@ export default async function workerModelExtension(pi: ExtensionAPI) {
         return;
       }
 
-      const config = trimmed ? parseArgs(trimmed) : await selectWorkerModel(ctx);
+      const tokens = trimmed.split(/\s+/).filter(Boolean);
+      if (tokens[0] === "thinking") {
+        const requestedLevel = tokens[1];
+        if (tokens.length !== 2 || !requestedLevel || !isWorkerThinkingLevel(requestedLevel)) {
+          ctx.ui.notify(
+            "Usage: /worker-model thinking <off|minimal|low|medium|high|xhigh|max>",
+            "warning",
+          );
+          return;
+        }
+        applyWorkerThinkingLevel(requestedLevel as ThinkingLevel, ctx);
+        return;
+      }
+
+      const config = trimmed ? parseWorkerModelSpec(trimmed) : await selectWorkerModel(ctx);
       if (!config) {
         if (trimmed) {
           ctx.ui.notify(
-            "Usage: /worker-model [provider/model-id | status] — pick from the modal when run without arguments.",
+            "Usage: /worker-model [provider/model-id [level] | thinking <level> | status] — pick from the modal when run without arguments.",
             "warning",
           );
         }
@@ -55,12 +73,4 @@ export default async function workerModelExtension(pi: ExtensionAPI) {
       applyWorkerConfig(config, ctx);
     },
   });
-}
-
-function parseArgs(args: string): { provider: string; model: string } | undefined {
-  const [provider, ...rest] = args.split("/");
-  if (!provider?.trim() || rest.length === 0 || rest.some((part) => !part.trim())) {
-    return undefined;
-  }
-  return { provider: provider.trim(), model: rest.join("/").trim() };
 }

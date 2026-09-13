@@ -8,6 +8,7 @@
 
 import { type ChildProcess, spawn } from "node:child_process";
 import { join } from "node:path";
+import type { ThinkingLevel } from "pi";
 import { cleanGitEnv } from "../../../lib/git.ts";
 import { patchesDir } from "./store.ts";
 import type { WorkerEvents, WorkerRecord } from "./types.ts";
@@ -61,6 +62,7 @@ export interface StartWorkerOptions {
   cwd: string;
   task: string;
   model: string;
+  thinkingLevel: ThinkingLevel;
   name: string;
   timeoutMs: number;
   workerId: string;
@@ -88,6 +90,7 @@ export function startWorker(options: StartWorkerOptions): RunningWorker {
   const { events } = options;
   const args = ["--mode", "json", "--no-session", "--no-extensions", "-p", options.task];
   if (options.model) args.push("--model", options.model);
+  args.push("--thinking", options.thinkingLevel);
   for (const ext of options.extensionPaths) args.push("-e", ext);
   if (options.sandbox) args.push("--gondolin");
   if (options.readOnly) args.push("--worker-readonly");
@@ -110,6 +113,7 @@ export function startWorker(options: StartWorkerOptions): RunningWorker {
     name: options.name,
     task: options.task,
     model: options.model,
+    thinkingLevel: options.thinkingLevel,
     ...(child.pid !== undefined ? { pid: child.pid } : {}),
     cwd: options.worktree?.path ?? options.cwd,
     ...(options.worktree !== undefined
@@ -120,9 +124,15 @@ export function startWorker(options: StartWorkerOptions): RunningWorker {
   };
 
   let stdoutText = "";
+  // A JSON event line can be split across data events; hold the trailing
+  // partial line until its newline arrives (or the stream closes).
+  let stdoutLineBuffer = "";
   let stderrTail = "";
   child.stdout?.on("data", (chunk: Buffer) => {
-    for (const line of chunk.toString("utf8").split("\n")) {
+    stdoutLineBuffer += chunk.toString("utf8");
+    const lines = stdoutLineBuffer.split("\n");
+    stdoutLineBuffer = lines.pop() ?? "";
+    for (const line of lines) {
       stdoutText = extractAssistantText(line, stdoutText);
     }
   });
@@ -131,6 +141,7 @@ export function startWorker(options: StartWorkerOptions): RunningWorker {
   });
 
   let cancelRequested = false;
+  let timedOut = false;
   let finishPromise: Promise<WorkerRecord> | undefined;
 
   const doFinish = async (
@@ -173,25 +184,40 @@ export function startWorker(options: StartWorkerOptions): RunningWorker {
     return finishPromise;
   };
 
+  // The worker's terminal state is decided on `close`, not `exit`: Node can
+  // emit `exit` before stdout is fully drained, and a patch captured while
+  // the process is winding down misses its last writes. On timeout the child
+  // is killed first; `close` then fires only after it has stopped and its
+  // report and worktree are complete.
+  const timeoutSeconds = Math.round(options.timeoutMs / 1000);
   const timer = setTimeout(() => {
-    void finish(
-      "timeout",
-      null,
-      `worker exceeded ${Math.round(options.timeoutMs / 1000)}s timeout`,
-    ).then(async (w) => {
-      await killTree(child);
-      events.notify("warning", `worker ${w.name} (${w.id}) timed out`);
-      events.wake(
-        `[worker ${w.name} (${w.id}) timed out after ${Math.round(options.timeoutMs / 1000)}s]. Use the workers tool (action=status, id=${w.id}) for details.`,
-      );
-    });
+    timedOut = true;
+    void killTree(child);
   }, options.timeoutMs);
 
   const done = new Promise<WorkerRecord>((resolve) => {
-    child.on("exit", (code) => {
+    child.on("close", (code) => {
       clearTimeout(timer);
-      const status = cancelRequested ? "cancelled" : code === 0 ? "completed" : "failed";
-      const failure = status === "failed" ? stderrTail.trim() || `exit ${code ?? "?"}` : undefined;
+      if (stdoutLineBuffer !== "") {
+        stdoutText = extractAssistantText(stdoutLineBuffer, stdoutText);
+        stdoutLineBuffer = "";
+      }
+      const status = cancelRequested
+        ? "cancelled"
+        : timedOut
+          ? "timeout"
+          : code === 0 && stdoutText !== ""
+            ? "completed"
+            : "failed";
+      const failure =
+        status === "failed"
+          ? stderrTail.trim() ||
+            (code === 0 ? "worker exited without producing a report" : `exit ${code ?? "?"}`)
+          : status === "timeout"
+            ? `worker exceeded ${timeoutSeconds}s timeout`
+            : status === "cancelled"
+              ? "cancelled by user"
+              : undefined;
       void finish(status, code, failure).then((w) => {
         if (w.status === "completed") {
           events.wake(
@@ -201,6 +227,11 @@ export function startWorker(options: StartWorkerOptions): RunningWorker {
           events.notify(
             "error",
             `worker ${w.name} (${w.id}) failed: ${w.error ?? "unknown error"}`,
+          );
+        } else if (w.status === "timeout") {
+          events.notify("warning", `worker ${w.name} (${w.id}) timed out`);
+          events.wake(
+            `[worker ${w.name} (${w.id}) timed out after ${timeoutSeconds}s]. Use the workers tool (action=status, id=${w.id}) for details.`,
           );
         }
         resolve(w);

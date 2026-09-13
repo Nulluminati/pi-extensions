@@ -1,7 +1,6 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ExtensionContext } from "pi";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   loadWorkerModelConfig,
@@ -10,13 +9,10 @@ import {
   saveWorkerModelConfig,
   WORKER_MODEL_ENV_VAR,
 } from "../../lib/worker-model.ts";
-import { createMockContext } from "../mocks/context-mocks.ts";
-import type { DeepMocked } from "../mocks/mock-types.ts";
 
 describe("worker-model", () => {
   let cwd: string;
   let configPath: string;
-  let mockCtx: DeepMocked<ExtensionContext>;
   const oldEnv: Record<string, string | undefined> = {};
 
   const setEnv = (key: string, value: string | undefined) => {
@@ -28,8 +24,8 @@ describe("worker-model", () => {
   beforeEach(async () => {
     cwd = await mkdtemp(join(tmpdir(), "worker-model-"));
     configPath = join(cwd, "worker-model.json");
-    mockCtx = createMockContext() as DeepMocked<ExtensionContext>;
     setEnv(WORKER_MODEL_ENV_VAR, undefined);
+    setEnv("PI_WORKER_MODEL_THINKING", undefined);
   });
 
   afterEach(async () => {
@@ -40,70 +36,95 @@ describe("worker-model", () => {
     await rm(cwd, { recursive: true, force: true });
   });
 
-  it("explicit parameter wins over environment and config", async () => {
+  it("resolves the environment model and default thinking instead of the saved config", async () => {
     setEnv(WORKER_MODEL_ENV_VAR, "opencode-go/glm-5.3-flash");
-    saveWorkerModelConfig({ provider: "synthetic", model: "hf:zai-org/GLM-5.3-Flash" }, configPath);
-
-    const selection = await resolveWorkerModelSpec("synthetic/hf:zai-org/GLM-5.3-Flash", mockCtx, {
+    saveWorkerModelConfig(
+      { provider: "synthetic", model: "hf:zai-org/GLM-5.3-Flash", thinkingLevel: "low" },
       configPath,
-    });
-
-    expect(selection).toEqual({
-      model: "synthetic/hf:zai-org/GLM-5.3-Flash",
-      source: "explicit",
-    });
-  });
-
-  it("'main' inherits the session model", async () => {
-    (mockCtx as { model?: unknown }).model = {
-      provider: "synthetic",
-      id: "hf:zai-org/GLM-5.3-Flash",
-    };
-
-    const selection = await resolveWorkerModelSpec("main", mockCtx, { configPath });
-
-    expect(selection).toEqual({
-      model: "synthetic/hf:zai-org/GLM-5.3-Flash",
-      source: "main",
-    });
-  });
-
-  it("'main' throws when the session has no model", async () => {
-    (mockCtx as { model?: unknown }).model = undefined;
-
-    await expect(resolveWorkerModelSpec("main", mockCtx, { configPath })).rejects.toThrow(
-      /requires the session to have a model/,
     );
+
+    const selection = await resolveWorkerModelSpec({ configPath });
+
+    expect(selection).toEqual({
+      model: "opencode-go/glm-5.3-flash",
+      thinkingLevel: "high",
+      source: "environment",
+    });
+  });
+
+  it("resolves the saved model and thinking level when the environment is unset", async () => {
+    saveWorkerModelConfig(
+      { provider: "synthetic", model: "hf:zai-org/GLM-5.3-Flash", thinkingLevel: "xhigh" },
+      configPath,
+    );
+
+    const selection = await resolveWorkerModelSpec({ configPath });
+
+    expect(selection).toEqual({
+      model: "synthetic/hf:zai-org/GLM-5.3-Flash",
+      thinkingLevel: "xhigh",
+      source: "config",
+    });
   });
 
   it("environment variable wins over the config file", async () => {
     setEnv(WORKER_MODEL_ENV_VAR, "opencode-go/glm-5.3-flash");
-    saveWorkerModelConfig({ provider: "synthetic", model: "other" }, configPath);
+    saveWorkerModelConfig(
+      { provider: "synthetic", model: "other", thinkingLevel: "low" },
+      configPath,
+    );
 
     const loaded = loadWorkerModelConfig({ configPath });
 
     expect(loaded).toEqual({
-      config: { provider: "opencode-go", model: "glm-5.3-flash" },
+      config: { provider: "opencode-go", model: "glm-5.3-flash", thinkingLevel: "high" },
       source: "environment",
     });
   });
 
   it("loads the config file when no environment variable is set", async () => {
-    saveWorkerModelConfig({ provider: "synthetic", model: "hf:zai-org/GLM-5.3-Flash" }, configPath);
+    saveWorkerModelConfig(
+      { provider: "synthetic", model: "hf:zai-org/GLM-5.3-Flash", thinkingLevel: "medium" },
+      configPath,
+    );
 
     const loaded = loadWorkerModelConfig({ configPath });
 
     expect(loaded).toEqual({
-      config: { provider: "synthetic", model: "hf:zai-org/GLM-5.3-Flash" },
+      config: {
+        provider: "synthetic",
+        model: "hf:zai-org/GLM-5.3-Flash",
+        thinkingLevel: "medium",
+      },
       source: "config",
     });
   });
 
+  it("loads the worker thinking level from the environment", () => {
+    setEnv(WORKER_MODEL_ENV_VAR, "opencode-go/glm-5.3-flash");
+    setEnv("PI_WORKER_MODEL_THINKING", "xhigh");
+
+    expect(loadWorkerModelConfig({ configPath }).config.thinkingLevel).toBe("xhigh");
+  });
+
+  it("defaults legacy config files without a thinking level to high", async () => {
+    await writeFile(configPath, JSON.stringify({ provider: "synthetic", model: "legacy" }));
+
+    expect(loadWorkerModelConfig({ configPath, env: {} }).config.thinkingLevel).toBe("high");
+  });
+
   it("round-trips through save and load", async () => {
-    saveWorkerModelConfig({ provider: "opencode-go", model: "glm-5.3-flash" }, configPath);
+    saveWorkerModelConfig(
+      { provider: "opencode-go", model: "glm-5.3-flash", thinkingLevel: "high" },
+      configPath,
+    );
 
     const raw = JSON.parse(await readFile(configPath, "utf8"));
-    expect(raw).toEqual({ provider: "opencode-go", model: "glm-5.3-flash" });
+    expect(raw).toEqual({
+      provider: "opencode-go",
+      model: "glm-5.3-flash",
+      thinkingLevel: "high",
+    });
     const loaded = loadWorkerModelConfig({ configPath });
     expect(loaded.config.model).toBe("glm-5.3-flash");
   });
@@ -112,21 +133,25 @@ describe("worker-model", () => {
     expect(() => loadWorkerModelConfig({ configPath })).toThrow(
       /Global worker model is not configured/,
     );
-    await expect(resolveWorkerModelSpec(undefined, mockCtx, { configPath })).rejects.toThrow(
-      /Run \/worker-model/,
-    );
+    await expect(resolveWorkerModelSpec({ configPath })).rejects.toThrow(/Run \/worker-model/);
   });
 
-  it("throws on an invalid environment spec", async () => {
+  it("throws on an invalid environment spec or thinking level", async () => {
     setEnv(WORKER_MODEL_ENV_VAR, "no-separator");
-
     expect(() => loadWorkerModelConfig({ configPath })).toThrow(/Invalid PI_WORKER_MODEL/);
+
+    setEnv(WORKER_MODEL_ENV_VAR, "opencode-go/glm-5.3-flash");
+    setEnv("PI_WORKER_MODEL_THINKING", "extreme");
+    expect(() => loadWorkerModelConfig({ configPath })).toThrow(/Invalid PI_WORKER_MODEL_THINKING/);
   });
 
-  it("throws on invalid explicit specs with a hint about main", async () => {
-    await expect(resolveWorkerModelSpec("noslash", mockCtx, { configPath })).rejects.toThrow(
-      /or "main" to inherit/,
+  it("rejects an invalid thinking level in the config file", async () => {
+    await writeFile(
+      configPath,
+      JSON.stringify({ provider: "synthetic", model: "worker", thinkingLevel: "extreme" }),
     );
+
+    expect(() => loadWorkerModelConfig({ configPath, env: {} })).toThrow(/Invalid thinkingLevel/);
   });
 
   it("config path honors the override env var", () => {
@@ -138,7 +163,7 @@ describe("worker-model", () => {
 
   it("writes config atomically and creates parent directories", async () => {
     const nested = join(cwd, "deep", "dir", "worker-model.json");
-    saveWorkerModelConfig({ provider: "a", model: "b" }, nested);
+    saveWorkerModelConfig({ provider: "a", model: "b", thinkingLevel: "high" }, nested);
     expect(await readFile(nested, "utf8")).toContain('"provider": "a"');
   });
 });

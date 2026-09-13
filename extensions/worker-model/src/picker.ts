@@ -2,6 +2,7 @@ import type { SelectItem } from "@earendil-works/pi-tui";
 import type { ExtensionCommandContext } from "pi";
 import { createSearchableSelectModal } from "../../../lib/searchable-select.ts";
 import { loadWorkerModelConfig, type WorkerModelConfig } from "../../../lib/worker-model.ts";
+import { currentWorkerThinkingLevel } from "./config.ts";
 
 interface ModelMetadata {
   id: string;
@@ -85,5 +86,5 @@ export async function selectWorkerModel(
   if (!selected) return undefined;
   const [provider, ...rest] = selected.split("/");
   if (!provider || rest.length === 0) return undefined;
-  return { provider, model: rest.join("/") };
+  return { provider, model: rest.join("/"), thinkingLevel: currentWorkerThinkingLevel() };
 }

@@ -1,5 +1,7 @@
-import type { ExtensionCommandContext } from "pi";
+import type { ExtensionCommandContext, ThinkingLevel } from "pi";
 import {
+  DEFAULT_WORKER_THINKING_LEVEL,
+  isWorkerThinkingLevel,
   loadWorkerModelConfig,
   resolveWorkerModelConfigPath,
   saveWorkerModelConfig,
@@ -7,9 +9,21 @@ import {
 } from "../../../lib/worker-model.ts";
 
 export function parseWorkerModelSpec(args: string): WorkerModelConfig | undefined {
-  const [provider, ...rest] = args.trim().split("/");
+  const tokens = args.trim().split(/\s+/).filter(Boolean);
+  if (tokens.length === 0 || tokens.length > 2) return undefined;
+  const [provider, ...rest] = (tokens[0] ?? "").split("/");
   if (!provider || rest.length === 0 || rest.some((part) => !part.trim())) return undefined;
-  return { provider: provider.trim(), model: rest.join("/").trim() };
+  const requestedLevel = tokens[1];
+  let thinkingLevel = currentWorkerThinkingLevel();
+  if (requestedLevel !== undefined) {
+    if (!isWorkerThinkingLevel(requestedLevel)) return undefined;
+    thinkingLevel = requestedLevel;
+  }
+  return {
+    provider: provider.trim(),
+    model: rest.join("/").trim(),
+    thinkingLevel,
+  };
 }
 
 export function applyWorkerConfig(
@@ -27,8 +41,33 @@ export function applyWorkerConfig(
     return false;
   }
 
-  ctx.ui.notify(`Global worker model set to ${config.provider}/${config.model}.`, "info");
+  ctx.ui.notify(
+    `Global worker model set to ${config.provider}/${config.model} (${config.thinkingLevel}).`,
+    "info",
+  );
   return true;
+}
+
+export function applyWorkerThinkingLevel(
+  thinkingLevel: ThinkingLevel,
+  ctx: ExtensionCommandContext,
+): boolean {
+  let current: WorkerModelConfig;
+  try {
+    current = loadWorkerModelConfig().config;
+  } catch (error) {
+    ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+    return false;
+  }
+  return applyWorkerConfig({ ...current, thinkingLevel }, ctx);
+}
+
+export function currentWorkerThinkingLevel(): ThinkingLevel {
+  try {
+    return loadWorkerModelConfig().config.thinkingLevel;
+  } catch {
+    return DEFAULT_WORKER_THINKING_LEVEL;
+  }
 }
 
 export function configuredWorkerModelLabel(): string | undefined {

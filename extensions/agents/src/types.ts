@@ -1,5 +1,7 @@
 /** Worker session types for the agents extension. */
 
+import type { ThinkingLevel } from "pi";
+
 // --- Types ---
 
 export type WorkerStatus = "running" | "completed" | "failed" | "timeout" | "cancelled";
@@ -9,6 +11,8 @@ export interface WorkerRecord {
   name: string;
   task: string;
   model: string;
+  /** Optional for compatibility with worker records created before thinking was configurable. */
+  thinkingLevel?: ThinkingLevel;
   pid?: number;
   /** Directory the worker session ran in (worktree path when isolated). */
   cwd: string;

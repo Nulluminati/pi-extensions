@@ -12,21 +12,16 @@ export const DELEGATE_PARAMETERS = {
       type: "string",
       description: "Short worker name for messaging (defaults to worker-<id>).",
     },
-    model: {
-      type: "string",
-      description:
-        'Model for the worker as provider/id. Resolution: this parameter, then $PI_WORKER_MODEL or worker-model.json; "main" inherits the session model. Unconfigured delegates fail with a descriptive error.',
-    },
     extensions: {
       type: "array",
       items: { type: "string" },
       description:
-        "Extension names for the worker to load (resolution: this param, then $PI_WORKER_EXTENSIONS, then worker-extensions.json, then the default set). messenger is always loaded. Workflow extensions (agents, missions, autoresearch, goal, plan) are forbidden in workers.",
+        "Extension names for the worker to load (resolution: this param, then $PI_WORKER_EXTENSIONS, then worker-extensions.json, then the default set). messenger and gondolin are always loaded. Workflow extensions (agents, missions, autoresearch, goal, plan) are forbidden in workers.",
     },
     isolate: {
       type: "boolean",
       description:
-        "Run in an isolated git worktree and capture a patch (default true in git repos). Set false only for read-only tasks.",
+        "Run in an isolated git worktree and capture a patch (default true in git repos). Set false only for read-only tasks. Plan-mode workers are always read-only and inspect the current workspace without creating a worktree.",
     },
     wait: {
       type: "boolean",

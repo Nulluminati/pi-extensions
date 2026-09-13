@@ -5,9 +5,14 @@
  * provide *isolation*, not security: workers still run with user privileges.
  */
 
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { runGit } from "../../../lib/git.ts";
+
+// --- Constants ---
+
+/** Marker file in the worktree's private git dir holding its fork point. */
+const BASE_COMMIT_FILE = "agents-base";
 
 // --- Helpers ---
 
@@ -54,15 +59,40 @@ export async function createWorktree(
   const path = worktreePath(cwd, workerId);
   await mkdir(worktreesDir(cwd), { recursive: true });
   await runGit(cwd, ["worktree", "add", "-b", branch, path, "HEAD"]);
+  // Record the fork point inside the worktree's private git dir so patch
+  // capture can diff against it even after the worker commits.
+  const base = (await runGit(path, ["rev-parse", "HEAD"])).trim();
+  const gitDir = (await runGit(path, ["rev-parse", "--absolute-git-dir"])).trim();
+  await writeFile(join(gitDir, BASE_COMMIT_FILE), `${base}\n`, "utf8");
   return { path, branch };
 }
 
-/** Capture everything the worker changed (including new files) as a patch. */
+/**
+ * Capture everything the worker changed (including new files and commits)
+ * relative to the worktree's fork point as a patch.
+ */
 export async function captureWorktreePatch(worktreePath: string, outFile: string): Promise<void> {
   await runGit(worktreePath, ["add", "-A"]);
-  const diff = await runGit(worktreePath, ["diff", "--cached", "HEAD"]);
+  const base = await worktreeBaseCommit(worktreePath);
+  const diff = await runGit(worktreePath, ["diff", "--cached", base]);
   await mkdir(join(outFile, ".."), { recursive: true });
   await writeFile(outFile, diff, "utf8");
+}
+
+/**
+ * The commit the worktree branched from, recorded by createWorktree. Worktrees
+ * created before the marker existed fall back to HEAD, which only captures
+ * uncommitted changes.
+ */
+async function worktreeBaseCommit(worktreePath: string): Promise<string> {
+  try {
+    const gitDir = (await runGit(worktreePath, ["rev-parse", "--absolute-git-dir"])).trim();
+    const base = (await readFile(join(gitDir, BASE_COMMIT_FILE), "utf8")).trim();
+    if (base !== "") return base;
+  } catch {
+    // No marker (or unreadable git dir): fall back to HEAD.
+  }
+  return "HEAD";
 }
 
 /** Remove a worktree and its branch after the patch has been captured. */

@@ -84,10 +84,11 @@ describe("worker-model-extension", () => {
     expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
       provider: "anthropic",
       model: "claude-haiku-4-5",
+      thinkingLevel: "high",
     });
   });
 
-  it("sets a model directly from command arguments", async () => {
+  it("sets a model and thinking level directly from command arguments", async () => {
     const path = configPath();
     vi.stubEnv("PI_WORKER_MODEL_CONFIG", path);
     vi.stubEnv("PI_WORKER_MODEL", "");
@@ -96,11 +97,37 @@ describe("worker-model-extension", () => {
     ctx.modelRegistry.getAvailable = vi.fn(() => [ctx.model]);
     await workerModelExtension(pi);
 
-    await getCommandHandler(pi, "worker-model")("synthetic/hf:zai-org/GLM-5.3-Flash", ctx);
+    await getCommandHandler(pi, "worker-model")("synthetic/hf:zai-org/GLM-5.3-Flash xhigh", ctx);
 
     expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
       provider: "synthetic",
       model: "hf:zai-org/GLM-5.3-Flash",
+      thinkingLevel: "xhigh",
+    });
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      "Global worker model set to synthetic/hf:zai-org/GLM-5.3-Flash (xhigh).",
+      "info",
+    );
+  });
+
+  it("changes only the thinking level with the thinking subcommand", async () => {
+    const path = configPath();
+    vi.stubEnv("PI_WORKER_MODEL_CONFIG", path);
+    vi.stubEnv("PI_WORKER_MODEL", "");
+    writeFileSync(
+      path,
+      JSON.stringify({ provider: "opencode-go", model: "deepseek-flash", thinkingLevel: "low" }),
+    );
+    const pi = createMockPi();
+    const ctx = createMockCommandContext();
+    await workerModelExtension(pi);
+
+    await getCommandHandler(pi, "worker-model")("thinking high", ctx);
+
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
+      provider: "opencode-go",
+      model: "deepseek-flash",
+      thinkingLevel: "high",
     });
   });
 
@@ -133,11 +160,14 @@ describe("worker-model-extension", () => {
     expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("not configured"), "error");
 
     const { saveWorkerModelConfig } = await import("../../lib/worker-model.ts");
-    saveWorkerModelConfig({ provider: "synthetic", model: "hf:zai-org/GLM-5.3-Flash" }, path);
+    saveWorkerModelConfig(
+      { provider: "synthetic", model: "hf:zai-org/GLM-5.3-Flash", thinkingLevel: "high" },
+      path,
+    );
 
     await getCommandHandler(pi, "worker-model")("status", ctx);
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      expect.stringContaining("synthetic/hf:zai-org/GLM-5.3-Flash"),
+      "Global worker model is synthetic/hf:zai-org/GLM-5.3-Flash (high, config).",
       "info",
     );
   });
