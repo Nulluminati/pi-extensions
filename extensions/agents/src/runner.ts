@@ -125,19 +125,23 @@ export function startWorker(options: StartWorkerOptions): RunningWorker {
 
   let stdoutText = "";
   // A JSON event line can be split across data events; hold the trailing
-  // partial line until its newline arrives (or the stream closes).
+  // partial line until its newline arrives (or the stream closes). Decoding
+  // is left to setEncoding, which buffers a multibyte UTF-8 sequence split
+  // across chunk boundaries; per-chunk decoding would corrupt it.
   let stdoutLineBuffer = "";
   let stderrTail = "";
-  child.stdout?.on("data", (chunk: Buffer) => {
-    stdoutLineBuffer += chunk.toString("utf8");
+  child.stdout?.setEncoding("utf8");
+  child.stderr?.setEncoding("utf8");
+  child.stdout?.on("data", (chunk: string) => {
+    stdoutLineBuffer += chunk;
     const lines = stdoutLineBuffer.split("\n");
     stdoutLineBuffer = lines.pop() ?? "";
     for (const line of lines) {
       stdoutText = extractAssistantText(line, stdoutText);
     }
   });
-  child.stderr?.on("data", (chunk: Buffer) => {
-    stderrTail = `${stderrTail}${chunk.toString("utf8")}`.slice(-4000);
+  child.stderr?.on("data", (chunk: string) => {
+    stderrTail = `${stderrTail}${chunk}`.slice(-4000);
   });
 
   let cancelRequested = false;
@@ -166,7 +170,10 @@ export function startWorker(options: StartWorkerOptions): RunningWorker {
         await captureWorktreePatch(options.worktree.path, patchPath);
         record.patchPath = patchPath;
       } catch (err) {
-        record.error = `patch capture failed: ${(err as Error).message}`;
+        // Keep an earlier terminal error (e.g. the timeout reason) and append
+        // the patch failure instead of overwriting it.
+        const patchError = `patch capture failed: ${(err as Error).message}`;
+        record.error = record.error !== undefined ? `${record.error}; ${patchError}` : patchError;
       }
     }
     await options.onRecord(record);
@@ -227,6 +234,11 @@ export function startWorker(options: StartWorkerOptions): RunningWorker {
           events.notify(
             "error",
             `worker ${w.name} (${w.id}) failed: ${w.error ?? "unknown error"}`,
+          );
+          // The wake carries ids and status words only; stderr detail stays
+          // in the registry and is read on demand via the workers tool.
+          events.wake(
+            `[worker ${w.name} (${w.id}) failed]. Use the workers tool (action=status, id=${w.id}) for details.`,
           );
         } else if (w.status === "timeout") {
           events.notify("warning", `worker ${w.name} (${w.id}) timed out`);

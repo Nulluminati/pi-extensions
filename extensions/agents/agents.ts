@@ -14,6 +14,7 @@
  * or worker-model.json; keep orchestration and judgment in the main session.
  */
 
+import { existsSync } from "node:fs";
 import { access } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext, ExtensionUIContext } from "pi";
@@ -31,7 +32,13 @@ import { type RunningWorker, startWorker } from "./src/runner.ts";
 import { DELEGATE_PARAMETERS, WORKERS_PARAMETERS } from "./src/schemas.ts";
 import { generateWorkerId, loadWorker, loadWorkers, saveWorker } from "./src/store.ts";
 import type { WorkerEvents, WorkerRecord } from "./src/types.ts";
-import { applyPatch, createWorktree, isGitRepo, removeWorktree } from "./src/worktree.ts";
+import {
+  applyPatch,
+  createWorktree,
+  isGitRepo,
+  removeWorktree,
+  worktreePath,
+} from "./src/worktree.ts";
 
 // --- Constants ---
 
@@ -110,7 +117,7 @@ export default async function agentsExtension(pi: ExtensionAPI) {
       "After delegating, do not block: you are woken when the worker exits. Read its report with workers (action=status). Apply an implementation worker's patch with action=collect; planning workers are read-only and produce no patch.",
     ],
     parameters: DELEGATE_PARAMETERS,
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       lastUi = ctx.ui;
       const task = typeof params.task === "string" ? params.task.trim() : "";
       if (!task) throw new Error("delegate requires task.");
@@ -134,23 +141,15 @@ export default async function agentsExtension(pi: ExtensionAPI) {
           : envTimeoutMs();
       const parentPlanning = isPlanModeActive((ctx.sessionManager.getBranch() ?? []) as unknown[]);
 
-      let worktree: { path: string; branch: string } | undefined;
-      // Read-only planning workers inspect the parent's current files through
-      // Gondolin and never need a branch or patch. Avoid changing git metadata
-      // merely to perform research during plan mode.
-      const wantIsolate = !parentPlanning && params.isolate !== false;
-      if (wantIsolate) {
-        if (!(await isGitRepo(ctx.cwd))) {
-          if (params.isolate === true) {
-            throw new Error("isolate=true requires a git repository.");
-          }
-        } else {
-          worktree = await createWorktree(ctx.cwd, workerId);
-        }
-      }
-
+      // Sanitize at the boundary: the name flows into wake messages and
+      // PI_MESSENGER_NAME, a trusted channel that carries ids and status
+      // words only, so anything outside [A-Za-z0-9_-] (or longer than 64
+      // chars) falls back to the worker id.
+      const requestedName = typeof params.name === "string" ? params.name.trim() : "";
       const name =
-        typeof params.name === "string" && params.name.trim() ? params.name.trim() : workerId;
+        requestedName && requestedName.length <= 64 && /^[A-Za-z0-9_-]+$/.test(requestedName)
+          ? requestedName
+          : workerId;
       const duplicate = Object.values(workers).some(
         (w) => w.name === name && w.status === "running",
       );
@@ -165,6 +164,23 @@ export default async function agentsExtension(pi: ExtensionAPI) {
       const resolvedExtensions = resolveWorkerExtensions(requestedExtensions, {
         extensionsRoot: fileURLToPath(new URL("../../extensions/", import.meta.url)),
       });
+
+      let worktree: { path: string; branch: string } | undefined;
+      // Read-only planning workers inspect the parent's current files through
+      // Gondolin and never need a branch or patch. Avoid changing git metadata
+      // merely to perform research during plan mode. Name and extension
+      // resolution happen first so a rejection cannot orphan a created tree.
+      const wantIsolate = !parentPlanning && params.isolate !== false;
+      if (wantIsolate) {
+        if (!(await isGitRepo(ctx.cwd))) {
+          if (params.isolate === true) {
+            throw new Error("isolate=true requires a git repository.");
+          }
+        } else {
+          worktree = await createWorktree(ctx.cwd, workerId);
+        }
+      }
+
       // Every worker routes built-in file and shell tools through Gondolin.
       // Planning workers additionally load the headless plan gate, which
       // reduces active tools to the research allowlist and enforces read-only Bash.
@@ -191,6 +207,14 @@ export default async function agentsExtension(pi: ExtensionAPI) {
         onRecord: (worker) => saveWorker(ctx.cwd, worker),
       });
       running.set(workerId, runningWorker);
+      // Finished fire-and-forget workers leave the map so it tracks only live
+      // children. done never rejects; the rejection branch is a no-op guard.
+      runningWorker.done.then(
+        () => {
+          running.delete(workerId);
+        },
+        () => {},
+      );
       // Persist the running record immediately so concurrency limits,
       // duplicate-name checks, and the workers list see it.
       await saveWorker(ctx.cwd, runningWorker.record);
@@ -204,6 +228,15 @@ export default async function agentsExtension(pi: ExtensionAPI) {
       const waitNote = params.wait === true ? "" : " You will be woken when it exits.";
 
       if (params.wait === true) {
+        // A cancelled turn aborts this tool call; cancel the worker too so it
+        // does not stay pending until the hard timeout.
+        signal?.addEventListener(
+          "abort",
+          () => {
+            void runningWorker.cancel();
+          },
+          { once: true },
+        );
         const record = await runningWorker.done;
         running.delete(workerId);
         await publish(ctx);
@@ -272,6 +305,16 @@ export default async function agentsExtension(pi: ExtensionAPI) {
         await runningWorker.cancel();
         running.delete(id);
         await publish(ctx);
+        // cancel() is a no-op on a non-running record; if the worker reached
+        // a terminal state on its own first, say so instead of claiming the
+        // cancel stopped it.
+        const status = runningWorker.record.status;
+        if (status !== "cancelled") {
+          return {
+            content: [{ type: "text", text: `Worker ${record.name} is already ${status}.` }],
+            details: { worker: runningWorker.record },
+          };
+        }
         return {
           content: [{ type: "text", text: `Worker ${record.name} (${id}) cancelled.` }],
           details: { worker: runningWorker.record },
@@ -315,7 +358,15 @@ export default async function agentsExtension(pi: ExtensionAPI) {
             );
           }
           await removeWorktree(ctx.cwd, id);
-          lines.push("Worktree and branch removed.");
+          // git worktree removal can fail without throwing here; never claim
+          // success while the directory is still on disk.
+          if (existsSync(worktreePath(ctx.cwd, id))) {
+            lines.push(
+              `Warning: worktree removal failed; remove it manually at ${worktreePath(ctx.cwd, id)}.`,
+            );
+          } else {
+            lines.push("Worktree and branch removed.");
+          }
         }
         record.collectedAt = Date.now();
         await saveWorker(ctx.cwd, record);
@@ -329,25 +380,9 @@ export default async function agentsExtension(pi: ExtensionAPI) {
   // --- Lifecycle ---
 
   pi.on("session_start", async (_event, ctx) => {
-    // Workers from a previous process are gone; reconcile records whose pid
-    // is no longer alive so the registry reflects reality.
-    const workers = await loadWorkers(ctx.cwd);
-    for (const worker of Object.values(workers)) {
-      if (worker.status !== "running" || worker.pid === undefined) continue;
-      let alive = false;
-      try {
-        process.kill(worker.pid, 0);
-        alive = true;
-      } catch {
-        alive = false;
-      }
-      if (!alive) {
-        worker.status = "failed";
-        worker.error = "worker process is gone (session ended before completion)";
-        worker.endedAt = Date.now();
-        await saveWorker(ctx.cwd, worker);
-      }
-    }
+    // loadWorkers heals stuck-running records on read (dead pid → failed),
+    // so loading the registry reconciles orphans left by a crashed parent.
+    await loadWorkers(ctx.cwd);
     await publish(ctx);
   });
 

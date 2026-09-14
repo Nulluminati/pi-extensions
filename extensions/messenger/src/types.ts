@@ -39,10 +39,3 @@ export type PresenceRegistry = Record<string, Presence>;
 
 /** Reservations file shape: normalized path prefix → claim. */
 export type ReservationMap = Record<string, Reservation>;
-
-export interface InboxEntry {
-  id: string;
-  from: string;
-  text: string;
-  at: number;
-}

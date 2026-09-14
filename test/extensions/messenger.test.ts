@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -9,8 +9,10 @@ import type { ExtensionAPI, ExtensionContext } from "pi";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import messengerExtension from "../../extensions/messenger/messenger.ts";
 import { checkToolCall } from "../../extensions/messenger/src/enforce.ts";
+import { resolveAgentName } from "../../extensions/messenger/src/identity.ts";
 import { withFileLock } from "../../extensions/messenger/src/lock.ts";
 import {
+  ensureUniqueAgentName,
   findBlockingReservation,
   heartbeat,
   inboxPath,
@@ -53,13 +55,15 @@ describe("messenger-extension", () => {
     mockPi = createMockPi() as DeepMocked<ExtensionAPI>;
     mockCtx = createMockContext();
     (mockCtx as { cwd: string }).cwd = cwd;
-    delete process.env.PI_MESSENGER_NAME;
+    // Deterministic regardless of the host shell: the variable starts unset
+    // (empty is falsy for `?.trim()`), individual tests override it.
+    vi.stubEnv("PI_MESSENGER_NAME", "");
     await messengerExtension(mockPi);
   });
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
     await rm(cwd, { recursive: true, force: true });
-    delete process.env.PI_MESSENGER_NAME;
   });
 
   it("registers the messenger tool and lifecycle handlers", () => {
@@ -74,7 +78,7 @@ describe("messenger-extension", () => {
   });
 
   it("session_start joins presence under PI_MESSENGER_NAME when set", async () => {
-    process.env.PI_MESSENGER_NAME = "test-agent";
+    vi.stubEnv("PI_MESSENGER_NAME", "test-agent");
     const handler = getEventHandler("session_start");
     await handler({ type: "session_start", reason: "startup" }, mockCtx);
 
@@ -105,7 +109,7 @@ describe("messenger-extension", () => {
   });
 
   it("PI_MESSENGER_NAME overrides the persisted identity", async () => {
-    process.env.PI_MESSENGER_NAME = "env-agent";
+    vi.stubEnv("PI_MESSENGER_NAME", "env-agent");
     vi.mocked(mockCtx.sessionManager.getBranch).mockReturnValue([
       { type: "custom", customType: "messenger-identity", data: { name: "persisted-agent" } },
     ]);
@@ -116,7 +120,7 @@ describe("messenger-extension", () => {
   });
 
   it("send delivers to a mailbox and inbox reads and clears it", async () => {
-    process.env.PI_MESSENGER_NAME = "receiver";
+    vi.stubEnv("PI_MESSENGER_NAME", "receiver");
     await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
     // Busy while the mail arrives, so the watcher does not auto-deliver and
     // the manual inbox read below has something to read.
@@ -133,7 +137,7 @@ describe("messenger-extension", () => {
   });
 
   it("send warns when the recipient is offline but still stores mail", async () => {
-    process.env.PI_MESSENGER_NAME = "sender";
+    vi.stubEnv("PI_MESSENGER_NAME", "sender");
     await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
 
     const res = await executeTool({ action: "send", to: "ghost", text: "anyone there?" });
@@ -142,7 +146,7 @@ describe("messenger-extension", () => {
   });
 
   it("reserve claims paths and tool_call blocks other agents from editing them", async () => {
-    process.env.PI_MESSENGER_NAME = "owner";
+    vi.stubEnv("PI_MESSENGER_NAME", "owner");
     await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
 
     const res = await executeTool({ action: "reserve", paths: ["src/auth"], reason: "refactor" });
@@ -186,7 +190,7 @@ describe("messenger-extension", () => {
     // Another session (simulated by direct store calls) reserves src/db.
     await reserve(cwd, "other-session", ["src/db"], "migration");
 
-    process.env.PI_MESSENGER_NAME = "me";
+    vi.stubEnv("PI_MESSENGER_NAME", "me");
     await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
 
     const handler = getEventHandler("tool_call");
@@ -211,7 +215,7 @@ describe("messenger-extension", () => {
     await reserve(cwd, "a", ["src/a"]);
     await reserve(cwd, "b", ["src/b"]);
 
-    process.env.PI_MESSENGER_NAME = "a";
+    vi.stubEnv("PI_MESSENGER_NAME", "a");
     await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
 
     await executeTool({ action: "release" });
@@ -221,7 +225,7 @@ describe("messenger-extension", () => {
   });
 
   it("agent_settled delivers concurrently arriving mail exactly once", async () => {
-    process.env.PI_MESSENGER_NAME = "busy";
+    vi.stubEnv("PI_MESSENGER_NAME", "busy");
     // Busy at start so the inbox watcher cannot deliver first.
     mockCtx.isIdle = vi.fn(() => false);
     await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
@@ -239,7 +243,7 @@ describe("messenger-extension", () => {
   });
 
   it("agent_settled delivers unread mail into the conversation and marks it read", async () => {
-    process.env.PI_MESSENGER_NAME = "busy";
+    vi.stubEnv("PI_MESSENGER_NAME", "busy");
     await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
     // Mail arrives mid-turn: the watcher must defer to the settle handler.
     mockCtx.isIdle = vi.fn(() => false);
@@ -264,7 +268,7 @@ describe("messenger-extension", () => {
   });
 
   it("incoming mail wakes an idle session without a settle", async () => {
-    process.env.PI_MESSENGER_NAME = "watched";
+    vi.stubEnv("PI_MESSENGER_NAME", "watched");
     mockCtx.isIdle = vi.fn(() => true);
     await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
 
@@ -280,33 +284,52 @@ describe("messenger-extension", () => {
   });
 
   it("inbox watcher ignores other agents' mailboxes", async () => {
-    process.env.PI_MESSENGER_NAME = "watched";
+    vi.stubEnv("PI_MESSENGER_NAME", "watched");
     mockCtx.isIdle = vi.fn(() => true);
     await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
 
     await sendMessage(cwd, "someone-else", "peer", "not for you");
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    // Give any (wrong) delivery a deterministic window to surface, then
+    // prove the watcher is live with mail addressed to us: the control makes
+    // the negative above meaningful instead of a dead-watcher false pass.
+    await flushEventLoop();
     expect(mockPi.sendMessage).not.toHaveBeenCalled();
+    await sendMessage(cwd, "watched", "peer", "for you");
+    await vi.waitFor(() => expect(mockPi.sendMessage).toHaveBeenCalledTimes(1));
+    expect(mockPi.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: [expect.objectContaining({ text: expect.stringContaining("for you") })],
+      }),
+      { triggerTurn: true },
+    );
   });
 
   it("inbox watcher stops after session_shutdown", async () => {
-    process.env.PI_MESSENGER_NAME = "watched";
+    vi.stubEnv("PI_MESSENGER_NAME", "watched");
     mockCtx.isIdle = vi.fn(() => true);
     await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+
+    // Positive control: the watcher delivers while it is alive.
+    await sendMessage(cwd, "watched", "peer", "while alive");
+    await vi.waitFor(() => expect(mockPi.sendMessage).toHaveBeenCalledTimes(1));
+    mockPi.sendMessage.mockClear();
+
     await getEventHandler("session_shutdown")(
       { type: "session_shutdown", reason: "quit" },
       mockCtx,
     );
 
     await sendMessage(cwd, "watched", "peer", "too late");
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    // Delivery took a few event-loop turns in the control above; the same
+    // flush after close() must stay silent.
+    await flushEventLoop();
     expect(mockPi.sendMessage).not.toHaveBeenCalled();
   });
 
   it("session_shutdown leaves presence but keeps reservations for the next resume", async () => {
     // Identity persists in the session (messenger-identity entry), so a
     // resumed session re-adopts its claims; shutdown only drops presence.
-    process.env.PI_MESSENGER_NAME = "returning";
+    vi.stubEnv("PI_MESSENGER_NAME", "returning");
     await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
     await executeTool({ action: "reserve", paths: ["src/kept"] });
 
@@ -337,7 +360,7 @@ describe("messenger-extension", () => {
   });
 
   it("session_start re-adopts own reservations with the current pid", async () => {
-    process.env.PI_MESSENGER_NAME = "returning";
+    vi.stubEnv("PI_MESSENGER_NAME", "returning");
     // Simulate a claim left behind by a previous process that died.
     await reserve(cwd, "returning", ["src/kept"], "before restart", 999999999);
 
@@ -349,13 +372,159 @@ describe("messenger-extension", () => {
   });
 
   it("list shows online agents from the registry", async () => {
-    process.env.PI_MESSENGER_NAME = "viewer";
+    vi.stubEnv("PI_MESSENGER_NAME", "viewer");
     await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
     await heartbeat(cwd, "peer-session", { pid: process.pid, cwd, status: "testing" });
 
     const res = await executeTool({ action: "list" });
     expect(res.content[0].text).toContain("(you)");
     expect(res.content[0].text).toContain("peer-session");
+  });
+
+  it("whoami reports the resolved identity and never terminates the turn", async () => {
+    vi.stubEnv("PI_MESSENGER_NAME", "narcissus");
+    await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+
+    const res = await executeTool({ action: "whoami" });
+    expect(res.content[0].text).toBe('You are "narcissus".');
+    expect(res.details).toEqual({ name: "narcissus" });
+    expect(res.terminate).toBeUndefined();
+  });
+
+  it("send validates its inputs and the recipient name via the tool", async () => {
+    vi.stubEnv("PI_MESSENGER_NAME", "sender");
+    await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+
+    await expect(executeTool({ action: "send", to: "", text: "hi" })).rejects.toThrow(
+      /send requires to/,
+    );
+    await expect(executeTool({ action: "send", to: "peer", text: "   " })).rejects.toThrow(
+      /send requires text/,
+    );
+    await expect(executeTool({ action: "send", to: "../escape", text: "hi" })).rejects.toThrow(
+      /Invalid recipient mailbox name/,
+    );
+    await expect(executeTool({ action: "send", to: "has/slash", text: "hi" })).rejects.toThrow(
+      /Invalid recipient mailbox name/,
+    );
+  });
+
+  it("status action sets a presence line and clears it with an empty string", async () => {
+    vi.stubEnv("PI_MESSENGER_NAME", "statusful");
+    await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+
+    const set = await executeTool({ action: "status", status: "refactoring auth" });
+    expect(set.content[0].text).toBe("Status set: refactoring auth");
+    expect((await loadRegistry(cwd))["statusful"]?.status).toBe("refactoring auth");
+
+    const cleared = await executeTool({ action: "status" });
+    expect(cleared.content[0].text).toBe("Status cleared.");
+    // Cleared means removed, not stored as an empty string.
+    expect((await loadRegistry(cwd))["statusful"]?.status).toBeUndefined();
+    const shard = JSON.parse(
+      await readFile(join(cwd, ".pi/messenger/registry/statusful.json"), "utf8"),
+    ) as Record<string, unknown>;
+    expect("status" in shard).toBe(false);
+  });
+
+  it("unread mail shows a themed messenger status line and clears when read", async () => {
+    vi.stubEnv("PI_MESSENGER_NAME", "reader");
+    await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+    // No unread mail yet: the status is cleared.
+    expect(mockCtx.ui.setStatus).toHaveBeenNthCalledWith(1, "messenger", undefined);
+
+    await sendMessage(cwd, "reader", "peer", "status check");
+    await getEventHandler("agent_settled")({ type: "agent_settled" }, mockCtx);
+
+    // The mock theme passes text through, so the canonical pattern is
+    // "<icon> <Prefix>: <text>".
+    expect(mockCtx.ui.setStatus).toHaveBeenCalledWith(
+      "messenger",
+      "✉ Messenger: 1 unread · reader",
+    );
+
+    await executeTool({ action: "inbox" });
+    expect(mockCtx.ui.setStatus).toHaveBeenLastCalledWith("messenger", undefined);
+  });
+
+  it("reserve requires at least one path", async () => {
+    vi.stubEnv("PI_MESSENGER_NAME", "claimer");
+    await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+
+    await expect(executeTool({ action: "reserve", paths: [] })).rejects.toThrow(
+      /reserve requires paths/,
+    );
+  });
+
+  it("unknown actions are rejected with a descriptive error", async () => {
+    vi.stubEnv("PI_MESSENGER_NAME", "anyone");
+    await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+
+    await expect(executeTool({ action: "teleport" })).rejects.toThrow(/Unknown messenger action/);
+  });
+
+  it("release with explicit paths releases only those", async () => {
+    vi.stubEnv("PI_MESSENGER_NAME", "selector");
+    await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+    await executeTool({ action: "reserve", paths: ["src/one", "src/two"] });
+
+    const res = await executeTool({ action: "release", paths: ["src/one"] });
+
+    expect(res.content[0].text).toBe("Released: src/one");
+    const reservations = await loadReservations(cwd);
+    expect(reservations["src/one"]).toBeUndefined();
+    expect(reservations["src/two"]).toBeDefined();
+  });
+
+  it("tool_call blocks without notifying when there is no UI", async () => {
+    await reserve(cwd, "other-session", ["src/db"], "migration");
+    vi.stubEnv("PI_MESSENGER_NAME", "me");
+    (mockCtx as { hasUI: boolean }).hasUI = false;
+    await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+
+    const handler = getEventHandler("tool_call");
+    const result = await handler(
+      {
+        type: "tool_call",
+        toolName: "edit",
+        toolCallId: "t2",
+        input: { path: "src/db/schema.ts" },
+      },
+      mockCtx,
+    );
+    expect(result).toMatchObject({ block: true });
+    expect(result.reason).toContain("other-session");
+    expect(mockCtx.ui.notify).not.toHaveBeenCalled();
+  });
+
+  it("session_start fails fast on a PI_MESSENGER_NAME that cannot be a mailbox", async () => {
+    vi.stubEnv("PI_MESSENGER_NAME", "bad/name");
+    await expect(
+      getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx),
+    ).rejects.toThrow(/agent name/i);
+    expect((await loadRegistry(cwd))["bad/name"]).toBeUndefined();
+  });
+
+  it("session_start suffixes a name already held by a different live process", async () => {
+    // A real helper process provides a pid that is alive but is not ours.
+    const helper = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30_000)"], {
+      stdio: "ignore",
+    });
+    try {
+      const helperPid = helper.pid;
+      if (helperPid === undefined) throw new Error("failed to spawn live helper process");
+      await heartbeat(cwd, "collider", { pid: helperPid, cwd });
+
+      vi.stubEnv("PI_MESSENGER_NAME", "collider");
+      await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+
+      const registry = await loadRegistry(cwd);
+      // The live holder keeps its name; this session takes the next free one.
+      expect(registry["collider"]?.pid).toBe(helperPid);
+      expect(registry["collider-2"]?.pid).toBe(process.pid);
+    } finally {
+      helper.kill();
+    }
   });
 });
 
@@ -433,6 +602,18 @@ describe("messenger-store", () => {
     expect(claims["src/legacy"]).toBeDefined();
   });
 
+  it("loadReservations rejects a corrupt reservations file instead of wiping claims", async () => {
+    await reserve(cwd, "owner", ["src/kept"]);
+    const path = join(cwd, ".pi/messenger/reservations.json");
+    await writeFile(path, "{not json", "utf8");
+
+    await expect(loadReservations(cwd)).rejects.toThrow(/reservations\.json/);
+    // A reserve must not treat the corrupt file as an empty map and save
+    // over it, silently destroying enforcement and every live claim.
+    await expect(reserve(cwd, "other", ["src/new"])).rejects.toThrow(/reservations\.json/);
+    expect(await readFile(path, "utf8")).toBe("{not json");
+  });
+
   it("findBlockingReservation covers directories by boundary", async () => {
     await reserve(cwd, "owner", ["src/auth"]);
     const reservations = await loadReservations(cwd);
@@ -460,6 +641,27 @@ describe("messenger-store", () => {
     const registry = await loadRegistry(cwd);
     expect(registry["agent-a"]).toBeDefined();
     expect(registry["agent-b"]?.status).toBe("still working");
+  });
+
+  it("heartbeat with an empty status clears the stored status", async () => {
+    await heartbeat(cwd, "agent-a", { pid: process.pid, cwd, status: "working" });
+    await heartbeat(cwd, "agent-a", { pid: process.pid, cwd, status: "" });
+    expect((await loadRegistry(cwd))["agent-a"]?.status).toBeUndefined();
+    // Omitted status keeps the existing one.
+    await heartbeat(cwd, "agent-a", { pid: process.pid, cwd, status: "back" });
+    await heartbeat(cwd, "agent-a", { pid: process.pid, cwd });
+    expect((await loadRegistry(cwd))["agent-a"]?.status).toBe("back");
+  });
+
+  it("ensureUniqueAgentName keeps own pid's name and suffixes a live other holder", async () => {
+    await heartbeat(cwd, "collider", { pid: process.pid, cwd });
+    await expect(ensureUniqueAgentName(cwd, "collider", process.pid)).resolves.toBe("collider");
+    await expect(ensureUniqueAgentName(cwd, "collider", 999999999)).resolves.toBe("collider-2");
+  });
+
+  it("ensureUniqueAgentName reuses a name whose holder is gone", async () => {
+    await heartbeat(cwd, "freed", { pid: 999999999, cwd });
+    await expect(ensureUniqueAgentName(cwd, "freed", process.pid)).resolves.toBe("freed");
   });
 
   it("legacy single-file registry migrates to shards on read", async () => {
@@ -605,6 +807,14 @@ describe("messenger-store", () => {
     expect(result.conflicts).toEqual([]);
   });
 
+  it("reserve accepts a top-level entry whose name starts with dots", async () => {
+    // "..notes" is a normal file name, not a parent traversal.
+    const result = await reserve(cwd, "owner", ["..notes"]);
+
+    expect(result.reserved).toEqual(["..notes"]);
+    expect(result.conflicts).toEqual([]);
+  });
+
   it("concurrent markRead and sendMessage keep newly arrived mail", async () => {
     await Promise.all(
       Array.from({ length: 30 }, (_, i) => sendMessage(cwd, "a", "peer", `old-${i}`)),
@@ -659,7 +869,9 @@ describe("messenger-store", () => {
       events.push("second");
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    // The holder still owns the lock, so the waiter cannot start; a
+    // deterministic flush proves it without a wall-clock sleep.
+    await flushEventLoop();
     expect(events).not.toContain("second");
 
     releaseFirst();
@@ -667,3 +879,22 @@ describe("messenger-store", () => {
     expect(events).toEqual(["first-start", "first-end", "second"]);
   });
 });
+
+describe("messenger-identity", () => {
+  it("resolveAgentName validates the env override and generates a name when unset", () => {
+    expect(() => resolveAgentName({ PI_MESSENGER_NAME: "bad/name" })).toThrow(/agent name/i);
+    expect(() => resolveAgentName({ PI_MESSENGER_NAME: "bad\\name" })).toThrow(/agent name/i);
+    // Empty/unset falls through to generation instead of throwing.
+    expect(resolveAgentName({ PI_MESSENGER_NAME: "  " })).toMatch(/^[a-z]+-[a-z]+-[0-9a-f]{1,2}$/);
+    expect(resolveAgentName({})).toMatch(/^[a-z]+-[a-z]+-[0-9a-f]{1,2}$/);
+  });
+});
+
+/** Deterministic wait: yield several macrotask ticks so queued IO callbacks
+ *  (e.g. an inbox watcher reacting to a mailbox write) get a window to run
+ *  without a fixed wall-clock sleep. */
+async function flushEventLoop(ticks = 8): Promise<void> {
+  for (let i = 0; i < ticks; i += 1) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+}

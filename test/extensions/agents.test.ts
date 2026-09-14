@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,6 +14,7 @@ import {
   loadWorkers,
   saveWorker,
 } from "../../extensions/agents/src/store.ts";
+import type { WorkerRecord } from "../../extensions/agents/src/types.ts";
 import {
   applyPatch,
   captureWorktreePatch,
@@ -38,6 +40,8 @@ exit 0
 `;
 
 const FAILING_WORKER = "#!/bin/sh\necho boom >&2\nexit 3\n";
+const NOISY_FAILING_WORKER =
+  "#!/bin/sh\necho 'line one failure' >&2\necho 'line two failure' >&2\necho 'line three failure' >&2\nexit 3\n";
 const SLOW_WORKER = "#!/bin/sh\nsleep 30\n";
 
 async function writeFixture(dir: string, name: string, body: string): Promise<string> {
@@ -56,6 +60,64 @@ async function initGitRepo(cwd: string): Promise<void> {
   await execFileAsync("git", ["commit", "-qm", "init"], gitOpts(cwd));
 }
 
+interface WakeMessageShape {
+  customType: string;
+  content: Array<{ type: string; text: string }>;
+  display: boolean;
+  details: Record<string, unknown>;
+}
+
+interface WakeOptionsShape {
+  triggerTurn: boolean;
+  deliverAs: string;
+}
+
+function findWakeCall(pi: DeepMocked<ExtensionAPI>): {
+  message: WakeMessageShape;
+  options: WakeOptionsShape;
+} {
+  for (const call of pi.sendMessage.mock.calls) {
+    const [message, options] = call;
+    if ((message as WakeMessageShape).customType === "agents:wake") {
+      return {
+        message: message as WakeMessageShape,
+        options: options as WakeOptionsShape,
+      };
+    }
+  }
+  throw new Error("no agents:wake message was sent via pi.sendMessage");
+}
+
+/** The wake is emitted after the registry write, so poll rather than read once. */
+async function waitForWake(pi: DeepMocked<ExtensionAPI>, timeoutMs = 5_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const found = pi.sendMessage.mock.calls.some(
+      ([message]) => (message as WakeMessageShape).customType === "agents:wake",
+    );
+    if (found) return;
+    if (Date.now() > deadline) throw new Error("no agents:wake message within timeout");
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
+async function waitForRecord(
+  dir: string,
+  id: string,
+  status: WorkerRecord["status"],
+  timeoutMs = 15_000,
+): Promise<WorkerRecord> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const record = await loadWorker(dir, id);
+    if (record?.status === status) return record;
+    if (Date.now() > deadline) {
+      throw new Error(`worker ${id} did not reach ${status} within ${timeoutMs}ms`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
 // --- Suite ---
 
 describe("agents-extension", () => {
@@ -65,10 +127,14 @@ describe("agents-extension", () => {
   let mockCtx: DeepMocked<ExtensionContext>;
   const oldEnv: Record<string, string | undefined> = {};
 
-  const executeTool = async (name: string, params: Record<string, unknown>) => {
+  const executeTool = async (
+    name: string,
+    params: Record<string, unknown>,
+    signal?: AbortSignal,
+  ) => {
     const call = mockPi.registerTool.mock.calls.find((c) => c[0].name === name);
     if (!call) throw new Error(`tool ${name} not registered`);
-    return call[0].execute("call-1", params as never, undefined, undefined, mockCtx);
+    return call[0].execute("call-1", params as never, signal, undefined, mockCtx);
   };
 
   const getEventHandler = (eventType: string) => {
@@ -119,6 +185,12 @@ describe("agents-extension", () => {
     expect(delegate).toBeDefined();
     expect(delegate?.parameters.properties).not.toHaveProperty("model");
     expect(definitions.some((definition) => definition.name === "workers")).toBe(true);
+  });
+
+  it("delegate throws on an empty task", async () => {
+    await expect(executeTool("delegate", { task: "   " })).rejects.toThrow(
+      /delegate requires task/,
+    );
   });
 
   it("delegate from a planning session forces read-only Gondolin workers without worktrees", async () => {
@@ -275,6 +347,13 @@ ${SUCCESS_WORKER}`,
     ).rejects.toThrow(/forbidden/);
   });
 
+  it("delegate throws when isolate=true outside a git repo", async () => {
+    // cwd is a plain temp directory, not a git repository.
+    await expect(executeTool("delegate", { task: "t", isolate: true })).rejects.toThrow(
+      /isolate=true requires a git repository/,
+    );
+  });
+
   it("delegate fails with a descriptive error when no worker model is configured", async () => {
     setEnv("PI_WORKER_MODEL", undefined);
     // No worker-model.json config exists in the temp cwd's agent dir.
@@ -328,6 +407,26 @@ ${SUCCESS_WORKER}`,
     const result = await executeTool("delegate", { task: "do it", isolate: false, wait: true });
     expect(result.details.worker.status).toBe("failed");
     expect(result.details.worker.error).toContain("boom");
+  });
+
+  it("wakes the parent with ids and status words only when a worker fails", async () => {
+    const fixture = await writeFixture(fixtureDir, "noisy-fail-worker.sh", NOISY_FAILING_WORKER);
+    setEnv("PI_WORKER_COMMAND", fixture);
+
+    const started = await executeTool("delegate", { task: "do it", isolate: false });
+    const id = started.details.workerId as string;
+
+    await waitForRecord(cwd, id, "failed");
+    await waitForWake(mockPi);
+    const wake = findWakeCall(mockPi);
+
+    expect(wake.message.details).toMatchObject({ source: "agents", trusted: true });
+    expect(wake.options.triggerTurn).toBe(true);
+    const text = wake.message.content[0].text;
+    expect(text).toContain("failed");
+    expect(text).toContain(`id=${id}`);
+    // Trusted-channel contract: stderr content never enters the wake.
+    expect(text).not.toContain("line one failure");
   });
 
   it("marks a worker failed when it exits without producing a report", async () => {
@@ -438,6 +537,30 @@ sleep 30
 
     const status = await executeTool("workers", { action: "status", id });
     expect(status.content[0].text).toContain("JWT tokens");
+  });
+
+  it("workers status throws for an unknown id", async () => {
+    await expect(executeTool("workers", { action: "status", id: "w-nope" })).rejects.toThrow(
+      /Unknown worker/,
+    );
+  });
+
+  it("workers throws on an unknown action", async () => {
+    const id = generateWorkerId();
+    await saveWorker(cwd, {
+      id,
+      name: "known",
+      task: "t",
+      model: "m",
+      cwd,
+      status: "completed",
+      startedAt: Date.now(),
+      endedAt: Date.now(),
+    });
+
+    await expect(executeTool("workers", { action: "explode", id })).rejects.toThrow(
+      /Unknown workers action/,
+    );
   });
 
   it("saveWorker ignores a stale running snapshot for a terminal record", async () => {
@@ -578,6 +701,20 @@ sleep 30
     expect(record?.status).toBe("cancelled");
   });
 
+  it("workers cancel stops a running worker", async () => {
+    const fixture = await writeFixture(fixtureDir, "slow-worker.sh", SLOW_WORKER);
+    setEnv("PI_WORKER_COMMAND", fixture);
+
+    const started = await executeTool("delegate", { task: "long", isolate: false });
+    const id = started.details.workerId as string;
+
+    const cancelled = await executeTool("workers", { action: "cancel", id });
+    expect(cancelled.content[0].text).toContain("cancelled");
+    expect(cancelled.details.worker.status).toBe("cancelled");
+    const record = await loadWorker(cwd, id);
+    expect(record?.status).toBe("cancelled");
+  });
+
   it("workers collect applies an isolated worker's patch and cleans up", async () => {
     await initGitRepo(cwd);
     const fixture = await writeFixture(fixtureDir, "ok-worker.sh", SUCCESS_WORKER);
@@ -643,6 +780,52 @@ sleep 30
     await expect(executeTool("workers", { action: "collect", id: worker.id })).rejects.toThrow(
       /already collected/,
     );
+  });
+
+  it("workers collect with apply=false leaves the patch unapplied", async () => {
+    await initGitRepo(cwd);
+    const fixture = await writeFixture(fixtureDir, "ok-worker.sh", SUCCESS_WORKER);
+    setEnv("PI_WORKER_COMMAND", fixture);
+
+    const started = await executeTool("delegate", { task: "t", isolate: true, wait: true });
+    const worker = started.details.worker;
+    const { writeFile: wf } = await import("node:fs/promises");
+    await wf(join(worker.worktree as string, "UNAPPLIED.md"), "unapplied\n");
+    const { captureWorktreePatch } = await import("../../extensions/agents/src/worktree.ts");
+    await captureWorktreePatch(worker.worktree as string, worker.patchPath as string);
+
+    const collected = await executeTool("workers", {
+      action: "collect",
+      id: worker.id,
+      apply: false,
+    });
+
+    expect(collected.content[0].text).toContain("Patch left unapplied");
+    expect(existsSync(join(cwd, "UNAPPLIED.md"))).toBe(false);
+    const record = await loadWorker(cwd, worker.id as string);
+    expect(record?.collectedAt).toBeDefined();
+  });
+
+  it("workers collect surfaces the patch path when git apply fails", async () => {
+    await initGitRepo(cwd);
+    const fixture = await writeFixture(fixtureDir, "ok-worker.sh", SUCCESS_WORKER);
+    setEnv("PI_WORKER_COMMAND", fixture);
+
+    const started = await executeTool("delegate", { task: "t", isolate: true, wait: true });
+    const worker = started.details.worker;
+    const patchPath = worker.patchPath as string;
+    const { writeFile: wf } = await import("node:fs/promises");
+    // Corrupt the patch so `git apply` rejects it.
+    await wf(patchPath, "not a valid git patch\n");
+
+    const error = await executeTool("workers", { action: "collect", id: worker.id }).then(
+      () => null,
+      (err: unknown) => err,
+    );
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("Patch apply failed");
+    expect((error as Error).message).toContain(patchPath);
   });
 });
 

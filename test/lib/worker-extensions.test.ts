@@ -133,6 +133,37 @@ describe("worker-extensions", () => {
     ).toThrow(/does-not-exist/);
   });
 
+  it("rejects path traversal names that would resolve a denylisted extension", () => {
+    // "agents/../agents" resolves to extensions/agents/agents.ts, defeating
+    // the literal-name denylist check.
+    expect(() =>
+      resolveWorkerExtensions(["agents/../agents"], {
+        extensionsRoot: root,
+        configPath,
+      }),
+    ).toThrow(/Invalid worker extension name/);
+    expect(() =>
+      resolveWorkerExtensions(["messenger", "../agents"], {
+        extensionsRoot: root,
+        configPath,
+      }),
+    ).toThrow(/Invalid worker extension name/);
+  });
+
+  it("rejects names outside the lowercase letters, digits, and hyphens convention", () => {
+    for (const bad of ["foo/bar", "..", ".", "Agents", "a b", "web_search", ""]) {
+      expect(() => resolveWorkerExtensions([bad], { extensionsRoot: root, configPath })).toThrow(
+        /Invalid worker extension name/,
+      );
+    }
+    // Well-formed names still resolve to paths.
+    const resolved = resolveWorkerExtensions(["web-search"], {
+      extensionsRoot: root,
+      configPath,
+    });
+    expect(resolved.map((r) => r.name)).toEqual(["messenger", "web-search", "gondolin"]);
+  });
+
   it("rejects malformed config files and env values with descriptive errors", () => {
     writeFileSync(configPath, "{ not json");
     expect(() => resolveWorkerExtensions(undefined, { extensionsRoot: root, configPath })).toThrow(

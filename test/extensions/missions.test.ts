@@ -1,9 +1,15 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext } from "pi";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import missionsExtension from "../../extensions/missions/missions.ts";
+import {
+  acquireMissionLock,
+  generateMissionId,
+  loadMission,
+} from "../../extensions/missions/src/storage.ts";
 import { createMockCommandContext } from "../mocks/context-mocks.ts";
 import type { DeepMocked } from "../mocks/mock-types.ts";
 import { createMockPi as createBasePi } from "../mocks/pi-mocks.ts";
@@ -287,5 +293,273 @@ describe("missions-extension", () => {
     await shutdown({ type: "session_shutdown", reason: "quit" }, mockCtx);
     expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("missions", undefined);
     expect(mockCtx.ui.setWidget).toHaveBeenCalledWith("missions", undefined);
+  });
+
+  it("task_add stores the verification command and description", async () => {
+    await executeTool({ action: "create", title: "t", objective: "o" });
+    await executeTool({
+      action: "task_add",
+      taskTitle: "Ship it",
+      verification: { command: "npm test", description: "the suite passes" },
+    });
+
+    const pointer = JSON.parse(await readFile(join(cwd, ".pi/missions/active.json"), "utf8"));
+    const stored = JSON.parse(
+      await readFile(join(cwd, ".pi/missions", `${pointer.id}.json`), "utf8"),
+    );
+    expect(stored.tasks[0].verification).toEqual({
+      command: "npm test",
+      description: "the suite passes",
+    });
+  });
+
+  it("set_status to a non-terminal status keeps the active pointer on disk", async () => {
+    const created = await executeTool({ action: "create", title: "t", objective: "o" });
+    const id = created.details.missionId as string;
+
+    await executeTool({ action: "set_status", missionStatus: "paused" });
+    const pointer = JSON.parse(await readFile(join(cwd, ".pi/missions/active.json"), "utf8"));
+    expect(pointer).toEqual({ id });
+
+    await executeTool({ action: "set_status", missionStatus: "active" });
+    const reactivated = JSON.parse(await readFile(join(cwd, ".pi/missions/active.json"), "utf8"));
+    expect(reactivated).toEqual({ id });
+  });
+
+  it("set_status re-activating a mission restores a cleared pointer", async () => {
+    const created = await executeTool({ action: "create", title: "first", objective: "o" });
+    const id = created.details.missionId as string;
+    await executeTool({ action: "set_status", missionStatus: "aborted" });
+    expect(existsSync(join(cwd, ".pi/missions/active.json"))).toBe(false);
+
+    // Aborting frees the slot; reopening requires re-selecting the mission,
+    // and the pointer must come back with it.
+    await executeTool({ action: "switch", id });
+    await executeTool({ action: "set_status", missionStatus: "paused" });
+    const pointer = JSON.parse(await readFile(join(cwd, ".pi/missions/active.json"), "utf8"));
+    expect(pointer.id).toBe(id);
+  });
+
+  it("list returns every mission with a summary", async () => {
+    await executeTool({ action: "create", title: "visible", objective: "o" });
+    await executeTool({ action: "set_status", missionStatus: "aborted" });
+    const second = await executeTool({ action: "create", title: "current", objective: "o" });
+    expect(second.details.missionId).toBeDefined();
+
+    const res = await executeTool({ action: "list" });
+    const text = res.content[0].text as string;
+    expect(text).toContain("visible");
+    expect(text).toContain("current");
+    expect(res.details.count).toBe(2);
+  });
+
+  it("switch to an unknown id throws", async () => {
+    await expect(executeTool({ action: "switch", id: "mission-missing" })).rejects.toThrow(
+      /No mission found/,
+    );
+  });
+
+  it("checkpoint records a labelled checkpoint", async () => {
+    await executeTool({ action: "create", title: "t", objective: "o" });
+    const res = await executeTool({
+      action: "checkpoint",
+      label: "kickoff",
+      summary: "agreed on scope",
+      commit: "abc1234",
+    });
+    expect(res.content[0].text).toContain("Checkpoint");
+    expect(res.details.checkpointId).toMatch(/^ckpt-/);
+
+    const pointer = JSON.parse(await readFile(join(cwd, ".pi/missions/active.json"), "utf8"));
+    const stored = JSON.parse(
+      await readFile(join(cwd, ".pi/missions", `${pointer.id}.json`), "utf8"),
+    );
+    expect(stored.checkpoints[0]).toMatchObject({ label: "kickoff", commit: "abc1234" });
+  });
+
+  it("decision records a decision", async () => {
+    await executeTool({ action: "create", title: "t", objective: "o" });
+    const res = await executeTool({ action: "decision", text: "Use sqlite for storage" });
+    expect(res.content[0].text).toContain("Decision recorded.");
+
+    const pointer = JSON.parse(await readFile(join(cwd, ".pi/missions/active.json"), "utf8"));
+    const stored = JSON.parse(
+      await readFile(join(cwd, ".pi/missions", `${pointer.id}.json`), "utf8"),
+    );
+    expect(stored.decisions[0].text).toBe("Use sqlite for storage");
+  });
+
+  it("set_budget stores budgets and rejects negative values", async () => {
+    await executeTool({ action: "create", title: "t", objective: "o" });
+
+    const res = await executeTool({ action: "set_budget", maxIterations: 5, maxTokens: 1000 });
+    expect(res.details.budget).toEqual({ maxIterations: 5, maxTokens: 1000 });
+
+    await expect(executeTool({ action: "set_budget", maxIterations: -1 })).rejects.toThrow(
+      /maxIterations must be >= 0/,
+    );
+    await expect(executeTool({ action: "set_budget", maxTokens: -5 })).rejects.toThrow(
+      /maxTokens must be >= 0/,
+    );
+  });
+
+  it("task_verify attaches and clears a verification command", async () => {
+    await executeTool({ action: "create", title: "t", objective: "o" });
+    const added = await executeTool({ action: "task_add", taskTitle: "Task" });
+    const taskId = added.details.taskId as string;
+
+    const set = await executeTool({
+      action: "task_verify",
+      taskId,
+      verification: { command: "npm test", description: "suite passes" },
+    });
+    expect(set.content[0].text).toContain("npm test");
+
+    const cleared = await executeTool({ action: "task_verify", taskId });
+    expect(cleared.content[0].text).toContain("cleared");
+  });
+
+  it("spend rejects negative amounts and requires iterations or tokens", async () => {
+    await executeTool({ action: "create", title: "t", objective: "o" });
+
+    await expect(executeTool({ action: "spend" })).rejects.toThrow(
+      /requires iterations and\/or tokens/,
+    );
+    await expect(executeTool({ action: "spend", iterations: -1 })).rejects.toThrow(
+      /iterations must be >= 0/,
+    );
+    await expect(executeTool({ action: "spend", tokens: -1 })).rejects.toThrow(
+      /tokens must be >= 0/,
+    );
+  });
+
+  it("unknown action throws", async () => {
+    await executeTool({ action: "create", title: "t", objective: "o" });
+    await expect(executeTool({ action: "explode" })).rejects.toThrow(/Unknown mission action/);
+  });
+
+  it("create requires title and objective", async () => {
+    await expect(executeTool({ action: "create" })).rejects.toThrow(/requires title/);
+    await expect(executeTool({ action: "create", title: "t" })).rejects.toThrow(
+      /requires objective/,
+    );
+  });
+
+  it("task_add is blocked after abort", async () => {
+    const created = await executeTool({ action: "create", title: "t", objective: "o" });
+    await executeTool({ action: "set_status", missionStatus: "aborted" });
+    // Aborting frees the active slot; re-select the closed mission so the
+    // mutation hits requireOpen's closed-mission guard.
+    await executeTool({ action: "switch", id: created.details.missionId as string });
+    await expect(executeTool({ action: "task_add", taskTitle: "Too late" })).rejects.toThrow(
+      /no longer be modified/,
+    );
+  });
+
+  it("loadMission rejects with a descriptive error for a corrupt mission file", async () => {
+    await mkdir(join(cwd, ".pi/missions"), { recursive: true });
+    await writeFile(join(cwd, ".pi/missions/mission-corrupt.json"), "{ this is not json");
+
+    await expect(loadMission(cwd, "mission-corrupt")).rejects.toThrow(/mission-corrupt\.json/);
+  });
+
+  it("a corrupt active pointer does not delete mission files", async () => {
+    await executeTool({ action: "create", title: "survivor", objective: "o" });
+    const pointerPath = join(cwd, ".pi/missions/active.json");
+    await writeFile(pointerPath, "{ corrupted");
+
+    await expect(executeTool({ action: "status" })).rejects.toThrow(/active\.json/);
+
+    const files = await readdir(join(cwd, ".pi/missions"));
+    expect(files.some((name) => /^mission-.*\.json$/.test(name))).toBe(true);
+    expect(existsSync(pointerPath)).toBe(true);
+  });
+
+  it("generateMissionId produces unique ids for 1000 calls in one millisecond", () => {
+    const spy = vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
+    try {
+      const ids = new Set<string>();
+      for (let i = 0; i < 1000; i += 1) ids.add(generateMissionId());
+      expect(ids.size).toBe(1000);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("a live lock hold is not stolen while the holder keeps it fresh", async () => {
+    const lockPath = join(cwd, ".pi", "missions", ".locks", "lock-live.lock");
+    // Real timers throughout: staleness compares Date.now() against real
+    // filesystem mtimes, so a fake clock would desync the two.
+    const release = await acquireMissionLock(cwd, "lock-live", {
+      staleMs: 150,
+      refreshMs: 50,
+      timeoutMs: 400,
+    });
+    const waiter = acquireMissionLock(cwd, "lock-live", {
+      staleMs: 150,
+      refreshMs: 50,
+      timeoutMs: 400,
+    });
+    // Attach the rejection expectation before the waiter's deadline passes.
+    const waiterTimedOut = expect(waiter).rejects.toThrow(/Timed out waiting/);
+    // Well past the stale window: the holder's refresh interval keeps the
+    // lock mtime fresh, so the waiter must time out rather than steal it.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await waiterTimedOut;
+    await expect(stat(lockPath)).resolves.toBeTruthy();
+    await release();
+  });
+
+  it("an abandoned stale lock is reclaimed", async () => {
+    const lockPath = join(cwd, ".pi", "missions", ".locks", "lock-dead.lock");
+    await mkdir(join(cwd, ".pi", "missions", ".locks"), { recursive: true });
+    await writeFile(lockPath, "0\n");
+    const abandoned = new Date(Date.now() - 120_000);
+    await utimes(lockPath, abandoned, abandoned);
+
+    const release = await acquireMissionLock(cwd, "lock-dead", { staleMs: 1_000 });
+    await release();
+  });
+
+  it("/missions lists missions and handles the empty case", async () => {
+    const handler = getCommand("missions").handler;
+    await handler("", mockCtx);
+    expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("No missions"), "info");
+
+    await executeTool({ action: "create", title: "listed", objective: "o" });
+    mockCtx.ui.notify.mockClear();
+    await handler("", mockCtx);
+    expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("listed"), "info");
+  });
+
+  it("/mission:status reports when no mission is active", async () => {
+    const handler = getCommand("mission:status").handler;
+    await handler("", mockCtx);
+    expect(mockCtx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("No active mission"),
+      "info",
+    );
+  });
+
+  it("/mission:reconcile re-runs verification and reports when nothing is active", async () => {
+    const handler = getCommand("mission:reconcile").handler;
+    await handler("", mockCtx);
+    expect(mockCtx.ui.notify).toHaveBeenCalledWith("No active mission to reconcile.", "info");
+
+    await executeTool({ action: "create", title: "reconcile me", objective: "o" });
+    const task = await executeTool({
+      action: "task_add",
+      taskTitle: "Done task",
+      verification: { command: "true" },
+    });
+    await executeTool({
+      action: "task_update",
+      taskId: task.details.taskId as string,
+      status: "done",
+      summary: "delivered",
+    });
+    mockCtx.ui.notify.mockClear();
+    await handler("", mockCtx);
+    expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Reconciled"), "info");
   });
 });

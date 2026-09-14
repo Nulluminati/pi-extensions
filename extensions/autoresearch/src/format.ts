@@ -1,5 +1,6 @@
 /** Rendering for autoresearch status, results, and the footer line. */
 
+import { formatStatusLine } from "../../../lib/ui-format.ts";
 import { bestEntry, confidence } from "./stats.ts";
 import type { AutoConfig, AutoSummary, RunEntry } from "./types.ts";
 
@@ -7,6 +8,9 @@ import type { AutoConfig, AutoSummary, RunEntry } from "./types.ts";
 
 export const AUTORESEARCH_STATUS_KEY = "autoresearch";
 export const AUTORESEARCH_STATE_EVENT = "autoresearch:state";
+export const AUTORESEARCH_STATUS_ICON = "⚗";
+export const AUTORESEARCH_ICON_COLOR = "accent";
+export const AUTORESEARCH_TEXT_COLOR = "muted";
 
 // --- Summary ---
 
@@ -89,4 +93,20 @@ export function statusText(summary: AutoSummary): string | undefined {
   if (summary.best !== undefined) parts.push(`best ${round(summary.best)}`);
   if (summary.confidence !== undefined) parts.push(`conf ${round(summary.confidence)}x`);
   return parts.join(" · ");
+}
+
+/** Theme-formatted footer status entry, or undefined when not running. */
+export function formatFooter(
+  theme: { fg: (color: string, text: string) => string },
+  summary: AutoSummary | undefined,
+): string | undefined {
+  const text = summary ? statusText(summary) : undefined;
+  if (text === undefined) return undefined;
+  return formatStatusLine(theme, {
+    icon: AUTORESEARCH_STATUS_ICON,
+    prefix: "Autoresearch",
+    text,
+    iconColor: AUTORESEARCH_ICON_COLOR,
+    textColor: AUTORESEARCH_TEXT_COLOR,
+  });
 }

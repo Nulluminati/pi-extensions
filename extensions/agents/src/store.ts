@@ -28,7 +28,9 @@ function registryPath(cwd: string): string {
 // --- Ids ---
 
 export function generateWorkerId(): string {
-  return `w-${Date.now().toString(36)}-${randomBytes(2).toString("hex")}`;
+  // 8 random bytes: parallel delegates create ids within the same
+  // millisecond, and 2 bytes collide too easily in that window.
+  return `w-${Date.now().toString(36)}-${randomBytes(8).toString("hex")}`;
 }
 
 // --- Registry ---
@@ -90,10 +92,4 @@ export function saveWorker(cwd: string, worker: WorkerRecord): Promise<void> {
 
 export async function loadWorker(cwd: string, id: string): Promise<WorkerRecord | undefined> {
   return (await loadWorkers(cwd))[id];
-}
-
-export function listRunning(workers: Record<string, WorkerRecord>): WorkerRecord[] {
-  return Object.values(workers)
-    .filter((w) => w.status === "running")
-    .sort((a, b) => a.startedAt - b.startedAt);
 }

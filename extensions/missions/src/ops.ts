@@ -85,7 +85,6 @@ export function addTask(mission: Mission, input: TaskAddInput): MissionTask {
   const deps = input.dependsOn ?? [];
   for (const dep of deps) {
     findTask(mission, dep); // throws on unknown dep
-    if (dep === title) throw new Error("A task cannot depend on itself.");
   }
   if (input.verification !== undefined && !input.verification.command.trim()) {
     throw new Error("Verification command must not be empty; omit verification instead.");
@@ -98,7 +97,14 @@ export function addTask(mission: Mission, input: TaskAddInput): MissionTask {
     dependsOn: [...deps],
     ...(input.owner !== undefined ? { owner: input.owner } : {}),
     ...(input.verification !== undefined
-      ? { verification: { command: input.verification.command.trim() } }
+      ? {
+          verification: {
+            command: input.verification.command.trim(),
+            ...(input.verification.description
+              ? { description: input.verification.description }
+              : {}),
+          },
+        }
       : {}),
   };
   mission.tasks.push(task);

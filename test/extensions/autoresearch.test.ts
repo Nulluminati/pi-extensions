@@ -1,13 +1,13 @@
-import { execFile } from "node:child_process";
+import { exec, execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { ExtensionAPI, ExtensionContext } from "pi";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import autoresearchExtension from "../../extensions/autoresearch/autoresearch.ts";
-import { parseMetric } from "../../extensions/autoresearch/src/measure.ts";
+import { CHECKS_TIMEOUT_MS, parseMetric } from "../../extensions/autoresearch/src/measure.ts";
 import { AUTORESEARCH_PARAMETERS } from "../../extensions/autoresearch/src/schemas.ts";
 import { bestEntry, confidence } from "../../extensions/autoresearch/src/stats.ts";
 import { loadConfig, readLog } from "../../extensions/autoresearch/src/store.ts";
@@ -19,6 +19,33 @@ import { createMockPi } from "../mocks/pi-mocks.ts";
 
 const execFileAsync = promisify(execFile);
 const gitOpts = (cwd: string) => ({ cwd, env: cleanGitEnv() });
+
+// Pass-through spy on exec so tests can assert the options passed to child
+// processes (e.g. the git commit timeout) while everything still really runs.
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  const spied = vi.fn(actual.exec);
+  // Node's exec carries a custom promisify symbol that vi.fn drops; reattach
+  // an equivalent so promisify(exec) still resolves {stdout, stderr}, while
+  // calls keep flowing through the spy so tests can inspect them.
+  const promisified = (command: string, options?: Parameters<typeof actual.exec>[1]) =>
+    new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+      spied(command, options, (error, stdout, stderr) => {
+        if (error) {
+          Object.assign(error, { stdout, stderr });
+          reject(error);
+        } else {
+          resolve({ stdout: String(stdout), stderr: String(stderr) });
+        }
+      });
+    });
+  return {
+    ...actual,
+    exec: Object.assign(spied, {
+      [Symbol.for("nodejs.util.promisify.custom")]: promisified,
+    }),
+  };
+});
 
 async function initGitRepo(cwd: string): Promise<void> {
   await execFileAsync("git", ["init", "-q"], gitOpts(cwd));
@@ -86,6 +113,7 @@ describe("autoresearch-extension", () => {
   });
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
     await rm(cwd, { recursive: true, force: true });
   });
 
@@ -119,6 +147,12 @@ describe("autoresearch-extension", () => {
     expect(prompt).toContain("Make the code faster");
     expect(existsSync(join(cwd, ".auto"))).toBe(false);
 
+    // Footer status uses the shared themed status line.
+    expect(mockCtx.ui.setStatus).toHaveBeenCalledWith(
+      "autoresearch",
+      expect.stringContaining("Autoresearch:"),
+    );
+
     // .pi/autoresearch/ is excluded from git locally.
     const exclude = await readFile(join(cwd, ".git/info/exclude"), "utf8");
     expect(exclude.split("\n")).toContain(".pi/autoresearch/");
@@ -142,6 +176,16 @@ describe("autoresearch-extension", () => {
     expect(existsSync(join(cwd, ".pi", "autoresearch"))).toBe(false);
     const exclude = await readFile(join(cwd, ".git/info/exclude"), "utf8").catch(() => "");
     expect(exclude).not.toContain(".pi/autoresearch/");
+  });
+
+  it("init ignores untracked state under .pi/", async () => {
+    // Other pi extensions park their state under .pi/; it must not block init.
+    await mkdir(join(cwd, ".pi", "missions"), { recursive: true });
+    await writeFile(join(cwd, ".pi", "missions", "x.json"), "{}");
+
+    const res = await initSession();
+    expect(res.content[0].text).toContain("Baseline: 100");
+    expect(existsSync(join(cwd, ".pi", "missions", "x.json"))).toBe(true);
   });
 
   it("init rejects pre-existing untracked work", async () => {
@@ -381,19 +425,120 @@ describe("autoresearch-extension", () => {
     expect(entries[entries.length - 1].status).toBe("checks_failed");
   });
 
+  it("measure failure tells the agent to discard the pending run before fixing", async () => {
+    await initSession();
+    await writeFile(join(cwd, "metric.txt"), "not a number\n");
+
+    const run = await executeTool({ action: "run", description: "unparseable metric" });
+    expect(run.content[0].text).toContain("status=discard");
+    expect(run.content[0].text).toContain("reverts the working-tree changes");
+  });
+
+  it("a second run while a measurement is pending still throws", async () => {
+    await initSession();
+    await executeTool({ action: "run", description: "first run" });
+    await expect(executeTool({ action: "run", description: "second run" })).rejects.toThrow(
+      "A run is already pending. Log it (action=log) before running again.",
+    );
+  });
+
+  it("keep with a corrupt untracked snapshot fails loudly and does not commit", async () => {
+    await initSession();
+    await writeFile(join(cwd, ".pi", "autoresearch", "untracked-snapshot.json"), "{ corrupt");
+    await writeFile(join(cwd, "code.txt"), "experiment edit\n");
+    await executeTool({ action: "run", description: "corrupt snapshot" });
+
+    await expect(
+      executeTool({ action: "log", status: "keep", description: "corrupt snapshot" }),
+    ).rejects.toThrow(/untracked-snapshot\.json/);
+
+    // No commit was created.
+    const gitLog = await execFileAsync("git", ["log", "--oneline"], gitOpts(cwd));
+    expect(gitLog.stdout).not.toContain("autoresearch");
+  });
+
+  it("keep with a missing untracked snapshot keeps legacy behavior", async () => {
+    await initSession();
+    await rm(join(cwd, ".pi", "autoresearch", "untracked-snapshot.json"));
+    await writeFile(join(cwd, "code.txt"), "legacy edit\n");
+    await writeFile(join(cwd, "legacy-new.txt"), "created during experiment\n");
+    await executeTool({ action: "run", description: "legacy keep" });
+
+    const log = await executeTool({ action: "log", status: "keep", description: "legacy keep" });
+    expect(log.content[0].text).toContain("Kept (commit");
+
+    // Legacy: with no snapshot, every untracked file is fair game for a keep.
+    const shown = await execFileAsync(
+      "git",
+      ["show", "--pretty=", "--name-only", "HEAD"],
+      gitOpts(cwd),
+    );
+    const committed = shown.stdout.split("\n").filter(Boolean);
+    expect(committed).toContain("code.txt");
+    expect(committed).toContain("legacy-new.txt");
+  });
+
+  it("log with no pending run throws", async () => {
+    await initSession();
+    await expect(executeTool({ action: "log", status: "keep" })).rejects.toThrow(/Nothing to log/);
+  });
+
+  it("log with an invalid status throws", async () => {
+    await initSession();
+    await writeFile(join(cwd, "code.txt"), "changed\n");
+    await executeTool({ action: "run", description: "valid run" });
+    await expect(executeTool({ action: "log", status: "bogus" })).rejects.toThrow(
+      /log requires status/,
+    );
+  });
+
+  it("stop without a campaign reports the no-session error", async () => {
+    await expect(executeTool({ action: "stop" })).rejects.toThrow(/No autoresearch session/);
+  });
+
+  it("keep with no experiment changes throws", async () => {
+    await initSession();
+    await executeTool({ action: "run", description: "no edits" });
+    await expect(
+      executeTool({ action: "log", status: "keep", description: "no edits" }),
+    ).rejects.toThrow("No experiment changes to commit.");
+  });
+
+  it("git commit runs with a timeout so a hanging hook cannot block the tool", async () => {
+    await initSession();
+    await runAndLog("90", "keep", "timed commit");
+
+    const commitCall = vi
+      .mocked(exec)
+      .mock.calls.find((call) => String(call[0]).includes("git commit"));
+    expect(commitCall).toBeDefined();
+    const options = commitCall?.[1] as unknown as { timeout?: number; maxBuffer?: number };
+    expect(options.timeout).toBe(CHECKS_TIMEOUT_MS);
+    expect(options.maxBuffer).toBe(16 * 1024 * 1024);
+  });
+
+  it("interactive input does not reset the continuation guard", async () => {
+    await initSession();
+    const agentEnd = getEventHandler("agent_end");
+    const input = getEventHandler("input");
+
+    await agentEnd({ type: "agent_end", messages: [] }, mockCtx);
+    expect(mockPi.sendUserMessage).toHaveBeenCalledTimes(1);
+
+    // Interactive input is the user typing, not our follow-up arriving; the
+    // queued continuation must stay queued.
+    await input({ type: "input", text: "", source: "interactive" }, mockCtx);
+    await agentEnd({ type: "agent_end", messages: [] }, mockCtx);
+    expect(mockPi.sendUserMessage).toHaveBeenCalledTimes(1);
+  });
+
   it("git operations are immune to inherited GIT_INDEX_FILE (lint-staged)", async () => {
     await initSession();
     // Simulate lint-staged's environment: its temp index belongs to the outer
     // repo and must never leak into the campaign repo's commits.
-    const oldIndex = process.env.GIT_INDEX_FILE;
-    process.env.GIT_INDEX_FILE = "/tmp/definitely-not-a-real-index";
-    try {
-      const log = await runAndLog("90", "keep", "env-poison keep");
-      expect(log.content[0].text).toContain("Kept (commit");
-    } finally {
-      if (oldIndex === undefined) delete process.env.GIT_INDEX_FILE;
-      else process.env.GIT_INDEX_FILE = oldIndex;
-    }
+    vi.stubEnv("GIT_INDEX_FILE", "/tmp/definitely-not-a-real-index");
+    const log = await runAndLog("90", "keep", "env-poison keep");
+    expect(log.content[0].text).toContain("Kept (commit");
   });
 
   it("reports confidence once enough runs exist", async () => {
@@ -497,6 +642,12 @@ describe("autoresearch-units", () => {
     expect(parseMetric("time=17", "time")).toBe(17);
     expect(parseMetric("build ok in 3 rounds, 125ms total", "time")).toBe(125);
     expect(parseMetric("nothing here", "time")).toBeUndefined();
+  });
+
+  it("parseMetric reads the value after the first equals sign, including trailing units", () => {
+    expect(parseMetric("METRIC time=42 ms", "time")).toBe(42);
+    expect(parseMetric("METRIC size=1.5KB", "size")).toBe(1.5);
+    expect(parseMetric("METRIC temp=-4 C", "temp")).toBe(-4);
   });
 
   it("bestEntry respects direction", () => {

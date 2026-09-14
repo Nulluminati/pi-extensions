@@ -283,14 +283,21 @@ export default async function missionsExtension(pi: ExtensionAPI) {
         case "set_status": {
           const status = params.missionStatus;
           if (!status) throw new Error("set_status requires missionStatus.");
+          // requireOpen is deliberately NOT called here: reopening a paused,
+          // completed, or aborted mission is allowed.
           setStatus(mission, status);
           await persist(ctx, mission);
-          // Completed and aborted missions free the active slot — otherwise
-          // they block every future create until manually deleted.
           if (status === "complete" || status === "aborted") {
+            // Completed and aborted missions free the active slot — otherwise
+            // they block every future create until manually deleted.
             await setActiveMissionId(ctx.cwd, undefined);
             active = undefined;
             publish(ctx);
+          } else {
+            // Non-terminal statuses keep the on-disk pointer in lockstep: an
+            // in-memory-active mission with no pointer on disk would let a
+            // second active mission be created later.
+            await setActiveMissionId(ctx.cwd, mission.id);
           }
           return {
             content: [{ type: "text", text: `Mission is now ${status}.` }],

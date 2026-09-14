@@ -53,6 +53,14 @@ export const FORBIDDEN_WORKER_EXTENSIONS = [
 /** Coordination and sandbox extensions loaded by every worker. */
 export const REQUIRED_WORKER_EXTENSIONS = ["messenger", "gondolin"] as const;
 
+/**
+ * Extension names map to extensions/<name>/<name>.ts; names outside the
+ * lowercase letters, digits, and hyphens convention are rejected before any
+ * filesystem access, so traversal like "agents/../agents" cannot slip past
+ * the denylist or resolve an unintended entrypoint.
+ */
+const WORKER_EXTENSION_NAME_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
+
 export interface ResolvedWorkerExtension {
   name: string;
   /** Absolute path to the extension entrypoint. */
@@ -110,6 +118,11 @@ export function resolveWorkerExtensions(
   ]);
   const resolved: ResolvedWorkerExtension[] = [];
   for (const name of unique) {
+    if (!WORKER_EXTENSION_NAME_PATTERN.test(name)) {
+      throw new Error(
+        `Invalid worker extension name "${name}": expected lowercase letters, digits, and hyphens (extensions map to extensions/<name>/<name>.ts).`,
+      );
+    }
     if (forbidden.has(name)) {
       throw new Error(
         `Extension "${name}" is forbidden in worker sessions (would break the one-level delegation model or mutate durable records).`,

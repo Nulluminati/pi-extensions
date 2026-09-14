@@ -11,7 +11,6 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { existsSync } from "node:fs";
 import { appendFile, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
@@ -69,12 +68,12 @@ async function writeJsonAtomic(path: string, data: unknown): Promise<void> {
   await rename(tmp, path);
 }
 
-async function readJson<T>(path: string): Promise<T | undefined> {
-  try {
-    return JSON.parse(await readFile(path, "utf8")) as T;
-  } catch {
-    return undefined;
-  }
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 // --- Presence ---
@@ -91,10 +90,12 @@ export async function heartbeat(
   info: { pid: number; cwd: string; model?: string; status?: string },
 ): Promise<void> {
   // One shard per agent: this write never touches another agent's entry, so
-  // concurrent heartbeats cannot clobber each other.
+  // concurrent heartbeats cannot clobber each other. An empty-string status
+  // clears the field; an omitted one (undefined) keeps the existing value.
   const existing = await readShard<Presence>(registryDir(cwd), name);
   const model = info.model ?? existing?.model;
-  const status = info.status ?? existing?.status;
+  const status =
+    info.status === undefined ? existing?.status : info.status === "" ? undefined : info.status;
   const presence: Presence = {
     name,
     pid: info.pid,
@@ -109,6 +110,34 @@ export async function heartbeat(
 
 export async function leaveRegistry(cwd: string, name: string): Promise<void> {
   await removeShard(registryDir(cwd), name);
+}
+
+/** How many `-2`, `-3`, … suffixes to try before giving up. */
+const MAX_NAME_ATTEMPTS = 100;
+
+/**
+ * Return an agent name not held by a different live process: `name` when it
+ * is free (or held by this pid), otherwise the first free `name-2`, `name-3`,
+ * …. Deterministic, so two sessions racing to join converge on distinct
+ * mailboxes instead of fighting over one name.
+ */
+export async function ensureUniqueAgentName(
+  cwd: string,
+  name: string,
+  pid: number = process.pid,
+): Promise<string> {
+  let candidate = name;
+  for (let attempt = 1; attempt <= MAX_NAME_ATTEMPTS; attempt += 1) {
+    const holder = (await loadRegistry(cwd))[candidate];
+    if (holder === undefined || holder.pid === pid || !isProcessAlive(holder.pid)) {
+      return candidate;
+    }
+    candidate = `${name}-${attempt + 1}`;
+  }
+  throw new Error(
+    `No free agent name derived from "${name}" after ${MAX_NAME_ATTEMPTS} attempts; ` +
+      "stale sessions may be holding the registry — check .pi/messenger/registry/.",
+  );
 }
 
 // --- Mailbox ---
@@ -218,8 +247,30 @@ export async function loadReservations(cwd: string): Promise<ReservationMap> {
   return withFileLock(reservationsLockPath(cwd), () => loadReservationsUnlocked(cwd));
 }
 
+/**
+ * Read the reservations map. A missing file is an empty map; a corrupt file
+ * or failed read throws naming the path, so callers fail loudly instead of
+ * silently treating enforcement as disabled (the next save would then wipe
+ * every live claim).
+ */
+async function readReservations(cwd: string): Promise<ReservationMap> {
+  const path = reservationsPath(cwd);
+  let raw: string;
+  try {
+    raw = await readFile(path, "utf8");
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") return {};
+    throw new Error(`Cannot read messenger reservations at ${path}: ${errorMessage(error)}`);
+  }
+  try {
+    return JSON.parse(raw) as ReservationMap;
+  } catch (error) {
+    throw new Error(`Messenger reservations file at ${path} is corrupt: ${errorMessage(error)}`);
+  }
+}
+
 async function loadReservationsUnlocked(cwd: string): Promise<ReservationMap> {
-  const reservations = (await readJson<ReservationMap>(reservationsPath(cwd))) ?? {};
+  const reservations = await readReservations(cwd);
   const registry = await loadRegistry(cwd);
   let changed = false;
   const now = Date.now();
@@ -256,8 +307,10 @@ export function normalizePathPrefix(cwd: string, raw: string): string | undefine
   if (!trimmed) return undefined;
   const abs = resolve(cwd, trimmed);
   const rel = relative(cwd, abs);
-  if (!rel || rel.startsWith("..") || isAbsolute(rel)) {
-    // Empty rel means cwd itself; outside-project paths get ".."-prefixed rel.
+  // ".."-prefixed rels are outside the project; the separator check keeps
+  // top-level entries that merely start with dots ("..notes", "...") inside.
+  if (!rel || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+    // Empty rel means cwd itself.
     if (rel === "") return ".";
     return undefined;
   }
@@ -405,9 +458,4 @@ export function findBlockingReservation(
     }
   }
   return undefined;
-}
-
-/** Whether the project has a messenger directory (used by tests). */
-export function messengerInitialized(cwd: string): boolean {
-  return existsSync(messengerDir(cwd));
 }

@@ -1,11 +1,17 @@
 /** Rendering helpers for messenger tool results and status. */
 
-import type { Message, PresenceRegistry, ReservationMap } from "./types.ts";
+import type { Message, PresenceRegistry } from "./types.ts";
 
 // --- Constants ---
 
 export const MESSENGER_STATUS_KEY = "messenger";
 export const MESSENGER_STATE_EVENT = "messenger:state";
+
+// Envelope glyph for the footer status line, colored like other extensions'
+// status icons (see lib/ui-format.ts consumers); text stays muted.
+export const MESSENGER_STATUS_ICON = "✉";
+export const MESSENGER_ICON_COLOR = "success";
+export const MESSENGER_TEXT_COLOR = "muted";
 
 // --- Formatting ---
 
@@ -30,18 +36,6 @@ export function formatMessages(messages: Message[]): string {
     .join("\n");
 }
 
-export function formatReservations(reservations: ReservationMap, selfName: string): string {
-  const entries = Object.entries(reservations);
-  if (entries.length === 0) return "No active reservations.";
-  return entries
-    .map(([prefix, claim]) => {
-      const self = claim.owner === selfName ? " (you)" : "";
-      const reason = claim.reason ? ` — ${claim.reason}` : "";
-      return `${prefix} → ${claim.owner}${self}${reason}`;
-    })
-    .join("\n");
-}
-
 export function formatBlockReason(block: {
   prefix: string;
   owner: string;
@@ -52,10 +46,4 @@ export function formatBlockReason(block: {
     `Blocked: "${block.prefix}" is reserved by ${block.owner}${reason}. ` +
     `Message them with the messenger tool (action=send, to="${block.owner}") to coordinate.`
   );
-}
-
-/** Compact unread-mail status for the footer, or undefined when no mail. */
-export function mailStatusText(unreadCount: number, agentName: string): string | undefined {
-  if (unreadCount === 0) return undefined;
-  return `${unreadCount} unread · ${agentName}`;
 }

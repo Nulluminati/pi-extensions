@@ -17,7 +17,7 @@ You will be woken when a worker exits; read its report with `workers (action=sta
 
 ## How It Works
 
-- **Worker sessions**: `pi --mode json --no-session --no-extensions --model <worker> --thinking <level> --gondolin -p <task>` with the required Gondolin and messenger extensions plus the configured extension set. The final assistant text becomes the worker's report; usage is tracked per worker.
+- **Worker sessions**: `pi --mode json --no-session --no-extensions --model <worker> --thinking <level> --gondolin -p <task>` with the required Gondolin and messenger extensions plus the configured extension set. The final assistant text becomes the worker's report.
 - **Worktree isolation**: workers that can modify files branch from `HEAD` into `.pi/worktrees/<id>` on branch `agents/<id>`. The tree must be clean so the worker starts from an unambiguous base. On completion, committed changes, uncommitted changes, and new files are captured in a patch under `.pi/workers/patches/`. `collect` applies the patch to the main tree and removes the worktree only after confirming that the patch still exists. Plan-mode workers are read-only, inspect the current workspace through Gondolin, and do not create worktrees or patches.
 - **Trusted wakes**: wake messages carry only ids and status words, never worker output — output is read on demand via the workers tool, so a worker's stdout is never injected as user-authored content.
 - **Durable registry**: `.pi/workers/registry.json` survives restarts. Any read reconciles records stuck in `running` whose pid is dead (marked failed), so crashed parents leave no permanent ghosts and their concurrency slots are freed; on shutdown, running workers are cancelled (SIGTERM process group, then SIGKILL).

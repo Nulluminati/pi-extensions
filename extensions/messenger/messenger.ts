@@ -16,18 +16,22 @@ import { type FSWatcher, mkdirSync, watch } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "pi";
 import { resolveSessionIdentity } from "../../lib/session-identity.ts";
+import { formatStatusLine } from "../../lib/ui-format.ts";
 import { checkToolCall } from "./src/enforce.ts";
 import {
   formatBlockReason,
   formatMessages,
   formatPresence,
+  MESSENGER_ICON_COLOR,
   MESSENGER_STATE_EVENT,
+  MESSENGER_STATUS_ICON,
   MESSENGER_STATUS_KEY,
-  mailStatusText,
+  MESSENGER_TEXT_COLOR,
 } from "./src/format.ts";
-import { resolveAgentName } from "./src/identity.ts";
+import { assertValidAgentName, resolveAgentName } from "./src/identity.ts";
 import { MESSENGER_PARAMETERS } from "./src/schemas.ts";
 import {
+  ensureUniqueAgentName,
   heartbeat,
   inboxFileName,
   leaveRegistry,
@@ -63,7 +67,16 @@ export default async function messengerExtension(pi: ExtensionAPI) {
       unread: unread.length,
     });
     if (ctx.hasUI) {
-      const text = mailStatusText(unread.length, agentName);
+      const text =
+        unread.length === 0
+          ? undefined
+          : formatStatusLine(ctx.ui.theme, {
+              icon: MESSENGER_STATUS_ICON,
+              prefix: "Messenger",
+              text: `${unread.length} unread · ${agentName}`,
+              iconColor: MESSENGER_ICON_COLOR,
+              textColor: MESSENGER_TEXT_COLOR,
+            });
       ctx.ui.setStatus(MESSENGER_STATUS_KEY, text);
     }
     return unread.length;
@@ -99,12 +112,14 @@ export default async function messengerExtension(pi: ExtensionAPI) {
         },
         { triggerTurn: true },
       );
+      // Mail stays "unread" until the model reads it via the inbox action,
+      // so the status line announces it now and clears on read.
+      await refreshStatus(ctx);
       await markRead(
         ctx.cwd,
         agentName,
         unread.map((m) => m.id),
       );
-      await refreshStatus(ctx);
     } finally {
       delivering = false;
     }
@@ -249,10 +264,11 @@ export default async function messengerExtension(pi: ExtensionAPI) {
 
       if (action === "status") {
         const text = typeof params.status === "string" ? params.status.trim() : "";
+        // An empty string tells heartbeat to remove the stored status.
         await heartbeat(ctx.cwd, agentName, {
           pid: process.pid,
           cwd: ctx.cwd,
-          ...(text ? { status: text } : {}),
+          status: text,
         });
         return {
           content: [{ type: "text", text: text ? `Status set: ${text}` : "Status cleared." }],
@@ -277,19 +293,24 @@ export default async function messengerExtension(pi: ExtensionAPI) {
       reservations,
     );
     if (!block) return undefined;
-    ctx.ui.notify(formatBlockReason(block), "warning");
-    return { block: true, reason: formatBlockReason(block) };
+    const reason = formatBlockReason(block);
+    if (ctx.hasUI) ctx.ui.notify(reason, "warning");
+    return { block: true, reason };
   });
 
   // --- Lifecycle ---
 
   pi.on("session_start", async (_event, ctx) => {
-    agentName = await resolveSessionIdentity(pi, ctx, {
+    const resolved = await resolveSessionIdentity(pi, ctx, {
       // "messenger-identity" keeps entries persisted by earlier versions.
       customType: IDENTITY_CUSTOM_TYPE,
       envVar: "PI_MESSENGER_NAME",
       generate: resolveAgentName,
     });
+    // Fail fast on an unusable env/persisted name before anything is written,
+    // then never take a mailbox another live session already holds.
+    assertValidAgentName(resolved);
+    agentName = await ensureUniqueAgentName(ctx.cwd, resolved);
     const model = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined;
     await heartbeat(ctx.cwd, agentName, {
       pid: process.pid,

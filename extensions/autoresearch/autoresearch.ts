@@ -21,8 +21,8 @@ import {
   AUTORESEARCH_STATE_EVENT,
   AUTORESEARCH_STATUS_KEY,
   buildSummary,
+  formatFooter,
   formatSummary,
-  statusText,
 } from "./src/format.ts";
 import {
   CHECKS_TIMEOUT_MS,
@@ -49,7 +49,7 @@ import {
   savePrompt,
   saveUntrackedSnapshot,
 } from "./src/store.ts";
-import type { AutoConfig, RunEntry, RunStatus } from "./src/types.ts";
+import type { AutoConfig, RunEntry } from "./src/types.ts";
 
 // --- Constants ---
 
@@ -133,7 +133,7 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
       iterations: summary?.iterations ?? 0,
     });
     if (ctx.hasUI) {
-      ctx.ui.setStatus(AUTORESEARCH_STATUS_KEY, summary ? statusText(summary) : undefined);
+      ctx.ui.setStatus(AUTORESEARCH_STATUS_KEY, formatFooter(ctx.ui.theme, summary));
     }
   }
 
@@ -184,8 +184,10 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
         // keeps stage worktree changes and discards restore tracked files from
         // HEAD, so pre-existing edits must be committed or stashed first.
         const dirty = await changedFiles(cwd);
+        // Everything under .pi/ is extension state (autoresearch, missions,
+        // messenger, …) and is never treated as pre-existing work.
         const blocking = [...dirty.tracked, ...dirty.untracked].filter(
-          (path) => path !== ".pi/autoresearch" && !path.startsWith(".pi/autoresearch/"),
+          (path) => path !== ".pi" && !path.startsWith(".pi/"),
         );
         if (blocking.length > 0) {
           const shown = blocking.slice(0, 10).join("\n");
@@ -327,7 +329,7 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
             content: [
               {
                 type: "text",
-                text: `Measure command failed or produced no parseable metric.\nOutput (tail):\n${measured.output.slice(-1500)}\nFix the code or measure command, then run again.`,
+                text: `Measure command failed or produced no parseable metric.\nOutput (tail):\n${measured.output.slice(-1500)}\nLog this run first: action=log with status=discard (discard reverts the working-tree changes). Then fix the code or measure command and run again.`,
               },
             ],
             details: { pending },
@@ -373,7 +375,7 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
         const entry: RunEntry = {
           run: pending.run,
           at: Date.now(),
-          status: status as RunStatus,
+          status,
           description,
           ...(pending.hypothesis !== undefined ? { hypothesis: pending.hypothesis } : {}),
           ...(pending.metric !== undefined ? { metric: pending.metric } : {}),

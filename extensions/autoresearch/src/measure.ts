@@ -26,9 +26,14 @@ export function parseMetric(output: string, metric: string): number | undefined 
   for (const line of lines) {
     const tagged = line.match(/^\s*METRIC\s+(.+)$/);
     if (tagged?.[1]) {
-      const pair = tagged[1].split("=");
-      if (pair.length === 2 && pair[1] !== undefined) {
-        const value = Number.parseFloat(pair[1].trim());
+      // Split on the first "=" only: values may carry further "=" signs or
+      // trailing unit text ("METRIC time=42 ms"). The leading numeric token
+      // of the remainder is the value; anything else falls through.
+      const eq = tagged[1].indexOf("=");
+      const rest = eq === -1 ? undefined : tagged[1].slice(eq + 1);
+      const numeric = rest?.match(/^\s*([-+]?[0-9]+(?:\.[0-9]+)?(?:[eE][-+]?[0-9]+)?)/);
+      if (numeric?.[1]) {
+        const value = Number.parseFloat(numeric[1]);
         if (Number.isFinite(value)) return value;
       }
     }
@@ -171,10 +176,13 @@ export async function commitExperiment(
   await runGit(cwd, ["add", "--", ...paths]);
   // Message passed via env to avoid shell-quoting bugs. Git env must be
   // sanitized: inherited GIT_INDEX_FILE (e.g. under lint-staged) makes this
-  // commit build its tree from the outer repo's index.
+  // commit build its tree from the outer repo's index. The timeout keeps a
+  // hanging pre-commit hook from stalling the tool forever.
   await execAsync('git commit -q -m "$AR_MSG"', {
     cwd,
     env: { ...cleanGitEnv(), AR_MSG: message },
+    timeout: CHECKS_TIMEOUT_MS,
+    maxBuffer: 16 * 1024 * 1024,
   });
   const id = await runGit(cwd, ["rev-parse", "--short", "HEAD"]);
   return id.trim();

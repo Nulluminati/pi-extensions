@@ -6,6 +6,7 @@
  */
 
 import { randomBytes } from "node:crypto";
+import type { FileHandle } from "node:fs/promises";
 import { mkdir, open, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Mission, MissionSummary, TaskStatus } from "./types.ts";
@@ -15,8 +16,14 @@ import type { Mission, MissionSummary, TaskStatus } from "./types.ts";
 const MISSIONS_DIR = ".pi/missions";
 const ACTIVE_FILE = "active.json";
 const LOCK_RETRY_MS = 10;
-const LOCK_TIMEOUT_MS = 5_000;
+// The wait deadline must exceed the stale window: a waiter that outlives
+// LOCK_STALE_MS can observe and reclaim an abandoned lock instead of giving
+// up while the holder's final refresh is still in flight.
+const LOCK_TIMEOUT_MS = 35_000;
 const LOCK_STALE_MS = 30_000;
+// How often a held lock's mtime is touched; well under LOCK_STALE_MS so a
+// live hold never looks abandoned.
+const LOCK_REFRESH_MS = 10_000;
 const ALL_TASK_STATUSES: TaskStatus[] = [
   "todo",
   "in_progress",
@@ -33,7 +40,7 @@ export function missionsDir(cwd: string): string {
 }
 
 export function generateMissionId(): string {
-  return `mission-${Date.now().toString(36)}-${randomBytes(2).toString("hex")}`;
+  return `mission-${Date.now().toString(36)}-${randomBytes(8).toString("hex")}`;
 }
 
 export function generateTaskId(): string {
@@ -56,23 +63,42 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
 }
 
-async function acquireMissionLock(cwd: string, id: string): Promise<() => Promise<void>> {
+export interface LockTimings {
+  /** Total time a waiter spends before giving up. Must be >= staleMs. */
+  timeoutMs?: number;
+  /** Age at which an untouched lock is treated as abandoned. */
+  staleMs?: number;
+  /** How often the holder touches the lock's mtime while held. */
+  refreshMs?: number;
+}
+
+/**
+ * Acquire the advisory lock file for a mission; returns an async release
+ * function. While held, the lock's mtime is refreshed on an interval so a
+ * hold longer than LOCK_STALE_MS cannot be mistaken for an abandoned lock
+ * and stolen by a waiting session. The refresher is cleared on release.
+ */
+export async function acquireMissionLock(
+  cwd: string,
+  id: string,
+  timings: LockTimings = {},
+): Promise<() => Promise<void>> {
+  const timeoutMs = timings.timeoutMs ?? LOCK_TIMEOUT_MS;
+  const staleMs = timings.staleMs ?? LOCK_STALE_MS;
+  const refreshMs = timings.refreshMs ?? LOCK_REFRESH_MS;
   const path = missionLockPath(cwd, id);
   await mkdir(join(missionsDir(cwd), ".locks"), { recursive: true });
-  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  const deadline = Date.now() + timeoutMs;
 
+  let handle: FileHandle;
   while (true) {
     try {
-      const handle = await open(path, "wx", 0o600);
-      await handle.writeFile(`${process.pid}\n`, "utf8");
-      return async () => {
-        await handle.close();
-        await unlink(path).catch(() => {});
-      };
+      handle = await open(path, "wx", 0o600);
+      break;
     } catch (error) {
       if (!isNodeError(error) || error.code !== "EEXIST") throw error;
       const lockStat = await stat(path).catch(() => undefined);
-      if (lockStat && Date.now() - lockStat.mtimeMs >= LOCK_STALE_MS) {
+      if (lockStat && Date.now() - lockStat.mtimeMs >= staleMs) {
         await unlink(path).catch(() => {});
         continue;
       }
@@ -82,6 +108,18 @@ async function acquireMissionLock(cwd: string, id: string): Promise<() => Promis
       await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS));
     }
   }
+
+  await handle.writeFile(`${process.pid}\n`, "utf8");
+  const refresher = setInterval(() => {
+    const now = new Date();
+    handle.utimes(now, now).catch(() => {});
+  }, refreshMs);
+
+  return async () => {
+    clearInterval(refresher);
+    await handle.close();
+    await unlink(path).catch(() => {});
+  };
 }
 
 function isActiveMission(value: unknown): value is Mission {
@@ -108,13 +146,26 @@ async function writeJsonAtomic(path: string, data: unknown): Promise<void> {
 // --- Active pointer ---
 
 export async function getActiveMissionId(cwd: string): Promise<string | undefined> {
+  const path = join(missionsDir(cwd), ACTIVE_FILE);
+  let raw: string;
   try {
-    const raw = await readFile(join(missionsDir(cwd), ACTIVE_FILE), "utf8");
-    const parsed = JSON.parse(raw) as { id?: unknown };
-    return typeof parsed.id === "string" ? parsed.id : undefined;
-  } catch {
-    return undefined;
+    raw = await readFile(path, "utf8");
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") return undefined;
+    throw error;
   }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`Active mission pointer ${path} is corrupt (invalid JSON): ${detail}`);
+  }
+  const id = (parsed as { id?: unknown } | null)?.id;
+  if (typeof id !== "string") {
+    throw new Error(`Active mission pointer ${path} is corrupt (missing mission id).`);
+  }
+  return id;
 }
 
 export async function setActiveMissionId(cwd: string, id: string | undefined): Promise<void> {
@@ -148,14 +199,25 @@ export async function saveMission(cwd: string, mission: Mission): Promise<void> 
 }
 
 export async function loadMission(cwd: string, id: string): Promise<Mission | undefined> {
-  const raw = await readFile(missionPath(cwd, id), "utf8").catch(() => undefined);
-  if (raw === undefined) return undefined;
+  const path = missionPath(cwd, id);
+  let raw: string;
   try {
-    const parsed: unknown = JSON.parse(raw);
-    return isActiveMission(parsed) ? parsed : undefined;
-  } catch {
-    return undefined;
+    raw = await readFile(path, "utf8");
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") return undefined;
+    throw error;
   }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`Mission file ${path} is corrupt (invalid JSON): ${detail}`);
+  }
+  if (!isActiveMission(parsed)) {
+    throw new Error(`Mission file ${path} is corrupt (does not match the mission shape).`);
+  }
+  return parsed;
 }
 
 /** Load the mission the active pointer references, if it still exists. */

@@ -138,20 +138,6 @@ export async function excludeAutoFromGit(cwd: string): Promise<void> {
   await appendFile(exclude, `${GIT_EXCLUDE_PATTERN}\n`, "utf8");
 }
 
-// --- JSON file helpers ---
-
-async function writeJson(path: string, data: unknown): Promise<void> {
-  await writeFile(path, JSON.stringify(data, null, 2), "utf8");
-}
-
-async function readJson<T>(path: string): Promise<T | undefined> {
-  try {
-    return JSON.parse(await readFile(path, "utf8")) as T;
-  } catch {
-    return undefined;
-  }
-}
-
 // --- Untracked baseline snapshot ---
 
 function untrackedSnapshotPath(cwd: string): string {
@@ -159,11 +145,39 @@ function untrackedSnapshotPath(cwd: string): string {
 }
 
 /** Untracked files present when the experiment base was captured: discards
- * never remove these and keeps never stage them. */
+ * never remove these and keeps never stage them. Written atomically (tmp +
+ * rename) like config.json — a partial snapshot would parse as garbage and
+ * let a keep absorb pre-existing untracked work into its commit. */
 export async function saveUntrackedSnapshot(cwd: string, files: string[]): Promise<void> {
-  await writeJson(untrackedSnapshotPath(cwd), files);
+  await mkdir(autoDir(cwd), { recursive: true });
+  const tmp = `${untrackedSnapshotPath(cwd)}.${process.pid}.tmp`;
+  await writeFile(tmp, JSON.stringify(files, null, 2), "utf8");
+  await rename(tmp, untrackedSnapshotPath(cwd));
 }
 
+/** Load the untracked baseline snapshot, or undefined when no snapshot file
+ * exists (legacy campaigns). A file that exists but cannot be parsed is a
+ * hard error: keeps and discards scope themselves from the snapshot, so
+ * guessing a baseline could commit pre-existing work or delete files it
+ * should never touch. */
 export async function loadUntrackedSnapshot(cwd: string): Promise<string[] | undefined> {
-  return (await readJson<string[]>(untrackedSnapshotPath(cwd))) ?? undefined;
+  const path = untrackedSnapshotPath(cwd);
+  let raw: string;
+  try {
+    raw = await readFile(path, "utf8");
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return undefined;
+    throw error;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`Untracked snapshot ${path} is corrupt (invalid JSON): ${detail}`);
+  }
+  if (!Array.isArray(parsed) || parsed.some((entry) => typeof entry !== "string")) {
+    throw new Error(`Untracked snapshot ${path} is corrupt (expected a JSON array of file paths).`);
+  }
+  return parsed;
 }
