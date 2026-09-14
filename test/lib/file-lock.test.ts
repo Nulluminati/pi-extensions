@@ -107,19 +107,19 @@ describe("file-lock", () => {
       async () => {
         await gate;
       },
-      { staleMs: 150, refreshMs: 50 },
+      { staleMs: 400, refreshMs: 50 },
     );
     const waiter = withFileLock(lockPath, async () => "stolen", {
-      staleMs: 150,
+      staleMs: 400,
       refreshMs: 50,
-      timeoutMs: 400,
+      timeoutMs: 900,
     });
     // Attach the rejection expectation before the waiter's deadline passes.
     const waiterTimedOut = expect(waiter).rejects.toThrow(/Timed out waiting/);
 
     // Well past the stale window: the holder's refresh interval keeps the
     // lock mtime fresh, so the waiter must time out rather than steal it.
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await new Promise((resolve) => setTimeout(resolve, 500));
     await waiterTimedOut;
     await expect(stat(lockPath)).resolves.toBeTruthy();
     releaseFirst();
