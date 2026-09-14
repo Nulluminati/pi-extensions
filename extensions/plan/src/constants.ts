@@ -1,6 +1,8 @@
 /** Keys, tool sets, and entry/message types for the plan extension. */
 
-export const ENTRY_TYPE = "plan-state";
+// The session entry type is owned by lib/plan-state.ts (shared with agents);
+// this re-export keeps plan's own import surface unchanged.
+export { PLAN_STATE_ENTRY_TYPE as ENTRY_TYPE } from "../../../lib/plan-state.ts";
 
 /** Custom messages injected per turn (filtered from context between turns). */
 export const PLAN_CONTEXT_TYPE = "plan-context";

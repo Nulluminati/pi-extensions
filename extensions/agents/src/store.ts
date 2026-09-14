@@ -6,8 +6,9 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { writeJsonAtomic } from "../../../lib/json-atomic.ts";
 import { isProcessAlive } from "../../../lib/presence-shards.ts";
 import type { WorkerRecord, WorkerRegistryFile } from "./types.ts";
 
@@ -35,13 +36,6 @@ export function generateWorkerId(): string {
 
 // --- Registry ---
 
-async function writeAtomic(path: string, data: unknown): Promise<void> {
-  await mkdir(join(path, ".."), { recursive: true });
-  const tmp = `${path}.${process.pid}.${randomBytes(2).toString("hex")}.tmp`;
-  await writeFile(tmp, JSON.stringify(data, null, 2), "utf8");
-  await rename(tmp, path);
-}
-
 export async function loadWorkers(cwd: string): Promise<Record<string, WorkerRecord>> {
   let workers: Record<string, WorkerRecord> = {};
   try {
@@ -64,7 +58,7 @@ export async function loadWorkers(cwd: string): Promise<Record<string, WorkerRec
     worker.endedAt = Date.now();
     changed = true;
   }
-  if (changed) await writeAtomic(registryPath(cwd), { workers });
+  if (changed) await writeJsonAtomic(registryPath(cwd), { workers });
   return workers;
 }
 
@@ -81,7 +75,7 @@ export function saveWorker(cwd: string, worker: WorkerRecord): Promise<void> {
     const existing = workers[worker.id];
     if (existing && existing.status !== "running" && worker.status === "running") return;
     workers[worker.id] = worker;
-    await writeAtomic(registryPath(cwd), { workers });
+    await writeJsonAtomic(registryPath(cwd), { workers });
   });
   saveQueues.set(
     cwd,

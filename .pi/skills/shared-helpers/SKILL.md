@@ -34,6 +34,9 @@ import { renderModalFrame } from "../../../lib/tui-frame.ts";
 | Prompt for one line of text in a framed modal | `promptText`, `createInputModal` | `lib/input-modal.ts` |
 | Wrap/replace the editor component (`ctx.ui.setEditorComponent`) | `installEditorFactoryLayer`, `hasEditorFactoryLayer`, `removeEditorFactoryLayer` | `lib/editor-factory.ts` |
 | Give a session a stable agent name that survives `pi -c` and `/reload` | `resolveSessionIdentity` | `lib/session-identity.ts` |
+| Write config/state JSON without risking a torn file on crash | `writeJsonAtomic` | `lib/json-atomic.ts` |
+| Mutate shared state files across sessions without clobbering | `withFileLock` | `lib/file-lock.ts` |
+| Build a `/smallmodel`-style model picker (descriptions, searchable modal) | `formatModelDescription`, `selectModelWithSearch` | `lib/model-picker.ts` |
 | Share live presence (who is online) between concurrent sessions | `writeShard`, `loadShards`, `removeShard`, `readShard` | `lib/presence-shards.ts` |
 
 ---
@@ -222,6 +225,33 @@ Mandatory rules (see `status-bar`, `voice`):
 2. **Check `hasEditorFactoryLayer` before installing** — installation must be idempotent (session reloads re-fire lifecycle events).
 3. **Always remove your layer on shutdown** with `removeEditorFactoryLayer`, and only call `setEditorComponent` when the stack actually changed (`restored !== current`).
 4. **Inside `instantiate`, call the parent factory** and wrap its editor; only ignore the parent when you are deliberately replacing the base editor itself (status-bar's visual layer pattern).
+
+## `lib/json-atomic.ts` — atomic JSON writes
+
+Crash-safe state file writes: `writeJsonAtomic(path, data)` pretty-prints `data`, writes a
+`${path}.${pid}.${random}.tmp` sibling, then renames it over the target (rename is atomic),
+creating parent directories as needed. Use for every persisted JSON state file (reservations,
+missions, registries). Used by `messenger`, `missions`, `autoresearch`, `agents`, and
+`lib/presence-shards`.
+
+## `lib/file-lock.ts` — cross-process advisory file lock
+
+Mutual exclusion for read-modify-write cycles on shared files: `withFileLock(lockPath, fn,
+options?)` runs `fn` holding a `wx`-created lock file. Waiters poll; a lock untouched for
+`staleMs` (default 15s) is reclaimed as crashed, the holder refreshes its mtime every
+`refreshMs` (default 5s) so long critical sections are never stolen, and `timeoutMs`
+(default 30s, must be ≥ `staleMs`) caps the wait — `timeoutMessage` lets a consumer name its
+domain in the error. Used by `messenger` (reservations, mailbox compaction) and `missions`
+(mission saves, via an acquire/release adapter in its storage module).
+
+## `lib/model-picker.ts` — model picker pieces
+
+Shared formatting and modal for `/smallmodel`- and `/worker-model`-style pickers:
+`formatTokenCount` ("200k", "1.2m"), `formatModelDescription(model)` (name · ctx · out ·
+capability flags), and `selectModelWithSearch(ctx, items, activeValue, title)` — the
+`ui.custom` searchable modal used in TUI mode (resolves the selected value, `undefined` on
+cancel; fall back to `ctx.ui.select` outside TUI). `ModelMetadata` is the shared model shape.
+Config load/save stays in `lib/small-model.ts` / `lib/worker-model.ts`.
 
 ## `lib/session-identity.ts` — persisted per-session identity
 

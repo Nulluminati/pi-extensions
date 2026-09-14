@@ -6,19 +6,19 @@
  */
 
 import { randomBytes } from "node:crypto";
-import type { FileHandle } from "node:fs/promises";
-import { mkdir, open, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
+import { withFileLock } from "../../../lib/file-lock.ts";
+import { writeJsonAtomic } from "../../../lib/json-atomic.ts";
 import type { Mission, MissionSummary, TaskStatus } from "./types.ts";
 
 // --- Constants ---
 
 const MISSIONS_DIR = ".pi/missions";
 const ACTIVE_FILE = "active.json";
-const LOCK_RETRY_MS = 10;
 // The wait deadline must exceed the stale window: a waiter that outlives
-// LOCK_STALE_MS can observe and reclaim an abandoned lock instead of giving
-// up while the holder's final refresh is still in flight.
+// the stale window can observe and reclaim an abandoned lock instead of
+// giving up while the holder's final refresh is still in flight.
 const LOCK_TIMEOUT_MS = 35_000;
 const LOCK_STALE_MS = 30_000;
 // How often a held lock's mtime is touched; well under LOCK_STALE_MS so a
@@ -75,50 +75,41 @@ export interface LockTimings {
 /**
  * Acquire the advisory lock file for a mission; returns an async release
  * function. While held, the lock's mtime is refreshed on an interval so a
- * hold longer than LOCK_STALE_MS cannot be mistaken for an abandoned lock
- * and stolen by a waiting session. The refresher is cleared on release.
+ * hold longer than the stale window cannot be mistaken for an abandoned
+ * lock and stolen by a waiting session. The refresher is cleared on release.
  */
 export async function acquireMissionLock(
   cwd: string,
   id: string,
   timings: LockTimings = {},
 ): Promise<() => Promise<void>> {
-  const timeoutMs = timings.timeoutMs ?? LOCK_TIMEOUT_MS;
-  const staleMs = timings.staleMs ?? LOCK_STALE_MS;
-  const refreshMs = timings.refreshMs ?? LOCK_REFRESH_MS;
-  const path = missionLockPath(cwd, id);
-  await mkdir(join(missionsDir(cwd), ".locks"), { recursive: true });
-  const deadline = Date.now() + timeoutMs;
-
-  let handle: FileHandle;
-  while (true) {
-    try {
-      handle = await open(path, "wx", 0o600);
-      break;
-    } catch (error) {
-      if (!isNodeError(error) || error.code !== "EEXIST") throw error;
-      const lockStat = await stat(path).catch(() => undefined);
-      if (lockStat && Date.now() - lockStat.mtimeMs >= staleMs) {
-        await unlink(path).catch(() => {});
-        continue;
-      }
-      if (Date.now() >= deadline) {
-        throw new Error(`Timed out waiting to update mission ${id}; another session is saving it.`);
-      }
-      await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS));
-    }
-  }
-
-  await handle.writeFile(`${process.pid}\n`, "utf8");
-  const refresher = setInterval(() => {
-    const now = new Date();
-    handle.utimes(now, now).catch(() => {});
-  }, refreshMs);
-
+  let releaseHold!: () => void;
+  const released = new Promise<void>((resolveHold) => {
+    releaseHold = resolveHold;
+  });
+  let markAcquired!: () => void;
+  const acquired = new Promise<void>((resolveAcquired) => {
+    markAcquired = resolveAcquired;
+  });
+  const finished = withFileLock(
+    missionLockPath(cwd, id),
+    async () => {
+      markAcquired();
+      await released;
+    },
+    {
+      staleMs: timings.staleMs ?? LOCK_STALE_MS,
+      refreshMs: timings.refreshMs ?? LOCK_REFRESH_MS,
+      timeoutMs: timings.timeoutMs ?? LOCK_TIMEOUT_MS,
+      timeoutMessage: `Timed out waiting to update mission ${id}; another session is saving it.`,
+    },
+  );
+  // The lock is ours once fn starts running; finished rejects instead when
+  // acquisition times out, and that rejection is the caller's error.
+  await Promise.race([acquired, finished]);
   return async () => {
-    clearInterval(refresher);
-    await handle.close();
-    await unlink(path).catch(() => {});
+    releaseHold();
+    await finished;
   };
 }
 
@@ -134,13 +125,6 @@ function isActiveMission(value: unknown): value is Mission {
     Array.isArray(m.checkpoints) &&
     Array.isArray(m.decisions)
   );
-}
-
-/** Atomic JSON write: write to a temp sibling, then rename over the target. */
-async function writeJsonAtomic(path: string, data: unknown): Promise<void> {
-  const tmp = `${path}.${process.pid}.${randomBytes(2).toString("hex")}.tmp`;
-  await writeFile(tmp, JSON.stringify(data, null, 2), "utf8");
-  await rename(tmp, path);
 }
 
 // --- Active pointer ---

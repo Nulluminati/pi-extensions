@@ -12,8 +12,9 @@
  * passing its path as `legacyPath`.
  */
 
-import { mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { readdir, readFile, unlink } from "node:fs/promises";
+import { join } from "node:path";
+import { writeJsonAtomic } from "./json-atomic.ts";
 
 // --- Types ---
 
@@ -46,14 +47,7 @@ export function shardPath(dir: string, agentName: string): string {
   return join(dir, `${encodeURIComponent(agentName)}.json`);
 }
 
-// --- Atomic JSON helpers ---
-
-async function writeJsonAtomic(path: string, data: unknown): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  const tmp = `${path}.${process.pid}.${Math.random().toString(36).slice(2, 6)}.tmp`;
-  await writeFile(tmp, JSON.stringify(data, null, 2), "utf8");
-  await rename(tmp, path);
-}
+// --- JSON helpers ---
 
 async function readJson<T>(path: string): Promise<T | undefined> {
   try {

@@ -56,7 +56,7 @@ Workers should use a cheap model; keep design decisions, integration, and review
 | `pi.registerTool("delegate" / "workers")` | Delegation and worker management |
 | `pi.sendMessage(..., { triggerTurn: true, deliverAs: "steer" })` | Trusted wake on worker exit |
 | `pi.on("session_start" / "session_shutdown")` | Reconcile orphaned records / cancel running workers |
-| `pi.events.emit("agents:state")` | Publish state for the status bar |
+| `pi.events.emit("agents:state")` | Publishes worker-count state (`{ running: <n> }`) for future consumers such as the status bar |
 
 **Worker sandbox**: every worker loads the Gondolin extension and runs with `--gondolin` (QEMU micro-VM; requires Node >= 23.6 and QEMU on `PATH`). Built-in file and shell tools are routed through the VM. A worker without a working sandbox fails loudly rather than falling back to the host.
 

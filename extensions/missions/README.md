@@ -43,7 +43,7 @@ Tool actions: `create`, `status`, `list`, `switch`, `task_add`, `task_update`, `
 | `pi.registerCommand` | `/missions`, `/mission:status`, `/mission:reconcile` |
 | `pi.on("session_start")` | Restore active mission into status/widget |
 | `pi.on("session_shutdown")` | Clear session UI |
-| `pi.events.emit("missions:state")` | Publish state for the status bar |
+| `pi.events.emit("missions:state")` | Publishes mission state (`{ active, status, title }`) for future consumers such as the status bar |
 
 ## Configuration
 

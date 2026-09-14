@@ -5,6 +5,7 @@
 import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { runGit } from "../../../lib/git.ts";
+import { writeJsonAtomic } from "../../../lib/json-atomic.ts";
 import type { AutoConfig, RunEntry } from "./types.ts";
 
 // --- Paths ---
@@ -41,10 +42,7 @@ function isActiveConfig(value: unknown): value is AutoConfig {
 }
 
 export async function saveConfig(cwd: string, config: AutoConfig): Promise<void> {
-  await mkdir(autoDir(cwd), { recursive: true });
-  const tmp = `${configPath(cwd)}.${process.pid}.tmp`;
-  await writeFile(tmp, JSON.stringify(config, null, 2), "utf8");
-  await rename(tmp, configPath(cwd));
+  await writeJsonAtomic(configPath(cwd), config);
 }
 
 export async function loadConfig(cwd: string): Promise<AutoConfig | undefined> {
@@ -149,10 +147,7 @@ function untrackedSnapshotPath(cwd: string): string {
  * rename) like config.json — a partial snapshot would parse as garbage and
  * let a keep absorb pre-existing untracked work into its commit. */
 export async function saveUntrackedSnapshot(cwd: string, files: string[]): Promise<void> {
-  await mkdir(autoDir(cwd), { recursive: true });
-  const tmp = `${untrackedSnapshotPath(cwd)}.${process.pid}.tmp`;
-  await writeFile(tmp, JSON.stringify(files, null, 2), "utf8");
-  await rename(tmp, untrackedSnapshotPath(cwd));
+  await writeJsonAtomic(untrackedSnapshotPath(cwd), files);
 }
 
 /** Load the untracked baseline snapshot, or undefined when no snapshot file

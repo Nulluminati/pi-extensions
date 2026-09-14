@@ -18,9 +18,9 @@ import { existsSync } from "node:fs";
 import { access } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext, ExtensionUIContext } from "pi";
+import { isPlanModeActive } from "../../lib/plan-state.ts";
 import { resolveWorkerExtensions } from "../../lib/worker-extensions.ts";
 import { resolveWorkerModelSpec } from "../../lib/worker-model.ts";
-import { isPlanModeActive } from "../plan/src/state.ts";
 import {
   AGENTS_STATE_EVENT,
   formatWorkerList,

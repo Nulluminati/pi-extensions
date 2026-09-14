@@ -68,6 +68,48 @@ export {
   renderEditorModalFrame,
 } from "./src/editor.ts";
 
+// --- Config file watching ---
+
+/** A live config-file watch: the directory watcher (undefined when the
+ *  directory could not be watched) plus the matching stop logic. */
+interface ConfigWatch {
+  watcher: FSWatcher | undefined;
+  stop: () => void;
+}
+
+/**
+ * Watch the directory containing `configPath`, filtered to its basename, and
+ * call `onStable` once 25ms after the last event (a single save often
+ * arrives as several). Shared by the small-model and worker-model watchers.
+ */
+function watchConfigFile(configPath: string, onStable: () => void): ConfigWatch {
+  let watcher: FSWatcher | undefined;
+  let debounce: ReturnType<typeof setTimeout> | undefined;
+  try {
+    watcher = watch(dirname(configPath), (_event, filename) => {
+      if (filename && filename.toString() !== basename(configPath)) return;
+      if (debounce) clearTimeout(debounce);
+      debounce = setTimeout(() => {
+        debounce = undefined;
+        onStable();
+      }, 25);
+    });
+  } catch {
+    watcher = undefined;
+  }
+  return {
+    watcher,
+    stop() {
+      if (debounce) {
+        clearTimeout(debounce);
+        debounce = undefined;
+      }
+      watcher?.close();
+      watcher = undefined;
+    },
+  };
+}
+
 // --- Extension ---
 
 export default async function statusBarExtension(pi: ExtensionAPI) {
@@ -93,10 +135,8 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
 
   let getBranch: () => any[] = () => [];
   let currentCwd = "";
-  let smallModelWatcher: FSWatcher | undefined;
-  let smallModelWatchDebounce: ReturnType<typeof setTimeout> | undefined;
-  let workerModelWatcher: FSWatcher | undefined;
-  let workerModelWatchDebounce: ReturnType<typeof setTimeout> | undefined;
+  let smallModelWatch: ConfigWatch | undefined;
+  let workerModelWatch: ConfigWatch | undefined;
 
   // Track a running goal so the editor frame can show a "Goal" badge in its
   // top-right cell. Subscribed at load time rather than in session_start: the
@@ -244,7 +284,7 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
   /**
    * Watch the global small-model config file so the editor title updates the
    * instant `/smallmodel` (or an external edit) changes it — without waiting
-   * for the next turn. Mirrors the small-model extension's own watcher.
+   * for the next turn.
    */
   function startSmallModelWatch(): void {
     stopSmallModelWatch();
@@ -255,30 +295,16 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     } catch {
       return;
     }
-    const configDirectory = dirname(configPath);
-    try {
-      smallModelWatcher = watch(configDirectory, (_event, filename) => {
-        if (filename && filename.toString() !== basename(configPath)) return;
-        if (smallModelWatchDebounce) clearTimeout(smallModelWatchDebounce);
-        smallModelWatchDebounce = setTimeout(() => {
-          smallModelWatchDebounce = undefined;
-          refreshSmallModel();
-          refreshWorkerModel();
-          editorRequestRender?.();
-        }, 25);
-      });
-    } catch {
-      smallModelWatcher = undefined;
-    }
+    smallModelWatch = watchConfigFile(configPath, () => {
+      refreshSmallModel();
+      refreshWorkerModel();
+      editorRequestRender?.();
+    });
   }
 
   function stopSmallModelWatch(): void {
-    if (smallModelWatchDebounce) {
-      clearTimeout(smallModelWatchDebounce);
-      smallModelWatchDebounce = undefined;
-    }
-    smallModelWatcher?.close();
-    smallModelWatcher = undefined;
+    smallModelWatch?.stop();
+    smallModelWatch = undefined;
   }
 
   function refreshWorkerModel(): void {
@@ -290,7 +316,7 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     }
   }
 
-  /** Watch the global worker-model config file (mirrors the small-model watcher). */
+  /** Watch the global worker-model config file so its label stays live too. */
   function startWorkerModelWatch(): void {
     stopWorkerModelWatch();
     let configPath: string;
@@ -299,29 +325,15 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     } catch {
       return;
     }
-    const configDirectory = dirname(configPath);
-    try {
-      workerModelWatcher = watch(configDirectory, (_event, filename) => {
-        if (filename && filename.toString() !== basename(configPath)) return;
-        if (workerModelWatchDebounce) clearTimeout(workerModelWatchDebounce);
-        workerModelWatchDebounce = setTimeout(() => {
-          workerModelWatchDebounce = undefined;
-          refreshWorkerModel();
-          editorRequestRender?.();
-        }, 25);
-      });
-    } catch {
-      workerModelWatcher = undefined;
-    }
+    workerModelWatch = watchConfigFile(configPath, () => {
+      refreshWorkerModel();
+      editorRequestRender?.();
+    });
   }
 
   function stopWorkerModelWatch(): void {
-    if (workerModelWatchDebounce) {
-      clearTimeout(workerModelWatchDebounce);
-      workerModelWatchDebounce = undefined;
-    }
-    workerModelWatcher?.close();
-    workerModelWatcher = undefined;
+    workerModelWatch?.stop();
+    workerModelWatch = undefined;
   }
 
   function accumulateTokenUsage(): void {

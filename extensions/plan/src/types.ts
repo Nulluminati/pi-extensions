@@ -1,15 +1,5 @@
-/** Shared types for the plan extension. */
+/** Shared types for the plan extension. Types live in lib/plan-state.ts
+ * (shared with the agents extension); this module re-exports them so
+ * plan/src modules keep importing from here. */
 
-export type PlanMode = "off" | "plan" | "executing" | "readonly";
-
-export interface Plan {
-  title: string;
-  steps: string[];
-  notes?: string;
-}
-
-export interface PlanState {
-  mode: PlanMode;
-  plan: Plan | null;
-  toolsBeforePlan: string[] | undefined;
-}
+export type { Plan, PlanMode, PlanState } from "../../../lib/plan-state.ts";

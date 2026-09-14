@@ -10,7 +10,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import messengerExtension from "../../extensions/messenger/messenger.ts";
 import { checkToolCall } from "../../extensions/messenger/src/enforce.ts";
 import { resolveAgentName } from "../../extensions/messenger/src/identity.ts";
-import { withFileLock } from "../../extensions/messenger/src/lock.ts";
 import {
   ensureUniqueAgentName,
   findBlockingReservation,
@@ -26,6 +25,7 @@ import {
   reserve,
   sendMessage,
 } from "../../extensions/messenger/src/store.ts";
+import { withFileLock } from "../../lib/file-lock.ts";
 import { createMockContext } from "../mocks/context-mocks.ts";
 import type { DeepMocked } from "../mocks/mock-types.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";

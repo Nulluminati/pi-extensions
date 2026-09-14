@@ -11,8 +11,10 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { appendFile, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { appendFile, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { withFileLock } from "../../../lib/file-lock.ts";
+import { writeJsonAtomic } from "../../../lib/json-atomic.ts";
 import {
   isProcessAlive,
   loadShards,
@@ -20,7 +22,6 @@ import {
   removeShard,
   writeShard,
 } from "../../../lib/presence-shards.ts";
-import { withFileLock } from "./lock.ts";
 import type { Message, Presence, PresenceRegistry, ReservationMap } from "./types.ts";
 
 // --- Paths ---
@@ -59,14 +60,7 @@ export function inboxPath(cwd: string, name: string): string {
   return join(messengerDir(cwd), "inbox", inboxFileName(name));
 }
 
-// --- Atomic JSON helpers ---
-
-async function writeJsonAtomic(path: string, data: unknown): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  const tmp = `${path}.${process.pid}.${randomBytes(2).toString("hex")}.tmp`;
-  await writeFile(tmp, JSON.stringify(data, null, 2), "utf8");
-  await rename(tmp, path);
-}
+// --- Error helpers ---
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
