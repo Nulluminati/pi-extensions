@@ -44,6 +44,8 @@ Tool actions: `create`, `status`, `list`, `switch`, `task_add`, `task_update`, `
 | `pi.on("session_start")` | Restore active mission into status/widget |
 | `pi.on("session_shutdown")` | Clear session UI |
 | `pi.events.emit("missions:state")` | Publishes mission state (`{ active, status, title }`) for future consumers such as the status bar |
+| `ctx.ui.setWidget("missions", …)` | Framed panel above the input: mission title/status, task lines, `tasks d/total` in the frame corner |
+| `ctx.ui.setStatus("missions", …)` | Fallback footer line for pi's default footer (skipped by the bundled status bar, which shows the widget instead) |
 
 ## Configuration
 

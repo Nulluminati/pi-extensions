@@ -35,7 +35,8 @@ messenger (action=release)                        # drop your reservations
 | `pi.on("agent_settled")` | Heartbeat + deliver unread mail into the conversation |
 | `pi.sendMessage(..., { triggerTurn: true })` | Inject delivered mail as context |
 | `pi.on("session_start" / "session_shutdown")` | Join/leave the mesh |
-| `pi.events.emit("messenger:state")` | Publishes identity state (`{ name, unread }`) for future consumers such as the status bar |
+| `pi.events.emit("messenger:state")` | Publishes identity state (`{ name, unread }`); the bundled status bar subscribes and shows `✉ N` next to the context usage bar |
+| `ctx.ui.setStatus("messenger", …)` | Fallback footer line (`✉ Messenger: N unread · name`) for pi's default footer; skipped by the bundled status bar, which shows the count on line 1 instead |
 
 ## Configuration
 

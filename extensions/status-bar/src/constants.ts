@@ -31,6 +31,13 @@ export const ICON_THINKING = String.fromCodePoint(0xf09d1);
 // thinking level in the editor meta line when the selected model is flex-capable.
 export const ICON_FLEX = "⚡";
 
+// Envelope marking unread messenger mail in the line-1 right block. The glyph
+// matches the messenger extension's own status icon; defined here (not
+// imported) so the status-bar extension stays self-contained.
+export const ICON_MAIL = "✉";
+
+export const MAIL_COLOR = "success";
+
 // Glyphs specified by Zero Cool.
 export const ICON_SMALL_MODEL = "󰧟";
 export const ICON_WORKER_MODEL = String.fromCodePoint(0xf52e); // nf-md-robot-industrial
@@ -119,6 +126,31 @@ export const GOAL_STATE_EVENT = "goal:state-change";
  * default footer when the status bar is disabled.
  */
 export const GONDOLIN_STATUS_KEY = "gondolin";
+
+/**
+ * Status keys the missions, messenger, and autoresearch extensions publish
+ * under. All three are moving widget-first: their live state renders in
+ * dedicated widgets, so their setStatus entries are only fallbacks for the
+ * default footer when the status bar is disabled. Showing them on line 2
+ * would double-render, so they are suppressed alongside STATUS_KEY,
+ * SMALL_MODEL_STATUS_KEY, GONDOLIN_STATUS_KEY, and GOAL_STATUS_KEY. The
+ * messenger's unread count reaches the footer through the messenger:state
+ * event instead (see MESSENGER_STATE_EVENT).
+ */
+export const MISSIONS_STATUS_KEY = "missions";
+
+export const MESSENGER_STATUS_KEY = "messenger";
+
+export const AUTORESEARCH_STATUS_KEY = "autoresearch";
+
+/**
+ * Event the messenger extension emits on pi.events whenever its identity and
+ * unread-mail state change (payload: { name, unread }). The footer renders an
+ * "✉ N" mail segment on line 1 from it. Defined here (not imported) so the
+ * status-bar extension stays self-contained; the messenger extension owns the
+ * contract and emits the same string.
+ */
+export const MESSENGER_STATE_EVENT = "messenger:state";
 
 /**
  * Event the gondolin extension emits on pi.events when the sandbox VM state

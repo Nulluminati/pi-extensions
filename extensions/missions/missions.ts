@@ -18,13 +18,14 @@ import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "pi
 import { excludeFromGit } from "../../lib/git.ts";
 import { projectStateRelative } from "../../lib/paths.ts";
 import {
+  createMissionWidget,
   formatMissionStatus,
   formatMissionSummaries,
   formatReconcileReport,
   formatStatus,
   MISSION_STATE_EVENT,
   MISSION_STATUS_KEY,
-  widgetLines,
+  MISSION_WIDGET_KEY,
 } from "./src/format.ts";
 import {
   addCheckpoint,
@@ -84,7 +85,7 @@ export default async function missionsExtension(pi: ExtensionAPI) {
     });
     if (!ctx.hasUI) return;
     ctx.ui.setStatus(MISSION_STATUS_KEY, formatStatus(ctx.ui.theme, active));
-    ctx.ui.setWidget("missions", widgetLines(active));
+    ctx.ui.setWidget(MISSION_WIDGET_KEY, active ? createMissionWidget(() => active) : undefined);
   }
 
   async function reloadActive(ctx: ExtensionContext): Promise<Mission | undefined> {
@@ -383,6 +384,6 @@ export default async function missionsExtension(pi: ExtensionAPI) {
     // Mission state lives on disk; just clear session UI.
     if (!ctx.hasUI) return;
     ctx.ui.setStatus(MISSION_STATUS_KEY, undefined);
-    ctx.ui.setWidget("missions", undefined);
+    ctx.ui.setWidget(MISSION_WIDGET_KEY, undefined);
   });
 }

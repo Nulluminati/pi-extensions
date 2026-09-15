@@ -1,6 +1,7 @@
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { ExtensionCommandContext } from "pi";
 import {
+  AUTORESEARCH_STATUS_KEY,
   BAR_SEGMENTS,
   GOAL_STATUS_KEY,
   GONDOLIN_STATUS_KEY,
@@ -11,6 +12,7 @@ import {
   ICON_DELETED,
   ICON_DIVERGED,
   ICON_GIT,
+  ICON_MAIL,
   ICON_MODIFIED,
   ICON_RENAMED,
   ICON_STAGED,
@@ -18,6 +20,9 @@ import {
   ICON_TURN,
   ICON_TYPECHANGED,
   ICON_UNTRACKED,
+  MAIL_COLOR,
+  MESSENGER_STATUS_KEY,
+  MISSIONS_STATUS_KEY,
   SMALL_MODEL_STATUS_KEY,
   STATUS_KEY,
   TOKEN_COLORS,
@@ -91,25 +96,28 @@ function buildGitStatusBlock(gs: GitStatus, theme: any): string {
 
 /**
  * Right-block pieces, fullest variant first. When width is tight the right
- * block is shed in tiers (dropping cost, then the decorative bar) before the
- * static left block is ever truncated, so token counts and the context window
- * stay visible as long as possible.
+ * block is shed in tiers — cost first, then the turn count, then mail, then
+ * the token breakdown, with the decorative bar dropping early and the window
+ * surviving longest — before the static left block is ever truncated, so the
+ * context window stays visible as long as possible.
  */
 function rightBlockVariants(
   bar: string,
   windowStr: string,
   tokenStr: string,
   turnStr: string,
+  mailStr: string,
   costStr: string,
 ): string[] {
   const join = (parts: string[]) => parts.filter(Boolean).join(" ");
   return [
-    join([bar, windowStr, tokenStr, turnStr, costStr]),
-    join([bar, windowStr, tokenStr, turnStr]),
-    join([windowStr, tokenStr, turnStr, costStr]),
-    join([windowStr, tokenStr, turnStr]),
-    join([tokenStr, turnStr, costStr]),
-    join([tokenStr, turnStr]),
+    join([bar, windowStr, tokenStr, turnStr, mailStr, costStr]),
+    join([bar, windowStr, tokenStr, turnStr, mailStr]),
+    join([windowStr, tokenStr, turnStr, mailStr, costStr]),
+    join([windowStr, tokenStr, turnStr, mailStr]),
+    join([tokenStr, turnStr, mailStr, costStr]),
+    join([tokenStr, turnStr, mailStr]),
+    join([tokenStr, mailStr]),
     join([tokenStr]),
     join([windowStr]),
     join([]),
@@ -200,9 +208,13 @@ export function buildFooterLines(
   // Token breakdown: always shown (0 when empty), each indicator colored.
   const tu = state.tokenUsage;
   const tokenStr = formatTokenBreakdown(tu, theme);
-  // Turn count sits right of the token counters, leading the trailing pair
-  // with cost. Cost always shown — $0.000 at session start, 3 decimals.
+  // Turn count sits right of the token counters, leading the trailing trio
+  // with mail and cost. Cost always shown — $0.000 at session start, 3
+  // decimals. Mail appears only while mail is unread, and sheds after the
+  // turn count but before the token breakdown (see rightBlockVariants).
   const turnStr = theme.fg("text", `${ICON_TURN}${state.turnCount}`);
+  const mailStr =
+    state.unreadMail > 0 ? theme.fg(MAIL_COLOR, `${ICON_MAIL} ${state.unreadMail}`) : "";
   const costStr = theme.fg("mdHeading", `$${tu.cost.toFixed(3)}`);
 
   const line1 = composeLine1(
@@ -212,6 +224,7 @@ export function buildFooterLines(
       windowStr ? theme.fg("text", windowStr) : "",
       tokenStr,
       turnStr,
+      mailStr,
       costStr,
     ),
     width,
@@ -226,13 +239,19 @@ export function buildFooterLines(
       // Skip our own indicator and the small-model status: the small model is
       // shown in the editor meta line, not the footer. Skip gondolin too: its
       // workspace segment lives on line 1, and goal: a running goal is shown
-      // as a "Goal" badge in the editor frame (their setStatus entries are
-      // only the fallback for the default footer).
+      // as a "Goal" badge in the editor frame. Skip missions, messenger, and
+      // autoresearch as well: they are moving widget-first, so their setStatus
+      // entries are only the fallback for the default footer and would
+      // double-render here (the messenger's unread count reaches line 1 via
+      // the messenger:state event instead).
       if (
         key !== STATUS_KEY &&
         key !== SMALL_MODEL_STATUS_KEY &&
         key !== GONDOLIN_STATUS_KEY &&
         key !== GOAL_STATUS_KEY &&
+        key !== MISSIONS_STATUS_KEY &&
+        key !== MESSENGER_STATUS_KEY &&
+        key !== AUTORESEARCH_STATUS_KEY &&
         text
       ) {
         line2Segments.push(text);

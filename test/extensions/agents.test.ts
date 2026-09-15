@@ -8,6 +8,7 @@ import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext } from "pi";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import agentsExtension from "../../extensions/agents/agents.ts";
+import { createWorkersWidget } from "../../extensions/agents/src/format.ts";
 import { extractAssistantText } from "../../extensions/agents/src/runner.ts";
 import {
   generateWorkerId,
@@ -842,6 +843,44 @@ sleep 30
     expect((error as Error).message).toContain("Patch apply failed");
     expect((error as Error).message).toContain(patchPath);
   });
+
+  describe("widget", () => {
+    function renderLastWidget(width = 80): string[] {
+      const lastCall = mockCtx.ui.setWidget.mock.calls.at(-1) as unknown[];
+      const factory = lastCall[1] as
+        | ((tui: unknown, theme: unknown) => { render(w: number): string[] })
+        | undefined;
+      if (typeof factory !== "function") {
+        throw new Error(`expected a widget factory, got ${String(factory)}`);
+      }
+      return factory(undefined, mockCtx.ui.theme).render(width);
+    }
+
+    it("shows running workers in a framed widget while they run", async () => {
+      const fixture = await writeFixture(fixtureDir, "slow-worker.sh", SLOW_WORKER);
+      setEnv("PI_WORKER_COMMAND", fixture);
+
+      await executeTool("delegate", { task: "t", isolate: false, name: "scout" });
+
+      const lastCall = mockCtx.ui.setWidget.mock.calls.at(-1) as unknown[];
+      expect(lastCall[0]).toBe("agents");
+      const text = renderLastWidget().join("\n");
+      expect(text).toContain("Workers");
+      expect(text).toContain("1 running");
+      expect(text).toContain('"scout" running');
+
+      await getEventHandler("session_shutdown")(
+        { type: "session_shutdown", reason: "quit" },
+        mockCtx,
+      );
+      expect(mockCtx.ui.setWidget).toHaveBeenLastCalledWith("agents", undefined);
+    });
+
+    it("clears the widget when no workers are running", async () => {
+      await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+      expect(mockCtx.ui.setWidget).toHaveBeenLastCalledWith("agents", undefined);
+    });
+  });
 });
 
 describe("agents-units", () => {
@@ -877,6 +916,21 @@ describe("agents-units", () => {
       await rm(gitDir, { recursive: true, force: true });
       await rm(plainDir, { recursive: true, force: true });
     }
+  });
+
+  it("createWorkersWidget caps the panel at five workers with an overflow line", () => {
+    const workers = Array.from({ length: 7 }, (_, i) =>
+      makeWorkerRecord({ id: `w-${i + 1}`, name: `w-${i + 1}` }),
+    );
+    const factory = createWorkersWidget(() => workers);
+    const text = factory(undefined, { fg: (_color: string, t: string) => t })
+      .render(80)
+      .join("\n");
+    expect(text).toContain("Workers");
+    expect(text).toContain("7 running");
+    expect(text).toContain("w-5");
+    expect(text).not.toContain("w-6");
+    expect(text).toContain("↓ 2 more");
   });
 
   it("worktree lifecycle: create, capture patch, apply, remove", async () => {
@@ -989,3 +1043,18 @@ describe("agents-units", () => {
     }
   });
 });
+
+// --- Helpers ---
+
+function makeWorkerRecord(overrides: Partial<WorkerRecord> = {}): WorkerRecord {
+  return {
+    id: "w-1",
+    name: "w-1",
+    task: "t",
+    model: "test-model",
+    cwd: "/tmp",
+    status: "running",
+    startedAt: 0,
+    ...overrides,
+  };
+}

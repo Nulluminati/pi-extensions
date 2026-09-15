@@ -1146,6 +1146,36 @@ describe("status-bar-extension", () => {
     expect(lines[1]).toContain("🎯 active");
   });
 
+  it("footer line 2 suppresses missions, messenger, and autoresearch statuses (widget-first fallbacks)", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBar(mockPi, mockCtx);
+
+    const component = getFooterFactory(mockCtx)(
+      { requestRender: vi.fn() },
+      plainTheme(),
+      footerData({
+        statuses: new Map([
+          ["missions", "◆ mission fix-bug · running 4m"],
+          ["messenger", "✉ Messenger: 3 unread · scout"],
+          ["autoresearch", "⌕ researching auth flows"],
+          ["some-other-ext", "foreign status"],
+        ]),
+      }),
+    );
+    const lines = component.render(120);
+
+    // Line 2 still renders for the foreign status, but the three widget-first
+    // extensions are suppressed (their setStatus entries are default-footer
+    // fallbacks and would double-render).
+    expect(lines.length).toBe(2);
+    expect(lines[1]).toContain("foreign status");
+    expect(lines[1]).not.toContain("mission fix-bug");
+    expect(lines[1]).not.toContain("Messenger");
+    expect(lines[1]).not.toContain("✉");
+    expect(lines[1]).not.toContain("researching auth flows");
+  });
+
   it("footer line 1 shows the gondolin workspace segment after the cwd", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
@@ -1889,6 +1919,186 @@ describe("status-bar goal badge", () => {
 
     expect(lines.length).toBe(1);
     expect(lines[0]).not.toContain("Goal");
+  });
+});
+
+describe("status-bar mail slot", () => {
+  function plainTheme() {
+    return { fg: vi.fn((_color: string, text: string) => text) };
+  }
+
+  /** Enable the bar with a context snapshot, token history, one turn, and
+   * unread mail, so every line-1 right-block segment is populated. */
+  async function enableBarWithMail(
+    mockPi: ReturnType<typeof createMockPi>,
+    mockCtx: ReturnType<typeof createMockCommandContext>,
+  ) {
+    mockCtx.getContextUsage = vi.fn(() => ({
+      tokens: 50000,
+      contextWindow: 200000,
+      percent: 25,
+    }));
+    mockCtx.sessionManager.getBranch = vi.fn(() => [
+      {
+        type: "message",
+        message: {
+          role: "assistant",
+          usage: {
+            input: 1000,
+            output: 500,
+            cacheRead: 200,
+            cacheWrite: 100,
+            cost: { total: 0.03 },
+          },
+        },
+      },
+    ]);
+    await enableBar(mockPi, mockCtx);
+    const turnStartHandler = getEventHandler(mockPi, "turn_start");
+    await turnStartHandler({ type: "turn_start", turnIndex: 0, timestamp: Date.now() }, mockCtx);
+    getEventsHandler(mockPi, "messenger:state")({ name: "scout", unread: 2 });
+  }
+
+  it("status-bar subscribes to messenger:state at load time (before session_start)", async () => {
+    const mockPi = createMockPi();
+    await statusBarExtension(mockPi);
+    // No session_start required: the messenger extension publishes its state
+    // during its own session_start handler, which may run before this
+    // extension's session_start-scoped listeners exist.
+    expect(getEventsHandler(mockPi, "messenger:state")).toBeDefined();
+  });
+
+  it("messenger:state with unread 2 shows ✉ 2 on line 1, right of the context bar", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBarWithMail(mockPi, mockCtx);
+
+    const component = getFooterFactory(mockCtx)(
+      { requestRender: vi.fn() },
+      plainTheme(),
+      footerData(),
+    );
+    const line = component.render(120)[0] ?? "";
+
+    expect(line).toContain("✉ 2");
+    // Right of the context-bar cluster ([bar] 50.0k/200.0k).
+    expect(line.indexOf("✉")).toBeGreaterThan(line.indexOf("50.0k/200.0k"));
+  });
+
+  it("mail segment renders in the success color", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBarWithMail(mockPi, mockCtx);
+
+    const fgMock = vi.fn((_color: string, text: string) => text);
+    const component = getFooterFactory(mockCtx)(
+      { requestRender: vi.fn() },
+      { fg: fgMock },
+      footerData(),
+    );
+    component.render(120);
+
+    expect(fgMock).toHaveBeenCalledWith("success", "✉ 2");
+  });
+
+  it("messenger:state with unread 0 clears the mail segment", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBarWithMail(mockPi, mockCtx);
+
+    getEventsHandler(mockPi, "messenger:state")({ name: "scout", unread: 0 });
+
+    const component = getFooterFactory(mockCtx)(
+      { requestRender: vi.fn() },
+      plainTheme(),
+      footerData(),
+    );
+    expect(component.render(120)[0]).not.toContain("✉");
+  });
+
+  it("no mail segment and no gap artifacts at unread 0", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBar(mockPi, mockCtx);
+
+    const component = getFooterFactory(mockCtx)(
+      { requestRender: vi.fn() },
+      plainTheme(),
+      footerData(),
+    );
+    const line = component.render(120)[0] ?? "";
+
+    expect(line).not.toContain("✉");
+    expect(line).not.toContain("✉ 0");
+    // The right block is right-aligned: with no mail segment the line still
+    // ends exactly at the cost segment, with no trailing gap.
+    expect(line.endsWith("$0.000")).toBe(true);
+  });
+
+  it("messenger:state triggers a footer re-render", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBar(mockPi, mockCtx);
+
+    const requestRender = vi.fn();
+    getFooterFactory(mockCtx)({ requestRender }, plainTheme(), footerData());
+
+    getEventsHandler(mockPi, "messenger:state")({ name: "scout", unread: 1 });
+    expect(requestRender).toHaveBeenCalled();
+  });
+
+  it("mail sheds after turn count but before the token breakdown", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBarWithMail(mockPi, mockCtx);
+
+    const component = getFooterFactory(mockCtx)(
+      { requestRender: vi.fn() },
+      plainTheme(),
+      footerData(),
+    );
+
+    // Scan widths and record which segments survive at each width.
+    const rows: Array<{
+      width: number;
+      mail: boolean;
+      turn: boolean;
+      cost: boolean;
+      token: boolean;
+      bar: boolean;
+    }> = [];
+    for (let width = 24; width <= 140; width++) {
+      const line = component.render(width)[0] ?? "";
+      rows.push({
+        width,
+        mail: line.includes("✉ 2"),
+        turn: line.includes("↻1"),
+        cost: line.includes("$0.030"),
+        token: line.includes("↑1.0k"),
+        bar: line.includes("█"),
+      });
+    }
+
+    const widest = rows[rows.length - 1];
+    expect(widest.mail).toBe(true);
+    expect(widest.cost).toBe(true);
+    expect(widest.turn).toBe(true);
+    expect(widest.token).toBe(true);
+    expect(widest.bar).toBe(true);
+
+    // Cost sheds first while turn and mail remain.
+    expect(rows.some((r) => r.cost === false && r.turn && r.mail)).toBe(true);
+    // Mail outlives turn count (a width exists with mail but no turn).
+    expect(rows.some((r) => r.mail && !r.turn)).toBe(true);
+    // Mail sheds before the token breakdown (a width exists with token but no mail).
+    expect(rows.some((r) => !r.mail && r.token)).toBe(true);
+
+    // Shedding priority holds at every width: cost ⊆ turn ⊆ mail ⊆ token.
+    for (const r of rows) {
+      if (r.cost) expect(r.turn, `width ${r.width}: cost without turn`).toBe(true);
+      if (r.turn) expect(r.mail, `width ${r.width}: turn without mail`).toBe(true);
+      if (r.mail) expect(r.token, `width ${r.width}: mail without token`).toBe(true);
+    }
   });
 });
 

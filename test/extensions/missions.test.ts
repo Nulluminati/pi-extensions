@@ -300,6 +300,11 @@ describe("missions-extension", () => {
       expect.stringContaining("active"),
     );
     expect(mockCtx.ui.setWidget).toHaveBeenCalledWith("missions", expect.anything());
+    const text = renderLastWidget(mockCtx).join("\n");
+    expect(text).toContain("Mission");
+    expect(text).toContain("tasks 0/1");
+    expect(text).toContain("restored — active");
+    expect(text).toContain("▸ task-a");
   });
 
   it("mission:status command notifies with the full status", async () => {
@@ -605,3 +610,17 @@ describe("missions-extension", () => {
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Reconciled"), "info");
   });
 });
+
+// --- Helpers ---
+
+/** Instantiate the last widget factory the extension published and render it. */
+function renderLastWidget(mockCtx: DeepMocked<ExtensionCommandContext>, width = 80): string[] {
+  const lastCall = mockCtx.ui.setWidget.mock.calls.at(-1) as unknown[];
+  const factory = lastCall[1] as
+    | ((tui: unknown, theme: unknown) => { render(w: number): string[] })
+    | undefined;
+  if (typeof factory !== "function") {
+    throw new Error(`expected a widget factory, got ${String(factory)}`);
+  }
+  return factory(undefined, mockCtx.ui.theme).render(width);
+}

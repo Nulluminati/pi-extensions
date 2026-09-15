@@ -311,6 +311,7 @@ describe("autoresearch-extension", () => {
     const shutdown = getEventHandler("session_shutdown");
     await shutdown({ type: "session_shutdown", reason: "reload" }, mockCtx);
     expect(mockCtx.ui.setStatus).toHaveBeenLastCalledWith("autoresearch", undefined);
+    expect(mockCtx.ui.setWidget).toHaveBeenLastCalledWith("autoresearch", undefined);
     expect(mockPi.events.emit).toHaveBeenLastCalledWith("autoresearch:state", {
       active: false,
       iterations: 0,
@@ -634,6 +635,59 @@ describe("autoresearch-extension", () => {
     expect(existsSync(pendingPath)).toBe(false);
     // Pending changes were reverted on stop.
     expect(await readFile(join(cwd, "code.txt"), "utf8")).toBe("v1\n");
+  });
+
+  describe("widget", () => {
+    function renderLastWidget(width = 80): string[] {
+      const lastCall = mockCtx.ui.setWidget.mock.calls.at(-1) as unknown[];
+      const factory = lastCall[1] as
+        | ((tui: unknown, theme: unknown) => { render(w: number): string[] })
+        | undefined;
+      if (typeof factory !== "function") {
+        throw new Error(`expected a widget factory, got ${String(factory)}`);
+      }
+      return factory(undefined, mockCtx.ui.theme).render(width);
+    }
+
+    it("shows the campaign widget from init with the baseline state", async () => {
+      await initSession();
+
+      const lastCall = mockCtx.ui.setWidget.mock.calls.at(-1) as unknown[];
+      expect(lastCall[0]).toBe("autoresearch");
+      expect(typeof lastCall[1]).toBe("function");
+      const text = renderLastWidget().join("\n");
+      expect(text).toContain("Autoresearch");
+      expect(text).toContain("it 0");
+      // Best starts at the baseline; confidence needs more runs.
+      expect(text).toContain("best 100");
+      expect(text).not.toContain("conf ");
+      expect(text).toContain("run 1 baseline");
+    });
+
+    it("updates the widget as runs are logged", async () => {
+      await initSession();
+      await runAndLog("90", "keep", "faster algorithm");
+
+      const text = renderLastWidget().join("\n");
+      expect(text).toContain("it 1");
+      expect(text).toContain("best 90");
+      expect(text).toContain("run 2 keep: faster algorithm");
+    });
+
+    it("clears the widget when the campaign stops but keeps the footer fallback", async () => {
+      await initSession();
+      await executeTool({ action: "stop" });
+
+      expect(mockCtx.ui.setWidget).toHaveBeenLastCalledWith("autoresearch", undefined);
+      expect(mockCtx.ui.setStatus).toHaveBeenLastCalledWith("autoresearch", undefined);
+    });
+
+    it("clears the widget on session shutdown", async () => {
+      await initSession();
+      const shutdown = getEventHandler("session_shutdown");
+      await shutdown({ type: "session_shutdown", reason: "reload" }, mockCtx);
+      expect(mockCtx.ui.setWidget).toHaveBeenLastCalledWith("autoresearch", undefined);
+    });
   });
 });
 

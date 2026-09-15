@@ -25,10 +25,10 @@ import { resolveWorkerExtensions } from "../../lib/worker-extensions.ts";
 import { resolveWorkerModelSpec } from "../../lib/worker-model.ts";
 import {
   AGENTS_STATE_EVENT,
+  createWorkersWidget,
   formatWorkerList,
   formatWorkerStatus,
   WORKERS_WIDGET_KEY,
-  widgetLines,
 } from "./src/format.ts";
 import { type RunningWorker, startWorker } from "./src/runner.ts";
 import { DELEGATE_PARAMETERS, WORKERS_PARAMETERS } from "./src/schemas.ts";
@@ -73,7 +73,10 @@ export default async function agentsExtension(pi: ExtensionAPI) {
     const live = Object.values(workers)
       .filter((w) => w.status === "running")
       .sort((a, b) => a.startedAt - b.startedAt);
-    lastUi.setWidget(WORKERS_WIDGET_KEY, widgetLines(live));
+    lastUi.setWidget(
+      WORKERS_WIDGET_KEY,
+      live.length > 0 ? createWorkersWidget(() => live) : undefined,
+    );
   }
 
   function makeEvents(ctx: ExtensionContext): WorkerEvents {
@@ -382,6 +385,9 @@ export default async function agentsExtension(pi: ExtensionAPI) {
   // --- Lifecycle ---
 
   pi.on("session_start", async (_event, ctx) => {
+    // Event contexts carry a usable ui surface: capture it so the widget is
+    // restored on session_start (reload) before any tool call has run.
+    if (ctx.hasUI) lastUi = ctx.ui;
     // Keep worker state out of `git status`; best-effort outside repos.
     try {
       await excludeFromGit(ctx.cwd, `${projectStateRelative("workers")}/`);

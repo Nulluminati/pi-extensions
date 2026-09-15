@@ -21,7 +21,9 @@ import { isProjectStatePath, projectStateRelative } from "../../lib/paths.ts";
 import {
   AUTORESEARCH_STATE_EVENT,
   AUTORESEARCH_STATUS_KEY,
+  AUTORESEARCH_WIDGET_KEY,
   buildSummary,
+  createAutoresearchWidget,
   formatFooter,
   formatSummary,
 } from "./src/format.ts";
@@ -135,6 +137,15 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
     });
     if (ctx.hasUI) {
       ctx.ui.setStatus(AUTORESEARCH_STATUS_KEY, formatFooter(ctx.ui.theme, summary));
+      if (summary?.active) {
+        const state = { summary, entries };
+        ctx.ui.setWidget(
+          AUTORESEARCH_WIDGET_KEY,
+          createAutoresearchWidget(() => state),
+        );
+      } else {
+        ctx.ui.setWidget(AUTORESEARCH_WIDGET_KEY, undefined);
+      }
     }
   }
 
@@ -525,6 +536,9 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
     toolActivity = 0;
     lastSeenActivity = 0;
     pi.events.emit(AUTORESEARCH_STATE_EVENT, { active: false, iterations: 0 });
-    if (ctx.hasUI) ctx.ui.setStatus(AUTORESEARCH_STATUS_KEY, undefined);
+    if (ctx.hasUI) {
+      ctx.ui.setStatus(AUTORESEARCH_STATUS_KEY, undefined);
+      ctx.ui.setWidget(AUTORESEARCH_WIDGET_KEY, undefined);
+    }
   });
 }

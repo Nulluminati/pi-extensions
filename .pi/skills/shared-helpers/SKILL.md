@@ -27,6 +27,7 @@ import { renderModalFrame } from "../../../lib/tui-frame.ts";
 | Make a cheap one-off LLM call (summaries, side agents, recaps) | `resolveSmallModel` (+ `complete` / `completeSimple` from `@earendil-works/pi-ai`) | `lib/small-model.ts` |
 | Build a `/smallmodel`-style config command or read the user's saved small-model choice | `loadSmallModelConfig`, `saveSmallModelConfig`, `parseSmallModelSpec` | `lib/small-model.ts` |
 | Draw a bordered modal dialog with a title | `renderModalFrame`, `modalContentWidth` | `lib/tui-frame.ts` |
+| Build a framed editor-widget panel (jobs, todos, missions, workers, autoresearch) | `createFramedWidget` | `lib/framed-widget.ts` |
 | Show an icon + colored status in the footer/status area | `formatStatusLine` | `lib/ui-format.ts` |
 | Render a "key: action" hint bar inside a dialog | `formatStyledKeyHints`, `formatKeyHints` | `lib/ui-format.ts` |
 | Write a `renderResult` for a registered tool | `createToolStatus`, `wrapToolText` | `lib/tool-renderer.ts` |
@@ -87,6 +88,29 @@ render(width: number): string[] {
 - Compute body width with `modalContentWidth(width)` and render your content into that narrower width; the frame adds the border and padding around it.
 - Small widths are handled: below 4 columns the frame degrades to truncated raw lines. You don't need width guards beyond the empty case.
 - Lower-level pieces (`frameBorderLine`, `frameRuleLine`, `frameContentLine`) exist for custom layouts, but prefer `renderModalFrame` so all dialogs share one visual language.
+
+## `lib/framed-widget.ts` — framed editor widgets
+
+Factory for the always-on panels above the editor (jobs, todos, missions, workers, autoresearch). `createFramedWidget({ title, titleRight?, getBodyLines, maxBodyLines? })` returns the `(tui, theme) => { render(width), invalidate() }` component `ctx.ui.setWidget` expects: body lines and the top-right label are computed at render time (read live state in the callbacks), lines are wrapped in `renderModalFrame` with `paddingY: 0`, overflow beyond `maxBodyLines` (default 8) collapses into a dim `↓ N more` line, and frames are cached per width until `invalidate()`.
+
+```typescript
+ctx.ui.setWidget(WIDGET_KEY, hasState ? createFramedWidget({
+  title: "Jobs",
+  titleRight: () => `${count()} running`,
+  getBodyLines: (theme) => buildLines(theme),
+}) : undefined);
+```
+
+Pass `undefined` to `setWidget` when there is nothing to show. For a theme richer than `{ fg }`, type the callbacks via the generic: `createFramedWidget<MyWidgetTheme>({…})`.
+
+### Widget-first status rule
+
+Extensions whose live state is shown in a framed editor widget (missions, agents, autoresearch) follow two rules so the surfaces stay consistent and never double-render:
+
+1. **Keep the `ctx.ui.setStatus` fallback.** It is what pi's default footer shows when the bundled status bar is disabled (`/statusbar:toggle`). Never remove it; build it with `formatStatusLine`.
+2. **Register the status key in the status bar's line-2 skip list** (`extensions/status-bar/src/constants.ts`, mirrored string like `MISSIONS_STATUS_KEY`). The custom footer skips widget-first keys on its second line because the widget already shows the state.
+
+Messenger's unread count is the one line-1 exception: the status bar subscribes to `messenger:state` and renders `✉ N` next to the context usage bar; messenger's own `setStatus` entry remains its disabled-footer fallback and is likewise skipped on line 2.
 
 ## `lib/input-modal.ts` — framed text prompt
 

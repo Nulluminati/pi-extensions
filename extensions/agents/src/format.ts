@@ -1,11 +1,15 @@
 /** Rendering for worker lists, status output, and the editor widget. */
 
+import { createFramedWidget, type FramedWidgetFactory } from "../../../lib/framed-widget.ts";
 import type { WorkerRecord } from "./types.ts";
 
 // --- Constants ---
 
 export const WORKERS_WIDGET_KEY = "agents";
 export const AGENTS_STATE_EVENT = "agents:state";
+
+/** How many workers the widget shows before collapsing the rest. */
+const MAX_WIDGET_WORKERS = 5;
 
 // --- Formatting ---
 
@@ -42,9 +46,12 @@ export function formatWorkerList(workers: WorkerRecord[]): string {
   return workers.map((w) => formatWorkerLine(w)).join("\n");
 }
 
-export function widgetLines(workers: WorkerRecord[]): string[] | undefined {
-  if (workers.length === 0) return undefined;
-  const lines = [`⚙ ${workers.length} worker(s)`];
-  for (const w of workers.slice(0, 5)) lines.push(`  ${formatWorkerLine(w)}`);
-  return lines;
+/** Framed editor widget: the running workers, read at render time. */
+export function createWorkersWidget(getWorkers: () => WorkerRecord[]): FramedWidgetFactory {
+  return createFramedWidget({
+    title: "Workers",
+    titleRight: () => `${getWorkers().length} running`,
+    getBodyLines: () => getWorkers().map(formatWorkerLine),
+    maxBodyLines: MAX_WIDGET_WORKERS,
+  });
 }

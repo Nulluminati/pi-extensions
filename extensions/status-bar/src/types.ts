@@ -68,4 +68,11 @@ export interface State {
   // True while the plan extension is in plan mode (see plan:mode-change on the
   // pi.events bus); tints the editor frame with the warning color.
   planModeActive: boolean;
+  // Unread messenger mail count, published by the messenger extension on the
+  // pi.events bus (see messenger:state). Shown as an "✉ N" segment in the
+  // line-1 right block while N > 0. Like goalRunning, it is not cleared on
+  // session boundaries: the messenger re-announces its state during its own
+  // session_start, and a reset here could clobber an announcement that has
+  // already fired.
+  unreadMail: number;
 }

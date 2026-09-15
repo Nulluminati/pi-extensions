@@ -1,5 +1,6 @@
 /** Rendering for autoresearch status, results, and the footer line. */
 
+import { createFramedWidget, type FramedWidgetFactory } from "../../../lib/framed-widget.ts";
 import { formatStatusLine } from "../../../lib/ui-format.ts";
 import { bestEntry, confidence } from "./stats.ts";
 import type { AutoConfig, AutoSummary, RunEntry } from "./types.ts";
@@ -7,6 +8,7 @@ import type { AutoConfig, AutoSummary, RunEntry } from "./types.ts";
 // --- Constants ---
 
 export const AUTORESEARCH_STATUS_KEY = "autoresearch";
+export const AUTORESEARCH_WIDGET_KEY = "autoresearch";
 export const AUTORESEARCH_STATE_EVENT = "autoresearch:state";
 export const AUTORESEARCH_STATUS_ICON = "⚗";
 export const AUTORESEARCH_ICON_COLOR = "accent";
@@ -108,5 +110,38 @@ export function formatFooter(
     text,
     iconColor: AUTORESEARCH_ICON_COLOR,
     textColor: AUTORESEARCH_TEXT_COLOR,
+  });
+}
+
+// --- Widget ---
+
+/** Framed editor widget: campaign progress and the latest run. The summary
+ * and log snapshot are read at render time from what the last publish gave. */
+export function createAutoresearchWidget(
+  getState: () => { summary: AutoSummary; entries: RunEntry[] } | undefined,
+): FramedWidgetFactory {
+  return createFramedWidget({
+    title: "Autoresearch",
+    titleRight: () => {
+      const state = getState();
+      if (!state) return undefined;
+      const { iterations, maxIterations } = state.summary;
+      return `it ${iterations}${maxIterations !== undefined ? `/${maxIterations}` : ""}`;
+    },
+    getBodyLines: () => {
+      const state = getState();
+      if (!state) return [];
+      const { summary, entries } = state;
+      const lines: string[] = [];
+      const bestParts: string[] = [];
+      if (summary.best !== undefined) bestParts.push(`best ${round(summary.best)}`);
+      if (summary.confidence !== undefined) bestParts.push(`conf ${round(summary.confidence)}x`);
+      if (bestParts.length > 0) lines.push(bestParts.join(" · "));
+      const last = entries[entries.length - 1];
+      if (last) {
+        lines.push(`run ${last.run} ${last.status}: ${last.description.split("\n")[0]}`);
+      }
+      return lines;
+    },
   });
 }

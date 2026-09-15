@@ -2,8 +2,8 @@
  * editor-widget factory. Tested directly and through the extension. */
 
 import type { ExtensionAPI } from "pi";
+import { createFramedWidget, type FramedWidgetComponent } from "../../../lib/framed-widget.ts";
 import { getTodoItems, type TodoItem } from "../../../lib/todos.ts";
-import { renderModalFrame } from "../../../lib/tui-frame.ts";
 
 /** How many items the widget shows before collapsing the rest. */
 const MAX_WIDGET_ITEMS = 3;
@@ -52,26 +52,12 @@ export function buildWidgetLines(
  * same border language as modal panels. Items are read at render time, so
  * the box always shows the current list.
  */
-export function createTodosWidget(pi: ExtensionAPI) {
-  return (_tui: unknown, theme: WidgetTheme) => {
-    let cachedWidth: number | undefined;
-    let cachedLines: string[] | undefined;
-    return {
-      render(width: number): string[] {
-        if (cachedLines && cachedWidth === width) return cachedLines;
-        const items = getTodoItems(pi);
-        cachedLines = renderModalFrame(theme, width, buildWidgetLines(theme, items), {
-          title: WIDGET_TITLE,
-          titleRight: buildProgressLabel(items),
-          paddingY: 0,
-        });
-        cachedWidth = width;
-        return cachedLines;
-      },
-      invalidate(): void {
-        cachedWidth = undefined;
-        cachedLines = undefined;
-      },
-    };
-  };
+export function createTodosWidget(
+  pi: ExtensionAPI,
+): (tui: unknown, theme: WidgetTheme) => FramedWidgetComponent {
+  return createFramedWidget<WidgetTheme>({
+    title: WIDGET_TITLE,
+    titleRight: () => buildProgressLabel(getTodoItems(pi)),
+    getBodyLines: (theme) => buildWidgetLines(theme, getTodoItems(pi)),
+  });
 }

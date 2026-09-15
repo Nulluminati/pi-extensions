@@ -1,37 +1,63 @@
 /** Human-readable rendering of mission state for tool results, commands,
  * the footer status line, and the editor widget. */
 
+import { createFramedWidget, type FramedWidgetFactory } from "../../../lib/framed-widget.ts";
 import { formatStatusLine } from "../../../lib/ui-format.ts";
 import type { Mission, MissionSummary, ReconcileReport } from "./types.ts";
 
 // --- Status line / widget ---
 
 export const MISSION_STATUS_KEY = "missions";
+export const MISSION_WIDGET_KEY = "missions";
 export const MISSION_STATE_EVENT = "missions:state";
 export const MISSION_STATUS_ICON = "◈";
 
 /** Short footer text for the active mission, or undefined when none. */
 export function statusText(mission: Mission | undefined): string | undefined {
   if (!mission) return undefined;
+  return `${mission.status} · ${progressText(mission)}`;
+}
+
+/** Task progress for the widget's top-right label, e.g. "tasks 3/7 · 1 failing". */
+export function progressText(mission: Mission): string {
   const done = mission.tasks.filter((t) => t.status === "done").length;
   const failed = mission.tasks.filter(
     (t) => t.status === "failed" || t.status === "regressed",
   ).length;
-  const parts = [`${mission.status}`, `tasks ${done}/${mission.tasks.length}`];
+  const parts = [`tasks ${done}/${mission.tasks.length}`];
   if (failed > 0) parts.push(`${failed} failing`);
   return parts.join(" · ");
 }
 
-/** Plain widget lines for the editor widget, or undefined when no mission. */
-export function widgetLines(mission: Mission | undefined): string[] | undefined {
-  if (!mission) return undefined;
-  const lines = [`${MISSION_STATUS_ICON} ${mission.title} — ${statusText(mission)}`];
+/** Task lines for the widget body, at most three per attention-needing status. */
+function widgetTaskLines(mission: Mission): string[] {
   const show = (status: string) => mission.tasks.filter((t) => t.status === status).slice(0, 3);
+  const lines: string[] = [];
   for (const task of show("in_progress")) lines.push(`  ▸ ${task.id} ${task.title}`);
   for (const task of show("blocked")) lines.push(`  ⛔ ${task.id} ${task.title} (blocked)`);
   for (const task of show("regressed")) lines.push(`  ⚠ ${task.id} ${task.title} (regressed)`);
   for (const task of show("failed")) lines.push(`  ✗ ${task.id} ${task.title} (failed)`);
   return lines;
+}
+
+/** Framed editor widget: the active mission and its attention-needing tasks,
+ * or undefined when no mission is active. The mission is read at render time. */
+export function createMissionWidget(getMission: () => Mission | undefined): FramedWidgetFactory {
+  return createFramedWidget({
+    title: "Mission",
+    titleRight: () => {
+      const mission = getMission();
+      return mission ? progressText(mission) : undefined;
+    },
+    getBodyLines: () => {
+      const mission = getMission();
+      if (!mission) return [];
+      return [
+        `${MISSION_STATUS_ICON} ${mission.title} — ${mission.status}`,
+        ...widgetTaskLines(mission),
+      ];
+    },
+  });
 }
 
 /** Theme-formatted footer status entry. */

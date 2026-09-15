@@ -45,6 +45,7 @@ import {
   GOAL_STATE_EVENT,
   GONDOLIN_VM_EVENT,
   ICON_COLOR,
+  MESSENGER_STATE_EVENT,
   PLAN_MODE_EVENT,
   STATUS_ICON,
   STATUS_KEY,
@@ -131,6 +132,7 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     flexOn: false,
     flexCapable: false,
     planModeActive: false,
+    unreadMail: 0,
   };
 
   let getBranch: () => any[] = () => [];
@@ -155,6 +157,19 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
       editorRequestRender?.();
     },
   );
+
+  // Track unread messenger mail so line 1 can show an "✉ N" segment in its
+  // right block. Subscribed at load time rather than in session_start, for
+  // the same reason as the goal subscription above: the messenger extension
+  // publishes its state during its own session_start handler, which may run
+  // before this extension's session_start-scoped listeners exist, and the
+  // announcement would be missed on first load. Like goalRunning, unreadMail
+  // is not reset on session boundaries — the messenger re-announces on every
+  // session_start, and resetting here could clobber that announcement.
+  pi.events.on(MESSENGER_STATE_EVENT, (payload: { name: string | null; unread: number }) => {
+    state.unreadMail = payload.unread;
+    state.lastHandle?.requestRender();
+  });
 
   function setFooter(ctx: ExtensionCommandContext): void {
     if (!ctx.hasUI) return;
