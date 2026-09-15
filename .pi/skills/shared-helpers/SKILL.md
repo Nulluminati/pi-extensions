@@ -1,6 +1,6 @@
 ---
 name: shared-helpers
-description: Use the shared helper modules in lib/ when building or modifying Pi extensions in this repo. Covers session entry parsing (session-utils), cheap model resolution (small-model), modal frames (tui-frame), single-line input modals (input-modal), status lines and key hints (ui-format), tool result renderers (tool-renderer), searchable select modals (searchable-select), editor factory layering (editor-factory), persisted per-session identity (session-identity), and sharded presence registries with dead-pid pruning (presence-shards). Use whenever an extension needs TUI rendering, a status line, a picker dialog, a text prompt, a custom editor wrapper, transcript parsing, or a cheap direct LLM call — import the lib/ helper instead of reimplementing the pattern.
+description: Use the shared helper modules in lib/ when building or modifying Pi extensions in this repo. Covers session entry parsing (session-utils), cheap model resolution (small-model), modal frames (tui-frame), single-line input modals (input-modal), status lines and key hints (ui-format), tool result renderers (tool-renderer), searchable select modals (searchable-select), editor factory layering (editor-factory), persisted per-session identity (session-identity), sharded presence registries with dead-pid pruning (presence-shards), and canonical config/state/cache locations (paths). Use whenever an extension needs TUI rendering, a status line, a picker dialog, a text prompt, a custom editor wrapper, transcript parsing, a cheap direct LLM call, or a place to store config or state — import the lib/ helper instead of reimplementing the pattern.
 ---
 
 # Shared Helpers in `lib/`
@@ -36,6 +36,7 @@ import { renderModalFrame } from "../../../lib/tui-frame.ts";
 | Give a session a stable agent name that survives `pi -c` and `/reload` | `resolveSessionIdentity` | `lib/session-identity.ts` |
 | Write config/state JSON without risking a torn file on crash | `writeJsonAtomic` | `lib/json-atomic.ts` |
 | Mutate shared state files across sessions without clobbering | `withFileLock` | `lib/file-lock.ts` |
+| Resolve where an extension stores config, state, cache, or project files | `agentConfigPath`, `agentStateDir`, `cacheDir`, `projectStateDir`, `projectStateRelative` | `lib/paths.ts` |
 | Build a `/smallmodel`-style model picker (descriptions, searchable modal) | `formatModelDescription`, `selectModelWithSearch` | `lib/model-picker.ts` |
 | Share live presence (who is online) between concurrent sessions | `writeShard`, `loadShards`, `removeShard`, `readShard` | `lib/presence-shards.ts` |
 
@@ -225,6 +226,33 @@ Mandatory rules (see `status-bar`, `voice`):
 2. **Check `hasEditorFactoryLayer` before installing** — installation must be idempotent (session reloads re-fire lifecycle events).
 3. **Always remove your layer on shutdown** with `removeEditorFactoryLayer`, and only call `setEditorComponent` when the stack actually changed (`restored !== current`).
 4. **Inside `instantiate`, call the parent factory** and wrap its editor; only ignore the parent when you are deliberately replacing the base editor itself (status-bar's visual layer pattern).
+
+## `lib/paths.ts` — where extension state lives
+
+Every filesystem location an extension owns resolves through this module. Never call
+`homedir()`, never hardcode `.pi`, and never write into the agent's `extensions/` directory
+(Pi uses it as an extension-discovery root, so state there collides with code loading).
+
+| Resolver | Location | Use for |
+|----------|----------|---------|
+| `agentConfigPath(name)` | `<agentDir>/<name>.json` | Global config, sibling of Pi's `settings.json` |
+| `agentStateDir(name)` | `<agentDir>/<name>/` | Global runtime state: logs, spools, locks |
+| `cacheDir(name)` | `$XDG_CACHE_HOME/pi-<name>/` (default `~/.cache/pi-<name>/`) | Regenerable cache and downloaded models |
+| `projectStateDir(cwd, name)` | `<cwd>/<CONFIG_DIR_NAME>/<name>/` | Project-scoped state |
+| `projectStateRelative(name)` | `<CONFIG_DIR_NAME>/<name>` | Git-exclude patterns |
+
+`isProjectStatePath(relativePath)` answers whether a project-relative path is extension state —
+use it in clean-tree and git-hygiene checks rather than prefix-matching the config dir yourself.
+It treats the config dir itself as state too, because `git status --porcelain` collapses a
+wholly-untracked tree to `.pi/`.
+
+`<agentDir>` comes from `getAgentDir()` and honors `PI_CODING_AGENT_DIR`; project paths use
+`CONFIG_DIR_NAME`, so rebranded distributions resolve to their own config directory. Both are
+exported by `@earendil-works/pi-coding-agent`. `test/conventions.test.ts` fails the suite on a
+`homedir()` call or literal `.pi` path segment under `extensions/` or `lib/`, allowlisting only
+this module and `tool-style` (which reads pywal's cache, not its own state).
+
+Ephemeral spills with no retention go in `os.tmpdir()` with a `pi-<name>-` prefix instead.
 
 ## `lib/json-atomic.ts` — atomic JSON writes
 

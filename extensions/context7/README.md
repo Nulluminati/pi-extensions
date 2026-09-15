@@ -107,7 +107,7 @@ If multiple cached docs match, the tool returns a list of candidates rather than
 
 ### Cache architecture
 
-The cache lives under `~/.pi/agent/extensions/context7/cache/`:
+The cache lives under `$XDG_CACHE_HOME/pi-context7/` (default `~/.cache/pi-context7/`):
 
 - **Resolve cache** — `cache/resolve/objects/<hash>.json` stores resolve results. `cache/resolve/index/` holds `all.json` and `by-library.json` for fast lookups.
 - **Docs cache** — `cache/docs/objects/<hash>.json` stores raw + curated text. `cache/docs/index/` holds `all.json`, `by-ref.json`, `by-library-id.json`, `by-library-name.json`, and `by-version.json` for semantic searches.
@@ -131,7 +131,7 @@ The cache lives under `~/.pi/agent/extensions/context7/cache/`:
 - **Curated by default, raw on demand** — `context7_get_library_docs` returns a compact, keyword-relevant summary to save tokens. If the LLM needs more, it can call `context7_get_cached_doc_raw` for the full text. This two-step pattern avoids flooding the context window with long docs.
 - **Stale fallback** — If Context7 is unreachable, stale cached docs are still usable. The tool reports the stale status so the LLM knows the data may be outdated.
 - **Auto-resolve with ambiguity guard** — `context7_get_library_docs` can resolve library names automatically, but it refuses to guess when results are ambiguous. This prevents fetching docs for the wrong library.
-- **Config via env or JSON** — The API key can be set via `CONTEXT7_API_KEY` (preferred) or in `~/.pi/agent/extensions/context7/config.json`. Cache TTLs are also configurable.
+- **Config via env or JSON** — The API key can be set via `CONTEXT7_API_KEY` (preferred) or in `~/.pi/agent/context7.json`. Cache TTLs are also configurable.
 
 ## Pi APIs Used
 
@@ -153,7 +153,7 @@ The API key is optional — Context7 works without one but with lower rate limit
 
 ### Config file
 
-Create `~/.pi/agent/extensions/context7/config.json`:
+Create `~/.pi/agent/context7.json`:
 
 ```json
 {

@@ -15,6 +15,7 @@ import { appendFile, readFile, rename, unlink, writeFile } from "node:fs/promise
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { withFileLock } from "../../../lib/file-lock.ts";
 import { writeJsonAtomic } from "../../../lib/json-atomic.ts";
+import { projectStateDir } from "../../../lib/paths.ts";
 import {
   isProcessAlive,
   loadShards,
@@ -27,7 +28,7 @@ import type { Message, Presence, PresenceRegistry, ReservationMap } from "./type
 // --- Paths ---
 
 export function messengerDir(cwd: string): string {
-  return join(cwd, ".pi", "messenger");
+  return projectStateDir(cwd, "messenger");
 }
 
 function registryPath(cwd: string): string {

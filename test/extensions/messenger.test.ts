@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext } from "pi";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import messengerExtension from "../../extensions/messenger/messenger.ts";
@@ -32,6 +33,32 @@ import { createMockPi } from "../mocks/pi-mocks.ts";
 
 const execFileAsync = promisify(execFile);
 const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
+/** Resolves Pi's bundled runtime package for spawned bare-node subprocesses. */
+const PI_PACKAGE_LOADER = fileURLToPath(new URL("../setup/pi-package-loader.mjs", import.meta.url));
+
+/**
+ * fs.watch delivery plus the idle-check round trip runs long under a loaded
+ * parallel pool; the default 1s leaves no margin.
+ */
+const WATCHER_WAIT = { timeout: 3_000 } as const;
+
+/**
+ * The inbox watcher's delivery work is fire-and-forget, so a mailbox write can
+ * land between rm's readdir and rmdir. Retry the transient codes instead of
+ * failing a green test on teardown timing.
+ */
+async function removeTempDir(path: string): Promise<void> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await rm(path, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (attempt >= 5 || (code !== "ENOTEMPTY" && code !== "EBUSY")) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 10 * (attempt + 1)));
+    }
+  }
+}
 
 describe("messenger-extension", () => {
   let cwd: string;
@@ -63,7 +90,7 @@ describe("messenger-extension", () => {
 
   afterEach(async () => {
     vi.unstubAllEnvs();
-    await rm(cwd, { recursive: true, force: true });
+    await removeTempDir(cwd);
   });
 
   it("registers the messenger tool and lifecycle handlers", () => {
@@ -274,13 +301,18 @@ describe("messenger-extension", () => {
 
     // No turn has ever run; only the inbox watcher can deliver this.
     await sendMessage(cwd, "watched", "peer", "wake up call");
-    await vi.waitFor(() =>
-      expect(mockPi.sendMessage).toHaveBeenCalledWith(
-        expect.objectContaining({ customType: "messenger-inbox" }),
-        { triggerTurn: true },
-      ),
+    await vi.waitFor(
+      () =>
+        expect(mockPi.sendMessage).toHaveBeenCalledWith(
+          expect.objectContaining({ customType: "messenger-inbox" }),
+          { triggerTurn: true },
+        ),
+      WATCHER_WAIT,
     );
-    await vi.waitFor(async () => expect(await readInbox(cwd, "watched")).toHaveLength(0));
+    await vi.waitFor(
+      async () => expect(await readInbox(cwd, "watched")).toHaveLength(0),
+      WATCHER_WAIT,
+    );
   });
 
   it("inbox watcher ignores other agents' mailboxes", async () => {
@@ -295,7 +327,7 @@ describe("messenger-extension", () => {
     await flushEventLoop();
     expect(mockPi.sendMessage).not.toHaveBeenCalled();
     await sendMessage(cwd, "watched", "peer", "for you");
-    await vi.waitFor(() => expect(mockPi.sendMessage).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(mockPi.sendMessage).toHaveBeenCalledTimes(1), WATCHER_WAIT);
     expect(mockPi.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         content: [expect.objectContaining({ text: expect.stringContaining("for you") })],
@@ -311,7 +343,7 @@ describe("messenger-extension", () => {
 
     // Positive control: the watcher delivers while it is alive.
     await sendMessage(cwd, "watched", "peer", "while alive");
-    await vi.waitFor(() => expect(mockPi.sendMessage).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(mockPi.sendMessage).toHaveBeenCalledTimes(1), WATCHER_WAIT);
     mockPi.sendMessage.mockClear();
 
     await getEventHandler("session_shutdown")(
@@ -536,7 +568,7 @@ describe("messenger-store", () => {
   });
 
   afterEach(async () => {
-    await rm(cwd, { recursive: true, force: true });
+    await removeTempDir(cwd);
   });
 
   it("normalizePathPrefix handles relative, absolute, and outside paths", () => {
@@ -691,7 +723,9 @@ describe("messenger-store", () => {
     const registry = await loadRegistry(cwd);
     expect(registry["agent-a"]).toBeUndefined();
     expect(registry["agent-b"]).toBeDefined();
-    expect(existsSync(join(cwd, ".pi/messenger/registry/agent-a.json"))).toBe(false);
+    expect(existsSync(join(cwd, CONFIG_DIR_NAME, "messenger", "registry", "agent-a.json"))).toBe(
+      false,
+    );
   });
 
   it("mailbox preserves malformed lines when marking read", async () => {
@@ -710,7 +744,7 @@ describe("messenger-store", () => {
   });
 
   it("inboxPath encodes the agent name so traversal names stay inside the inbox", () => {
-    const inbox = join(cwd, ".pi", "messenger", "inbox");
+    const inbox = join(cwd, CONFIG_DIR_NAME, "messenger", "inbox");
     const path = inboxPath(cwd, "../../escape");
 
     expect(path).toBe(join(inbox, `${encodeURIComponent("../../escape")}.jsonl`));
@@ -720,8 +754,8 @@ describe("messenger-store", () => {
   it("sendMessage rejects a recipient name that would escape the inbox", async () => {
     await expect(sendMessage(cwd, "../escape", "me", "hi")).rejects.toThrow(/recipient/i);
     await expect(sendMessage(cwd, "..\\escape", "me", "hi")).rejects.toThrow(/recipient/i);
-    expect(existsSync(join(cwd, ".pi", "messenger", "escape.jsonl"))).toBe(false);
-    expect(existsSync(join(cwd, ".pi", "escape.jsonl"))).toBe(false);
+    expect(existsSync(join(cwd, CONFIG_DIR_NAME, "messenger", "escape.jsonl"))).toBe(false);
+    expect(existsSync(join(cwd, CONFIG_DIR_NAME, "escape.jsonl"))).toBe(false);
   });
 
   it("concurrent reserve calls keep every claim", async () => {
@@ -762,6 +796,9 @@ describe("messenger-store", () => {
           [
             "--import",
             "tsx",
+            // Registered after tsx so its resolve hook runs first.
+            "--import",
+            PI_PACKAGE_LOADER,
             "--input-type=module",
             "-e",
             script,

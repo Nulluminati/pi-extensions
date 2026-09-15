@@ -12,6 +12,7 @@ import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node
 import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { ThinkingLevel } from "pi";
+import { agentConfigPath } from "./paths.ts";
 import { parseSmallModelSpec } from "./small-model.ts";
 
 // --- Constants ---
@@ -58,7 +59,7 @@ export function resolveWorkerModelConfigPath(
   agentDir = getAgentDir(),
 ): string {
   const override = env[WORKER_MODEL_CONFIG_ENV_VAR]?.trim();
-  return override || join(agentDir, "worker-model.json");
+  return override || agentConfigPath("worker-model", agentDir);
 }
 
 /**

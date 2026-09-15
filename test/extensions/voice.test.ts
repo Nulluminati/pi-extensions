@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readdir } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { completeSimple } from "@earendil-works/pi-ai";
 import { isKittyProtocolActive } from "@earendil-works/pi-tui";
@@ -999,15 +999,18 @@ describe("voice-extension", () => {
     });
 
     it("falls back to ~/.cache/pi-voice/models when unset", () => {
-      const dir = resolveModelsDir({});
-      expect(dir.endsWith(join(".cache", "pi-voice", "models"))).toBe(true);
+      expect(resolveModelsDir({})).toBe(join(homedir(), ".cache", "pi-voice", "models"));
+    });
+
+    it("honors XDG_CACHE_HOME when set", () => {
+      expect(resolveModelsDir({ XDG_CACHE_HOME: "/xdg" })).toBe("/xdg/pi-voice/models");
     });
   });
 
   describe("resolveVoiceConfigPath", () => {
-    it("uses the global Pi extension config directory by default", () => {
-      expect(resolveVoiceConfigPath({}, "/home/zero")).toBe(
-        "/home/zero/.pi/agent/extensions/voice/config.json",
+    it("uses the global Pi agent directory by default", () => {
+      expect(resolveVoiceConfigPath({}, "/home/zero/.pi/agent")).toBe(
+        "/home/zero/.pi/agent/voice.json",
       );
     });
 

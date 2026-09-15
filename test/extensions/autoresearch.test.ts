@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext } from "pi";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import autoresearchExtension from "../../extensions/autoresearch/autoresearch.ts";
@@ -139,7 +140,7 @@ describe("autoresearch-extension", () => {
     expect(entries[0].status).toBe("baseline");
     expect(entries[0].metric).toBe(100);
 
-    const stateDir = join(cwd, ".pi", "autoresearch");
+    const stateDir = join(cwd, CONFIG_DIR_NAME, "autoresearch");
     expect(existsSync(join(stateDir, "config.json"))).toBe(true);
     expect(existsSync(join(stateDir, "log.jsonl"))).toBe(true);
     expect(existsSync(join(stateDir, "untracked-snapshot.json"))).toBe(true);
@@ -173,19 +174,19 @@ describe("autoresearch-extension", () => {
 
     // The pre-existing edit is preserved and no state was written.
     expect(await readFile(join(cwd, "code.txt"), "utf8")).toBe("pre-existing edit\n");
-    expect(existsSync(join(cwd, ".pi", "autoresearch"))).toBe(false);
+    expect(existsSync(join(cwd, CONFIG_DIR_NAME, "autoresearch"))).toBe(false);
     const exclude = await readFile(join(cwd, ".git/info/exclude"), "utf8").catch(() => "");
     expect(exclude).not.toContain(".pi/autoresearch/");
   });
 
   it("init ignores untracked state under .pi/", async () => {
     // Other pi extensions park their state under .pi/; it must not block init.
-    await mkdir(join(cwd, ".pi", "missions"), { recursive: true });
-    await writeFile(join(cwd, ".pi", "missions", "x.json"), "{}");
+    await mkdir(join(cwd, CONFIG_DIR_NAME, "missions"), { recursive: true });
+    await writeFile(join(cwd, CONFIG_DIR_NAME, "missions", "x.json"), "{}");
 
     const res = await initSession();
     expect(res.content[0].text).toContain("Baseline: 100");
-    expect(existsSync(join(cwd, ".pi", "missions", "x.json"))).toBe(true);
+    expect(existsSync(join(cwd, CONFIG_DIR_NAME, "missions", "x.json"))).toBe(true);
   });
 
   it("init rejects pre-existing untracked work", async () => {
@@ -196,7 +197,7 @@ describe("autoresearch-extension", () => {
     expect(await readFile(join(cwd, "scratch.txt"), "utf8")).toBe(
       "agent state that must survive\n",
     );
-    expect(existsSync(join(cwd, ".pi", "autoresearch"))).toBe(false);
+    expect(existsSync(join(cwd, CONFIG_DIR_NAME, "autoresearch"))).toBe(false);
   });
 
   it("keep commits the change and records the improvement", async () => {
@@ -276,7 +277,7 @@ describe("autoresearch-extension", () => {
     await initSession();
     await writeFile(join(cwd, "code.txt"), "pending edit\n");
     await executeTool({ action: "run", description: "pending experiment" });
-    expect(existsSync(join(cwd, ".pi", "autoresearch", "pending.json"))).toBe(true);
+    expect(existsSync(join(cwd, CONFIG_DIR_NAME, "autoresearch", "pending.json"))).toBe(true);
 
     // Simulate a reload: a fresh extension instance over the same cwd.
     const mockPi2 = createMockPi() as DeepMocked<ExtensionAPI>;
@@ -298,7 +299,7 @@ describe("autoresearch-extension", () => {
 
     expect(log.content[0].text).toContain("Discarded");
     expect(await readFile(join(cwd, "code.txt"), "utf8")).toBe("v1\n");
-    expect(existsSync(join(cwd, ".pi", "autoresearch", "pending.json"))).toBe(false);
+    expect(existsSync(join(cwd, CONFIG_DIR_NAME, "autoresearch", "pending.json"))).toBe(false);
   });
 
   it("session shutdown clears the status line and lifecycle state", async () => {
@@ -342,7 +343,7 @@ describe("autoresearch-extension", () => {
     expect(entries[0].metric).toBe(90);
 
     // The previous campaign log is archived, not merged into the new one.
-    const archived = await readdir(join(cwd, ".pi", "autoresearch"));
+    const archived = await readdir(join(cwd, CONFIG_DIR_NAME, "autoresearch"));
     expect(archived.some((name) => name.startsWith("log.") && name !== "log.jsonl")).toBe(true);
   });
 
@@ -444,7 +445,10 @@ describe("autoresearch-extension", () => {
 
   it("keep with a corrupt untracked snapshot fails loudly and does not commit", async () => {
     await initSession();
-    await writeFile(join(cwd, ".pi", "autoresearch", "untracked-snapshot.json"), "{ corrupt");
+    await writeFile(
+      join(cwd, CONFIG_DIR_NAME, "autoresearch", "untracked-snapshot.json"),
+      "{ corrupt",
+    );
     await writeFile(join(cwd, "code.txt"), "experiment edit\n");
     await executeTool({ action: "run", description: "corrupt snapshot" });
 
@@ -459,7 +463,7 @@ describe("autoresearch-extension", () => {
 
   it("keep with a missing untracked snapshot keeps legacy behavior", async () => {
     await initSession();
-    await rm(join(cwd, ".pi", "autoresearch", "untracked-snapshot.json"));
+    await rm(join(cwd, CONFIG_DIR_NAME, "autoresearch", "untracked-snapshot.json"));
     await writeFile(join(cwd, "code.txt"), "legacy edit\n");
     await writeFile(join(cwd, "legacy-new.txt"), "created during experiment\n");
     await executeTool({ action: "run", description: "legacy keep" });
@@ -614,7 +618,7 @@ describe("autoresearch-extension", () => {
     // Restore a pending measurement across sessions via pending.json.
     await writeFile(join(cwd, "code.txt"), "uncommitted experiment\n");
     await executeTool({ action: "run", description: "pending experiment" });
-    const pendingPath = join(cwd, ".pi", "autoresearch", "pending.json");
+    const pendingPath = join(cwd, CONFIG_DIR_NAME, "autoresearch", "pending.json");
     expect(existsSync(pendingPath)).toBe(true);
     await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
     const statusWithPending = await executeTool({ action: "status" });

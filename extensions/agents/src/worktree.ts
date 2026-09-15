@@ -8,6 +8,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { runGit } from "../../../lib/git.ts";
+import { isProjectStatePath, projectStateDir } from "../../../lib/paths.ts";
 
 // --- Constants ---
 
@@ -17,7 +18,7 @@ const BASE_COMMIT_FILE = "agents-base";
 // --- Helpers ---
 
 export function worktreesDir(cwd: string): string {
-  return join(cwd, ".pi", "worktrees");
+  return projectStateDir(cwd, "worktrees");
 }
 
 export function worktreePath(cwd: string, workerId: string): string {
@@ -41,6 +42,24 @@ export async function isGitRepo(cwd: string): Promise<boolean> {
 }
 
 /**
+ * Untracked files under the config dir — messenger inboxes, mission records,
+ * worker registries — are tooling state, not work. They never enter the
+ * worktree (branched from HEAD) and never appear in the captured patch, so
+ * counting them only self-blocks delegation in repos that do not gitignore
+ * the config dir. Tracked modifications under it still refuse: a HEAD-based
+ * worktree would be missing those committed-then-edited files.
+ */
+function blockingStatusLines(status: string): string[] {
+  return status
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .filter((line) => {
+      if (!line.startsWith("?? ")) return true;
+      return !isProjectStatePath(line.slice(3).replace(/^"(.*)"$/, "$1"));
+    });
+}
+
+/**
  * Create an isolated worktree from HEAD. Rejects when the tree is dirty —
  * workers must branch from committed state, otherwise the captured patch
  * would silently miss uncommitted work.
@@ -50,7 +69,7 @@ export async function createWorktree(
   workerId: string,
 ): Promise<{ path: string; branch: string }> {
   const status = await runGit(cwd, ["status", "--porcelain"]);
-  if (status.trim() !== "") {
+  if (blockingStatusLines(status).length > 0) {
     throw new Error(
       "Refusing to create a worker worktree from a dirty tree. Commit or stash first so the worker's patch captures a clean baseline.",
     );

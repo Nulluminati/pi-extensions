@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node
 import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { ExtensionContext, Model, ThinkingLevel } from "pi";
+import { agentConfigPath } from "./paths.ts";
 
 const DEFAULT_THINKING_LEVEL: ThinkingLevel = "minimal";
 const OPENCODE_HOST = "opencode.ai";
@@ -61,7 +62,7 @@ export function resolveSmallModelConfigPath(
   agentDir = getAgentDir(),
 ): string {
   const override = env[SMALL_MODEL_CONFIG_ENV_VAR]?.trim();
-  return override || join(agentDir, "small-model.json");
+  return override || agentConfigPath("small-model", agentDir);
 }
 
 export function loadSmallModelConfig(options: ConfigOptions = {}): {

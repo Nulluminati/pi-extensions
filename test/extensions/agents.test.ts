@@ -4,6 +4,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext } from "pi";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import agentsExtension from "../../extensions/agents/agents.ts";
@@ -926,6 +927,49 @@ describe("agents-units", () => {
       await initGitRepo(repo);
       await writeFile(join(repo, "README.md"), "# changed\n");
       await expect(createWorktree(repo, "w-dirty")).rejects.toThrow(/dirty tree/);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("createWorktree ignores untracked config-dir state", async () => {
+    const repo = await mkdtemp(join(tmpdir(), "agents-dirty-state-"));
+    try {
+      await initGitRepo(repo);
+      // Messenger/missions/workers write here in repos that do not gitignore it.
+      await mkdir(join(repo, CONFIG_DIR_NAME, "messenger", "inbox"), { recursive: true });
+      await writeFile(join(repo, CONFIG_DIR_NAME, "messenger", "inbox", "peer.jsonl"), "{}\n");
+
+      await expect(createWorktree(repo, "w-state")).resolves.toEqual({
+        path: expect.stringContaining("w-state"),
+        branch: "agents/w-state",
+      });
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("createWorktree still refuses untracked work files", async () => {
+    const repo = await mkdtemp(join(tmpdir(), "agents-dirty-src-"));
+    try {
+      await initGitRepo(repo);
+      await writeFile(join(repo, "scratch.ts"), "export {};\n");
+      await expect(createWorktree(repo, "w-src")).rejects.toThrow(/dirty tree/);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("createWorktree refuses tracked modifications under the config dir", async () => {
+    const repo = await mkdtemp(join(tmpdir(), "agents-dirty-tracked-"));
+    try {
+      await mkdir(join(repo, CONFIG_DIR_NAME), { recursive: true });
+      await writeFile(join(repo, CONFIG_DIR_NAME, "committed.json"), "{}\n");
+      await initGitRepo(repo);
+      await writeFile(join(repo, CONFIG_DIR_NAME, "committed.json"), '{"changed":true}\n');
+
+      // A HEAD-based worktree would miss the edit, so this must still refuse.
+      await expect(createWorktree(repo, "w-tracked")).rejects.toThrow(/dirty tree/);
     } finally {
       await rm(repo, { recursive: true, force: true });
     }

@@ -38,6 +38,7 @@ import {
   loadRegistry,
   loadReservations,
   markRead,
+  messengerDir,
   readInbox,
   readoptReservations,
   release,
@@ -152,7 +153,7 @@ export default async function messengerExtension(pi: ExtensionAPI) {
     if (!agentName) return;
     stopInboxWatcher();
     try {
-      const inboxDir = join(ctx.cwd, ".pi", "messenger", "inbox");
+      const inboxDir = join(messengerDir(ctx.cwd), "inbox");
       mkdirSync(inboxDir, { recursive: true });
       inboxWatcher = watch(inboxDir, (_event, filename) => {
         if (filename && filename !== inboxFileName(agentName)) return;

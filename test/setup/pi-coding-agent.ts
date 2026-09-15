@@ -97,6 +97,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
     DynamicBorder,
     Theme,
     ToolExecutionComponent,
+    CONFIG_DIR_NAME: ".pi",
     DEFAULT_COMPACTION_SETTINGS: {
       enabled: true,
       reserveTokens: 16384,

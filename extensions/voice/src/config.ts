@@ -1,10 +1,9 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { agentConfigPath, cacheDir } from "../../../lib/paths.ts";
 import {
-  DEFAULT_CONFIG_SUBPATH,
   DEFAULT_MODEL_ID,
-  DEFAULT_MODELS_SUBDIR,
   DEFAULT_TTS_MODEL_ID,
   KITTEN_VOICES,
   MODELS_ENV_VAR,
@@ -16,13 +15,13 @@ import { MODELS, TTS_MODELS } from "./models.ts";
 export function resolveModelsDir(env: NodeJS.ProcessEnv): string {
   const fromEnv = env[MODELS_ENV_VAR];
   if (fromEnv?.trim()) return fromEnv;
-  return join(homedir(), DEFAULT_MODELS_SUBDIR);
+  return join(cacheDir("voice", env), "models");
 }
 
-export function resolveVoiceConfigPath(env: NodeJS.ProcessEnv, homeDir = homedir()): string {
+export function resolveVoiceConfigPath(env: NodeJS.ProcessEnv, agentDir = getAgentDir()): string {
   const fromEnv = env[VOICE_CONFIG_ENV_VAR];
   if (fromEnv?.trim()) return fromEnv.trim();
-  return join(homeDir, DEFAULT_CONFIG_SUBPATH);
+  return agentConfigPath("voice", agentDir);
 }
 
 function readVoiceConfig(configPath: string): Record<string, unknown> {

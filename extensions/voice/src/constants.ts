@@ -1,5 +1,3 @@
-import { join } from "node:path";
-
 // --- Constants ---
 
 export const SAMPLE_RATE = 16000;
@@ -44,10 +42,6 @@ export const KITTEN_VOICES = [
 export const MODELS_ENV_VAR = "PI_VOICE_MODELS";
 
 export const VOICE_CONFIG_ENV_VAR = "PI_VOICE_CONFIG";
-
-export const DEFAULT_MODELS_SUBDIR = join(".cache", "pi-voice", "models");
-
-export const DEFAULT_CONFIG_SUBPATH = join(".pi", "agent", "extensions", "voice", "config.json");
 
 export const VAD_MODEL_FILE = "silero_vad.onnx";
 

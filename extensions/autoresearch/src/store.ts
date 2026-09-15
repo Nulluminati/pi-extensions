@@ -6,14 +6,15 @@ import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises
 import { isAbsolute, join, resolve } from "node:path";
 import { runGit } from "../../../lib/git.ts";
 import { writeJsonAtomic } from "../../../lib/json-atomic.ts";
+import { projectStateDir, projectStateRelative } from "../../../lib/paths.ts";
 import type { AutoConfig, RunEntry } from "./types.ts";
 
 // --- Paths ---
 
-const GIT_EXCLUDE_PATTERN = ".pi/autoresearch/";
+const GIT_EXCLUDE_PATTERN = `${projectStateRelative("autoresearch")}/`;
 
 export function autoDir(cwd: string): string {
-  return join(cwd, ".pi", "autoresearch");
+  return projectStateDir(cwd, "autoresearch");
 }
 
 export function configPath(cwd: string): string {

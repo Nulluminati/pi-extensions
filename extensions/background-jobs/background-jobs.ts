@@ -25,13 +25,12 @@
  * itself is in-memory and session-scoped.
  */
 
-import { join } from "node:path";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionUIContext } from "pi";
+import { agentStateDir } from "../../lib/paths.ts";
 import { executeJobsAction, openJobsPanel } from "./src/jobs.ts";
 import { startMonitor } from "./src/monitor.ts";
 import { activeJobs, buildSnapshot, createRegistry, type JobRegistry } from "./src/registry.ts";
-import { cancelJob, startBackgroundJob } from "./src/runner.ts";
+import { cancelJob, pruneSpoolDir, startBackgroundJob } from "./src/runner.ts";
 import { BACKGROUND_PARAMETERS, JOBS_PARAMETERS, MONITOR_PARAMETERS } from "./src/schemas.ts";
 import type { JobEvents } from "./src/types.ts";
 import { createJobsWidget } from "./src/widget.ts";
@@ -106,6 +105,13 @@ export default async function backgroundJobsExtension(pi: ExtensionAPI) {
   };
 
   pi.on("session_start", async (_event, _ctx) => {
+    // Retention runs against the pre-reset registry so logs for jobs that are
+    // still terminating are never deletion candidates.
+    const liveSpoolPaths = new Set(
+      activeJobs(registry)
+        .map((job) => job.spoolPath)
+        .filter((path): path is string => typeof path === "string"),
+    );
     // Fresh session state: clear stale timers and rebuild the registry.
     for (const job of activeJobs(registry)) {
       if (job.timer) clearTimeout(job.timer);
@@ -114,6 +120,11 @@ export default async function backgroundJobsExtension(pi: ExtensionAPI) {
     registry.nextId = 1;
     lastUi = undefined;
     shuttingDown = false;
+    try {
+      await pruneSpoolDir(agentStateDir("background-jobs"), { keep: liveSpoolPaths });
+    } catch (error) {
+      console.error(`[background-jobs] spool prune failed: ${(error as Error).message}`);
+    }
   });
 
   pi.on("session_shutdown", async (_event, _ctx) => {
@@ -164,7 +175,7 @@ export default async function backgroundJobsExtension(pi: ExtensionAPI) {
         env: (params.env as Record<string, string> | undefined) ?? undefined,
         wakeOnPattern,
         patternSource: patternRaw,
-        spoolDir: join(getAgentDir(), "background-jobs"),
+        spoolDir: agentStateDir("background-jobs"),
         events,
       });
 

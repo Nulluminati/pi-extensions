@@ -3,7 +3,6 @@
 // --- Types ---
 
 export interface Context7Settings {
-  extensionDir: string;
   configPath: string;
   cacheDir: string;
   apiKey?: string | undefined;

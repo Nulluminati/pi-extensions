@@ -773,6 +773,7 @@ declare module "@earendil-works/pi-tui" {
 
 declare module "@earendil-works/pi-coding-agent" {
   export function getAgentDir(): string;
+  export const CONFIG_DIR_NAME: string;
   export function getSettingsListTheme(): any;
   export function estimateTokens(message: any): number;
   export const DEFAULT_COMPACTION_SETTINGS: {

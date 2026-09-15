@@ -10,11 +10,11 @@ import { mkdir, readdir, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { withFileLock } from "../../../lib/file-lock.ts";
 import { writeJsonAtomic } from "../../../lib/json-atomic.ts";
+import { projectStateDir } from "../../../lib/paths.ts";
 import type { Mission, MissionSummary, TaskStatus } from "./types.ts";
 
 // --- Constants ---
 
-const MISSIONS_DIR = ".pi/missions";
 const ACTIVE_FILE = "active.json";
 // The wait deadline must exceed the stale window: a waiter that outlives
 // the stale window can observe and reclaim an abandoned lock instead of
@@ -36,7 +36,7 @@ const ALL_TASK_STATUSES: TaskStatus[] = [
 // --- Helpers ---
 
 export function missionsDir(cwd: string): string {
-  return join(cwd, MISSIONS_DIR);
+  return projectStateDir(cwd, "missions");
 }
 
 export function generateMissionId(): string {

@@ -17,6 +17,7 @@
 import { readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "pi";
+import { isProjectStatePath } from "../../lib/paths.ts";
 import {
   AUTORESEARCH_STATE_EVENT,
   AUTORESEARCH_STATUS_KEY,
@@ -184,10 +185,10 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
         // keeps stage worktree changes and discards restore tracked files from
         // HEAD, so pre-existing edits must be committed or stashed first.
         const dirty = await changedFiles(cwd);
-        // Everything under .pi/ is extension state (autoresearch, missions,
-        // messenger, …) and is never treated as pre-existing work.
+        // Everything under the config dir is extension state (autoresearch,
+        // missions, messenger, …) and is never treated as pre-existing work.
         const blocking = [...dirty.tracked, ...dirty.untracked].filter(
-          (path) => path !== ".pi" && !path.startsWith(".pi/"),
+          (path) => !isProjectStatePath(path),
         );
         if (blocking.length > 0) {
           const shown = blocking.slice(0, 10).join("\n");

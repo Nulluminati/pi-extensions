@@ -19,6 +19,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { agentConfigPath } from "./paths.ts";
 
 // --- Constants ---
 
@@ -164,7 +165,7 @@ function loadWorkerExtensionsConfig(configPath: string): string[] | undefined {
 
 function workerExtensionsConfigPath(env: NodeJS.ProcessEnv): string {
   const override = env[WORKER_EXTENSIONS_CONFIG_ENV_VAR]?.trim();
-  return override || join(defaultAgentDir(), "worker-extensions.json");
+  return override || agentConfigPath("worker-extensions", defaultAgentDir());
 }
 
 function defaultExtensionsRoot(): string {

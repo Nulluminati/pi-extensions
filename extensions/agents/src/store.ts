@@ -9,13 +9,14 @@ import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { writeJsonAtomic } from "../../../lib/json-atomic.ts";
+import { projectStateDir } from "../../../lib/paths.ts";
 import { isProcessAlive } from "../../../lib/presence-shards.ts";
 import type { WorkerRecord, WorkerRegistryFile } from "./types.ts";
 
 // --- Paths ---
 
 export function workersDir(cwd: string): string {
-  return join(cwd, ".pi", "workers");
+  return projectStateDir(cwd, "workers");
 }
 
 export function patchesDir(cwd: string): string {

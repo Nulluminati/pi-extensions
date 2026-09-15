@@ -33,12 +33,12 @@ The extension prefers `ffmpeg` for recording when both recorders are installed. 
 
 ## Model setup
 
-Models are stored in `$PI_VOICE_MODELS`, or `~/.cache/pi-voice/models` when the variable is unset. Open `/voice:settings` to check whether each selected model is ready or missing.
+Models are stored in `$PI_VOICE_MODELS`, or `$XDG_CACHE_HOME/pi-voice/models` (default `~/.cache/pi-voice/models`) when the variable is unset. Open `/voice:settings` to check whether each selected model is ready or missing.
 
 For the default setup, download Moonshine Base, Kitten Nano, and Silero VAD:
 
 ```bash
-models_dir="${PI_VOICE_MODELS:-$HOME/.cache/pi-voice/models}"
+models_dir="${PI_VOICE_MODELS:-${XDG_CACHE_HOME:-$HOME/.cache}/pi-voice/models}"
 mkdir -p "$models_dir"
 cd "$models_dir"
 
@@ -172,7 +172,7 @@ The dictation model row in `/voice` marks each choice as `Ready` or `Missing` an
 `/voice` saves the dictation model, speech model, and selected Kitten voice in:
 
 ```text
-~/.pi/agent/extensions/voice/config.json
+~/.pi/agent/voice.json
 ```
 
 The file contains the three selections:

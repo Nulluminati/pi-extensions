@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionCommandContext } from "pi";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import missionsExtension from "../../extensions/missions/missions.ts";
@@ -487,7 +488,7 @@ describe("missions-extension", () => {
   });
 
   it("a live lock hold is not stolen while the holder keeps it fresh", async () => {
-    const lockPath = join(cwd, ".pi", "missions", ".locks", "lock-live.lock");
+    const lockPath = join(cwd, CONFIG_DIR_NAME, "missions", ".locks", "lock-live.lock");
     // Real timers throughout: staleness compares Date.now() against real
     // filesystem mtimes, so a fake clock would desync the two.
     const release = await acquireMissionLock(cwd, "lock-live", {
@@ -511,8 +512,8 @@ describe("missions-extension", () => {
   });
 
   it("an abandoned stale lock is reclaimed", async () => {
-    const lockPath = join(cwd, ".pi", "missions", ".locks", "lock-dead.lock");
-    await mkdir(join(cwd, ".pi", "missions", ".locks"), { recursive: true });
+    const lockPath = join(cwd, CONFIG_DIR_NAME, "missions", ".locks", "lock-dead.lock");
+    await mkdir(join(cwd, CONFIG_DIR_NAME, "missions", ".locks"), { recursive: true });
     await writeFile(lockPath, "0\n");
     const abandoned = new Date(Date.now() - 120_000);
     await utimes(lockPath, abandoned, abandoned);
