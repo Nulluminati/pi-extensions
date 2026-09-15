@@ -326,6 +326,27 @@ describe("messenger-extension", () => {
     );
   });
 
+  it("auto-delivery clears the unread count after marking the mail read", async () => {
+    vi.stubEnv("PI_MESSENGER_NAME", "reader");
+    mockCtx.isIdle = vi.fn(() => true);
+    await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+
+    await sendMessage(cwd, "reader", "peer", "count must drop to zero");
+    await getEventHandler("agent_settled")({ type: "agent_settled" }, mockCtx);
+
+    // The watcher may win the race and announce+clear fire-and-forget while
+    // the settle call is gated, so wait for the CLEAR rather than asserting
+    // immediately: the status bar's ✉ slot tracks the LAST announcement, and
+    // a delivery that stops at the announce would leave it stuck on a
+    // cleared inbox.
+    await vi.waitFor(() => {
+      const emits = mockPi.events.emit.mock.calls.filter(([event]) => event === "messenger:state");
+      expect(emits.length).toBeGreaterThanOrEqual(2);
+      expect(emits.at(-1)?.[1]).toMatchObject({ unread: 0 });
+      expect(mockCtx.ui.setStatus).toHaveBeenLastCalledWith("messenger", undefined);
+    });
+  });
+
   it("inbox watcher ignores other agents' mailboxes", async () => {
     vi.stubEnv("PI_MESSENGER_NAME", "watched");
     mockCtx.isIdle = vi.fn(() => true);

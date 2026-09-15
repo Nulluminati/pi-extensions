@@ -115,14 +115,16 @@ export default async function messengerExtension(pi: ExtensionAPI) {
         },
         { triggerTurn: true },
       );
-      // Mail stays "unread" until the model reads it via the inbox action,
-      // so the status line announces it now and clears on read.
+      // Announce the arrival (unread count feeds both the themed fallback
+      // line and the status bar's ✉ slot), then clear it: auto-delivery
+      // marks the mail read, so the count must drop to zero immediately.
       await refreshStatus(ctx);
       await markRead(
         ctx.cwd,
         agentName,
         unread.map((m) => m.id),
       );
+      await refreshStatus(ctx);
     } finally {
       delivering = false;
     }
