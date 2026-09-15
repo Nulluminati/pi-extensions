@@ -4,7 +4,7 @@
 
 import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { excludeFromGit, runGit } from "../../../lib/git.ts";
+import { excludeFromGit } from "../../../lib/git.ts";
 import { writeJsonAtomic } from "../../../lib/json-atomic.ts";
 import { projectStateDir, projectStateRelative } from "../../../lib/paths.ts";
 import type { AutoConfig, RunEntry } from "./types.ts";
