@@ -227,6 +227,12 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
           ...(typeof params.maxIterations === "number" && params.maxIterations > 0
             ? { maxIterations: params.maxIterations }
             : {}),
+          // Only this session's agent_end continues the loop; other sessions
+          // in the project see the state (widget, fallback status) but are
+          // never hijacked into driving someone else's experiment.
+          ...(ctx.sessionManager.getSessionId()
+            ? { ownerSessionId: ctx.sessionManager.getSessionId() }
+            : {}),
           createdAt: Date.now(),
         };
         await saveConfig(cwd, config);
@@ -455,6 +461,16 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
   pi.on("agent_end", async (_event, ctx) => {
     const config = await loadConfig(ctx.cwd);
     if (!config || config.stopped) return;
+    // Ownership gate: the continuation loop is driven only by the session
+    // that created the campaign. Project state is shared, so another
+    // session's turn must never be hijacked into running this experiment
+    // loop (legacy configs without an owner keep the old behavior).
+    if (
+      config.ownerSessionId !== undefined &&
+      config.ownerSessionId !== ctx.sessionManager.getSessionId()
+    ) {
+      return;
+    }
     if (continuationQueued || ctx.hasPendingMessages()) return;
 
     const entries = await readLog(ctx.cwd);

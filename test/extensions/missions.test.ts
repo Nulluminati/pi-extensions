@@ -535,24 +535,27 @@ describe("missions-extension", () => {
 
   it("a live lock hold is not stolen while the holder keeps it fresh", async () => {
     const lockPath = join(cwd, CONFIG_DIR_NAME, "missions", ".locks", "lock-live.lock");
-    // Real timers throughout: staleness compares Date.now() against real
-    // filesystem mtimes, so a fake clock would desync the two.
+    // staleMs is far beyond the test horizon, so the staleness path can never
+    // fire: the waiter must lose to its own timeout, not to a steal. Real
+    // timers throughout — the staleness check compares Date.now() against
+    // real filesystem mtimes, so a fake clock would desync the two.
     const release = await acquireMissionLock(cwd, "lock-live", {
-      staleMs: 400,
+      staleMs: 60_000,
       refreshMs: 50,
       timeoutMs: 900,
     });
+    const initialMtime = (await stat(lockPath)).mtimeMs;
     const waiter = acquireMissionLock(cwd, "lock-live", {
-      staleMs: 400,
+      staleMs: 60_000,
       refreshMs: 50,
-      timeoutMs: 900,
+      timeoutMs: 150,
     });
     // Attach the rejection expectation before the waiter's deadline passes.
     const waiterTimedOut = expect(waiter).rejects.toThrow(/Timed out waiting/);
-    // Well past the stale window: the holder's refresh interval keeps the
-    // lock mtime fresh, so the waiter must time out rather than steal it.
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise((resolve) => setTimeout(resolve, 200));
     await waiterTimedOut;
+    // The holder's refresh interval has touched the lock since acquisition.
+    expect((await stat(lockPath)).mtimeMs).toBeGreaterThan(initialMtime);
     await expect(stat(lockPath)).resolves.toBeTruthy();
     await release();
   });

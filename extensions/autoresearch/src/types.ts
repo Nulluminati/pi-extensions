@@ -19,6 +19,9 @@ export interface AutoConfig {
   maxIterations?: number;
   /** Set when the loop is deactivated; config kept for the record. */
   stopped?: boolean;
+  /** Session that created the campaign; only it drives the continuation
+   *  loop. Absent on legacy configs, which any session may continue. */
+  ownerSessionId?: string;
   createdAt: number;
 }
 

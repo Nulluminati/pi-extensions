@@ -581,6 +581,65 @@ describe("autoresearch-extension", () => {
     expect(mockPi.sendUserMessage.mock.calls[0][0]).not.toContain(".auto/");
   });
 
+  it("init stamps the owning session id in the config", async () => {
+    mockCtx.sessionManager.getSessionId = vi.fn(() => "session-A");
+    await initSession();
+    expect((await loadConfig(cwd))?.ownerSessionId).toBe("session-A");
+  });
+
+  it("a session that does not own the campaign stays silent on agent_end", async () => {
+    mockCtx.sessionManager.getSessionId = vi.fn(() => "session-A");
+    await initSession();
+
+    // A second session over the same project state: fresh instance, fresh id.
+    const mockPi2 = createMockPi() as DeepMocked<ExtensionAPI>;
+    const mockCtx2 = createMockContext();
+    (mockCtx2 as { cwd: string }).cwd = cwd;
+    mockCtx2.sessionManager.getSessionId = vi.fn(() => "session-B");
+    await autoresearchExtension(mockPi2);
+    await getEventHandler("session_start", mockPi2)(
+      { type: "session_start", reason: "startup" },
+      mockCtx2,
+    );
+
+    // Project-state visibility is intended: status and widget publish here too.
+    expect(mockCtx2.ui.setStatus).toHaveBeenCalledWith(
+      "autoresearch",
+      expect.stringContaining("Autoresearch"),
+    );
+    expect(mockCtx2.ui.setWidget).toHaveBeenCalledWith("autoresearch", expect.anything());
+
+    // But the continuation loop must never drive this session.
+    await getEventHandler("agent_end", mockPi2)({ type: "agent_end", messages: [] }, mockCtx2);
+    expect(mockPi2.sendUserMessage).not.toHaveBeenCalled();
+  });
+
+  it("the owning session keeps driving the continuation loop", async () => {
+    mockCtx.sessionManager.getSessionId = vi.fn(() => "session-A");
+    await initSession();
+    await getEventHandler("agent_end")({ type: "agent_end", messages: [] }, mockCtx);
+    expect(mockPi.sendUserMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("a legacy config without an owner keeps the any-session behavior", async () => {
+    // Pre-ownership campaigns on disk have no ownerSessionId field; any
+    // session may continue driving them until they are re-initialized.
+    await mkdir(join(cwd, CONFIG_DIR_NAME, "autoresearch"), { recursive: true });
+    await writeFile(
+      join(cwd, CONFIG_DIR_NAME, "autoresearch", "config.json"),
+      JSON.stringify({
+        objective: "legacy campaign",
+        metric: "m",
+        direction: "lower",
+        measure: "echo 'METRIC m=1'",
+        createdAt: Date.now(),
+      }),
+    );
+    const agentEnd = getEventHandler("agent_end");
+    await agentEnd({ type: "agent_end", messages: [] }, mockCtx);
+    expect(mockPi.sendUserMessage).toHaveBeenCalledTimes(1);
+  });
+
   it("stops after repeated stalls with no new experiments", async () => {
     await initSession();
     const agentEnd = getEventHandler("agent_end");

@@ -34,6 +34,8 @@ The agent then loops: edit code → `action=run` → `action=log` with `status=k
 
 State lives in `<cwd>/.pi/autoresearch/` (locally git-excluded; keep it out of remotes).
 
+The state is shared per project, so any session shows an active campaign's widget and fallback status. Only the session that created the campaign drives the continuation loop, though — other sessions' turns are never hijacked into running someone else's experiment. Campaigns created before ownership stamping (no `ownerSessionId` in the config) keep the old any-session behavior; re-initialize to take ownership.
+
 ## Cost Control
 
 Experiment loops burn tokens. Set `maxIterations` at init, and prefer provider-side budgets for unattended runs.

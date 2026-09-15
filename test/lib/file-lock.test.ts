@@ -55,13 +55,18 @@ describe("file-lock", () => {
 
   it("times out a waiter that cannot acquire within timeoutMs", async () => {
     const lockPath = join(dir, "test.lock");
+    const events: string[] = [];
     let releaseFirst = () => {};
     const gate = new Promise<void>((resolve) => {
       releaseFirst = resolve;
     });
     const holder = withFileLock(lockPath, async () => {
+      events.push("holder-start");
       await gate;
     });
+    // withFileLock acquires asynchronously — wait until the holder actually
+    // holds before starting the waiter, or the two opens race.
+    await vi.waitFor(() => expect(events).toContain("holder-start"));
     const waiter = withFileLock(lockPath, async () => "unreachable", { timeoutMs: 100 });
     // Attach the rejection expectation before the waiter's deadline passes.
     const waiterTimedOut = expect(waiter).rejects.toThrow(/Timed out waiting for lock/);
@@ -102,25 +107,34 @@ describe("file-lock", () => {
     const gate = new Promise<void>((resolve) => {
       releaseFirst = resolve;
     });
+    // staleMs is far beyond the test horizon, so the staleness path can never
+    // fire: the waiter must lose to its own timeout, not to a steal. The
+    // refresh mechanism is asserted separately via the advancing mtime.
     const holder = withFileLock(
       lockPath,
       async () => {
         await gate;
       },
-      { staleMs: 400, refreshMs: 50 },
+      { staleMs: 60_000, refreshMs: 50 },
     );
+    // withFileLock acquires asynchronously — wait until the holder actually
+    // holds before reading the mtime or starting the waiter.
+    await vi.waitFor(async () => {
+      await expect(stat(lockPath)).resolves.toBeTruthy();
+    });
+    const initialMtime = (await stat(lockPath)).mtimeMs;
     const waiter = withFileLock(lockPath, async () => "stolen", {
-      staleMs: 400,
+      staleMs: 60_000,
       refreshMs: 50,
-      timeoutMs: 900,
+      timeoutMs: 150,
     });
     // Attach the rejection expectation before the waiter's deadline passes.
     const waiterTimedOut = expect(waiter).rejects.toThrow(/Timed out waiting/);
 
-    // Well past the stale window: the holder's refresh interval keeps the
-    // lock mtime fresh, so the waiter must time out rather than steal it.
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise((resolve) => setTimeout(resolve, 200));
     await waiterTimedOut;
+    // The holder's refresh interval has touched the lock since acquisition.
+    expect((await stat(lockPath)).mtimeMs).toBeGreaterThan(initialMtime);
     await expect(stat(lockPath)).resolves.toBeTruthy();
     releaseFirst();
     await holder;
