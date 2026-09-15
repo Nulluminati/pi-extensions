@@ -540,7 +540,16 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
     const config = await loadConfig(ctx.cwd);
     const entries = await entriesAndPending(ctx.cwd);
 
-    publish(ctx, config, entries);
+    // Orchestration UI is single-session: only the campaign's owner shows the
+    // widget and footer status. Other sessions publish the cleared state so a
+    // stale announcement from an earlier campaign cannot linger. Legacy
+    // configs (no owner) keep the old visible-anywhere behavior.
+    const owned =
+      config === undefined ||
+      config.stopped === true ||
+      config.ownerSessionId === undefined ||
+      config.ownerSessionId === ctx.sessionManager.getSessionId();
+    publish(ctx, owned ? config : undefined, owned ? entries : []);
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {

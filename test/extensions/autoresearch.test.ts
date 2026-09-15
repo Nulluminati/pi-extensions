@@ -602,12 +602,14 @@ describe("autoresearch-extension", () => {
       mockCtx2,
     );
 
-    // Project-state visibility is intended: status and widget publish here too.
-    expect(mockCtx2.ui.setStatus).toHaveBeenCalledWith(
-      "autoresearch",
-      expect.stringContaining("Autoresearch"),
+    // Single-session UI: the non-owner publishes CLEARED state (no widget, no
+    // footer status) — campaign state is visible only to the owning session.
+    expect(mockCtx2.ui.setStatus).toHaveBeenCalledWith("autoresearch", undefined);
+    expect(mockCtx2.ui.setWidget).toHaveBeenCalledWith("autoresearch", undefined);
+    expect(mockPi2.events.emit).toHaveBeenCalledWith(
+      "autoresearch:state",
+      expect.objectContaining({ active: false }),
     );
-    expect(mockCtx2.ui.setWidget).toHaveBeenCalledWith("autoresearch", expect.anything());
 
     // But the continuation loop must never drive this session.
     await getEventHandler("agent_end", mockPi2)({ type: "agent_end", messages: [] }, mockCtx2);

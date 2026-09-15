@@ -34,7 +34,7 @@ The agent then loops: edit code → `action=run` → `action=log` with `status=k
 
 State lives in `<cwd>/.pi/autoresearch/` (locally git-excluded; keep it out of remotes).
 
-The state is shared per project, so any session shows an active campaign's widget and fallback status. Only the session that created the campaign drives the continuation loop, though — other sessions' turns are never hijacked into running someone else's experiment. Campaigns created before ownership stamping (no `ownerSessionId` in the config) keep the old any-session behavior; re-initialize to take ownership.
+The state files are shared per project, but the orchestration UI is single-session: only the session that created the campaign shows the widget and footer status and drives the continuation loop. Other sessions see nothing (their turns are never hijacked into running someone else's experiment); manual tool actions still work anywhere. Campaigns created before ownership stamping (no `ownerSessionId` in the config) remain visible in every session; re-initialize to take ownership.
 
 ## Cost Control
 

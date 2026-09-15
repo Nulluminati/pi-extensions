@@ -45,14 +45,17 @@ import { MISSION_PARAMETERS } from "./src/schemas.ts";
 import {
   generateMissionId,
   listMissionSummaries,
-  loadActiveMission,
   loadMission,
   saveMission,
-  setActiveMissionId,
 } from "./src/storage.ts";
 import type { Mission } from "./src/types.ts";
 
 const execAsync = promisify(execCb);
+
+/** Custom entry type carrying this session's active mission id (newest wins;
+ *  `{ id: undefined }` clears). Session state, not project state: two
+ *  sessions may each work their own active mission. */
+const MISSION_ACTIVE_ENTRY_TYPE = "missions-active";
 
 // --- Extension ---
 
@@ -89,9 +92,42 @@ export default async function missionsExtension(pi: ExtensionAPI) {
   }
 
   async function reloadActive(ctx: ExtensionContext): Promise<Mission | undefined> {
-    active = await loadActiveMission(ctx.cwd);
+    active = await loadSessionActiveMission(ctx);
     publish(ctx);
     return active;
+  }
+
+  /** The session's active mission, or undefined. Reads the newest
+   *  missions-active entry from the session branch and loads that mission
+   *  from disk; a dangling id (mission file deleted) degrades to none. */
+  async function loadSessionActiveMission(ctx: ExtensionContext): Promise<Mission | undefined> {
+    const branch = (ctx.sessionManager.getBranch() ?? []) as Array<{
+      type?: string;
+      customType?: string;
+      data?: { id?: unknown };
+    }>;
+    let id: string | undefined;
+    for (const entry of [...branch].reverse()) {
+      if (entry.type === "custom" && entry.customType === MISSION_ACTIVE_ENTRY_TYPE) {
+        id = typeof entry.data?.id === "string" ? entry.data.id : undefined;
+        break;
+      }
+    }
+    if (!id) return undefined;
+    try {
+      return await loadMission(ctx.cwd, id);
+    } catch (error) {
+      // Corrupt mission file: degrade to no active mission rather than
+      // breaking session startup; the corruption surfaces on explicit reads.
+      console.error(`[missions] active mission ${id} unreadable: ${(error as Error).message}`);
+      return undefined;
+    }
+  }
+
+  /** Record which mission this session is working (session transcript, not
+   *  project state — two sessions may each hold their own active mission). */
+  function setActiveMission(id: string | undefined): void {
+    pi.appendEntry(MISSION_ACTIVE_ENTRY_TYPE, { id });
   }
 
   function requireActive(): Mission {
@@ -129,7 +165,7 @@ export default async function missionsExtension(pi: ExtensionAPI) {
         const objective = (params.objective ?? "").trim();
         if (!title) throw new Error("create requires title.");
         if (!objective) throw new Error("create requires objective.");
-        if (await loadActiveMission(ctx.cwd)) {
+        if (active) {
           throw new Error(
             "An active mission already exists. Complete, abort, or switch missions before creating a new one.",
           );
@@ -139,7 +175,7 @@ export default async function missionsExtension(pi: ExtensionAPI) {
           ...(params.maxTokens !== undefined ? { maxTokens: params.maxTokens } : {}),
         });
         await saveMission(ctx.cwd, mission);
-        await setActiveMissionId(ctx.cwd, mission.id);
+        setActiveMission(mission.id);
         active = mission;
         publish(ctx);
         return {
@@ -163,7 +199,7 @@ export default async function missionsExtension(pi: ExtensionAPI) {
         if (!id) throw new Error("switch requires id.");
         const mission = await loadMission(ctx.cwd, id);
         if (!mission) throw new Error(`No mission found with id ${id}.`);
-        await setActiveMissionId(ctx.cwd, mission.id);
+        setActiveMission(mission.id);
         active = mission;
         publish(ctx);
         return {
@@ -291,16 +327,15 @@ export default async function missionsExtension(pi: ExtensionAPI) {
           setStatus(mission, status);
           await persist(ctx, mission);
           if (status === "complete" || status === "aborted") {
-            // Completed and aborted missions free the active slot — otherwise
-            // they block every future create until manually deleted.
-            await setActiveMissionId(ctx.cwd, undefined);
+            // Completed and aborted missions free this session's active slot —
+            // otherwise they block every future create in this session.
+            setActiveMission(undefined);
             active = undefined;
             publish(ctx);
           } else {
-            // Non-terminal statuses keep the on-disk pointer in lockstep: an
-            // in-memory-active mission with no pointer on disk would let a
-            // second active mission be created later.
-            await setActiveMissionId(ctx.cwd, mission.id);
+            // Non-terminal statuses keep the session pointer in lockstep with
+            // the in-memory active mission.
+            setActiveMission(mission.id);
           }
           return {
             content: [{ type: "text", text: `Mission is now ${status}.` }],

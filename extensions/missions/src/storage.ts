@@ -1,12 +1,12 @@
 /**
  * File-backed mission storage. One JSON file per mission under
- * `<cwd>/.pi/missions/`, plus an `active.json` pointer for the mission the
- * session is currently working. Writes are atomic (tmp file + rename) so a
+ * `<cwd>/.pi/missions/`. Which mission a session is working is session
+ * state (persisted in the session transcript, not on disk). Writes are atomic (tmp file + rename) so a
  * crash mid-write cannot corrupt a mission.
  */
 
 import { randomBytes } from "node:crypto";
-import { mkdir, readdir, readFile, unlink } from "node:fs/promises";
+import { mkdir, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { withFileLock } from "../../../lib/file-lock.ts";
 import { writeJsonAtomic } from "../../../lib/json-atomic.ts";
@@ -15,7 +15,6 @@ import type { Mission, MissionSummary, TaskStatus } from "./types.ts";
 
 // --- Constants ---
 
-const ACTIVE_FILE = "active.json";
 // The wait deadline must exceed the stale window: a waiter that outlives
 // the stale window can observe and reclaim an abandoned lock instead of
 // giving up while the holder's final refresh is still in flight.
@@ -127,41 +126,6 @@ function isActiveMission(value: unknown): value is Mission {
   );
 }
 
-// --- Active pointer ---
-
-export async function getActiveMissionId(cwd: string): Promise<string | undefined> {
-  const path = join(missionsDir(cwd), ACTIVE_FILE);
-  let raw: string;
-  try {
-    raw = await readFile(path, "utf8");
-  } catch (error) {
-    if (isNodeError(error) && error.code === "ENOENT") return undefined;
-    throw error;
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    throw new Error(`Active mission pointer ${path} is corrupt (invalid JSON): ${detail}`);
-  }
-  const id = (parsed as { id?: unknown } | null)?.id;
-  if (typeof id !== "string") {
-    throw new Error(`Active mission pointer ${path} is corrupt (missing mission id).`);
-  }
-  return id;
-}
-
-export async function setActiveMissionId(cwd: string, id: string | undefined): Promise<void> {
-  const pointer = join(missionsDir(cwd), ACTIVE_FILE);
-  if (id === undefined) {
-    await unlink(pointer).catch(() => {});
-    return;
-  }
-  await mkdir(missionsDir(cwd), { recursive: true });
-  await writeJsonAtomic(pointer, { id });
-}
-
 // --- Mission CRUD ---
 
 export async function saveMission(cwd: string, mission: Mission): Promise<void> {
@@ -204,18 +168,6 @@ export async function loadMission(cwd: string, id: string): Promise<Mission | un
   return parsed;
 }
 
-/** Load the mission the active pointer references, if it still exists. */
-export async function loadActiveMission(cwd: string): Promise<Mission | undefined> {
-  const id = await getActiveMissionId(cwd);
-  if (!id) return undefined;
-  const mission = await loadMission(cwd, id);
-  if (!mission) {
-    // Dangling pointer (mission file deleted) — clear it.
-    await setActiveMissionId(cwd, undefined);
-  }
-  return mission;
-}
-
 export async function listMissionSummaries(cwd: string): Promise<MissionSummary[]> {
   let files: string[] = [];
   try {
@@ -225,7 +177,7 @@ export async function listMissionSummaries(cwd: string): Promise<MissionSummary[
   }
   const summaries: MissionSummary[] = [];
   for (const file of files) {
-    if (!file.endsWith(".json") || file === ACTIVE_FILE) continue;
+    if (!file.endsWith(".json")) continue;
     const mission = await loadMission(cwd, file.replace(/\.json$/, ""));
     if (!mission) continue;
     const taskCounts = Object.fromEntries(ALL_TASK_STATUSES.map((s) => [s, 0])) as Record<

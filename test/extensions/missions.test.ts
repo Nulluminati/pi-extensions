@@ -47,6 +47,13 @@ describe("missions-extension", () => {
     mockCtx = createMockCommandContext();
     (mockCtx as { cwd: string }).cwd = cwd;
     await missionsExtension(mockPi);
+    // The session branch must round-trip appendEntry records the way the real
+    // transcript does, or reloadActive can't see this session's pointer.
+    mockCtx.sessionManager.getBranch = vi.fn(() => [
+      ...mockPi.appendEntry.mock.calls
+        .filter(([type]) => type === "missions-active")
+        .map(([, data]) => ({ type: "custom", customType: "missions-active", data })),
+    ]);
   });
 
   afterEach(async () => {
@@ -71,15 +78,46 @@ describe("missions-extension", () => {
     expect(text).toContain("Created mission-");
     expect(text).toContain("planning");
 
-    const pointer = JSON.parse(
-      await readFile(join(cwd, CONFIG_DIR_NAME, "missions", "active.json"), "utf8"),
-    );
-    expect(pointer.id).toMatch(/^mission-/);
+    const activeId = lastActiveEntryId();
+    expect(activeId).toMatch(/^mission-/);
     const stored = JSON.parse(
-      await readFile(join(cwd, CONFIG_DIR_NAME, "missions", `${pointer.id}.json`), "utf8"),
+      await readFile(join(cwd, CONFIG_DIR_NAME, "missions", `${activeId}.json`), "utf8"),
     );
     expect(stored.title).toBe("Build widget");
     expect(stored.status).toBe("planning");
+  });
+
+  /** The mission id this session last pointed at (from appendEntry calls). */
+  function lastActiveEntryId(): string | undefined {
+    const calls = mockPi.appendEntry.mock.calls.filter(([type]) => type === "missions-active");
+    const last = calls.at(-1)?.[1] as { id?: string } | undefined;
+    return last?.id;
+  }
+
+  it("a second session can hold its own active mission", async () => {
+    await executeTool({ action: "create", title: "mine", objective: "first session" });
+
+    // Session-scoped pointers: the second session sees no active mission and
+    // creates its own without touching the first.
+    const secondPi = createBasePi() as DeepMocked<ExtensionAPI>;
+    const secondCtx = createMockCommandContext();
+    (secondCtx as { cwd: string }).cwd = cwd;
+    await missionsExtension(secondPi);
+    const secondStart = secondPi.on.mock.calls.find((call) => call[0] === "session_start")?.[1];
+    if (!secondStart) throw new Error("second session_start handler not found");
+    await secondStart({ type: "session_start", reason: "startup" }, secondCtx);
+
+    const secondTool = secondPi.registerTool.mock.calls[0][0];
+    const secondCreate = await secondTool.execute(
+      "call-2",
+      { action: "create", title: "theirs", objective: "second session" } as never,
+      undefined,
+      undefined,
+      secondCtx,
+    );
+    expect(secondCreate.details.missionId).toMatch(/^mission-/);
+    const summaries = JSON.stringify(secondCreate.details.missionId);
+    expect(summaries).not.toContain(lastActiveEntryId() ?? "none");
   });
 
   it("rejects a second create while a mission is active", async () => {
@@ -90,7 +128,12 @@ describe("missions-extension", () => {
   });
 
   it("rejects a stale mutation instead of overwriting another session's update", async () => {
-    await executeTool({ action: "create", title: "shared", objective: "coordinate sessions" });
+    const created = await executeTool({
+      action: "create",
+      title: "shared",
+      objective: "coordinate sessions",
+    });
+    const sharedId = created.details.missionId as string;
 
     const secondPi = createBasePi() as DeepMocked<ExtensionAPI>;
     const secondCtx = createMockCommandContext();
@@ -99,6 +142,18 @@ describe("missions-extension", () => {
     const secondStart = secondPi.on.mock.calls.find((call) => call[0] === "session_start")?.[1];
     if (!secondStart) throw new Error("second session_start handler not found");
     await secondStart({ type: "session_start", reason: "startup" }, secondCtx);
+
+    // Session-scoped active pointers: the second session adopts the same
+    // mission explicitly (switch) — exactly what a second session must do to
+    // work on an existing mission.
+    const secondSwitch = secondPi.registerTool.mock.calls[0][0];
+    await secondSwitch.execute(
+      "call-switch",
+      { action: "switch", id: sharedId } as never,
+      undefined,
+      undefined,
+      secondCtx,
+    );
 
     await executeTool({ action: "task_add", taskTitle: "First session task" });
 
@@ -113,11 +168,8 @@ describe("missions-extension", () => {
       ),
     ).rejects.toThrow(/changed by another session/);
 
-    const pointer = JSON.parse(
-      await readFile(join(cwd, CONFIG_DIR_NAME, "missions", "active.json"), "utf8"),
-    );
     const stored = JSON.parse(
-      await readFile(join(cwd, CONFIG_DIR_NAME, "missions", `${pointer.id}.json`), "utf8"),
+      await readFile(join(cwd, CONFIG_DIR_NAME, "missions", `${sharedId}.json`), "utf8"),
     );
     expect(stored.tasks.map((task: { title: string }) => task.title)).toEqual([
       "First session task",
@@ -250,10 +302,7 @@ describe("missions-extension", () => {
 
     const res = await executeTool({ action: "switch", id: "mission-second" });
     expect(res.content[0].text).toContain("Switched to mission-second");
-    const pointer = JSON.parse(
-      await readFile(join(cwd, CONFIG_DIR_NAME, "missions", "active.json"), "utf8"),
-    );
-    expect(pointer.id).toBe("mission-second");
+    expect(lastActiveEntryId()).toBe("mission-second");
   });
 
   it("session_start keeps mission state out of git status", async () => {
@@ -287,10 +336,10 @@ describe("missions-extension", () => {
       join(cwd, CONFIG_DIR_NAME, "missions", "mission-restore.json"),
       JSON.stringify(mission),
     );
-    await writeFile(
-      join(cwd, CONFIG_DIR_NAME, "missions", "active.json"),
-      JSON.stringify({ id: "mission-restore" }),
-    );
+    // The active pointer lives in the session transcript now.
+    mockCtx.sessionManager.getBranch = vi.fn(() => [
+      { type: "custom", customType: "missions-active", data: { id: "mission-restore" } },
+    ]);
 
     const handler = getEventHandler("session_start");
     await handler({ type: "session_start", reason: "startup" }, mockCtx);
@@ -335,11 +384,8 @@ describe("missions-extension", () => {
       verification: { command: "npm test", description: "the suite passes" },
     });
 
-    const pointer = JSON.parse(
-      await readFile(join(cwd, CONFIG_DIR_NAME, "missions", "active.json"), "utf8"),
-    );
     const stored = JSON.parse(
-      await readFile(join(cwd, CONFIG_DIR_NAME, "missions", `${pointer.id}.json`), "utf8"),
+      await readFile(join(cwd, CONFIG_DIR_NAME, "missions", `${lastActiveEntryId()}.json`), "utf8"),
     );
     expect(stored.tasks[0].verification).toEqual({
       command: "npm test",
@@ -352,32 +398,24 @@ describe("missions-extension", () => {
     const id = created.details.missionId as string;
 
     await executeTool({ action: "set_status", missionStatus: "paused" });
-    const pointer = JSON.parse(
-      await readFile(join(cwd, CONFIG_DIR_NAME, "missions", "active.json"), "utf8"),
-    );
-    expect(pointer).toEqual({ id });
+    expect(lastActiveEntryId()).toBe(id);
 
     await executeTool({ action: "set_status", missionStatus: "active" });
-    const reactivated = JSON.parse(
-      await readFile(join(cwd, CONFIG_DIR_NAME, "missions", "active.json"), "utf8"),
-    );
-    expect(reactivated).toEqual({ id });
+    expect(lastActiveEntryId()).toBe(id);
   });
 
   it("set_status re-activating a mission restores a cleared pointer", async () => {
     const created = await executeTool({ action: "create", title: "first", objective: "o" });
     const id = created.details.missionId as string;
     await executeTool({ action: "set_status", missionStatus: "aborted" });
-    expect(existsSync(join(cwd, CONFIG_DIR_NAME, "missions", "active.json"))).toBe(false);
+    // Aborting clears the session pointer (entry id undefined).
+    expect(lastActiveEntryId()).toBeUndefined();
 
     // Aborting frees the slot; reopening requires re-selecting the mission,
     // and the pointer must come back with it.
     await executeTool({ action: "switch", id });
     await executeTool({ action: "set_status", missionStatus: "paused" });
-    const pointer = JSON.parse(
-      await readFile(join(cwd, CONFIG_DIR_NAME, "missions", "active.json"), "utf8"),
-    );
-    expect(pointer.id).toBe(id);
+    expect(lastActiveEntryId()).toBe(id);
   });
 
   it("list returns every mission with a summary", async () => {
@@ -410,11 +448,8 @@ describe("missions-extension", () => {
     expect(res.content[0].text).toContain("Checkpoint");
     expect(res.details.checkpointId).toMatch(/^ckpt-/);
 
-    const pointer = JSON.parse(
-      await readFile(join(cwd, CONFIG_DIR_NAME, "missions", "active.json"), "utf8"),
-    );
     const stored = JSON.parse(
-      await readFile(join(cwd, CONFIG_DIR_NAME, "missions", `${pointer.id}.json`), "utf8"),
+      await readFile(join(cwd, CONFIG_DIR_NAME, "missions", `${lastActiveEntryId()}.json`), "utf8"),
     );
     expect(stored.checkpoints[0]).toMatchObject({ label: "kickoff", commit: "abc1234" });
   });
@@ -424,11 +459,8 @@ describe("missions-extension", () => {
     const res = await executeTool({ action: "decision", text: "Use sqlite for storage" });
     expect(res.content[0].text).toContain("Decision recorded.");
 
-    const pointer = JSON.parse(
-      await readFile(join(cwd, CONFIG_DIR_NAME, "missions", "active.json"), "utf8"),
-    );
     const stored = JSON.parse(
-      await readFile(join(cwd, CONFIG_DIR_NAME, "missions", `${pointer.id}.json`), "utf8"),
+      await readFile(join(cwd, CONFIG_DIR_NAME, "missions", `${lastActiveEntryId()}.json`), "utf8"),
     );
     expect(stored.decisions[0].text).toBe("Use sqlite for storage");
   });
@@ -510,16 +542,30 @@ describe("missions-extension", () => {
     await expect(loadMission(cwd, "mission-corrupt")).rejects.toThrow(/mission-corrupt\.json/);
   });
 
-  it("a corrupt active pointer does not delete mission files", async () => {
-    await executeTool({ action: "create", title: "survivor", objective: "o" });
-    const pointerPath = join(cwd, CONFIG_DIR_NAME, "missions", "active.json");
-    await writeFile(pointerPath, "{ corrupted");
+  it("a dangling session pointer degrades to no active mission", async () => {
+    await executeTool({ action: "create", title: "gone", objective: "o" });
+    const id = lastActiveEntryId();
+    if (!id) throw new Error("no active entry after create");
+    await rm(join(cwd, CONFIG_DIR_NAME, "missions", `${id}.json`));
 
-    await expect(executeTool({ action: "status" })).rejects.toThrow(/active\.json/);
+    // session_start reloads from the session pointer: the mission file is
+    // gone, so the session starts with no active mission (and survives).
+    await getEventHandler("session_start")({ type: "session_start", reason: "reload" }, mockCtx);
+    await expect(executeTool({ action: "status" })).rejects.toThrow(/No active mission/);
+  });
 
-    const files = await readdir(join(cwd, CONFIG_DIR_NAME, "missions"));
-    expect(files.some((name) => /^mission-.*\.json$/.test(name))).toBe(true);
-    expect(existsSync(pointerPath)).toBe(true);
+  it("a corrupt active mission file degrades at session_start instead of crashing it", async () => {
+    await executeTool({ action: "create", title: "corrupt-target", objective: "o" });
+    const id = lastActiveEntryId();
+    if (!id) throw new Error("no active entry");
+    await writeFile(join(cwd, CONFIG_DIR_NAME, "missions", `${id}.json`), "{ corrupted");
+
+    const handler = getEventHandler("session_start");
+    await handler({ type: "session_start", reason: "reload" }, mockCtx);
+    // Degrades to none at session_start; the corruption surfaces on explicit
+    // reads (switch loads the file directly).
+    await expect(executeTool({ action: "status" })).rejects.toThrow(/No active mission/);
+    await expect(executeTool({ action: "switch", id })).rejects.toThrow(/corrupt/);
   });
 
   it("generateMissionId produces unique ids for 1000 calls in one millisecond", () => {
