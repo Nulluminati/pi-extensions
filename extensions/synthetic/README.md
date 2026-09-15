@@ -107,7 +107,7 @@ Fetched catalog data (for the staleness check) is requested fresh on `session_st
 Configure your Synthetic API key using one of:
 
 1. **Environment variable**: `export SYNTHETIC_API_KEY=syn_...`
-2. **Auth file**: Add to `~/.pi/agent/auth.json`:
+2. **Auth file**: Add to `$PI_CODING_AGENT_DIR/auth.json` (default `~/.pi/agent/auth.json`):
    ```json
    { "synthetic": { "type": "api_key", "key": "syn_..." } }
    ```

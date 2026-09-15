@@ -3,8 +3,8 @@
  * cycles can never destroy the experiment record. */
 
 import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { isAbsolute, join, resolve } from "node:path";
-import { runGit } from "../../../lib/git.ts";
+import { join } from "node:path";
+import { excludeFromGit, runGit } from "../../../lib/git.ts";
 import { writeJsonAtomic } from "../../../lib/json-atomic.ts";
 import { projectStateDir, projectStateRelative } from "../../../lib/paths.ts";
 import type { AutoConfig, RunEntry } from "./types.ts";
@@ -121,20 +121,10 @@ export async function savePrompt(
 
 // --- Git hygiene ---
 
-/** Ensure `.pi/autoresearch/` never enters a commit, without touching .gitignore.
- * The exclude path is resolved through git so linked worktrees — where `.git`
- * is a file, not a directory — work correctly. */
-export async function excludeAutoFromGit(cwd: string): Promise<void> {
-  const reported = (await runGit(cwd, ["rev-parse", "--git-path", "info/exclude"])).trim();
-  const exclude = isAbsolute(reported) ? reported : resolve(cwd, reported);
-  let current = "";
-  try {
-    current = await readFile(exclude, "utf8");
-  } catch {
-    // File may not exist yet; appendFile creates it (.git/info always exists).
-  }
-  if (current.split("\n").includes(GIT_EXCLUDE_PATTERN)) return;
-  await appendFile(exclude, `${GIT_EXCLUDE_PATTERN}\n`, "utf8");
+/** Ensure the autoresearch state directory never enters a commit, without
+ * touching .gitignore. */
+export function excludeAutoFromGit(cwd: string): Promise<boolean> {
+  return excludeFromGit(cwd, GIT_EXCLUDE_PATTERN);
 }
 
 // --- Untracked baseline snapshot ---

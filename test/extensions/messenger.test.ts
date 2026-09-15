@@ -27,6 +27,7 @@ import {
   sendMessage,
 } from "../../extensions/messenger/src/store.ts";
 import { withFileLock } from "../../lib/file-lock.ts";
+import { runGit } from "../../lib/git.ts";
 import { createMockContext } from "../mocks/context-mocks.ts";
 import type { DeepMocked } from "../mocks/mock-types.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
@@ -112,6 +113,16 @@ describe("messenger-extension", () => {
     const registry = await loadRegistry(cwd);
     expect(registry["test-agent"]).toBeDefined();
     expect(registry["test-agent"].pid).toBe(process.pid);
+  });
+
+  it("session_start keeps messenger state out of git status", async () => {
+    vi.stubEnv("PI_MESSENGER_NAME", "git-aware");
+    await runGit(cwd, ["init", "-q"]);
+
+    await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+
+    // Presence is written during session_start; the tree must still read clean.
+    expect(await runGit(cwd, ["status", "--porcelain"])).toBe("");
   });
 
   it("session_start reuses the identity persisted in the session", async () => {
@@ -454,7 +465,7 @@ describe("messenger-extension", () => {
     // Cleared means removed, not stored as an empty string.
     expect((await loadRegistry(cwd))["statusful"]?.status).toBeUndefined();
     const shard = JSON.parse(
-      await readFile(join(cwd, ".pi/messenger/registry/statusful.json"), "utf8"),
+      await readFile(join(cwd, CONFIG_DIR_NAME, "messenger", "registry", "statusful.json"), "utf8"),
     ) as Record<string, unknown>;
     expect("status" in shard).toBe(false);
   });
@@ -607,7 +618,7 @@ describe("messenger-store", () => {
     await loadReservations(cwd); // stamps orphanedAt = now
 
     // Age the orphan past the grace window.
-    const path = join(cwd, ".pi/messenger/reservations.json");
+    const path = join(cwd, CONFIG_DIR_NAME, "messenger", "reservations.json");
     const claims = JSON.parse(await readFile(path, "utf8")) as Record<
       string,
       { orphanedAt?: number }
@@ -636,7 +647,7 @@ describe("messenger-store", () => {
 
   it("loadReservations rejects a corrupt reservations file instead of wiping claims", async () => {
     await reserve(cwd, "owner", ["src/kept"]);
-    const path = join(cwd, ".pi/messenger/reservations.json");
+    const path = join(cwd, CONFIG_DIR_NAME, "messenger", "reservations.json");
     await writeFile(path, "{not json", "utf8");
 
     await expect(loadReservations(cwd)).rejects.toThrow(/reservations\.json/);
@@ -661,7 +672,7 @@ describe("messenger-store", () => {
 
   it("heartbeat writes one shard per agent and never rewrites another agent's shard", async () => {
     await heartbeat(cwd, "agent-a", { pid: process.pid, cwd });
-    const shardA = join(cwd, ".pi/messenger/registry/agent-a.json");
+    const shardA = join(cwd, CONFIG_DIR_NAME, "messenger", "registry", "agent-a.json");
     await heartbeat(cwd, "agent-b", { pid: process.pid, cwd, status: "working" });
     const aBefore = await readFile(shardA, "utf8");
 
@@ -697,8 +708,8 @@ describe("messenger-store", () => {
   });
 
   it("legacy single-file registry migrates to shards on read", async () => {
-    await mkdir(join(cwd, ".pi/messenger"), { recursive: true });
-    const legacyPath = join(cwd, ".pi/messenger/registry.json");
+    await mkdir(join(cwd, CONFIG_DIR_NAME, "messenger"), { recursive: true });
+    const legacyPath = join(cwd, CONFIG_DIR_NAME, "messenger", "registry.json");
     const legacy = {
       "live-agent": { name: "live-agent", pid: process.pid, cwd, startedAt: 1, lastSeenAt: 2 },
       "dead-agent": { name: "dead-agent", pid: 999999999, cwd, startedAt: 1, lastSeenAt: 2 },
@@ -710,8 +721,12 @@ describe("messenger-store", () => {
     expect(registry["live-agent"]).toBeDefined();
     expect(registry["dead-agent"]).toBeUndefined();
     expect(existsSync(legacyPath)).toBe(false);
-    expect(existsSync(join(cwd, ".pi/messenger/registry/live-agent.json"))).toBe(true);
-    expect(existsSync(join(cwd, ".pi/messenger/registry/dead-agent.json"))).toBe(false);
+    expect(existsSync(join(cwd, CONFIG_DIR_NAME, "messenger", "registry", "live-agent.json"))).toBe(
+      true,
+    );
+    expect(existsSync(join(cwd, CONFIG_DIR_NAME, "messenger", "registry", "dead-agent.json"))).toBe(
+      false,
+    );
   });
 
   it("leaveRegistry removes only the agent's shard", async () => {
@@ -729,8 +744,8 @@ describe("messenger-store", () => {
   });
 
   it("mailbox preserves malformed lines when marking read", async () => {
-    await mkdir(join(cwd, ".pi/messenger/inbox"), { recursive: true });
-    const path = join(cwd, ".pi/messenger/inbox/a.jsonl");
+    await mkdir(join(cwd, CONFIG_DIR_NAME, "messenger", "inbox"), { recursive: true });
+    const path = join(cwd, CONFIG_DIR_NAME, "messenger", "inbox", "a.jsonl");
     const good = { id: "m1", from: "x", to: "a", text: "hi", at: 1 };
     await writeFile(path, `${JSON.stringify(good)}\nnot-json\n`, "utf8");
 

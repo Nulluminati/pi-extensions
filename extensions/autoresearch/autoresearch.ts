@@ -17,7 +17,7 @@
 import { readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "pi";
-import { isProjectStatePath } from "../../lib/paths.ts";
+import { isProjectStatePath, projectStateRelative } from "../../lib/paths.ts";
 import {
   AUTORESEARCH_STATE_EVENT,
   AUTORESEARCH_STATUS_KEY,
@@ -428,7 +428,7 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
           content: [
             {
               type: "text",
-              text: "Autoresearch stopped. Config and log kept in .pi/autoresearch/.",
+              text: `Autoresearch stopped. Config and log kept in ${projectStateRelative("autoresearch")}/.`,
             },
           ],
           details: { active: false },
@@ -487,7 +487,7 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
 
     continuationQueued = true;
     pi.sendUserMessage(
-      "Continue the autoresearch loop. Re-read .pi/autoresearch/prompt.md and the tail of .pi/autoresearch/log.jsonl, then: pick the next hypothesis, edit the code, run the autoresearch tool (action=run), and log the result (action=log, keep or discard). If the cap is reached or you genuinely cannot improve further, call action=stop.",
+      `Continue the autoresearch loop. Re-read ${projectStateRelative("autoresearch")}/prompt.md and the tail of ${projectStateRelative("autoresearch")}/log.jsonl, then: pick the next hypothesis, edit the code, run the autoresearch tool (action=run), and log the result (action=log, keep or discard). If the cap is reached or you genuinely cannot improve further, call action=stop.`,
       { deliverAs: "followUp" },
     );
   });

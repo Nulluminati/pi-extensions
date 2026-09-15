@@ -14,6 +14,7 @@ import { bestEntry, confidence } from "../../extensions/autoresearch/src/stats.t
 import { loadConfig, readLog } from "../../extensions/autoresearch/src/store.ts";
 import type { RunEntry } from "../../extensions/autoresearch/src/types.ts";
 import { cleanGitEnv } from "../../lib/git.ts";
+import { projectStateRelative } from "../../lib/paths.ts";
 import { createMockContext } from "../mocks/context-mocks.ts";
 import type { DeepMocked } from "../mocks/mock-types.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
@@ -156,7 +157,7 @@ describe("autoresearch-extension", () => {
 
     // .pi/autoresearch/ is excluded from git locally.
     const exclude = await readFile(join(cwd, ".git/info/exclude"), "utf8");
-    expect(exclude.split("\n")).toContain(".pi/autoresearch/");
+    expect(exclude.split("\n")).toContain(`${projectStateRelative("autoresearch")}/`);
     expect(exclude.split("\n")).not.toContain(".auto/");
   });
 
@@ -176,7 +177,7 @@ describe("autoresearch-extension", () => {
     expect(await readFile(join(cwd, "code.txt"), "utf8")).toBe("pre-existing edit\n");
     expect(existsSync(join(cwd, CONFIG_DIR_NAME, "autoresearch"))).toBe(false);
     const exclude = await readFile(join(cwd, ".git/info/exclude"), "utf8").catch(() => "");
-    expect(exclude).not.toContain(".pi/autoresearch/");
+    expect(exclude).not.toContain(`${projectStateRelative("autoresearch")}/`);
   });
 
   it("init ignores untracked state under .pi/", async () => {
@@ -361,7 +362,7 @@ describe("autoresearch-extension", () => {
         await execFileAsync("git", ["rev-parse", "--git-path", "info/exclude"], gitOpts(wt))
       ).stdout.trim();
       const exclude = await readFile(excludePath, "utf8");
-      expect(exclude.split("\n")).toContain(".pi/autoresearch/");
+      expect(exclude.split("\n")).toContain(`${projectStateRelative("autoresearch")}/`);
     } finally {
       await execFileAsync("git", ["worktree", "remove", "--force", wt], gitOpts(cwd)).catch(
         () => {},
@@ -570,10 +571,12 @@ describe("autoresearch-extension", () => {
     const agentEnd = getEventHandler("agent_end");
     await agentEnd({ type: "agent_end", messages: [] }, mockCtx);
     expect(mockPi.sendUserMessage).toHaveBeenCalledWith(
-      expect.stringContaining("Re-read .pi/autoresearch/prompt.md"),
+      expect.stringContaining(`Re-read ${projectStateRelative("autoresearch")}/prompt.md`),
       { deliverAs: "followUp" },
     );
-    expect(mockPi.sendUserMessage.mock.calls[0][0]).toContain(".pi/autoresearch/log.jsonl");
+    expect(mockPi.sendUserMessage.mock.calls[0][0]).toContain(
+      `${projectStateRelative("autoresearch")}/log.jsonl`,
+    );
     expect(mockPi.sendUserMessage.mock.calls[0][0]).not.toContain(".auto/");
   });
 
@@ -625,7 +628,7 @@ describe("autoresearch-extension", () => {
     expect(statusWithPending.content[0].text).toContain("pending experiment");
 
     const stop = await executeTool({ action: "stop" });
-    expect(stop.content[0].text).toContain("kept in .pi/autoresearch/");
+    expect(stop.content[0].text).toContain(`kept in ${projectStateRelative("autoresearch")}/`);
     expect(stop.details.active).toBe(false);
     expect((await loadConfig(cwd))?.stopped).toBe(true);
     expect(existsSync(pendingPath)).toBe(false);
@@ -637,7 +640,7 @@ describe("autoresearch-extension", () => {
 describe("autoresearch-units", () => {
   it("schema points notes to the project state directory", () => {
     expect(AUTORESEARCH_PARAMETERS.properties.notes.description).toContain(
-      ".pi/autoresearch/prompt.md",
+      `${projectStateRelative("autoresearch")}/prompt.md`,
     );
   });
 

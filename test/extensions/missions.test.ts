@@ -11,6 +11,8 @@ import {
   generateMissionId,
   loadMission,
 } from "../../extensions/missions/src/storage.ts";
+import { runGit } from "../../lib/git.ts";
+import { projectStateRelative } from "../../lib/paths.ts";
 import { createMockCommandContext } from "../mocks/context-mocks.ts";
 import type { DeepMocked } from "../mocks/mock-types.ts";
 import { createMockPi as createBasePi } from "../mocks/pi-mocks.ts";
@@ -69,10 +71,12 @@ describe("missions-extension", () => {
     expect(text).toContain("Created mission-");
     expect(text).toContain("planning");
 
-    const pointer = JSON.parse(await readFile(join(cwd, ".pi/missions/active.json"), "utf8"));
+    const pointer = JSON.parse(
+      await readFile(join(cwd, CONFIG_DIR_NAME, "missions", "active.json"), "utf8"),
+    );
     expect(pointer.id).toMatch(/^mission-/);
     const stored = JSON.parse(
-      await readFile(join(cwd, ".pi/missions", `${pointer.id}.json`), "utf8"),
+      await readFile(join(cwd, CONFIG_DIR_NAME, "missions", `${pointer.id}.json`), "utf8"),
     );
     expect(stored.title).toBe("Build widget");
     expect(stored.status).toBe("planning");
@@ -109,9 +113,11 @@ describe("missions-extension", () => {
       ),
     ).rejects.toThrow(/changed by another session/);
 
-    const pointer = JSON.parse(await readFile(join(cwd, ".pi/missions/active.json"), "utf8"));
+    const pointer = JSON.parse(
+      await readFile(join(cwd, CONFIG_DIR_NAME, "missions", "active.json"), "utf8"),
+    );
     const stored = JSON.parse(
-      await readFile(join(cwd, ".pi/missions", `${pointer.id}.json`), "utf8"),
+      await readFile(join(cwd, CONFIG_DIR_NAME, "missions", `${pointer.id}.json`), "utf8"),
     );
     expect(stored.tasks.map((task: { title: string }) => task.title)).toEqual([
       "First session task",
@@ -237,12 +243,29 @@ describe("missions-extension", () => {
       budget: {},
       spent: { iterations: 0, tokens: 0 },
     };
-    await writeFile(join(cwd, ".pi/missions/mission-second.json"), JSON.stringify(second));
+    await writeFile(
+      join(cwd, CONFIG_DIR_NAME, "missions", "mission-second.json"),
+      JSON.stringify(second),
+    );
 
     const res = await executeTool({ action: "switch", id: "mission-second" });
     expect(res.content[0].text).toContain("Switched to mission-second");
-    const pointer = JSON.parse(await readFile(join(cwd, ".pi/missions/active.json"), "utf8"));
+    const pointer = JSON.parse(
+      await readFile(join(cwd, CONFIG_DIR_NAME, "missions", "active.json"), "utf8"),
+    );
     expect(pointer.id).toBe("mission-second");
+  });
+
+  it("session_start keeps mission state out of git status", async () => {
+    await mkdir(join(cwd, CONFIG_DIR_NAME, "missions"), { recursive: true });
+    await writeFile(join(cwd, CONFIG_DIR_NAME, "missions", "some-mission.json"), "{}\n");
+    await runGit(cwd, ["init", "-q"]);
+
+    await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+
+    const exclude = await readFile(join(cwd, ".git", "info", "exclude"), "utf8");
+    expect(exclude.split("\n")).toContain(`${projectStateRelative("missions")}/`);
+    expect(await runGit(cwd, ["status", "--porcelain"])).toBe("");
   });
 
   it("session_start restores the active mission into the status line", async () => {
@@ -259,10 +282,13 @@ describe("missions-extension", () => {
       budget: {},
       spent: { iterations: 0, tokens: 0 },
     };
-    await mkdir(join(cwd, ".pi/missions"), { recursive: true });
-    await writeFile(join(cwd, ".pi/missions/mission-restore.json"), JSON.stringify(mission));
+    await mkdir(join(cwd, CONFIG_DIR_NAME, "missions"), { recursive: true });
     await writeFile(
-      join(cwd, ".pi/missions/active.json"),
+      join(cwd, CONFIG_DIR_NAME, "missions", "mission-restore.json"),
+      JSON.stringify(mission),
+    );
+    await writeFile(
+      join(cwd, CONFIG_DIR_NAME, "missions", "active.json"),
       JSON.stringify({ id: "mission-restore" }),
     );
 
@@ -304,9 +330,11 @@ describe("missions-extension", () => {
       verification: { command: "npm test", description: "the suite passes" },
     });
 
-    const pointer = JSON.parse(await readFile(join(cwd, ".pi/missions/active.json"), "utf8"));
+    const pointer = JSON.parse(
+      await readFile(join(cwd, CONFIG_DIR_NAME, "missions", "active.json"), "utf8"),
+    );
     const stored = JSON.parse(
-      await readFile(join(cwd, ".pi/missions", `${pointer.id}.json`), "utf8"),
+      await readFile(join(cwd, CONFIG_DIR_NAME, "missions", `${pointer.id}.json`), "utf8"),
     );
     expect(stored.tasks[0].verification).toEqual({
       command: "npm test",
@@ -319,11 +347,15 @@ describe("missions-extension", () => {
     const id = created.details.missionId as string;
 
     await executeTool({ action: "set_status", missionStatus: "paused" });
-    const pointer = JSON.parse(await readFile(join(cwd, ".pi/missions/active.json"), "utf8"));
+    const pointer = JSON.parse(
+      await readFile(join(cwd, CONFIG_DIR_NAME, "missions", "active.json"), "utf8"),
+    );
     expect(pointer).toEqual({ id });
 
     await executeTool({ action: "set_status", missionStatus: "active" });
-    const reactivated = JSON.parse(await readFile(join(cwd, ".pi/missions/active.json"), "utf8"));
+    const reactivated = JSON.parse(
+      await readFile(join(cwd, CONFIG_DIR_NAME, "missions", "active.json"), "utf8"),
+    );
     expect(reactivated).toEqual({ id });
   });
 
@@ -331,13 +363,15 @@ describe("missions-extension", () => {
     const created = await executeTool({ action: "create", title: "first", objective: "o" });
     const id = created.details.missionId as string;
     await executeTool({ action: "set_status", missionStatus: "aborted" });
-    expect(existsSync(join(cwd, ".pi/missions/active.json"))).toBe(false);
+    expect(existsSync(join(cwd, CONFIG_DIR_NAME, "missions", "active.json"))).toBe(false);
 
     // Aborting frees the slot; reopening requires re-selecting the mission,
     // and the pointer must come back with it.
     await executeTool({ action: "switch", id });
     await executeTool({ action: "set_status", missionStatus: "paused" });
-    const pointer = JSON.parse(await readFile(join(cwd, ".pi/missions/active.json"), "utf8"));
+    const pointer = JSON.parse(
+      await readFile(join(cwd, CONFIG_DIR_NAME, "missions", "active.json"), "utf8"),
+    );
     expect(pointer.id).toBe(id);
   });
 
@@ -371,9 +405,11 @@ describe("missions-extension", () => {
     expect(res.content[0].text).toContain("Checkpoint");
     expect(res.details.checkpointId).toMatch(/^ckpt-/);
 
-    const pointer = JSON.parse(await readFile(join(cwd, ".pi/missions/active.json"), "utf8"));
+    const pointer = JSON.parse(
+      await readFile(join(cwd, CONFIG_DIR_NAME, "missions", "active.json"), "utf8"),
+    );
     const stored = JSON.parse(
-      await readFile(join(cwd, ".pi/missions", `${pointer.id}.json`), "utf8"),
+      await readFile(join(cwd, CONFIG_DIR_NAME, "missions", `${pointer.id}.json`), "utf8"),
     );
     expect(stored.checkpoints[0]).toMatchObject({ label: "kickoff", commit: "abc1234" });
   });
@@ -383,9 +419,11 @@ describe("missions-extension", () => {
     const res = await executeTool({ action: "decision", text: "Use sqlite for storage" });
     expect(res.content[0].text).toContain("Decision recorded.");
 
-    const pointer = JSON.parse(await readFile(join(cwd, ".pi/missions/active.json"), "utf8"));
+    const pointer = JSON.parse(
+      await readFile(join(cwd, CONFIG_DIR_NAME, "missions", "active.json"), "utf8"),
+    );
     const stored = JSON.parse(
-      await readFile(join(cwd, ".pi/missions", `${pointer.id}.json`), "utf8"),
+      await readFile(join(cwd, CONFIG_DIR_NAME, "missions", `${pointer.id}.json`), "utf8"),
     );
     expect(stored.decisions[0].text).toBe("Use sqlite for storage");
   });
@@ -458,20 +496,23 @@ describe("missions-extension", () => {
   });
 
   it("loadMission rejects with a descriptive error for a corrupt mission file", async () => {
-    await mkdir(join(cwd, ".pi/missions"), { recursive: true });
-    await writeFile(join(cwd, ".pi/missions/mission-corrupt.json"), "{ this is not json");
+    await mkdir(join(cwd, CONFIG_DIR_NAME, "missions"), { recursive: true });
+    await writeFile(
+      join(cwd, CONFIG_DIR_NAME, "missions", "mission-corrupt.json"),
+      "{ this is not json",
+    );
 
     await expect(loadMission(cwd, "mission-corrupt")).rejects.toThrow(/mission-corrupt\.json/);
   });
 
   it("a corrupt active pointer does not delete mission files", async () => {
     await executeTool({ action: "create", title: "survivor", objective: "o" });
-    const pointerPath = join(cwd, ".pi/missions/active.json");
+    const pointerPath = join(cwd, CONFIG_DIR_NAME, "missions", "active.json");
     await writeFile(pointerPath, "{ corrupted");
 
     await expect(executeTool({ action: "status" })).rejects.toThrow(/active\.json/);
 
-    const files = await readdir(join(cwd, ".pi/missions"));
+    const files = await readdir(join(cwd, CONFIG_DIR_NAME, "missions"));
     expect(files.some((name) => /^mission-.*\.json$/.test(name))).toBe(true);
     expect(existsSync(pointerPath)).toBe(true);
   });

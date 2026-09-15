@@ -15,6 +15,8 @@
 import { type FSWatcher, mkdirSync, watch } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "pi";
+import { excludeFromGit } from "../../lib/git.ts";
+import { projectStateRelative } from "../../lib/paths.ts";
 import { resolveSessionIdentity } from "../../lib/session-identity.ts";
 import { formatStatusLine } from "../../lib/ui-format.ts";
 import { checkToolCall } from "./src/enforce.ts";
@@ -302,6 +304,12 @@ export default async function messengerExtension(pi: ExtensionAPI) {
   // --- Lifecycle ---
 
   pi.on("session_start", async (_event, ctx) => {
+    // Keep project-local state out of `git status`; best-effort outside repos.
+    try {
+      await excludeFromGit(ctx.cwd, `${projectStateRelative("messenger")}/`);
+    } catch (error) {
+      console.error(`[messenger] git exclude failed: ${(error as Error).message}`);
+    }
     const resolved = await resolveSessionIdentity(pi, ctx, {
       // "messenger-identity" keeps entries persisted by earlier versions.
       customType: IDENTITY_CUSTOM_TYPE,

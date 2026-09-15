@@ -133,7 +133,7 @@ The probe checks `reasoning_content`, `reasoning`, and `reasoning_text`. Neuralw
 Configure your Neuralwatt API key with one of:
 
 1. Environment variable: `export NEURALWATT_API_KEY=...`
-2. Auth file: add to `~/.pi/agent/auth.json`:
+2. Auth file: add to `$PI_CODING_AGENT_DIR/auth.json` (default `~/.pi/agent/auth.json`):
    ```json
    { "neuralwatt": { "type": "api_key", "key": "..." } }
    ```

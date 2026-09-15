@@ -1,5 +1,7 @@
 /** Tool parameter schema for the autoresearch tool. */
 
+import { projectStateRelative } from "../../../lib/paths.ts";
+
 export const AUTORESEARCH_PARAMETERS = {
   type: "object",
   properties: {
@@ -32,7 +34,7 @@ export const AUTORESEARCH_PARAMETERS = {
     },
     notes: {
       type: "string",
-      description: "init: optional guidance recorded in .pi/autoresearch/prompt.md.",
+      description: `init: optional guidance recorded in ${projectStateRelative("autoresearch")}/prompt.md.`,
     },
     description: {
       type: "string",

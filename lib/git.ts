@@ -1,9 +1,12 @@
-/** Shared git helper: run git with a clean environment. Tools that spawn
- * child git processes must strip inherited index/worktree variables — under
- * lint-staged-style hooks, GIT_INDEX_FILE points at a temporary index in the
- * host repo and silently corrupts git calls made from tests and tools. */
+/** Shared git helpers: child-process environment hygiene, exec, and local
+ * exclude management. Tools that spawn child git processes must strip
+ * inherited index/worktree variables — under lint-staged-style hooks,
+ * GIT_INDEX_FILE points at a temporary index in the host repo and silently
+ * corrupts git calls made from tests and tools. */
 
 import { execFile } from "node:child_process";
+import { appendFile, readFile } from "node:fs/promises";
+import { isAbsolute, resolve } from "node:path";
 import { promisify } from "node:util";
 
 // --- Constants ---
@@ -38,4 +41,37 @@ export async function runGit(cwd: string, args: string[], timeoutMs = 60_000): P
     timeout: timeoutMs,
   });
   return stdout;
+}
+
+// --- Local excludes ---
+
+/**
+ * Append `pattern` to the repository's local exclude file (`.git/info/exclude`)
+ * so project-local state never dirties `git status`, without touching the
+ * tracked `.gitignore`. Idempotent, and a no-op outside a repository. The
+ * exclude path is resolved through git so linked worktrees — where `.git` is a
+ * file, not a directory — work correctly. Returns true when it appended.
+ */
+export async function excludeFromGit(cwd: string, pattern: string): Promise<boolean> {
+  let reported: string;
+  try {
+    reported = (await runGit(cwd, ["rev-parse", "--git-path", "info/exclude"])).trim();
+  } catch {
+    // Not a repository (or git is unavailable): there is nothing to exclude
+    // from, and callers treat this as best-effort hygiene.
+    return false;
+  }
+  const exclude = isAbsolute(reported) ? reported : resolve(cwd, reported);
+
+  let current = "";
+  try {
+    current = await readFile(exclude, "utf8");
+  } catch (error) {
+    // The file may not exist yet; appendFile creates it (.git/info always exists).
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  if (current.split("\n").includes(pattern)) return false;
+
+  await appendFile(exclude, `${pattern}\n`, "utf8");
+  return true;
 }

@@ -15,7 +15,7 @@ A `/websearch:select` command opens a fuzzy-filterable selector (the same `Selec
 
 | Provider | Description | Auth |
 |----------|-------------|------|
-| `synthetic` | Zero-retention search built for coding agents (synthetic.new) — **default** | `$SYNTHETIC_API_KEY`, `~/.pi/agent/auth.json`, or the synthetic provider's registered credentials |
+| `synthetic` | Zero-retention search built for coding agents (synthetic.new) — **default** | `$SYNTHETIC_API_KEY`, Pi's `auth.json` (`$PI_CODING_AGENT_DIR/auth.json`, default `~/.pi/agent/auth.json`), or the synthetic provider's registered credentials |
 | `brave` | Independent web index via the Brave Search API | `$BRAVE_API_KEY` ([get one](https://brave.com/search/api/)) |
 | `searxng` | Self-hosted metasearch aggregating Google, Bing, DuckDuckGo, and more | `$SEARXNG_URL` (your instance); optionally `$SEARXNG_API_KEY` for token-protected instances |
 

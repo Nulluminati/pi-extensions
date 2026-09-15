@@ -1,5 +1,6 @@
 /**
- * Canonical filesystem locations for extension state.
+ * Canonical filesystem locations for extension state, plus Pi's own auth
+ * store for the user-facing messages that point at it.
  *
  * Four locations, by lifetime and scope:
  * - `<agentDir>/<name>.json` — global config, alongside Pi's own settings.json
@@ -28,6 +29,15 @@ export function agentConfigPath(name: string, agentDir = getAgentDir()): string 
 /** Global runtime state directory for an extension, e.g. `<agentDir>/background-jobs`. */
 export function agentStateDir(name: string, agentDir = getAgentDir()): string {
   return join(agentDir, name);
+}
+
+/**
+ * Pi's own auth store. Extensions never write it; this exists so messages
+ * that tell the user where to put a key point at the real file under
+ * PI_CODING_AGENT_DIR. The package does not export getAuthPath from its root.
+ */
+export function authPath(agentDir = getAgentDir()): string {
+  return join(agentDir, "auth.json");
 }
 
 // --- Cache ---

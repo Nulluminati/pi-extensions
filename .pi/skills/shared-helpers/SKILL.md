@@ -37,6 +37,8 @@ import { renderModalFrame } from "../../../lib/tui-frame.ts";
 | Write config/state JSON without risking a torn file on crash | `writeJsonAtomic` | `lib/json-atomic.ts` |
 | Mutate shared state files across sessions without clobbering | `withFileLock` | `lib/file-lock.ts` |
 | Resolve where an extension stores config, state, cache, or project files | `agentConfigPath`, `agentStateDir`, `cacheDir`, `projectStateDir`, `projectStateRelative` | `lib/paths.ts` |
+| Point a user-facing message at Pi's auth file | `authPath` | `lib/paths.ts` |
+| Keep project-local state out of `git status` | `excludeFromGit` | `lib/git.ts` |
 | Build a `/smallmodel`-style model picker (descriptions, searchable modal) | `formatModelDescription`, `selectModelWithSearch` | `lib/model-picker.ts` |
 | Share live presence (who is online) between concurrent sessions | `writeShard`, `loadShards`, `removeShard`, `readShard` | `lib/presence-shards.ts` |
 
@@ -245,6 +247,20 @@ Every filesystem location an extension owns resolves through this module. Never 
 use it in clean-tree and git-hygiene checks rather than prefix-matching the config dir yourself.
 It treats the config dir itself as state too, because `git status --porcelain` collapses a
 wholly-untracked tree to `.pi/`.
+
+`authPath()` returns Pi's `auth.json` inside the agent dir. Extensions never write it; use it in
+messages that tell the user where a key belongs, so the path follows `PI_CODING_AGENT_DIR`.
+
+## `lib/git.ts` — git exec and local excludes
+
+`cleanGitEnv()` / `runGit(cwd, args)` run git with inherited index and worktree variables
+stripped; use `runGit` instead of raw `execFile` so hooks like lint-staged cannot corrupt calls.
+
+`excludeFromGit(cwd, pattern)` appends a pattern to the repository's local exclude file
+(`.git/info/exclude`) without touching the tracked `.gitignore`. It is idempotent and a no-op
+outside a repository, so extensions can call it on `session_start` to keep their project state
+dir out of `git status`. The exclude path is resolved through git, so it works from linked
+worktrees where `.git` is a file.
 
 `<agentDir>` comes from `getAgentDir()` and honors `PI_CODING_AGENT_DIR`; project paths use
 `CONFIG_DIR_NAME`, so rebranded distributions resolve to their own config directory. Both are

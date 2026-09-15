@@ -15,6 +15,8 @@
 import { exec as execCb } from "node:child_process";
 import { promisify } from "node:util";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "pi";
+import { excludeFromGit } from "../../lib/git.ts";
+import { projectStateRelative } from "../../lib/paths.ts";
 import {
   formatMissionStatus,
   formatMissionSummaries,
@@ -368,6 +370,12 @@ export default async function missionsExtension(pi: ExtensionAPI) {
   // --- Lifecycle ---
 
   pi.on("session_start", async (_event, ctx) => {
+    // Keep project-local state out of `git status`; best-effort outside repos.
+    try {
+      await excludeFromGit(ctx.cwd, `${projectStateRelative("missions")}/`);
+    } catch (error) {
+      console.error(`[missions] git exclude failed: ${(error as Error).message}`);
+    }
     await reloadActive(ctx);
   });
 

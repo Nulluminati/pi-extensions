@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   agentConfigPath,
   agentStateDir,
+  authPath,
   cacheDir,
   isProjectStatePath,
   projectStateDir,
@@ -29,6 +30,16 @@ describe("paths", () => {
       expect(agentStateDir("background-jobs", "/home/test/.pi/agent")).toBe(
         "/home/test/.pi/agent/background-jobs",
       );
+    });
+  });
+
+  describe("authPath", () => {
+    it("points at Pi's auth store inside the agent dir", () => {
+      expect(authPath("/home/test/.pi/agent")).toBe("/home/test/.pi/agent/auth.json");
+    });
+
+    it("follows a relocated agent dir", () => {
+      expect(authPath("/relocated/agent")).toBe("/relocated/agent/auth.json");
     });
   });
 

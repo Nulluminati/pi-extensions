@@ -15,7 +15,7 @@ import { appendFile, readFile, rename, unlink, writeFile } from "node:fs/promise
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { withFileLock } from "../../../lib/file-lock.ts";
 import { writeJsonAtomic } from "../../../lib/json-atomic.ts";
-import { projectStateDir } from "../../../lib/paths.ts";
+import { projectStateDir, projectStateRelative } from "../../../lib/paths.ts";
 import {
   isProcessAlive,
   loadShards,
@@ -131,7 +131,7 @@ export async function ensureUniqueAgentName(
   }
   throw new Error(
     `No free agent name derived from "${name}" after ${MAX_NAME_ATTEMPTS} attempts; ` +
-      "stale sessions may be holding the registry — check .pi/messenger/registry/.",
+      `stale sessions may be holding the registry — check ${projectStateRelative("messenger")}/registry/.`,
   );
 }
 
