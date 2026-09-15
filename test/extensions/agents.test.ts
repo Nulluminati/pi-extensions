@@ -23,7 +23,8 @@ import {
   isGitRepo,
   removeWorktree,
 } from "../../extensions/agents/src/worktree.ts";
-import { cleanGitEnv } from "../../lib/git.ts";
+import { cleanGitEnv, runGit } from "../../lib/git.ts";
+import { projectStateRelative } from "../../lib/paths.ts";
 import { createMockContext } from "../mocks/context-mocks.ts";
 import type { DeepMocked } from "../mocks/mock-types.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
@@ -646,6 +647,19 @@ sleep 30
     const record = await loadWorker(cwd, id);
     expect(record?.status).toBe("failed");
     expect(record?.error).toContain("gone");
+  });
+
+  it("session_start keeps worker state out of git status", async () => {
+    await initGitRepo(cwd);
+    await mkdir(join(cwd, CONFIG_DIR_NAME, "workers"), { recursive: true });
+    await writeFile(join(cwd, CONFIG_DIR_NAME, "workers", "registry.json"), "{}\n");
+
+    await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+
+    const exclude = await readFile(join(cwd, ".git", "info", "exclude"), "utf8");
+    expect(exclude.split("\n")).toContain(`${projectStateRelative("workers")}/`);
+    expect(exclude.split("\n")).toContain(`${projectStateRelative("worktrees")}/`);
+    expect(await runGit(cwd, ["status", "--porcelain"])).toBe("");
   });
 
   it("loadWorkers reconciles stuck-running records whose pid is dead on any read", async () => {

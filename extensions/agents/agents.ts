@@ -18,6 +18,8 @@ import { existsSync } from "node:fs";
 import { access } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext, ExtensionUIContext } from "pi";
+import { excludeFromGit } from "../../lib/git.ts";
+import { projectStateRelative } from "../../lib/paths.ts";
 import { isPlanModeActive } from "../../lib/plan-state.ts";
 import { resolveWorkerExtensions } from "../../lib/worker-extensions.ts";
 import { resolveWorkerModelSpec } from "../../lib/worker-model.ts";
@@ -380,6 +382,13 @@ export default async function agentsExtension(pi: ExtensionAPI) {
   // --- Lifecycle ---
 
   pi.on("session_start", async (_event, ctx) => {
+    // Keep worker state out of `git status`; best-effort outside repos.
+    try {
+      await excludeFromGit(ctx.cwd, `${projectStateRelative("workers")}/`);
+      await excludeFromGit(ctx.cwd, `${projectStateRelative("worktrees")}/`);
+    } catch (error) {
+      console.error(`[agents] git exclude failed: ${(error as Error).message}`);
+    }
     // loadWorkers heals stuck-running records on read (dead pid → failed),
     // so loading the registry reconciles orphans left by a crashed parent.
     await loadWorkers(ctx.cwd);
