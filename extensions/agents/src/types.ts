@@ -29,6 +29,18 @@ export interface WorkerRecord {
   /** When the patch was applied to the main tree (collect action). */
   collectedAt?: number;
   error?: string;
+  /** Latest activity snapshot from the worker's event stream (last tool +
+   *  count). Updated in-memory while running; the terminal save records the
+   *  last snapshot. */
+  activity?: WorkerActivity;
+}
+
+/** Compact live-activity snapshot; `detail` is a one-line arg summary. */
+export interface WorkerActivity {
+  tool: string;
+  detail?: string;
+  toolCount: number;
+  at: number;
 }
 
 export interface WorkerRegistryFile {
@@ -41,4 +53,6 @@ export interface WorkerEvents {
   wake(message: string): void;
   notify(level: "info" | "warning" | "error", message: string): void;
   onChange(): void;
+  /** Stream activity happened (throttle before republishing the widget). */
+  onActivity(): void;
 }

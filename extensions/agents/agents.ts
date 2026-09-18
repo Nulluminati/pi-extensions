@@ -15,7 +15,7 @@
  */
 
 import { existsSync } from "node:fs";
-import { access } from "node:fs/promises";
+import { access, readFile, unlink } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext, ExtensionUIContext } from "pi";
 import { excludeFromGit } from "../../lib/git.ts";
@@ -26,13 +26,21 @@ import { resolveWorkerModelSpec } from "../../lib/worker-model.ts";
 import {
   AGENTS_STATE_EVENT,
   createWorkersWidget,
+  formatStreamEntries,
   formatWorkerList,
   formatWorkerStatus,
   WORKERS_WIDGET_KEY,
 } from "./src/format.ts";
 import { type RunningWorker, startWorker } from "./src/runner.ts";
 import { DELEGATE_PARAMETERS, WORKERS_PARAMETERS } from "./src/schemas.ts";
-import { generateWorkerId, loadWorker, loadWorkers, saveWorker } from "./src/store.ts";
+import {
+  generateWorkerId,
+  loadWorker,
+  loadWorkers,
+  pruneStreams,
+  saveWorker,
+  streamPath,
+} from "./src/store.ts";
 import type { WorkerEvents, WorkerRecord } from "./src/types.ts";
 import {
   applyPatch,
@@ -65,8 +73,16 @@ export default async function agentsExtension(pi: ExtensionAPI) {
 
   // --- Publishing ---
 
+  /** Live activity churn must not re-render (or disk-read) per event. */
+  let activityRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+
   async function publish(ctx: ExtensionContext): Promise<void> {
     const workers = await loadWorkers(ctx.cwd);
+    // Live running-map records win over disk: they carry the freshest stream
+    // activity snapshot (activity is never persisted per update).
+    for (const [id, runningWorker] of running) {
+      if (workers[id]?.status === "running") workers[id] = runningWorker.record;
+    }
     const runningCount = Object.values(workers).filter((w) => w.status === "running").length;
     pi.events.emit(AGENTS_STATE_EVENT, { running: runningCount });
     if (!ctx.hasUI || !lastUi?.setWidget) return;
@@ -105,6 +121,14 @@ export default async function agentsExtension(pi: ExtensionAPI) {
       },
       onChange() {
         void publish(ctx);
+      },
+      onActivity() {
+        // Throttle widget refreshes: many stream events can arrive per second.
+        if (activityRefreshTimer) return;
+        activityRefreshTimer = setTimeout(() => {
+          activityRefreshTimer = undefined;
+          void publish(ctx);
+        }, 500);
       },
     };
   }
@@ -291,6 +315,32 @@ export default async function agentsExtension(pi: ExtensionAPI) {
       const record: WorkerRecord | undefined = live ?? (await loadWorker(ctx.cwd, id));
       if (!record) throw new Error(`Unknown worker ${id}. Use action=list to see workers.`);
 
+      if (action === "tail") {
+        const lines =
+          typeof params.lines === "number" && params.lines > 0 ? Math.floor(params.lines) : 40;
+        let raw = "";
+        try {
+          raw = await readFile(streamPath(ctx.cwd, id), "utf8");
+        } catch {
+          throw new Error(
+            `No stream captured for worker ${id}. Streams exist for workers started after this feature landed.`,
+          );
+        }
+        const all = formatStreamEntries(raw);
+        const shown = all.slice(-lines);
+        const text =
+          shown.length > 0
+            ? shown.join("\n") +
+              (all.length > shown.length
+                ? `\n… (older ${all.length - shown.length} entries omitted)`
+                : "")
+            : "Stream is empty.";
+        return {
+          content: [{ type: "text", text }],
+          details: { entries: all.length, shown: shown.length },
+        };
+      }
+
       if (action === "status") {
         return {
           content: [{ type: "text", text: formatWorkerStatus(record) }],
@@ -373,6 +423,8 @@ export default async function agentsExtension(pi: ExtensionAPI) {
             lines.push("Worktree and branch removed.");
           }
         }
+        // The stream spool served its purpose once collected.
+        await unlink(streamPath(ctx.cwd, id)).catch(() => {});
         record.collectedAt = Date.now();
         await saveWorker(ctx.cwd, record);
         return { content: [{ type: "text", text: lines.join(" ") }], details: { worker: record } };
@@ -388,6 +440,8 @@ export default async function agentsExtension(pi: ExtensionAPI) {
     // Event contexts carry a usable ui surface: capture it so the widget is
     // restored on session_start (reload) before any tool call has run.
     if (ctx.hasUI) lastUi = ctx.ui;
+    // Prune finished workers' stream spools (running ones are kept).
+    await pruneStreams(ctx.cwd);
     // Keep worker state out of `git status`; best-effort outside repos.
     try {
       await excludeFromGit(ctx.cwd, `${projectStateRelative("workers")}/`);

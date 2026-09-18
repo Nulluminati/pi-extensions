@@ -15,6 +15,7 @@ import {
   loadWorker,
   loadWorkers,
   saveWorker,
+  streamPath,
 } from "../../extensions/agents/src/store.ts";
 import type { WorkerRecord } from "../../extensions/agents/src/types.ts";
 import {
@@ -43,6 +44,26 @@ exit 0
 `;
 
 const FAILING_WORKER = "#!/bin/sh\necho boom >&2\nexit 3\n";
+const ACTIVE_WORKER = `#!/bin/sh
+printf '%s\n' '{"type":"tool_execution_start","toolName":"read","args":{"path":"src/auth.ts"}}'
+printf '%s\n' '{"type":"tool_execution_end","toolName":"read","result":{"content":[{"type":"text","text":"jwt tokens"}]}}'
+printf '%s\n' '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"Reading auth module."}]}}'
+sleep 30
+`;
+const TAIL_WORKER = `#!/bin/sh
+printf '%s\n' '{"type":"tool_execution_start","toolName":"read","args":{"path":"src/auth.ts"}}'
+printf '%s\n' '{"type":"tool_execution_end","toolName":"read","result":{"content":[{"type":"text","text":"jwt tokens"}]}}'
+printf '%s\n' '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"Reading auth module."}]}}'
+exit 0
+`;
+const SPOOL_CAP_WORKER = `#!/bin/sh
+i=0
+while [ $i -lt 4000 ]; do
+  printf '%s\n' '{"type":"tool_execution_start","toolName":"read","args":{"path":"a-very-long-path-that-keeps-going-and-going-to-fill-the-spool-buffer-with-lots-of-bytes-per-line-padding-padding-padding-padding-padding"}}'
+  i=$((i+1))
+done
+exit 0
+`;
 const NOISY_FAILING_WORKER =
   "#!/bin/sh\necho 'line one failure' >&2\necho 'line two failure' >&2\necho 'line three failure' >&2\nexit 3\n";
 const SLOW_WORKER = "#!/bin/sh\nsleep 30\n";
@@ -879,6 +900,92 @@ sleep 30
     it("clears the widget when no workers are running", async () => {
       await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
       expect(mockCtx.ui.setWidget).toHaveBeenLastCalledWith("agents", undefined);
+    });
+  });
+
+  // --- Live worker activity ---
+
+  describe("workers live activity", () => {
+    it("tracks live tool activity on the running record and spools the stream", async () => {
+      const fixture = await writeFixture(fixtureDir, "active-worker.sh", ACTIVE_WORKER);
+      setEnv("PI_WORKER_COMMAND", fixture);
+
+      const started = await executeTool("delegate", { task: "read auth", isolate: false });
+      const id = started.details.workerId as string;
+
+      // The spool projection captures the tool lifecycle and assistant text
+      // while the worker is still running. (The activity snapshot itself is
+      // intentionally in-memory only — the widget reads the live record.)
+      await vi.waitFor(async () => {
+        const raw = await readFile(streamPath(cwd, id), "utf8").catch(() => "");
+        expect(raw).toContain('"kind":"tool_start"');
+        expect(raw).toContain('"kind":"tool_end"');
+        expect(raw).toContain("Reading auth module");
+      });
+
+      await executeTool("workers", { action: "cancel", id });
+    });
+
+    it("shows live activity in the workers widget line", async () => {
+      const fixture = await writeFixture(fixtureDir, "active-widget.sh", ACTIVE_WORKER);
+      setEnv("PI_WORKER_COMMAND", fixture);
+
+      // Short name: the frame line is width-truncated, and a uuid-long id
+      // would push the activity segment past the truncation point.
+      const started = await executeTool("delegate", {
+        task: "t",
+        isolate: false,
+        name: "scout",
+      });
+      const id = started.details.workerId as string;
+
+      await vi.waitFor(async () => {
+        const lastCall = mockCtx.ui.setWidget.mock.calls.at(-1) as unknown[];
+        const factory = lastCall[1] as
+          | ((tui: unknown, theme: unknown) => { render(w: number): string[] })
+          | undefined;
+        if (typeof factory !== "function") throw new Error("no widget factory");
+        const component = factory(undefined, mockCtx.ui.theme);
+        const text = component.render(160).join("\n");
+        expect(text).toContain("▸ read src/auth.ts");
+      });
+      await executeTool("workers", { action: "cancel", id });
+    });
+
+    it("workers tail reads the bounded stream after completion", async () => {
+      const fixture = await writeFixture(fixtureDir, "tail-worker.sh", TAIL_WORKER);
+      setEnv("PI_WORKER_COMMAND", fixture);
+
+      const started = await executeTool("delegate", {
+        task: "t",
+        isolate: false,
+        wait: true,
+      });
+      const id = (started.details.worker as WorkerRecord).id;
+
+      const tail = await executeTool("workers", { action: "tail", id });
+      const text = tail.content[0].text as string;
+      expect(text).toContain("▸ read src/auth.ts");
+      expect(text).toContain("✓ read");
+      expect(text).toContain("✎ Reading auth module");
+      expect(text).toContain("■ finished completed");
+    });
+
+    it("the stream spool caps itself and records truncation", async () => {
+      const fixture = await writeFixture(fixtureDir, "spool-cap.sh", SPOOL_CAP_WORKER);
+      setEnv("PI_WORKER_COMMAND", fixture);
+
+      const started = await executeTool("delegate", {
+        task: "t",
+        isolate: false,
+        wait: true,
+        timeout_seconds: 30,
+      });
+      const id = (started.details.worker as WorkerRecord).id;
+
+      const raw = await readFile(streamPath(cwd, id), "utf8");
+      expect(Buffer.byteLength(raw)).toBeLessThanOrEqual(512 * 1024 + 4096);
+      expect(raw).toContain("stream truncated");
     });
   });
 });

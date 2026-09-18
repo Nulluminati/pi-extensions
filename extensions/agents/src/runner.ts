@@ -7,20 +7,184 @@
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
+import { appendFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { ThinkingLevel } from "pi";
 import { cleanGitEnv } from "../../../lib/git.ts";
-import { patchesDir } from "./store.ts";
-import type { WorkerEvents, WorkerRecord } from "./types.ts";
+import { patchesDir, STREAM_MAX_BYTES, streamPath } from "./store.ts";
+import type { WorkerActivity, WorkerEvents, WorkerRecord } from "./types.ts";
 import { captureWorktreePatch } from "./worktree.ts";
 
 // --- Constants ---
 
 export const CANCEL_GRACE_MS = 4_000;
+/** Arg/result summaries in the stream projection stay one line and short. */
+export const STREAM_SUMMARY_CHARS = 200;
 
 /** Worker binary override (tests point this at a fixture script). */
 function workerBinary(): string {
   return process.env.PI_WORKER_COMMAND?.trim() || "pi";
+}
+
+// --- Stream projection ---
+
+/** One filtered stream event (spooled as JSONL, read by workers tail). */
+export interface StreamEvent {
+  at: number;
+  kind: "start" | "tool_start" | "tool_end" | "assistant" | "end";
+  task?: string;
+  tool?: string;
+  detail?: string;
+  text?: string;
+  status?: string;
+  error?: string;
+}
+
+/** One-line summary of tool args or results: prefer the common location /
+ *  command keys, fall back to a truncated JSON dump. Never multi-line. */
+export function summarizeStreamValue(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  const preferred =
+    typeof value === "object" && value !== null
+      ? ((value as Record<string, unknown>).path ??
+        (value as Record<string, unknown>).file_path ??
+        (value as Record<string, unknown>).command ??
+        (value as Record<string, unknown>).pattern ??
+        (value as Record<string, unknown>).url ??
+        (value as Record<string, unknown>).query ??
+        (value as Record<string, unknown>).task)
+      : value;
+  const raw = typeof preferred === "string" && preferred.trim() ? preferred : JSON.stringify(value);
+  const oneLine = raw.replace(/\\?\n/g, " ").replace(/\s+/g, " ").trim();
+  if (!oneLine) return undefined;
+  return oneLine.length > STREAM_SUMMARY_CHARS
+    ? `${oneLine.slice(0, STREAM_SUMMARY_CHARS)}…`
+    : oneLine;
+}
+
+/**
+ * Bounded append-only spool of the worker's filtered event stream. Appends
+ * are serialized to keep line order; past the size cap, appending stops and
+ * a truncation marker is recorded (the head is preserved).
+ */
+class StreamSpool {
+  private readonly path: string;
+  private bytes = 0;
+  private overflow = false;
+  private queue: Promise<void> = Promise.resolve();
+
+  constructor(cwd: string, workerId: string) {
+    this.path = streamPath(cwd, workerId);
+  }
+
+  write(event: StreamEvent): void {
+    if (this.overflow) return;
+    const line = `${JSON.stringify(event)}\n`;
+    this.bytes += Buffer.byteLength(line);
+    if (this.bytes > STREAM_MAX_BYTES) {
+      this.overflow = true;
+      this.enqueue({ at: Date.now(), kind: "end", detail: "stream truncated (size cap reached)" });
+      return;
+    }
+    this.enqueue(event);
+  }
+
+  /** Resolves when all queued events are on disk (used at terminal save so
+   *  the tail is complete the moment the worker finishes). */
+  flush(): Promise<void> {
+    return this.queue;
+  }
+
+  private enqueue(event: StreamEvent): void {
+    this.queue = this.queue
+      .then(async () => {
+        await mkdir(join(this.path, ".."), { recursive: true });
+        await appendFile(this.path, `${JSON.stringify(event)}\n`, "utf8");
+      })
+      .catch((error) => {
+        // A failed spool write must never affect the worker monitor; give up
+        // on this worker's stream rather than retrying forever.
+        this.overflow = true;
+        console.error(`[agents] stream spool failed: ${(error as Error).message}`);
+      });
+  }
+}
+
+/**
+ * Ingest one JSON event line from the worker's stdout: track live activity on
+ * the record (last tool + running tool count), append to the stream spool,
+ * and return the updated final-assistant text.
+ */
+export function ingestStreamEvent(
+  jsonLine: string,
+  current: string,
+  record: WorkerRecord,
+  spool: StreamSpool,
+  events: WorkerEvents,
+): string {
+  let event: {
+    type?: string;
+    message?: { role?: string; content?: unknown };
+    toolName?: string;
+    args?: unknown;
+    result?: unknown;
+  };
+  try {
+    event = JSON.parse(jsonLine);
+  } catch {
+    return current;
+  }
+
+  if (event.type === "tool_execution_start" && typeof event.toolName === "string") {
+    const detail = summarizeStreamValue(event.args);
+    const activity: WorkerActivity = {
+      tool: event.toolName,
+      ...(detail !== undefined ? { detail } : {}),
+      toolCount: (record.activity?.toolCount ?? 0) + 1,
+      at: Date.now(),
+    };
+    record.activity = activity;
+    spool.write({
+      at: activity.at,
+      kind: "tool_start",
+      tool: activity.tool,
+      ...(detail !== undefined ? { detail } : {}),
+    });
+    events.onActivity();
+    return current;
+  }
+
+  if (event.type === "tool_execution_end" && typeof event.toolName === "string") {
+    const at = Date.now();
+    const toolEndDetail = summarizeStreamValue(event.result);
+    spool.write({
+      at,
+      kind: "tool_end",
+      tool: event.toolName,
+      ...(toolEndDetail !== undefined ? { detail: toolEndDetail } : {}),
+    });
+    return current;
+  }
+
+  if (event.type !== "message_end" || event.message?.role !== "assistant") return current;
+  const content = event.message.content;
+  if (!Array.isArray(content)) return current;
+  const text = content
+    .filter(
+      (block): block is { type: string; text?: string } =>
+        typeof block === "object" &&
+        block !== null &&
+        (block as { type?: string }).type === "text" &&
+        typeof (block as { text?: unknown }).text === "string",
+    )
+    .map((block) => block.text ?? "")
+    .join("")
+    .trim();
+  if (text) {
+    const streamed = summarizeStreamValue(text);
+    if (streamed !== undefined) spool.write({ at: Date.now(), kind: "assistant", text: streamed });
+  }
+  return text || current;
 }
 
 // --- Parsing ---
@@ -130,6 +294,13 @@ export function startWorker(options: StartWorkerOptions): RunningWorker {
   // across chunk boundaries; per-chunk decoding would corrupt it.
   let stdoutLineBuffer = "";
   let stderrTail = "";
+  const spool = new StreamSpool(options.cwd, options.workerId);
+  const taskSummary = summarizeStreamValue(options.task);
+  spool.write({
+    at: Date.now(),
+    kind: "start",
+    ...(taskSummary !== undefined ? { task: taskSummary } : {}),
+  });
   child.stdout?.setEncoding("utf8");
   child.stderr?.setEncoding("utf8");
   child.stdout?.on("data", (chunk: string) => {
@@ -137,7 +308,7 @@ export function startWorker(options: StartWorkerOptions): RunningWorker {
     const lines = stdoutLineBuffer.split("\n");
     stdoutLineBuffer = lines.pop() ?? "";
     for (const line of lines) {
-      stdoutText = extractAssistantText(line, stdoutText);
+      stdoutText = ingestStreamEvent(line, stdoutText, record, spool, events);
     }
   });
   child.stderr?.on("data", (chunk: string) => {
@@ -164,6 +335,16 @@ export function startWorker(options: StartWorkerOptions): RunningWorker {
     } else {
       delete record.error;
     }
+    const endError = summarizeStreamValue(error);
+    spool.write({
+      at: record.endedAt,
+      kind: "end",
+      status,
+      ...(endError !== undefined ? { error: endError } : {}),
+    });
+    // Complete the stream before the terminal save so a post-mortem tail
+    // always sees the end marker.
+    await spool.flush();
     if (options.worktree !== undefined && (status === "completed" || status === "timeout")) {
       const patchPath = join(patchesDir(options.cwd), `${record.id}.diff`);
       try {

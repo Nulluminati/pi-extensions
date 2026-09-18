@@ -6,7 +6,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { writeJsonAtomic } from "../../../lib/json-atomic.ts";
 import { projectStateDir } from "../../../lib/paths.ts";
@@ -21,6 +21,42 @@ export function workersDir(cwd: string): string {
 
 export function patchesDir(cwd: string): string {
   return join(workersDir(cwd), "patches");
+}
+
+/** Per-worker stream projection (filtered event log for the tail action). */
+export function streamsDir(cwd: string): string {
+  return join(workersDir(cwd), "streams");
+}
+
+export function streamPath(cwd: string, workerId: string): string {
+  return join(streamsDir(cwd), `${workerId}.jsonl`);
+}
+
+/** Stream spool cap: past this, the runner stops appending and records a
+ *  truncation marker (the head of the stream is preserved). */
+export const STREAM_MAX_BYTES = 512 * 1024;
+
+/** Delete stream spool files that no running record claims and whose worker
+ *  finished more than a day ago; post-mortem tails stay available for a day. */
+export async function pruneStreams(cwd: string, now = Date.now()): Promise<void> {
+  const workers = await loadWorkers(cwd);
+  let files: string[] = [];
+  try {
+    files = await readdir(streamsDir(cwd));
+  } catch {
+    return;
+  }
+  for (const file of files) {
+    const id = file.replace(/\.jsonl$/, "");
+    const record = workers[id];
+    // Running workers keep their stream; known terminal records keep it for a
+    // day (post-mortem tails); everything else is an orphan and goes.
+    if (record?.status === "running") continue;
+    if (record !== undefined) {
+      if (record.endedAt === undefined || now - record.endedAt <= 24 * 60 * 60_000) continue;
+    }
+    await unlink(join(streamsDir(cwd), file)).catch(() => {});
+  }
 }
 
 function registryPath(cwd: string): string {

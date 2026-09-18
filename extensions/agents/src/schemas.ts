@@ -39,10 +39,18 @@ export const WORKERS_PARAMETERS = {
   type: "object",
   properties: {
     action: {
-      enum: ["list", "status", "cancel", "collect"],
-      description: "Worker registry operation.",
+      enum: ["list", "status", "tail", "cancel", "collect"],
+      description:
+        "Worker registry operation. tail: read the bounded stream tail of a running or finished worker (tool calls, assistant texts) without anything auto-delivering into the conversation.",
     },
-    id: { type: "string", description: "Worker id, required for status / cancel / collect." },
+    id: {
+      type: "string",
+      description: "Worker id, required for status / tail / cancel / collect.",
+    },
+    lines: {
+      type: "number",
+      description: "tail: how many trailing stream entries to show (default 40).",
+    },
     apply: {
       type: "boolean",
       description: "collect: apply the worker's patch to the working tree (default true).",
