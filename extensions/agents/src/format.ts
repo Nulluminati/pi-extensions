@@ -62,14 +62,6 @@ export function createWorkersWidget(getWorkers: () => WorkerRecord[]): FramedWid
 
 // --- Stream tail ---
 
-const STREAM_ICONS: Record<string, string> = {
-  start: "▷",
-  tool_start: "▸",
-  tool_end: "✓",
-  assistant: "✎",
-  end: "■",
-};
-
 function shortTime(at: number): string {
   const d = new Date(at);
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -97,7 +89,6 @@ export function formatStreamEntries(entries: string): string[] {
       continue;
     }
     const time = typeof event.at === "number" ? `${shortTime(event.at)} ` : "";
-    const icon = STREAM_ICONS[event.kind ?? ""] ?? "·";
     if (event.kind === "assistant" && typeof event.text === "string") {
       lines.push(`${time}✎ ${event.text}`);
     } else if (event.kind === "tool_start" && typeof event.tool === "string") {

@@ -6,7 +6,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { mkdir, readdir, readFile, unlink } from "node:fs/promises";
+import { readdir, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { writeJsonAtomic } from "../../../lib/json-atomic.ts";
 import { projectStateDir } from "../../../lib/paths.ts";
