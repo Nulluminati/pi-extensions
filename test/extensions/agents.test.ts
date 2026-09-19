@@ -752,7 +752,7 @@ sleep 30
     expect(record?.status).toBe("cancelled");
   });
 
-  it("workers collect applies an isolated worker's patch and cleans up", async () => {
+  it("workers collect applies an isolated worker's patch and cleans up, keeping the stream", async () => {
     await initGitRepo(cwd);
     const fixture = await writeFixture(fixtureDir, "ok-worker.sh", SUCCESS_WORKER);
     setEnv("PI_WORKER_COMMAND", fixture);
@@ -780,6 +780,11 @@ sleep 30
     // Worktree cleaned up.
     const { existsSync } = await import("node:fs");
     expect(existsSync(worker.worktree as string)).toBe(false);
+    // But the stream spool survives the cleanup: post-mortem tails stay
+    // available until the 24h prune reaps them.
+    await expect(executeTool("workers", { action: "tail", id })).resolves.toMatchObject({
+      content: [{ type: "text", text: expect.stringContaining("■ finished completed") }],
+    });
     const record = await loadWorker(cwd, id);
     expect(record?.collectedAt).toBeDefined();
   });

@@ -15,7 +15,7 @@
  */
 
 import { existsSync } from "node:fs";
-import { access, readFile, unlink } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext, ExtensionUIContext } from "pi";
 import { excludeFromGit } from "../../lib/git.ts";
@@ -423,8 +423,9 @@ export default async function agentsExtension(pi: ExtensionAPI) {
             lines.push("Worktree and branch removed.");
           }
         }
-        // The stream spool served its purpose once collected.
-        await unlink(streamPath(ctx.cwd, id)).catch(() => {});
+        // The stream spool outlives the collect: post-mortem tails stay
+        // available for 24h after the worker finished (session_start prunes
+        // them). Collect removes the worktree/branch, not the forensics.
         record.collectedAt = Date.now();
         await saveWorker(ctx.cwd, record);
         return { content: [{ type: "text", text: lines.join(" ") }], details: { worker: record } };
