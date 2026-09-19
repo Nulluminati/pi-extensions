@@ -28,6 +28,7 @@ import { renderModalFrame } from "../../../lib/tui-frame.ts";
 | Build a `/smallmodel`-style config command or read the user's saved small-model choice | `loadSmallModelConfig`, `saveSmallModelConfig`, `parseSmallModelSpec` | `lib/small-model.ts` |
 | Draw a bordered modal dialog with a title | `renderModalFrame`, `modalContentWidth` | `lib/tui-frame.ts` |
 | Build a framed editor-widget panel (jobs, todos, missions, workers, autoresearch) | `createFramedWidget` | `lib/framed-widget.ts` |
+| Publish an editor widget with a guaranteed, churn-free position (recap first, then workers/jobs/todos/missions/autoresearch) | `setStripWidget`, `WIDGET_PRIORITY` | `lib/widget-strip.ts` |
 | Show an icon + colored status in the footer/status area | `formatStatusLine` | `lib/ui-format.ts` |
 | Render a "key: action" hint bar inside a dialog | `formatStyledKeyHints`, `formatKeyHints` | `lib/ui-format.ts` |
 | Write a `renderResult` for a registered tool | `createToolStatus`, `wrapToolText` | `lib/tool-renderer.ts` |
@@ -109,6 +110,8 @@ Extensions whose live state is shown in a framed editor widget (missions, agents
 
 1. **Keep the `ctx.ui.setStatus` fallback.** It is what pi's default footer shows when the bundled status bar is disabled (`/statusbar:toggle`). Never remove it; build it with `formatStatusLine`.
 2. **Register the status key in the status bar's line-2 skip list** (`extensions/status-bar/src/constants.ts`, mirrored string like `MISSIONS_STATUS_KEY`). The custom footer skips widget-first keys on its second line because the widget already shows the state.
+
+The same extensions publish their widget through the **widget strip** (`lib/widget-strip.ts`, `setStripWidget`) instead of `ctx.ui.setWidget` directly: pi stacks same-placement widgets in insertion order and re-setting a key sinks it to the end, so the strip re-renders entries by priority (recap 0, workers 10, jobs 20, todos 30, missions 40, autoresearch 50 — add new widgets to `WIDGET_PRIORITY` in the lib module, never call `ctx.ui.setWidget` for a content widget).
 
 Messenger's unread count is the one line-1 exception: the status bar subscribes to `messenger:state` and renders `✉ N` next to the context usage bar; messenger's own `setStatus` entry remains its disabled-footer fallback and is likewise skipped on line 2.
 
