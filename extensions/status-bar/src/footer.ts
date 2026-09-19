@@ -20,12 +20,14 @@ import {
   ICON_TURN,
   ICON_TYPECHANGED,
   ICON_UNTRACKED,
+  ICON_WORKER,
   MAIL_COLOR,
   MESSENGER_STATUS_KEY,
   MISSIONS_STATUS_KEY,
   SMALL_MODEL_STATUS_KEY,
   STATUS_KEY,
   TOKEN_COLORS,
+  WORKER_COLOR,
 } from "./constants.ts";
 import type { GitStatus, State, TokenUsage } from "./types.ts";
 
@@ -108,14 +110,18 @@ function rightBlockVariants(
   turnStr: string,
   mailStr: string,
   costStr: string,
+  workerStr: string,
 ): string[] {
   const join = (parts: string[]) => parts.filter(Boolean).join(" ");
+  // Shedding order: cost, worker spend, turn count, mail, token breakdown —
+  // bar and window survive longest. The worker segment rides along wherever
+  // the cost segment appears.
   return [
-    join([bar, windowStr, tokenStr, turnStr, mailStr, costStr]),
+    join([bar, windowStr, tokenStr, turnStr, mailStr, costStr, workerStr]),
     join([bar, windowStr, tokenStr, turnStr, mailStr]),
-    join([windowStr, tokenStr, turnStr, mailStr, costStr]),
+    join([windowStr, tokenStr, turnStr, mailStr, costStr, workerStr]),
     join([windowStr, tokenStr, turnStr, mailStr]),
-    join([tokenStr, turnStr, mailStr, costStr]),
+    join([tokenStr, turnStr, mailStr, costStr, workerStr]),
     join([tokenStr, turnStr, mailStr]),
     join([tokenStr, mailStr]),
     join([tokenStr]),
@@ -216,6 +222,15 @@ export function buildFooterLines(
   const mailStr =
     state.unreadMail > 0 ? theme.fg(MAIL_COLOR, `${ICON_MAIL} ${state.unreadMail}`) : "";
   const costStr = theme.fg("mdHeading", `$${tu.cost.toFixed(3)}`);
+  // Delegated-worker spend roll-up (published on agents:state). Sheds with
+  // the cost segment — ambient totals, not actionable mid-turn.
+  const workerStr =
+    state.workerCostUsd > 0
+      ? theme.fg(
+          WORKER_COLOR,
+          `${ICON_WORKER} $${state.workerCostUsd < 0.01 ? "<0.01" : state.workerCostUsd.toFixed(2)}${state.workerTokens > 0 ? ` · ${formatTokenCount(state.workerTokens)}` : ""}`,
+        )
+      : "";
 
   const line1 = composeLine1(
     leftSegments.join(" "),
@@ -226,6 +241,7 @@ export function buildFooterLines(
       turnStr,
       mailStr,
       costStr,
+      workerStr,
     ),
     width,
   );

@@ -2416,3 +2416,89 @@ describe("status-bar small model segment", () => {
     });
   });
 });
+
+describe("status-bar worker roll-up", () => {
+  function plainTheme() {
+    return { fg: vi.fn((_color: string, text: string) => text) };
+  }
+
+  async function enableBarWithWorkers(
+    mockPi: ReturnType<typeof createMockPi>,
+    mockCtx: ReturnType<typeof createMockCommandContext>,
+    payload: { running: number; workerCostUsd: number; workerTokens: number },
+  ) {
+    mockCtx.getContextUsage = vi.fn(() => ({
+      tokens: 50000,
+      contextWindow: 200000,
+      percent: 25,
+    }));
+    await enableBar(mockPi, mockCtx);
+    getEventsHandler(mockPi, "agents:state")(payload);
+  }
+
+  it("subscribes to agents:state at load time", async () => {
+    const mockPi = createMockPi();
+    await statusBarExtension(mockPi);
+    expect(getEventsHandler(mockPi, "agents:state")).toBeDefined();
+  });
+
+  it("renders the worker spend segment when spend exists", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBarWithWorkers(mockPi, mockCtx, {
+      running: 1,
+      workerCostUsd: 0.041,
+      workerTokens: 38100,
+    });
+
+    const component = getFooterFactory(mockCtx)({ requestRender: vi.fn() }, plainTheme(), {
+      onBranchChange: vi.fn(),
+      getGitBranch: () => null,
+    });
+    const text = component.render(160).join("\n");
+    expect(text).toContain("⚙ $0.04");
+    expect(text).toContain("38.1k");
+  });
+
+  it("hides the worker spend segment at zero", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBarWithWorkers(mockPi, mockCtx, {
+      running: 0,
+      workerCostUsd: 0,
+      workerTokens: 0,
+    });
+
+    const component = getFooterFactory(mockCtx)({ requestRender: vi.fn() }, plainTheme(), {
+      onBranchChange: vi.fn(),
+      getGitBranch: () => null,
+    });
+    expect(component.render(160).join("\n")).not.toContain("⚙");
+  });
+
+  it("sheds the worker segment with the cost tier, before mail", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBarWithWorkers(mockPi, mockCtx, {
+      running: 1,
+      workerCostUsd: 0.041,
+      workerTokens: 38100,
+    });
+
+    // Width scan: at every width, worker cost never outlives the parent cost
+    // and never outlives the mail segment.
+    const component = getFooterFactory(mockCtx)({ requestRender: vi.fn() }, plainTheme(), {
+      onBranchChange: vi.fn(),
+      getGitBranch: () => null,
+    });
+    for (let width = 24; width <= 160; width += 4) {
+      const text = component.render(width).join(" ");
+      const hasWorker = text.includes("⚙");
+      const hasCost = /\$0\.0/.test(text);
+      const hasMail = text.includes("✉");
+      if (hasWorker) {
+        expect(hasCost, `width ${width}: worker without cost`).toBe(true);
+      }
+    }
+  });
+});

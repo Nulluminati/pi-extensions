@@ -33,6 +33,14 @@ export function formatWorkerLine(worker: WorkerRecord): string {
 
 export function formatWorkerStatus(worker: WorkerRecord): string {
   const lines = [formatWorkerLine(worker), `Task: ${worker.task}`, `cwd: ${worker.cwd}`];
+  if (worker.usage !== undefined) {
+    const tokens =
+      worker.usage.inputTokens +
+      worker.usage.outputTokens +
+      worker.usage.cacheReadTokens +
+      worker.usage.cacheWriteTokens;
+    lines.push(`Usage: ${worker.usage.costUsd.toFixed(3)} · ${(tokens / 1000).toFixed(1)}k tok`);
+  }
   if (worker.error !== undefined) lines.push(`Error: ${worker.error}`);
   if (worker.patchPath !== undefined) lines.push(`Patch: ${worker.patchPath}`);
   if (worker.outputText !== undefined) {

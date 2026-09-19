@@ -51,6 +51,10 @@ printf '%s\n' '{"type":"tool_execution_end","toolName":"read","result":{"content
 printf '%s\n' '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"Reading auth module."}]}}'
 sleep 30
 `;
+const USAGE_WORKER = `#!/bin/sh
+printf '%s\n' '{"type":"message_end","message":{"role":"assistant","usage":{"input":12000,"output":2000,"cacheRead":24000,"cacheWrite":100,"totalTokens":38100,"cost":{"total":0.041,"input":0.01,"output":0.02,"cacheRead":0.011,"cacheWrite":0.0}},"content":[{"type":"text","text":"done"}]}}'
+exit 0
+`;
 const TAIL_WORKER = `#!/bin/sh
 printf '%s\n' '{"type":"tool_execution_start","toolName":"read","args":{"path":"src/auth.ts"}}'
 printf '%s\n' '{"type":"tool_execution_end","toolName":"read","result":{"content":[{"type":"text","text":"jwt tokens"}]}}'
@@ -979,6 +983,37 @@ sleep 30
       expect(text).toContain("✓ read");
       expect(text).toContain("✎ Reading auth module");
       expect(text).toContain("■ finished completed");
+    });
+
+    it("rolls up worker usage and publishes it on agents:state", async () => {
+      const fixture = await writeFixture(fixtureDir, "usage-worker.sh", USAGE_WORKER);
+      setEnv("PI_WORKER_COMMAND", fixture);
+
+      const started = await executeTool("delegate", {
+        task: "t",
+        isolate: false,
+        wait: true,
+      });
+      const worker = started.details.worker as WorkerRecord;
+      // Per-message usage accumulates on the record and survives the terminal save.
+      expect(worker.usage).toMatchObject({
+        inputTokens: 12000,
+        outputTokens: 2000,
+        cacheReadTokens: 24000,
+        cacheWriteTokens: 100,
+        costUsd: 0.041,
+      });
+
+      const stored = await loadWorker(cwd, worker.id);
+      expect(stored?.usage?.costUsd).toBeCloseTo(0.041);
+
+      // The status payload aggregates across all records on the next publish.
+      await executeTool("workers", { action: "list" });
+      const stateEvents = mockPi.events.emit.mock.calls.filter(
+        ([event]) => event === "agents:state",
+      );
+      const payload = stateEvents.at(-1)?.[1] as { running: number; workerCostUsd: number };
+      expect(payload.workerCostUsd).toBeCloseTo(0.041);
     });
 
     it("the stream spool caps itself and records truncation", async () => {

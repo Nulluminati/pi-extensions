@@ -41,6 +41,7 @@ import {
   resolveWorkerModelConfigPath as resolveWorkerModelConfigPathLib,
 } from "../../lib/worker-model.ts";
 import {
+  AGENTS_STATE_EVENT,
   FLEX_EVENT,
   GOAL_STATE_EVENT,
   GONDOLIN_VM_EVENT,
@@ -133,6 +134,8 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     flexCapable: false,
     planModeActive: false,
     unreadMail: 0,
+    workerCostUsd: 0,
+    workerTokens: 0,
   };
 
   let getBranch: () => any[] = () => [];
@@ -170,6 +173,18 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     state.unreadMail = payload.unread;
     state.lastHandle?.requestRender();
   });
+
+  // Worker spend roll-up from the agents extension. Like unreadMail, this is
+  // event-owned state: the agents extension re-announces on its lifecycle
+  // events, so no session-boundary reset.
+  pi.events.on(
+    AGENTS_STATE_EVENT,
+    (payload: { running: number; workerCostUsd?: number; workerTokens?: number }) => {
+      state.workerCostUsd = payload.workerCostUsd ?? 0;
+      state.workerTokens = payload.workerTokens ?? 0;
+      state.lastHandle?.requestRender();
+    },
+  );
 
   function setFooter(ctx: ExtensionCommandContext): void {
     if (!ctx.hasUI) return;

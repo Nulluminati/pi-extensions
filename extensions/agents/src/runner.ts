@@ -12,7 +12,7 @@ import { join } from "node:path";
 import type { ThinkingLevel } from "pi";
 import { cleanGitEnv } from "../../../lib/git.ts";
 import { patchesDir, STREAM_MAX_BYTES, streamPath } from "./store.ts";
-import type { WorkerActivity, WorkerEvents, WorkerRecord } from "./types.ts";
+import type { WorkerActivity, WorkerEvents, WorkerRecord, WorkerUsage } from "./types.ts";
 import { captureWorktreePatch } from "./worktree.ts";
 
 // --- Constants ---
@@ -124,7 +124,7 @@ export function ingestStreamEvent(
 ): string {
   let event: {
     type?: string;
-    message?: { role?: string; content?: unknown };
+    message?: { role?: string; content?: unknown; usage?: unknown };
     toolName?: string;
     args?: unknown;
     result?: unknown;
@@ -167,6 +167,38 @@ export function ingestStreamEvent(
   }
 
   if (event.type !== "message_end" || event.message?.role !== "assistant") return current;
+  // Roll up the worker's own token/cost usage (pi-ai Usage, per message).
+  if (
+    event.message.usage !== undefined &&
+    typeof event.message.usage === "object" &&
+    event.message.usage !== null
+  ) {
+    const u = event.message.usage as {
+      input?: unknown;
+      output?: unknown;
+      cacheRead?: unknown;
+      cacheWrite?: unknown;
+      totalTokens?: unknown;
+      cost?: { total?: unknown };
+    };
+    const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+    let usage = record.usage;
+    if (usage === undefined) {
+      usage = {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        costUsd: 0,
+      };
+      record.usage = usage;
+    }
+    usage.inputTokens += num(u.input);
+    usage.outputTokens += num(u.output);
+    usage.cacheReadTokens += num(u.cacheRead);
+    usage.cacheWriteTokens += num(u.cacheWrite);
+    usage.costUsd += num(u.cost?.total);
+  }
   const content = event.message.content;
   if (!Array.isArray(content)) return current;
   const text = content

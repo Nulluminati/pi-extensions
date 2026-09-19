@@ -33,6 +33,10 @@ export interface WorkerRecord {
    *  count). Updated in-memory while running; the terminal save records the
    *  last snapshot. */
   activity?: WorkerActivity;
+  /** Roll-up of the worker's own token usage and cost, accumulated from the
+   *  usage fields on its assistant messages (in-memory while running; the
+   *  terminal save records the final totals). */
+  usage?: WorkerUsage;
 }
 
 /** Compact live-activity snapshot; `detail` is a one-line arg summary. */
@@ -41,6 +45,15 @@ export interface WorkerActivity {
   detail?: string;
   toolCount: number;
   at: number;
+}
+
+/** Accumulated token/cost totals across the worker's assistant messages. */
+export interface WorkerUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  costUsd: number;
 }
 
 export interface WorkerRegistryFile {

@@ -85,7 +85,25 @@ export default async function agentsExtension(pi: ExtensionAPI) {
       if (workers[id]?.status === "running") workers[id] = runningWorker.record;
     }
     const runningCount = Object.values(workers).filter((w) => w.status === "running").length;
-    pi.events.emit(AGENTS_STATE_EVENT, { running: runningCount });
+    // Roll up token/cost usage across every worker on record (running merged
+    // with finished) for the status bar. Worker spend is project state; the
+    // status bar renders it separately from this session's own counters.
+    let workerCostUsd = 0;
+    let workerTokens = 0;
+    for (const w of Object.values(workers)) {
+      if (w.usage === undefined) continue;
+      workerCostUsd += w.usage.costUsd;
+      workerTokens +=
+        w.usage.inputTokens +
+        w.usage.outputTokens +
+        w.usage.cacheReadTokens +
+        w.usage.cacheWriteTokens;
+    }
+    pi.events.emit(AGENTS_STATE_EVENT, {
+      running: runningCount,
+      workerCostUsd,
+      workerTokens,
+    });
     if (!ctx.hasUI || !lastUi?.setWidget) return;
     const live = Object.values(workers)
       .filter((w) => w.status === "running")

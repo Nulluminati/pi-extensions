@@ -75,4 +75,8 @@ export interface State {
   // session_start, and a reset here could clobber an announcement that has
   // already fired.
   unreadMail: number;
+  // Aggregated token/cost usage of the project's delegated workers
+  // (published on agents:state). Zero while no workers have run.
+  workerCostUsd: number;
+  workerTokens: number;
 }
