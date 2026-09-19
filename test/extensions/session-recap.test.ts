@@ -2,6 +2,7 @@ import { readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import sessionRecapExtension from "../../extensions/session-recap/session-recap.ts";
+import { __resetWidgetStrip, STRIP_KEY_ABOVE } from "../../lib/widget-strip.ts";
 import { createMockCommandContext } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
 import { getCommandHandler, getEventHandler } from "../mocks/test-helpers.ts";
@@ -98,6 +99,7 @@ function buildMeaningfulBranch(): unknown[] {
 
 describe("session-recap-extension", () => {
   beforeEach(() => {
+    __resetWidgetStrip();
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     vi.resetAllMocks();
     vi.stubEnv("PI_SMALL_MODEL", "test-provider/test-model");
@@ -228,15 +230,11 @@ describe("session-recap-extension", () => {
     vi.advanceTimersByTime(400);
     await vi.waitFor(() => expect(completeSimple).toHaveBeenCalled());
 
-    expect(mockCtx.ui.setWidget).toHaveBeenCalledWith(
-      "session-recap",
-      expect.any(Function),
-      expect.objectContaining({ placement: "aboveEditor" }),
-    );
+    expect(mockCtx.ui.setWidget).toHaveBeenCalledWith(STRIP_KEY_ABOVE, expect.any(Function));
 
     // Verify the factory renders content with the recap text
     const factory = (mockCtx.ui.setWidget as ReturnType<typeof vi.fn>).mock.calls.find(
-      (c: unknown[]) => c[0] === "session-recap" && typeof c[1] === "function",
+      (c: unknown[]) => c[0] === STRIP_KEY_ABOVE && typeof c[1] === "function",
     )?.[1] as ((tui: unknown, theme: unknown) => unknown) | undefined;
     expect(factory).toBeDefined();
     const theme = { fg: (_c: string, t: string) => t, bold: (t: string) => t };
@@ -272,11 +270,7 @@ describe("session-recap-extension", () => {
     vi.advanceTimersByTime(46000);
     await vi.waitFor(() => expect(completeSimple).toHaveBeenCalled());
 
-    expect(mockCtx.ui.setWidget).toHaveBeenCalledWith(
-      "session-recap",
-      expect.any(Function),
-      expect.objectContaining({ placement: "aboveEditor" }),
-    );
+    expect(mockCtx.ui.setWidget).toHaveBeenCalledWith(STRIP_KEY_ABOVE, expect.any(Function));
   });
 
   it("input clears recap and cancels idle timer", async () => {
@@ -302,7 +296,11 @@ describe("session-recap-extension", () => {
     const inputHandler = getEventHandler(mockPi, "input");
     await inputHandler({ type: "input", text: "hello", source: "interactive" }, mockCtx);
 
-    expect(mockCtx.ui.setWidget).toHaveBeenCalledWith("session-recap", undefined);
+    expect(
+      mockCtx.ui.setWidget.mock.calls
+        .filter(([key]) => key === STRIP_KEY_ABOVE)
+        .every(([, content]) => content === undefined),
+    ).toBe(true);
 
     // Advance timers — completeSimple should NOT be called because timer was cleared
     vi.advanceTimersByTime(60000);
@@ -346,7 +344,11 @@ describe("session-recap-extension", () => {
     const agentStartHandler = getEventHandler(mockPi, "agent_start");
     await agentStartHandler({ type: "agent_start" }, mockCtx);
 
-    expect(mockCtx.ui.setWidget).toHaveBeenCalledWith("session-recap", undefined);
+    expect(
+      mockCtx.ui.setWidget.mock.calls
+        .filter(([key]) => key === STRIP_KEY_ABOVE)
+        .every(([, content]) => content === undefined),
+    ).toBe(true);
   });
 
   it("agent_end triggers deferred focus recap", async () => {
@@ -425,15 +427,11 @@ describe("session-recap-extension", () => {
     await handler("", mockCtx);
 
     await vi.waitFor(() => expect(completeSimple).toHaveBeenCalled());
-    expect(mockCtx.ui.setWidget).toHaveBeenCalledWith(
-      "session-recap",
-      expect.any(Function),
-      expect.objectContaining({ placement: "aboveEditor" }),
-    );
+    expect(mockCtx.ui.setWidget).toHaveBeenCalledWith(STRIP_KEY_ABOVE, expect.any(Function));
 
     // Verify the factory renders content with the recap text
     const factory = (mockCtx.ui.setWidget as ReturnType<typeof vi.fn>).mock.calls.find(
-      (c: unknown[]) => c[0] === "session-recap" && typeof c[1] === "function",
+      (c: unknown[]) => c[0] === STRIP_KEY_ABOVE && typeof c[1] === "function",
     )?.[1] as ((tui: unknown, theme: unknown) => unknown) | undefined;
     expect(factory).toBeDefined();
     const theme = { fg: (_c: string, t: string) => t, bold: (t: string) => t };
@@ -468,11 +466,7 @@ describe("session-recap-extension", () => {
     releaseGeneration({ content: [{ type: "text", text: "recap: manual wins" }] });
     await recapDone;
 
-    expect(mockCtx.ui.setWidget).toHaveBeenCalledWith(
-      "session-recap",
-      expect.any(Function),
-      expect.objectContaining({ placement: "aboveEditor" }),
-    );
+    expect(mockCtx.ui.setWidget).toHaveBeenCalledWith(STRIP_KEY_ABOVE, expect.any(Function));
   });
 
   it("/recap with an empty transcript notifies instead of silently doing nothing", async () => {
@@ -538,11 +532,7 @@ describe("session-recap-extension", () => {
     releaseGeneration({ content: [{ type: "text", text: "recap: not stale" }] });
     await recapDone;
 
-    expect(mockCtx.ui.setWidget).toHaveBeenCalledWith(
-      "session-recap",
-      expect.any(Function),
-      expect.objectContaining({ placement: "aboveEditor" }),
-    );
+    expect(mockCtx.ui.setWidget).toHaveBeenCalledWith(STRIP_KEY_ABOVE, expect.any(Function));
   });
 
   it("/recap drops the recap when a new message lands during generation", async () => {
@@ -684,7 +674,11 @@ describe("session-recap-extension", () => {
 
     expect(tty.stdoutWrite).toHaveBeenLastCalledWith("\x1b[?1004l");
     expect(tty.stdinOff).toHaveBeenCalled();
-    expect(mockCtx.ui.setWidget).toHaveBeenCalledWith("session-recap", undefined);
+    expect(
+      mockCtx.ui.setWidget.mock.calls
+        .filter(([key]) => key === STRIP_KEY_ABOVE)
+        .every(([, content]) => content === undefined),
+    ).toBe(true);
   });
 
   it("focus out during active agent defers recap", async () => {
@@ -781,7 +775,7 @@ describe("session-recap-extension", () => {
 
     // Check that the factory widget was set
     const widgetCalls = (mockCtx.ui.setWidget as ReturnType<typeof vi.fn>).mock.calls.filter(
-      (call: unknown[]) => call[0] === "session-recap" && typeof call[1] === "function",
+      (call: unknown[]) => call[0] === STRIP_KEY_ABOVE && typeof call[1] === "function",
     );
     expect(widgetCalls.length).toBeGreaterThan(0);
 

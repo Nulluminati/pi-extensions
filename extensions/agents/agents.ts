@@ -21,6 +21,7 @@ import type { ExtensionAPI, ExtensionContext, ExtensionUIContext } from "pi";
 import { excludeFromGit } from "../../lib/git.ts";
 import { projectStateRelative } from "../../lib/paths.ts";
 import { isPlanModeActive } from "../../lib/plan-state.ts";
+import { setStripWidget, WIDGET_PRIORITY_WORKERS } from "../../lib/widget-strip.ts";
 import { resolveWorkerExtensions } from "../../lib/worker-extensions.ts";
 import { resolveWorkerModelSpec } from "../../lib/worker-model.ts";
 import {
@@ -89,10 +90,11 @@ export default async function agentsExtension(pi: ExtensionAPI) {
     const live = Object.values(workers)
       .filter((w) => w.status === "running")
       .sort((a, b) => a.startedAt - b.startedAt);
-    lastUi.setWidget(
-      WORKERS_WIDGET_KEY,
-      live.length > 0 ? createWorkersWidget(() => live) : undefined,
-    );
+    setStripWidget(lastUi, "aboveEditor", {
+      key: WORKERS_WIDGET_KEY,
+      priority: WIDGET_PRIORITY_WORKERS,
+      factory: live.length > 0 ? createWorkersWidget(() => live) : undefined,
+    });
   }
 
   function makeEvents(ctx: ExtensionContext): WorkerEvents {
@@ -461,6 +463,11 @@ export default async function agentsExtension(pi: ExtensionAPI) {
       running.delete(id);
       await worker.cancel();
     }
-    if (ctx.hasUI) ctx.ui.setWidget(WORKERS_WIDGET_KEY, undefined);
+    if (ctx.hasUI)
+      setStripWidget(ctx.ui, "aboveEditor", {
+        key: WORKERS_WIDGET_KEY,
+        priority: WIDGET_PRIORITY_WORKERS,
+        factory: undefined,
+      });
   });
 }

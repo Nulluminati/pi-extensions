@@ -10,6 +10,7 @@ import {
   SPOOL_MAX_AGE_MS,
   SPOOL_MAX_FILES,
 } from "../../extensions/background-jobs/src/runner.ts";
+import { __resetWidgetStrip, STRIP_KEY_ABOVE } from "../../lib/widget-strip.ts";
 import { createMockCommandContext } from "../mocks/context-mocks.ts";
 import type { DeepMocked } from "../mocks/mock-types.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
@@ -187,7 +188,7 @@ describe("background-jobs-extension", () => {
       await backgroundJobsExtension(mockPi);
       await startBackgroundJob(mockPi, mockCtx, { command: "npm test" });
 
-      const call = mockCtx.ui.setWidget.mock.calls.find((c) => c[0] === "background-jobs");
+      const call = mockCtx.ui.setWidget.mock.calls.find((c) => c[0] === STRIP_KEY_ABOVE);
       expect(call).toBeDefined();
       expect(typeof call?.[1]).toBe("function");
 
@@ -214,7 +215,7 @@ describe("background-jobs-extension", () => {
       }
 
       const calls = mockCtx.ui.setWidget.mock.calls.filter(
-        (call: unknown[]) => call[0] === "background-jobs",
+        (call: unknown[]) => call[0] === STRIP_KEY_ABOVE,
       );
       const call = calls[calls.length - 1];
       const factory = call?.[1] as (
@@ -251,7 +252,7 @@ describe("background-jobs-extension", () => {
         { triggerTurn: true, deliverAs: "steer" },
       );
       expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("exit 0"), "info");
-      expect(mockCtx.ui.setWidget).toHaveBeenLastCalledWith("background-jobs", undefined);
+      expect(mockCtx.ui.setWidget).toHaveBeenLastCalledWith(STRIP_KEY_ABOVE, undefined);
     });
 
     it("reports failure on non-zero exit", async () => {
@@ -1069,6 +1070,7 @@ describe("spool retention", () => {
   let dir: string;
 
   beforeEach(async () => {
+    __resetWidgetStrip();
     dir = await mkdtemp(join(tmpdir(), "background-jobs-prune-"));
   });
 

@@ -18,6 +18,7 @@ import { readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "pi";
 import { isProjectStatePath, projectStateRelative } from "../../lib/paths.ts";
+import { setStripWidget, WIDGET_PRIORITY_AUTORESEARCH } from "../../lib/widget-strip.ts";
 import {
   AUTORESEARCH_STATE_EVENT,
   AUTORESEARCH_STATUS_KEY,
@@ -139,12 +140,17 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
       ctx.ui.setStatus(AUTORESEARCH_STATUS_KEY, formatFooter(ctx.ui.theme, summary));
       if (summary?.active) {
         const state = { summary, entries };
-        ctx.ui.setWidget(
-          AUTORESEARCH_WIDGET_KEY,
-          createAutoresearchWidget(() => state),
-        );
+        setStripWidget(ctx.ui, "aboveEditor", {
+          key: AUTORESEARCH_WIDGET_KEY,
+          priority: WIDGET_PRIORITY_AUTORESEARCH,
+          factory: createAutoresearchWidget(() => state),
+        });
       } else {
-        ctx.ui.setWidget(AUTORESEARCH_WIDGET_KEY, undefined);
+        setStripWidget(ctx.ui, "aboveEditor", {
+          key: AUTORESEARCH_WIDGET_KEY,
+          priority: WIDGET_PRIORITY_AUTORESEARCH,
+          factory: undefined,
+        });
       }
     }
   }
@@ -563,7 +569,11 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
     pi.events.emit(AUTORESEARCH_STATE_EVENT, { active: false, iterations: 0 });
     if (ctx.hasUI) {
       ctx.ui.setStatus(AUTORESEARCH_STATUS_KEY, undefined);
-      ctx.ui.setWidget(AUTORESEARCH_WIDGET_KEY, undefined);
+      setStripWidget(ctx.ui, "aboveEditor", {
+        key: AUTORESEARCH_WIDGET_KEY,
+        priority: WIDGET_PRIORITY_AUTORESEARCH,
+        factory: undefined,
+      });
     }
   });
 }

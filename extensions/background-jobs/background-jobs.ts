@@ -27,6 +27,7 @@
 
 import type { ExtensionAPI, ExtensionUIContext } from "pi";
 import { agentStateDir } from "../../lib/paths.ts";
+import { setStripWidget, WIDGET_PRIORITY_JOBS } from "../../lib/widget-strip.ts";
 import { executeJobsAction, openJobsPanel } from "./src/jobs.ts";
 import { startMonitor } from "./src/monitor.ts";
 import { activeJobs, buildSnapshot, createRegistry, type JobRegistry } from "./src/registry.ts";
@@ -69,7 +70,11 @@ export default async function backgroundJobsExtension(pi: ExtensionAPI) {
     if (!ui?.setWidget) return;
     const active = activeJobs(registry);
     try {
-      ui.setWidget(WIDGET_KEY, active.length > 0 ? createJobsWidget(registry) : undefined);
+      setStripWidget(ui, "aboveEditor", {
+        key: WIDGET_KEY,
+        priority: WIDGET_PRIORITY_JOBS,
+        factory: active.length > 0 ? createJobsWidget(registry) : undefined,
+      });
     } catch (err) {
       const message = (err as Error).message;
       if (!message.includes("stale")) {

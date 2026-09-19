@@ -13,6 +13,7 @@ import {
 } from "../../extensions/missions/src/storage.ts";
 import { runGit } from "../../lib/git.ts";
 import { projectStateRelative } from "../../lib/paths.ts";
+import { __resetWidgetStrip, STRIP_KEY_ABOVE } from "../../lib/widget-strip.ts";
 import { createMockCommandContext } from "../mocks/context-mocks.ts";
 import type { DeepMocked } from "../mocks/mock-types.ts";
 import { createMockPi as createBasePi } from "../mocks/pi-mocks.ts";
@@ -42,6 +43,7 @@ describe("missions-extension", () => {
   };
 
   beforeEach(async () => {
+    __resetWidgetStrip();
     cwd = await mkdtemp(join(tmpdir(), "missions-test-"));
     mockPi = createBasePi() as DeepMocked<ExtensionAPI>;
     mockCtx = createMockCommandContext();
@@ -348,7 +350,7 @@ describe("missions-extension", () => {
       "missions",
       expect.stringContaining("active"),
     );
-    expect(mockCtx.ui.setWidget).toHaveBeenCalledWith("missions", expect.anything());
+    expect(mockCtx.ui.setWidget).toHaveBeenCalledWith(STRIP_KEY_ABOVE, expect.anything());
     const text = renderLastWidget(mockCtx).join("\n");
     expect(text).toContain("Mission");
     expect(text).toContain("tasks 0/1");
@@ -373,7 +375,7 @@ describe("missions-extension", () => {
     const shutdown = getEventHandler("session_shutdown");
     await shutdown({ type: "session_shutdown", reason: "quit" }, mockCtx);
     expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("missions", undefined);
-    expect(mockCtx.ui.setWidget).toHaveBeenCalledWith("missions", undefined);
+    expect(mockCtx.ui.setWidget).toHaveBeenCalledWith(STRIP_KEY_ABOVE, undefined);
   });
 
   it("task_add stores the verification command and description", async () => {

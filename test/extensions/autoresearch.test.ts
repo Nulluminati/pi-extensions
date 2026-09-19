@@ -15,6 +15,7 @@ import { loadConfig, readLog } from "../../extensions/autoresearch/src/store.ts"
 import type { RunEntry } from "../../extensions/autoresearch/src/types.ts";
 import { cleanGitEnv } from "../../lib/git.ts";
 import { projectStateRelative } from "../../lib/paths.ts";
+import { __resetWidgetStrip, STRIP_KEY_ABOVE } from "../../lib/widget-strip.ts";
 import { createMockContext } from "../mocks/context-mocks.ts";
 import type { DeepMocked } from "../mocks/mock-types.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
@@ -104,6 +105,7 @@ describe("autoresearch-extension", () => {
   };
 
   beforeEach(async () => {
+    __resetWidgetStrip();
     cwd = await mkdtemp(join(tmpdir(), "autoresearch-test-"));
     await initGitRepo(cwd);
     mockPi = createMockPi() as DeepMocked<ExtensionAPI>;
@@ -311,7 +313,7 @@ describe("autoresearch-extension", () => {
     const shutdown = getEventHandler("session_shutdown");
     await shutdown({ type: "session_shutdown", reason: "reload" }, mockCtx);
     expect(mockCtx.ui.setStatus).toHaveBeenLastCalledWith("autoresearch", undefined);
-    expect(mockCtx.ui.setWidget).toHaveBeenLastCalledWith("autoresearch", undefined);
+    expect(mockCtx.ui.setWidget).toHaveBeenLastCalledWith(STRIP_KEY_ABOVE, undefined);
     expect(mockPi.events.emit).toHaveBeenLastCalledWith("autoresearch:state", {
       active: false,
       iterations: 0,
@@ -605,7 +607,7 @@ describe("autoresearch-extension", () => {
     // Single-session UI: the non-owner publishes CLEARED state (no widget, no
     // footer status) — campaign state is visible only to the owning session.
     expect(mockCtx2.ui.setStatus).toHaveBeenCalledWith("autoresearch", undefined);
-    expect(mockCtx2.ui.setWidget).toHaveBeenCalledWith("autoresearch", undefined);
+    expect(mockCtx2.ui.setWidget).toHaveBeenCalledWith(STRIP_KEY_ABOVE, undefined);
     expect(mockPi2.events.emit).toHaveBeenCalledWith(
       "autoresearch:state",
       expect.objectContaining({ active: false }),
@@ -699,7 +701,7 @@ describe("autoresearch-extension", () => {
   });
 
   describe("widget", () => {
-    function renderLastWidget(width = 80): string[] {
+    function renderLastWidget(width = 160): string[] {
       const lastCall = mockCtx.ui.setWidget.mock.calls.at(-1) as unknown[];
       const factory = lastCall[1] as
         | ((tui: unknown, theme: unknown) => { render(w: number): string[] })
@@ -714,7 +716,7 @@ describe("autoresearch-extension", () => {
       await initSession();
 
       const lastCall = mockCtx.ui.setWidget.mock.calls.at(-1) as unknown[];
-      expect(lastCall[0]).toBe("autoresearch");
+      expect(lastCall[0]).toBe(STRIP_KEY_ABOVE);
       expect(typeof lastCall[1]).toBe("function");
       const text = renderLastWidget().join("\n");
       expect(text).toContain("Autoresearch");
@@ -739,7 +741,7 @@ describe("autoresearch-extension", () => {
       await initSession();
       await executeTool({ action: "stop" });
 
-      expect(mockCtx.ui.setWidget).toHaveBeenLastCalledWith("autoresearch", undefined);
+      expect(mockCtx.ui.setWidget).toHaveBeenLastCalledWith(STRIP_KEY_ABOVE, undefined);
       expect(mockCtx.ui.setStatus).toHaveBeenLastCalledWith("autoresearch", undefined);
     });
 
@@ -747,7 +749,7 @@ describe("autoresearch-extension", () => {
       await initSession();
       const shutdown = getEventHandler("session_shutdown");
       await shutdown({ type: "session_shutdown", reason: "reload" }, mockCtx);
-      expect(mockCtx.ui.setWidget).toHaveBeenLastCalledWith("autoresearch", undefined);
+      expect(mockCtx.ui.setWidget).toHaveBeenLastCalledWith(STRIP_KEY_ABOVE, undefined);
     });
   });
 });

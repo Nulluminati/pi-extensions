@@ -17,6 +17,7 @@ import { promisify } from "node:util";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "pi";
 import { excludeFromGit } from "../../lib/git.ts";
 import { projectStateRelative } from "../../lib/paths.ts";
+import { setStripWidget, WIDGET_PRIORITY_MISSIONS } from "../../lib/widget-strip.ts";
 import {
   createMissionWidget,
   formatMissionStatus,
@@ -88,7 +89,11 @@ export default async function missionsExtension(pi: ExtensionAPI) {
     });
     if (!ctx.hasUI) return;
     ctx.ui.setStatus(MISSION_STATUS_KEY, formatStatus(ctx.ui.theme, active));
-    ctx.ui.setWidget(MISSION_WIDGET_KEY, active ? createMissionWidget(() => active) : undefined);
+    setStripWidget(ctx.ui, "aboveEditor", {
+      key: MISSION_WIDGET_KEY,
+      priority: WIDGET_PRIORITY_MISSIONS,
+      factory: active ? createMissionWidget(() => active) : undefined,
+    });
   }
 
   async function reloadActive(ctx: ExtensionContext): Promise<Mission | undefined> {
@@ -419,6 +424,10 @@ export default async function missionsExtension(pi: ExtensionAPI) {
     // Mission state lives on disk; just clear session UI.
     if (!ctx.hasUI) return;
     ctx.ui.setStatus(MISSION_STATUS_KEY, undefined);
-    ctx.ui.setWidget(MISSION_WIDGET_KEY, undefined);
+    setStripWidget(ctx.ui, "aboveEditor", {
+      key: MISSION_WIDGET_KEY,
+      priority: WIDGET_PRIORITY_MISSIONS,
+      factory: undefined,
+    });
   });
 }

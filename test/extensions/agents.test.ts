@@ -27,6 +27,7 @@ import {
 } from "../../extensions/agents/src/worktree.ts";
 import { cleanGitEnv, runGit } from "../../lib/git.ts";
 import { projectStateRelative } from "../../lib/paths.ts";
+import { __resetWidgetStrip, STRIP_KEY_ABOVE } from "../../lib/widget-strip.ts";
 import { createMockContext } from "../mocks/context-mocks.ts";
 import type { DeepMocked } from "../mocks/mock-types.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
@@ -175,6 +176,7 @@ describe("agents-extension", () => {
   };
 
   beforeEach(async () => {
+    __resetWidgetStrip();
     cwd = await mkdtemp(join(tmpdir(), "agents-test-"));
     fixtureDir = await mkdtemp(join(tmpdir(), "agents-fixture-"));
     mockPi = createMockPi() as DeepMocked<ExtensionAPI>;
@@ -889,7 +891,7 @@ sleep 30
       await executeTool("delegate", { task: "t", isolate: false, name: "scout" });
 
       const lastCall = mockCtx.ui.setWidget.mock.calls.at(-1) as unknown[];
-      expect(lastCall[0]).toBe("agents");
+      expect(lastCall[0]).toBe(STRIP_KEY_ABOVE);
       const text = renderLastWidget().join("\n");
       expect(text).toContain("Workers");
       expect(text).toContain("1 running");
@@ -899,12 +901,15 @@ sleep 30
         { type: "session_shutdown", reason: "quit" },
         mockCtx,
       );
-      expect(mockCtx.ui.setWidget).toHaveBeenLastCalledWith("agents", undefined);
+      expect(mockCtx.ui.setWidget).toHaveBeenLastCalledWith(STRIP_KEY_ABOVE, undefined);
     });
 
     it("clears the widget when no workers are running", async () => {
       await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
-      expect(mockCtx.ui.setWidget).toHaveBeenLastCalledWith("agents", undefined);
+      // With nothing registered the strip never publishes at all; the only
+      // valid strip calls are clears.
+      const stripCalls = mockCtx.ui.setWidget.mock.calls.filter(([key]) => key === STRIP_KEY_ABOVE);
+      expect(stripCalls.every(([, content]) => content === undefined)).toBe(true);
     });
   });
 
