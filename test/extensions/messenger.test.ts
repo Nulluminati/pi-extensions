@@ -12,6 +12,7 @@ import messengerExtension from "../../extensions/messenger/messenger.ts";
 import { checkToolCall } from "../../extensions/messenger/src/enforce.ts";
 import { resolveAgentName } from "../../extensions/messenger/src/identity.ts";
 import {
+  claimIdentity,
   ensureUniqueAgentName,
   findBlockingReservation,
   heartbeat,
@@ -27,6 +28,14 @@ import {
   sendMessage,
 } from "../../extensions/messenger/src/store.ts";
 import { withFileLock } from "../../lib/file-lock.ts";
+
+// Call-through spy: lets tests assert who took which lock while keeping the
+// real cross-process locking behavior for every code path under test.
+vi.mock("../../lib/file-lock.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../lib/file-lock.ts")>();
+  return { ...actual, withFileLock: vi.fn(actual.withFileLock) };
+});
+
 import { runGit } from "../../lib/git.ts";
 import { createMockContext } from "../mocks/context-mocks.ts";
 import type { DeepMocked } from "../mocks/mock-types.ts";
@@ -181,6 +190,21 @@ describe("messenger-extension", () => {
     const res = await executeTool({ action: "send", to: "ghost", text: "anyone there?" });
     expect(res.content[0].text).toContain("not currently online");
     expect(await readInbox(cwd, "ghost")).toHaveLength(1);
+  });
+
+  it("send is refused in a worker session (pull-only output boundary)", async () => {
+    // Un worker ne peut pas pousser du texte généré par un modèle dans une
+    // autre conversation : la sortie du worker ne remonte au parent que par
+    // les surfaces en lecture du tool workers (status, tail).
+    vi.stubEnv("PI_WORKER", "1");
+    vi.stubEnv("PI_MESSENGER_NAME", "worker-agent");
+    await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+
+    await expect(
+      executeTool({ action: "send", to: "parent", text: "texte arbitraire du worker" }),
+    ).rejects.toThrow(/worker/);
+    // Rien n'a été déposé dans la mailbox du destinataire.
+    expect(await readInbox(cwd, "parent")).toHaveLength(0);
   });
 
   it("reserve claims paths and tool_call blocks other agents from editing them", async () => {
@@ -728,6 +752,112 @@ describe("messenger-store", () => {
     await expect(ensureUniqueAgentName(cwd, "freed", process.pid)).resolves.toBe("freed");
   });
 
+  it("claimIdentity claims the name durably under the registry lock", async () => {
+    const claimed = await claimIdentity(cwd, "witness", process.pid);
+    expect(claimed).toBe("witness");
+
+    // The claim is durable before the lock is released: the shard is on disk.
+    const shard = JSON.parse(
+      await readFile(join(cwd, CONFIG_DIR_NAME, "messenger", "registry", "witness.json"), "utf8"),
+    ) as { name: string; pid: number };
+    expect(shard).toMatchObject({ name: "witness", pid: process.pid });
+
+    // The read-modify-write ran inside the registry lock.
+    expect(withFileLock).toHaveBeenCalledWith(
+      join(cwd, CONFIG_DIR_NAME, "messenger", "registry.json.lock"),
+      expect.any(Function),
+    );
+  });
+
+  it("claimIdentity gives a second claim on a held name the next suffix", async () => {
+    // A real helper process provides a pid that is alive but is not ours.
+    const helper = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30_000)"], {
+      stdio: "ignore",
+    });
+    try {
+      const helperPid = helper.pid;
+      if (helperPid === undefined) throw new Error("failed to spawn live helper process");
+
+      // The first claim wins the base name, and its presence record is
+      // durable on disk before the second claim's candidate loop runs.
+      expect(await claimIdentity(cwd, "collider", helperPid)).toBe("collider");
+      expect(
+        await readFile(
+          join(cwd, CONFIG_DIR_NAME, "messenger", "registry", "collider.json"),
+          "utf8",
+        ),
+      ).toContain(`"pid": ${helperPid}`);
+
+      // The second claim observes the first and moves to the next suffix.
+      expect(await claimIdentity(cwd, "collider", process.pid)).toBe("collider-2");
+
+      const registry = await loadRegistry(cwd);
+      expect(registry["collider"]?.pid).toBe(helperPid);
+      expect(registry["collider-2"]?.pid).toBe(process.pid);
+    } finally {
+      helper.kill();
+    }
+  });
+
+  it("concurrent claimIdentity calls serialize and converge on distinct names", async () => {
+    const helper = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30_000)"], {
+      stdio: "ignore",
+    });
+    try {
+      const helperPid = helper.pid;
+      if (helperPid === undefined) throw new Error("failed to spawn live helper process");
+
+      const names = await Promise.all([
+        claimIdentity(cwd, "racer", process.pid),
+        claimIdentity(cwd, "racer", helperPid),
+      ]);
+      // Without the registry lock both loops would see "racer" free and both
+      // return it, sharing a mailbox and reservation identity.
+      expect(new Set(names).size).toBe(2);
+      expect(names).toContain("racer");
+
+      const registry = await loadRegistry(cwd);
+      const [first, second] = names;
+      expect(registry[first]?.pid).toBeDefined();
+      expect(registry[second]?.pid).toBeDefined();
+      expect(registry[first]?.pid).not.toBe(registry[second]?.pid);
+      expect([process.pid, helperPid]).toContain(registry[first]?.pid);
+      expect([process.pid, helperPid]).toContain(registry[second]?.pid);
+    } finally {
+      helper.kill();
+    }
+  });
+
+  it("claimIdentity reuses a name whose holder is gone", async () => {
+    await heartbeat(cwd, "freed", { pid: 999999999, cwd });
+    await expect(claimIdentity(cwd, "freed", process.pid)).resolves.toBe("freed");
+  });
+
+  it("claimIdentity waits for the registry lock before running the candidate loop", async () => {
+    const lockPath = join(cwd, CONFIG_DIR_NAME, "messenger", "registry.json.lock");
+    let releaseHolder = () => {};
+    const gate = new Promise<void>((resolve) => {
+      releaseHolder = resolve;
+    });
+    const holder = withFileLock(lockPath, async () => {
+      await gate;
+    });
+    await flushEventLoop();
+
+    let settled = false;
+    const claim = claimIdentity(cwd, "racer", process.pid).then((name) => {
+      settled = true;
+      return name;
+    });
+    await flushEventLoop();
+    // The holder still owns the lock, so the candidate loop cannot have run.
+    expect(settled).toBe(false);
+
+    releaseHolder();
+    expect(await claim).toBe("racer");
+    await holder;
+  });
+
   it("legacy single-file registry migrates to shards on read", async () => {
     await mkdir(join(cwd, CONFIG_DIR_NAME, "messenger"), { recursive: true });
     const legacyPath = join(cwd, CONFIG_DIR_NAME, "messenger", "registry.json");
@@ -762,6 +892,63 @@ describe("messenger-store", () => {
     expect(existsSync(join(cwd, CONFIG_DIR_NAME, "messenger", "registry", "agent-a.json"))).toBe(
       false,
     );
+  });
+
+  it("readInbox treats a missing mailbox as empty but fails closed on an unreadable one", async () => {
+    expect(await readInbox(cwd, "ghost")).toEqual([]);
+    await expect(markRead(cwd, "ghost", ["m1"])).resolves.toBeUndefined();
+
+    // A directory where the mailbox should be makes the read fail with
+    // EISDIR: that must throw naming the path instead of silently reading as
+    // "no mail" (and eventually compacting the mailbox into nothing).
+    await mkdir(join(cwd, CONFIG_DIR_NAME, "messenger", "inbox", "stuck.jsonl"), {
+      recursive: true,
+    });
+    await expect(readInbox(cwd, "stuck")).rejects.toThrow(/stuck\.jsonl/);
+    await expect(markRead(cwd, "stuck", ["m1"])).rejects.toThrow(/stuck\.jsonl/);
+  });
+
+  it("loadRegistry fails closed on a corrupt shard instead of deleting it", async () => {
+    const dir = join(cwd, CONFIG_DIR_NAME, "messenger", "registry");
+    await mkdir(dir, { recursive: true });
+    const shard = join(dir, "broken.json");
+    await writeFile(shard, "{not json", "utf8");
+
+    await expect(loadRegistry(cwd)).rejects.toThrow(/broken\.json/);
+    // The corrupt shard must not be pruned like a dead session's: deletion
+    // is how durable presence gets destroyed by a read.
+    expect(existsSync(shard)).toBe(true);
+  });
+
+  it("loadRegistry fails closed on a shard with a malformed record", async () => {
+    const dir = join(cwd, CONFIG_DIR_NAME, "messenger", "registry");
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, "wrong.json"), JSON.stringify({ name: 7 }), "utf8");
+
+    await expect(loadRegistry(cwd)).rejects.toThrow(/wrong\.json/);
+  });
+
+  it("loadRegistry treats a missing registry as empty", async () => {
+    await expect(loadRegistry(cwd)).resolves.toEqual({});
+  });
+
+  it("loadRegistry fails closed on a corrupt legacy registry", async () => {
+    await mkdir(join(cwd, CONFIG_DIR_NAME, "messenger"), { recursive: true });
+    await writeFile(join(cwd, CONFIG_DIR_NAME, "messenger", "registry.json"), "]{bad", "utf8");
+
+    await expect(loadRegistry(cwd)).rejects.toThrow(/registry\.json/);
+  });
+
+  it("heartbeat fails closed on a corrupt own shard instead of resetting it", async () => {
+    await heartbeat(cwd, "agent-a", { pid: process.pid, cwd });
+    const shard = join(cwd, CONFIG_DIR_NAME, "messenger", "registry", "agent-a.json");
+    await writeFile(shard, "{not json", "utf8");
+
+    await expect(heartbeat(cwd, "agent-a", { pid: process.pid, cwd })).rejects.toThrow(
+      /agent-a\.json/,
+    );
+    // The unreadable shard is not silently overwritten with fresh state.
+    expect(await readFile(shard, "utf8")).toBe("{not json");
   });
 
   it("mailbox preserves malformed lines when marking read", async () => {

@@ -1,6 +1,6 @@
 ---
 name: shared-helpers
-description: Use the shared helper modules in lib/ when building or modifying Pi extensions in this repo. Covers session entry parsing (session-utils), cheap model resolution (small-model), modal frames (tui-frame), single-line input modals (input-modal), status lines and key hints (ui-format), tool result renderers (tool-renderer), searchable select modals (searchable-select), editor factory layering (editor-factory), persisted per-session identity (session-identity), sharded presence registries with dead-pid pruning (presence-shards), and canonical config/state/cache locations (paths). Use whenever an extension needs TUI rendering, a status line, a picker dialog, a text prompt, a custom editor wrapper, transcript parsing, a cheap direct LLM call, or a place to store config or state — import the lib/ helper instead of reimplementing the pattern.
+description: Use the shared helper modules in lib/ when building or modifying Pi extensions in this repo. Covers session entry parsing (session-utils), cheap model resolution (small-model), modal frames (tui-frame), single-line input modals (input-modal), status lines and key hints (ui-format), tool result renderers (tool-renderer), searchable select modals (searchable-select), editor factory layering (editor-factory), sharded presence registries with dead-pid pruning (presence-shards), plan mode state shared between sessions (plan-state), and canonical config/state/cache locations (paths). Use whenever an extension needs TUI rendering, a status line, a picker dialog, a text prompt, a custom editor wrapper, transcript parsing, a cheap direct LLM call, or a place to store config or state — import the lib/ helper instead of reimplementing the pattern.
 ---
 
 # Shared Helpers in `lib/`
@@ -35,9 +35,9 @@ import { renderModalFrame } from "../../../lib/tui-frame.ts";
 | Let the user fuzzy-pick from a list in a modal | `createSearchableSelectModal` | `lib/searchable-select.ts` |
 | Prompt for one line of text in a framed modal | `promptText`, `createInputModal` | `lib/input-modal.ts` |
 | Wrap/replace the editor component (`ctx.ui.setEditorComponent`) | `installEditorFactoryLayer`, `hasEditorFactoryLayer`, `removeEditorFactoryLayer` | `lib/editor-factory.ts` |
-| Give a session a stable agent name that survives `pi -c` and `/reload` | `resolveSessionIdentity` | `lib/session-identity.ts` |
 | Write config/state JSON without risking a torn file on crash | `writeJsonAtomic` | `lib/json-atomic.ts` |
 | Mutate shared state files across sessions without clobbering | `withFileLock` | `lib/file-lock.ts` |
+| Read or update the plan-mode state from another extension (e.g. to adapt behavior while the parent is planning) | `isPlanModeActive`, `findPlanStateEntry`, `reconstructState` | `lib/plan-state.ts` |
 | Resolve where an extension stores config, state, cache, or project files | `agentConfigPath`, `agentStateDir`, `cacheDir`, `projectStateDir`, `projectStateRelative` | `lib/paths.ts` |
 | Point a user-facing message at Pi's auth file | `authPath` | `lib/paths.ts` |
 | Keep project-local state out of `git status` | `excludeFromGit` | `lib/git.ts` |
@@ -312,8 +312,9 @@ options?)` runs `fn` holding a `wx`-created lock file. Waiters poll; a lock unto
 `staleMs` (default 15s) is reclaimed as crashed, the holder refreshes its mtime every
 `refreshMs` (default 5s) so long critical sections are never stolen, and `timeoutMs`
 (default 30s, must be ≥ `staleMs`) caps the wait — `timeoutMessage` lets a consumer name its
-domain in the error. Used by `messenger` (reservations, mailbox compaction) and `missions`
-(mission saves, via an acquire/release adapter in its storage module).
+domain in the error. Used by `messenger` (registry claims, reservations, mailbox compaction),
+`missions` (mission saves, via an acquire/release adapter in its storage module) and `agents`
+(worker registry read-modify-writes).
 
 ## `lib/model-picker.ts` — model picker pieces
 
@@ -324,16 +325,16 @@ capability flags), and `selectModelWithSearch(ctx, items, activeValue, title)` �
 cancel; fall back to `ctx.ui.select` outside TUI). `ModelMetadata` is the shared model shape.
 Config load/save stays in `lib/small-model.ts` / `lib/worker-model.ts`.
 
-## `lib/session-identity.ts` — persisted per-session identity
+## `lib/plan-state.ts` — plan mode shared state
 
-Gives a session a stable agent name that survives process restarts and `/reload`: env override, then the name persisted as a custom entry in the session transcript (newest wins), then generate-once-and-persist. Used by `messenger`.
+The plan extension persists its plan-mode state as a session custom entry; this module is the read/update contract other extensions use. Used by `plan` (source of truth) and `agents` (delegate adapts to a planning parent).
 
-- `resolveSessionIdentity(pi, ctx, { customType, envVar, generate })` → the agent name. Call in `session_start`; pass your extension's own `customType` (namespacing), the override env var, and your name generator.
-- Keep the `customType` stable across versions so previously persisted identities still resolve.
+- `isPlanModeActive(entries)` → whether the session branch shows plan mode as active.
+- Keep the entry type stable across versions so older transcripts still resolve.
 
 ## `lib/presence-shards.ts` — sharded presence registry
 
-Live presence shared by concurrent sessions. One shard file per agent: heartbeats only ever write the caller's own shard, so concurrent writers cannot clobber each other's entries. Reads merge all shards, drop corrupt shards, prune entries whose pid is dead, and can migrate a legacy single-file registry. Used by `messenger`.
+Live presence shared by concurrent sessions. One shard file per agent: heartbeats only ever write the caller's own shard, so concurrent writers cannot clobber each other's entries. Reads merge all shards, fail closed on corrupt or unreadable shards (they are never silently deleted or read as absent), prune entries whose pid is dead, and can migrate a legacy single-file registry. Used by `messenger` (presence) and `agents` (pid liveness).
 
 - `writeShard(dir, record)` / `readShard(dir, name)` / `removeShard(dir, name)` — per-agent operations.
 - `loadShards(dir, { legacyPath? })` → `Record<name, record>` after pruning dead pids.

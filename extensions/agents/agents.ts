@@ -22,7 +22,6 @@ import { excludeFromGit } from "../../lib/git.ts";
 import { projectStateRelative } from "../../lib/paths.ts";
 import { isPlanModeActive } from "../../lib/plan-state.ts";
 import { setStripWidget, WIDGET_PRIORITY_WORKERS } from "../../lib/widget-strip.ts";
-import { resolveWorkerExtensions } from "../../lib/worker-extensions.ts";
 import { resolveWorkerModelSpec } from "../../lib/worker-model.ts";
 import {
   AGENTS_STATE_EVENT,
@@ -46,6 +45,7 @@ import {
   streamPath,
 } from "./src/store.ts";
 import type { WorkerEvents, WorkerRecord } from "./src/types.ts";
+import { resolveWorkerExtensions } from "./src/worker-extensions.ts";
 import {
   applyPatch,
   createWorktree,

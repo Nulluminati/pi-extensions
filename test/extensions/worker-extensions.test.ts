@@ -8,7 +8,7 @@ import {
   FORBIDDEN_WORKER_EXTENSIONS,
   resolveWorkerExtensions,
   WORKER_EXTENSIONS_ENV_VAR,
-} from "../../lib/worker-extensions.ts";
+} from "../../extensions/agents/src/worker-extensions.ts";
 
 describe("worker-extensions", () => {
   let root: string;

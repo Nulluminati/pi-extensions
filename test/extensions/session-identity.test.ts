@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "pi";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resolveSessionIdentity } from "../../lib/session-identity.ts";
+import { resolveSessionIdentity } from "../../extensions/messenger/src/session-identity.ts";
 import { createMockContext } from "../mocks/context-mocks.ts";
 import type { DeepMocked } from "../mocks/mock-types.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";

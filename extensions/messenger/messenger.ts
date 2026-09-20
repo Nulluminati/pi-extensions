@@ -17,7 +17,6 @@ import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "pi";
 import { excludeFromGit } from "../../lib/git.ts";
 import { projectStateRelative } from "../../lib/paths.ts";
-import { resolveSessionIdentity } from "../../lib/session-identity.ts";
 import { formatStatusLine } from "../../lib/ui-format.ts";
 import { checkToolCall } from "./src/enforce.ts";
 import {
@@ -32,6 +31,7 @@ import {
 } from "./src/format.ts";
 import { assertValidAgentName, resolveAgentName } from "./src/identity.ts";
 import { MESSENGER_PARAMETERS } from "./src/schemas.ts";
+import { resolveSessionIdentity } from "./src/session-identity.ts";
 import {
   claimIdentity,
   ensureUniqueAgentName,
