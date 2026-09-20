@@ -24,6 +24,7 @@ export default async function workerModelExtension(pi: ExtensionAPI) {
   pi.registerCommand("worker-model", {
     description: "Select the global model used by delegated worker sessions",
     handler: async (args, ctx) => {
+      if (!ctx.hasUI) return;
       if (process.env[WORKER_MODEL_ENV_VAR]?.trim()) {
         ctx.ui.notify(
           `${WORKER_MODEL_ENV_VAR} is overriding the global config. Unset it before using /worker-model.`,
