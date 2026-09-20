@@ -72,10 +72,7 @@ export interface StripUi {
 interface StripState {
   entries: Map<StripPlacement, Map<string, StripEntry>>;
   /** Child components keyed by entry key, preserved across republishes. */
-  children: Map<
-    StripPlacement,
-    Map<string, { factory: NonNullable<StripEntry["factory"]>; component: unknown }>
-  >;
+  children: Map<StripPlacement, Map<string, StripChild>>;
   /** Whether the strip pi widget is currently published for a placement. */
   published: Map<StripPlacement, boolean>;
 }
@@ -94,8 +91,12 @@ function state(): StripState {
   return current;
 }
 
-/** Test isolation: drop the global registry. */
+/** Test isolation: dispose every cached child, then drop the global registry. */
 export function __resetWidgetStrip(): void {
+  const current = (globalThis as Record<symbol, StripState | undefined>)[STATE_KEY];
+  if (current) {
+    for (const children of current.children.values()) disposeChildren(children);
+  }
   delete (globalThis as Record<symbol, unknown>)[STATE_KEY];
 }
 
@@ -105,10 +106,33 @@ function stripKey(placement: StripPlacement): string {
 
 // --- Composite rendering ---
 
+type StripChild = { factory: NonNullable<StripEntry["factory"]>; component: unknown };
+
+/** Dispose one cached child's component when it exposes dispose(). */
+function disposeChild(child: StripChild | undefined): void {
+  if (!child) return;
+  const component = child.component as { dispose?: () => void };
+  if (typeof component.dispose === "function") component.dispose();
+}
+
+/** Dispose every cached child, then clear the map, so widgets owning timers
+ *  or subscriptions never leak when the strip drops their components. */
+function disposeChildren(children: Map<string, StripChild>): void {
+  for (const child of children.values()) disposeChild(child);
+  children.clear();
+}
+
 function makeComposite(placement: StripPlacement) {
   return (tui: unknown, theme: unknown) => {
     const s = state();
-    const children = s.children.get(placement) ?? new Map();
+    // The children map lives in shared state so every composite built for
+    // this placement (across republishes and /reload re-registrations)
+    // reuses the same cached components.
+    let children = s.children.get(placement);
+    if (!children) {
+      children = new Map();
+      s.children.set(placement, children);
+    }
     const render = (width: number): string[] => {
       const lines: string[] = [];
       const entries = [...(s.entries.get(placement)?.values() ?? [])].sort(
@@ -122,12 +146,7 @@ function makeComposite(placement: StripPlacement) {
             tui,
             theme,
           );
-          if (
-            child &&
-            typeof (child.component as { dispose?: () => void }).dispose === "function"
-          ) {
-            (child.component as { dispose(): void }).dispose();
-          }
+          disposeChild(child);
           child = { factory: entry.factory, component };
           children.set(entry.key, child);
         }
@@ -138,10 +157,10 @@ function makeComposite(placement: StripPlacement) {
     return {
       render,
       invalidate() {
-        children.clear();
+        disposeChildren(children);
       },
       dispose() {
-        children.clear();
+        disposeChildren(children);
       },
     };
   };
@@ -163,6 +182,13 @@ export function setStripWidget(ui: StripUi, placement: StripPlacement, entry: St
   }
   if (entry.factory === undefined) {
     entries.delete(entry.key);
+    // Removing an entry also disposes and drops its cached child immediately,
+    // so the component's timers or subscriptions do not outlive the widget.
+    const children = s.children.get(placement);
+    if (children?.has(entry.key)) {
+      disposeChild(children.get(entry.key));
+      children.delete(entry.key);
+    }
   } else {
     entries.set(entry.key, { key: entry.key, priority: entry.priority, factory: entry.factory });
   }

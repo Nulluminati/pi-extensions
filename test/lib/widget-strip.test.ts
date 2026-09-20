@@ -47,6 +47,19 @@ function lineFactory(text: string) {
   });
 }
 
+interface CompositeLike {
+  render(width: number): string[];
+  invalidate(): void;
+  dispose(): void;
+}
+
+/** Build the LAST strip composite the mock ui received for a placement. */
+function lastComposite(ui: MockUi, key: string): CompositeLike {
+  const call = ui.calls.filter((c) => c.key === key).at(-1);
+  if (!call || typeof call.content !== "function") throw new Error(`no composite for ${key}`);
+  return (call.content as (tui: unknown, theme: unknown) => CompositeLike)(undefined, theme);
+}
+
 describe("widget-strip", () => {
   beforeEach(() => {
     __resetWidgetStrip();
@@ -126,12 +139,91 @@ describe("widget-strip", () => {
     };
     setStripWidget(ui, "aboveEditor", { key: "workers", priority: 10, factory });
 
+    // The first render builds the child once; the children map must persist
+    // in shared state so later composites reuse it.
+    renderStrip(ui, STRIP_KEY_ABOVE);
     const before = builds;
     // A different entry changing republishes the strip but must not rebuild
     // the untouched worker component.
     setStripWidget(ui, "aboveEditor", { key: "recap", priority: 0, factory: lineFactory("recap") });
     renderStrip(ui, STRIP_KEY_ABOVE);
+    renderStrip(ui, STRIP_KEY_ABOVE);
+    expect(builds).toBe(before);
+  });
+
+  it("disposes cached children when the strip is invalidated", () => {
+    const ui = createMockUi();
+    const disposed: string[] = [];
+    let builds = 0;
+    const factory = () => {
+      builds += 1;
+      return {
+        render: () => ["body"],
+        invalidate: () => {},
+        dispose: () => disposed.push("workers"),
+      };
+    };
+    setStripWidget(ui, "aboveEditor", { key: "workers", priority: 10, factory });
+    renderStrip(ui, STRIP_KEY_ABOVE);
     expect(builds).toBe(1);
+
+    const composite = lastComposite(ui, STRIP_KEY_ABOVE);
+    composite.invalidate();
+    expect(disposed).toEqual(["workers"]);
+
+    // The next render rebuilds the disposed child fresh.
+    renderStrip(ui, STRIP_KEY_ABOVE);
+    expect(builds).toBe(2);
+  });
+
+  it("disposes and drops the cached child when its entry is removed", () => {
+    const ui = createMockUi();
+    const disposed: string[] = [];
+    let builds = 0;
+    const factory = () => {
+      builds += 1;
+      return {
+        render: () => ["body"],
+        invalidate: () => {},
+        dispose: () => disposed.push("workers"),
+      };
+    };
+    setStripWidget(ui, "aboveEditor", { key: "workers", priority: 10, factory });
+    renderStrip(ui, STRIP_KEY_ABOVE);
+    expect(builds).toBe(1);
+
+    setStripWidget(ui, "aboveEditor", { key: "workers", priority: 10, factory: undefined });
+    expect(disposed).toEqual(["workers"]);
+
+    // Re-registering the same factory must build a fresh component: the
+    // cached child was disposed and dropped with the entry.
+    setStripWidget(ui, "aboveEditor", { key: "workers", priority: 10, factory });
+    renderStrip(ui, STRIP_KEY_ABOVE);
+    expect(builds).toBe(2);
+  });
+
+  it("dispose() disposes every cached child", () => {
+    const ui = createMockUi();
+    const disposed: string[] = [];
+    const disposeFactory = (name: string) => () => ({
+      render: () => [name],
+      invalidate: () => {},
+      dispose: () => disposed.push(name),
+    });
+    setStripWidget(ui, "aboveEditor", {
+      key: "workers",
+      priority: 10,
+      factory: disposeFactory("workers"),
+    });
+    setStripWidget(ui, "aboveEditor", {
+      key: "recap",
+      priority: 0,
+      factory: disposeFactory("recap"),
+    });
+    renderStrip(ui, STRIP_KEY_ABOVE);
+
+    lastComposite(ui, STRIP_KEY_ABOVE).dispose();
+    expect(disposed.sort()).toEqual(["recap", "workers"]);
   });
 
   it("survives re-registration after a ui reset (reload)", () => {

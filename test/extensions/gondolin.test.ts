@@ -114,6 +114,36 @@ describe("gondolin-extension", () => {
     );
   });
 
+  it("closes the VM and records a startup error when the shell probe fails after create", async () => {
+    const mockPi = createMockPi();
+    await gondolinExtension(mockPi);
+    mockPi.getFlag = vi.fn(() => true);
+    const { VM } = (await import("@earendil-works/gondolin")) as unknown as {
+      VM: { create: ReturnType<typeof vi.fn> };
+    };
+    VM.create.mockImplementation(() => Promise.resolve(mockVm));
+    mockVm.exec.mockRejectedValueOnce(new Error("probe boom"));
+
+    const ctx = createMockCommandContext();
+    const sessionStart = getEventHandler(mockPi, "session_start");
+    await expect(sessionStart({ type: "session_start", reason: "startup" }, ctx)).rejects.toThrow(
+      /Gondolin VM failed to start/,
+    );
+
+    // Create plus probe is one initialization transaction: the created VM is
+    // closed on post-create failure so a retry cannot leak it.
+    expect(mockVm.close).toHaveBeenCalled();
+
+    // The failure is recorded persistently: subsequent tool calls fail loudly
+    // with the recorded error instead of leaking another VM or falling back
+    // to the host filesystem.
+    const tools = mockPi.registerTool.mock.calls.map((call) => call[0]);
+    const readTool = tools.find((tool) => tool.name === "read");
+    await expect(readTool.execute("id", { path: "x" }, undefined, undefined, ctx)).rejects.toThrow(
+      /probe boom/,
+    );
+  });
+
   it("starts and stops the VM headlessly without touching a missing UI", async () => {
     const mockPi = createMockPi();
     await gondolinExtension(mockPi);

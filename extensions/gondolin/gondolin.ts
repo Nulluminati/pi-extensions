@@ -118,8 +118,23 @@ export default async function gondolinExtension(pi: ExtensionAPI) {
       vmStarting = undefined;
       throw new Error(vmStartError);
     }
-    const bashProbe = await created.exec(["/bin/sh", "-lc", "command -v bash || true"]);
-    shellPath = bashProbe.stdout.trim() || "/bin/sh";
+    // Create plus shell probe is one initialization transaction: any failure
+    // after create closes the created VM so a retry cannot leak it, records
+    // the persistent startup error, and fails exactly like create does.
+    try {
+      const bashProbe = await created.exec(["/bin/sh", "-lc", "command -v bash || true"]);
+      shellPath = bashProbe.stdout.trim() || "/bin/sh";
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      try {
+        await created.close();
+      } catch {
+        // Best-effort: a failed close must not mask the probe error below.
+      }
+      vmStartError = `Gondolin VM failed to start: ${message}.`;
+      vmStarting = undefined;
+      throw new Error(vmStartError);
+    }
     vm = created;
     pi.events.emit(VM_EVENT, { state: "ready", vmId: created.id });
     setVmStatus(ctx, `${created.id.slice(0, 8)} (${GUEST_WORKSPACE})`);
