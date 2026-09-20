@@ -12,12 +12,19 @@
  * tell the agent to consult mission status when working on mission tasks.
  */
 
-import { exec as execCb } from "node:child_process";
-import { promisify } from "node:util";
+// --- Imports ---
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "pi";
 import { excludeFromGit } from "../../lib/git.ts";
 import { projectStateRelative } from "../../lib/paths.ts";
 import { setStripWidget, WIDGET_PRIORITY_MISSIONS } from "../../lib/widget-strip.ts";
+import {
+  type ActiveMissionRef,
+  createExecVerificationRunner,
+  executeMissionAction,
+  loadSessionActiveMission,
+  MISSION_ACTIVE_ENTRY_TYPE,
+  type MissionActionDeps,
+} from "./src/actions.ts";
 import {
   createMissionWidget,
   formatMissionStatus,
@@ -28,36 +35,10 @@ import {
   MISSION_STATUS_KEY,
   MISSION_WIDGET_KEY,
 } from "./src/format.ts";
-import {
-  addCheckpoint,
-  addDecision,
-  addSpend,
-  addTask,
-  createMission,
-  reconcileMission,
-  requireOpen,
-  setBudget,
-  setStatus,
-  setTaskVerification,
-  updateTask,
-  type VerificationRunner,
-} from "./src/ops.ts";
+import { reconcileMission } from "./src/ops.ts";
 import { MISSION_PARAMETERS } from "./src/schemas.ts";
-import {
-  generateMissionId,
-  listMissionSummaries,
-  loadMission,
-  saveMission,
-  validateMissionId,
-} from "./src/storage.ts";
+import { listMissionSummaries, saveMission } from "./src/storage.ts";
 import type { Mission } from "./src/types.ts";
-
-const execAsync = promisify(execCb);
-
-/** Custom entry type carrying this session's active mission id (newest wins;
- *  `{ id: undefined }` clears). Session state, not project state: two
- *  sessions may each work their own active mission. */
-const MISSION_ACTIVE_ENTRY_TYPE = "missions-active";
 
 // --- Extension ---
 
@@ -65,18 +46,19 @@ export default async function missionsExtension(pi: ExtensionAPI) {
   /** Cached active mission; kept in sync with disk on every tool call. */
   let active: Mission | undefined;
 
-  // --- Verification runner ---
+  const runner = createExecVerificationRunner();
 
-  const runner: VerificationRunner = {
-    async run(command, cwd) {
-      try {
-        await execAsync(command, { cwd, timeout: 120_000, maxBuffer: 1024 * 1024 });
-        return { ok: true, output: "verification command passed" };
-      } catch (err) {
-        const e = err as { stdout?: string; stderr?: string; message: string };
-        const output = [e.stdout, e.stderr, e.message].filter(Boolean).join("\n").trim();
-        return { ok: false, output: output || "verification command failed" };
-      }
+  // --- Active-mission pointer ---
+
+  // The cache above is consulted by every tool call; `record` writes the
+  // session-transcript entry that makes the pointer survive restarts.
+  const activeMission: ActiveMissionRef = {
+    get: () => active,
+    set: (mission) => {
+      active = mission;
+    },
+    record: (id) => {
+      pi.appendEntry(MISSION_ACTIVE_ENTRY_TYPE, { id });
     },
   };
 
@@ -103,53 +85,19 @@ export default async function missionsExtension(pi: ExtensionAPI) {
     return active;
   }
 
-  /** The session's active mission, or undefined. Reads the newest
-   *  missions-active entry from the session branch and loads that mission
-   *  from disk; a dangling id (mission file deleted) degrades to none. */
-  async function loadSessionActiveMission(ctx: ExtensionContext): Promise<Mission | undefined> {
-    const branch = (ctx.sessionManager.getBranch() ?? []) as Array<{
-      type?: string;
-      customType?: string;
-      data?: { id?: unknown };
-    }>;
-    let id: string | undefined;
-    for (const entry of [...branch].reverse()) {
-      if (entry.type === "custom" && entry.customType === MISSION_ACTIVE_ENTRY_TYPE) {
-        id = typeof entry.data?.id === "string" ? entry.data.id : undefined;
-        break;
-      }
-    }
-    if (!id) return undefined;
-    try {
-      return await loadMission(ctx.cwd, id);
-    } catch (error) {
-      // Corrupt mission file: degrade to no active mission rather than
-      // breaking session startup; the corruption surfaces on explicit reads.
-      console.error(`[missions] active mission ${id} unreadable: ${(error as Error).message}`);
-      return undefined;
-    }
-  }
-
-  /** Record which mission this session is working (session transcript, not
-   *  project state — two sessions may each hold their own active mission). */
-  function setActiveMission(id: string | undefined): void {
-    pi.appendEntry(MISSION_ACTIVE_ENTRY_TYPE, { id });
-  }
-
-  function requireActive(): Mission {
-    if (!active) {
-      throw new Error(
-        "No active mission. Use the mission tool (action=create) to create one, or action=switch to select one.",
-      );
-    }
-    return active;
-  }
-
   async function persist(ctx: ExtensionContext, mission: Mission): Promise<void> {
     await saveMission(ctx.cwd, mission);
     active = mission;
     publish(ctx);
   }
+
+  const deps: MissionActionDeps = {
+    mission: activeMission,
+    publish,
+    persist,
+    reload: reloadActive,
+    runner,
+  };
 
   // --- Tool ---
 
@@ -164,202 +112,7 @@ export default async function missionsExtension(pi: ExtensionAPI) {
     ],
     parameters: MISSION_PARAMETERS,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const action = params.action;
-
-      if (action === "create") {
-        const title = (params.title ?? "").trim();
-        const objective = (params.objective ?? "").trim();
-        if (!title) throw new Error("create requires title.");
-        if (!objective) throw new Error("create requires objective.");
-        if (active) {
-          throw new Error(
-            "An active mission already exists. Complete, abort, or switch missions before creating a new one.",
-          );
-        }
-        const mission = createMission(generateMissionId(), title, objective, {
-          ...(params.maxIterations !== undefined ? { maxIterations: params.maxIterations } : {}),
-          ...(params.maxTokens !== undefined ? { maxTokens: params.maxTokens } : {}),
-        });
-        await saveMission(ctx.cwd, mission);
-        setActiveMission(mission.id);
-        active = mission;
-        publish(ctx);
-        return {
-          content: [
-            { type: "text", text: `Created ${mission.id}. ${formatMissionStatus(mission)}` },
-          ],
-          details: { missionId: mission.id },
-        };
-      }
-
-      if (action === "list") {
-        const summaries = await listMissionSummaries(ctx.cwd);
-        return {
-          content: [{ type: "text", text: formatMissionSummaries(summaries) }],
-          details: { count: summaries.length },
-        };
-      }
-
-      if (action === "switch") {
-        const id = (params.id ?? "").trim();
-        if (!id) throw new Error("switch requires id.");
-        validateMissionId(id);
-        const mission = await loadMission(ctx.cwd, id);
-        if (!mission) throw new Error(`No mission found with id ${id}.`);
-        setActiveMission(mission.id);
-        active = mission;
-        publish(ctx);
-        return {
-          content: [
-            { type: "text", text: `Switched to ${mission.id}. ${formatMissionStatus(mission)}` },
-          ],
-          details: { missionId: mission.id },
-        };
-      }
-
-      if (action === "status") {
-        await reloadActive(ctx);
-        const mission = requireActive();
-        return {
-          content: [{ type: "text", text: formatMissionStatus(mission) }],
-          details: { missionId: mission.id, status: mission.status },
-        };
-      }
-
-      // Everything below operates on the active mission.
-      const mission = requireActive();
-
-      switch (action) {
-        case "task_add": {
-          requireOpen(mission);
-          const title = (params.taskTitle ?? "").trim();
-          if (!title) throw new Error("task_add requires taskTitle.");
-          const task = addTask(mission, {
-            title,
-            ...(params.dependsOn !== undefined ? { dependsOn: params.dependsOn } : {}),
-            ...(params.owner !== undefined ? { owner: params.owner } : {}),
-            ...(params.verification !== undefined ? { verification: params.verification } : {}),
-          });
-          await persist(ctx, mission);
-          return {
-            content: [{ type: "text", text: `Added ${task.id}: ${task.title}` }],
-            details: { taskId: task.id },
-          };
-        }
-        case "task_update": {
-          const taskId = (params.taskId ?? "").trim();
-          if (!taskId) throw new Error("task_update requires taskId.");
-          const task = updateTask(mission, {
-            taskId,
-            ...(params.status !== undefined ? { status: params.status } : {}),
-            ...(params.summary !== undefined ? { summary: params.summary } : {}),
-            ...(params.owner !== undefined ? { owner: params.owner } : {}),
-          });
-          await persist(ctx, mission);
-          return {
-            content: [{ type: "text", text: `${task.id} is now ${task.status}.` }],
-            details: { taskId: task.id, status: task.status },
-          };
-        }
-        case "task_verify": {
-          const taskId = (params.taskId ?? "").trim();
-          if (!taskId) throw new Error("task_verify requires taskId.");
-          const task = setTaskVerification(mission, taskId, params.verification);
-          await persist(ctx, mission);
-          return {
-            content: [
-              {
-                type: "text",
-                text: task.verification
-                  ? `${task.id} verification: ${task.verification.command}`
-                  : `${task.id} verification cleared.`,
-              },
-            ],
-            details: { taskId: task.id },
-          };
-        }
-        case "checkpoint": {
-          const label = (params.label ?? "").trim();
-          if (!label) throw new Error("checkpoint requires label.");
-          const summary = (params.summary ?? "").trim();
-          if (!summary) throw new Error("checkpoint requires summary.");
-          const { id } = addCheckpoint(mission, label, summary, params.commit);
-          await persist(ctx, mission);
-          return {
-            content: [{ type: "text", text: `Checkpoint ${id} recorded.` }],
-            details: { checkpointId: id },
-          };
-        }
-        case "decision": {
-          const text = (params.text ?? "").trim();
-          if (!text) throw new Error("decision requires text.");
-          addDecision(mission, text);
-          await persist(ctx, mission);
-          return { content: [{ type: "text", text: "Decision recorded." }], details: {} };
-        }
-        case "set_budget": {
-          const budget = setBudget(mission, {
-            ...(params.maxIterations !== undefined ? { maxIterations: params.maxIterations } : {}),
-            ...(params.maxTokens !== undefined ? { maxTokens: params.maxTokens } : {}),
-          });
-          await persist(ctx, mission);
-          return {
-            content: [{ type: "text", text: `Budget: ${JSON.stringify(budget)}` }],
-            details: { budget },
-          };
-        }
-        case "spend": {
-          if (params.iterations === undefined && params.tokens === undefined) {
-            throw new Error("spend requires iterations and/or tokens.");
-          }
-          const { overBudget, spent } = addSpend(mission, params.iterations, params.tokens);
-          await persist(ctx, mission);
-          return {
-            content: [
-              {
-                type: "text",
-                text: overBudget
-                  ? `Spend recorded: ${JSON.stringify(spent)}. OVER BUDGET — report this to the user.`
-                  : `Spend recorded: ${JSON.stringify(spent)}.`,
-              },
-            ],
-            details: { spent, overBudget },
-          };
-        }
-        case "set_status": {
-          const status = params.missionStatus;
-          if (!status) throw new Error("set_status requires missionStatus.");
-          // requireOpen is deliberately NOT called here: reopening a paused,
-          // completed, or aborted mission is allowed.
-          setStatus(mission, status);
-          await persist(ctx, mission);
-          if (status === "complete" || status === "aborted") {
-            // Completed and aborted missions free this session's active slot —
-            // otherwise they block every future create in this session.
-            setActiveMission(undefined);
-            active = undefined;
-            publish(ctx);
-          } else {
-            // Non-terminal statuses keep the session pointer in lockstep with
-            // the in-memory active mission.
-            setActiveMission(mission.id);
-          }
-          return {
-            content: [{ type: "text", text: `Mission is now ${status}.` }],
-            details: { status },
-          };
-        }
-        case "reconcile": {
-          const report = await reconcileMission(mission, ctx.cwd, runner);
-          await persist(ctx, mission);
-          return {
-            content: [{ type: "text", text: formatReconcileReport(report) }],
-            details: { report },
-          };
-        }
-        default:
-          throw new Error(`Unknown mission action: ${String(action)}`);
-      }
+      return executeMissionAction(deps, params, ctx);
     },
   });
 
