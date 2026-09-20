@@ -33,6 +33,7 @@ import {
 import { assertValidAgentName, resolveAgentName } from "./src/identity.ts";
 import { MESSENGER_PARAMETERS } from "./src/schemas.ts";
 import {
+  claimIdentity,
   ensureUniqueAgentName,
   heartbeat,
   inboxFileName,
@@ -319,9 +320,12 @@ export default async function messengerExtension(pi: ExtensionAPI) {
       generate: resolveAgentName,
     });
     // Fail fast on an unusable env/persisted name before anything is written,
-    // then never take a mailbox another live session already holds.
+    // then claim the identity atomically: the candidate loop and the durable
+    // presence write happen inside the registry lock, so a concurrent session
+    // (e.g. a fork of this one) gets the next suffix instead of sharing a
+    // mailbox and reservation identity.
     assertValidAgentName(resolved);
-    agentName = await ensureUniqueAgentName(ctx.cwd, resolved);
+    agentName = await claimIdentity(ctx.cwd, resolved);
     const model = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined;
     await heartbeat(ctx.cwd, agentName, {
       pid: process.pid,

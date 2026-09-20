@@ -74,14 +74,14 @@ describe("presence-shards", () => {
     expect(registry["live-agent"]).toBeDefined();
   });
 
-  it("drops corrupt shards instead of failing every read", async () => {
+  it("fails closed on a corrupt shard instead of deleting it", async () => {
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, "broken.json"), "not json", "utf8");
 
-    const registry = await loadShards(dir);
-
-    expect(registry).toEqual({});
-    expect(existsSync(join(dir, "broken.json"))).toBe(false);
+    // Deletion is how durable presence gets destroyed by a read: a corrupt
+    // shard must fail visibly and stay on disk for inspection or repair.
+    await expect(loadShards(dir)).rejects.toThrow(/broken\.json/);
+    expect(existsSync(join(dir, "broken.json"))).toBe(true);
   });
 
   it("migrates a legacy single-file registry to shards on read", async () => {

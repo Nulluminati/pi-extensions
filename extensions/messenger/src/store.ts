@@ -39,6 +39,13 @@ function registryDir(cwd: string): string {
   return join(messengerDir(cwd), "registry");
 }
 
+/** Cross-process lock guarding claim-time read-modify-write over the
+ *  registry: two sessions picking an agent name at once must not both see
+ *  the same candidate free. */
+function registryLockPath(cwd: string): string {
+  return join(messengerDir(cwd), "registry.json.lock");
+}
+
 function reservationsPath(cwd: string): string {
   return join(messengerDir(cwd), "reservations.json");
 }
@@ -129,10 +136,53 @@ export async function ensureUniqueAgentName(
     }
     candidate = `${name}-${attempt + 1}`;
   }
-  throw new Error(
+  throw noFreeNameError(name);
+}
+
+function noFreeNameError(name: string): Error {
+  return new Error(
     `No free agent name derived from "${name}" after ${MAX_NAME_ATTEMPTS} attempts; ` +
       `stale sessions may be holding the registry — check ${projectStateRelative("messenger")}/registry/.`,
   );
+}
+
+/**
+ * Atomically claim an agent identity: the candidate-selection loop runs
+ * inside the registry lock and the chosen name's presence shard is written
+ * before the lock is released, so a concurrent claim observes the claim and
+ * moves to the next suffix instead of sharing a mailbox and reservation
+ * identity. Dead holders are pruned on read, so a name whose session died is
+ * reusable; a live holder pushes the claim to `name-2`, `name-3`, ….
+ */
+export async function claimIdentity(
+  cwd: string,
+  name: string,
+  pid: number = process.pid,
+): Promise<string> {
+  return withFileLock(registryLockPath(cwd), async () => {
+    const registry = await loadRegistry(cwd);
+    let candidate = name;
+    let claimed = false;
+    for (let attempt = 0; attempt < MAX_NAME_ATTEMPTS; attempt += 1) {
+      const holder = registry[candidate];
+      if (holder === undefined || holder.pid === pid || !isProcessAlive(holder.pid)) {
+        claimed = true;
+        break;
+      }
+      candidate = `${name}-${attempt + 2}`;
+    }
+    if (!claimed) throw noFreeNameError(name);
+    // Durable before the lock releases: the shard is on disk, so the next
+    // claim's candidate loop cannot see the name as free.
+    await writeShard(registryDir(cwd), {
+      name: candidate,
+      pid,
+      cwd,
+      startedAt: Date.now(),
+      lastSeenAt: Date.now(),
+    });
+    return candidate;
+  });
 }
 
 // --- Mailbox ---
@@ -177,13 +227,17 @@ export async function sendMessage(
   return message;
 }
 
-/** Unread messages for `name`, oldest first. */
+/** Unread messages for `name`, oldest first. Only a missing mailbox reads as
+ *  empty; an unreadable one fails visibly, so delivery never mistakes a
+ *  broken mailbox for an empty one and later compaction cannot destroy it. */
 export async function readInbox(cwd: string, name: string): Promise<Message[]> {
+  const path = inboxPath(cwd, name);
   let raw: string;
   try {
-    raw = await readFile(inboxPath(cwd, name), "utf8");
-  } catch {
-    return [];
+    raw = await readFile(path, "utf8");
+  } catch (error) {
+    if (isNodeError(error) && (error.code === "ENOENT" || error.code === "ENOTDIR")) return [];
+    throw new Error(`Mailbox ${path} is unreadable: ${String(error)}`);
   }
   const messages: Message[] = [];
   for (const line of raw.split("\n")) {
@@ -208,8 +262,9 @@ export async function markRead(cwd: string, name: string, ids: string[]): Promis
     let raw: string;
     try {
       raw = await readFile(path, "utf8");
-    } catch {
-      return;
+    } catch (error) {
+      if (isNodeError(error) && (error.code === "ENOENT" || error.code === "ENOTDIR")) return;
+      throw new Error(`Mailbox ${path} is unreadable: ${String(error)}`);
     }
     const idSet = new Set(ids);
     const kept: string[] = [];

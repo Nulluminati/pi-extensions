@@ -47,13 +47,30 @@ export function shardPath(dir: string, agentName: string): string {
   return join(dir, `${encodeURIComponent(agentName)}.json`);
 }
 
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error;
+}
+
 // --- JSON helpers ---
 
+/** Read one shard, distinguishing "absent" from "broken": only ENOENT (or
+ *  ENOTDIR, a missing parent) returns undefined. A corrupt or unreadable
+ *  shard must fail visibly — silently reading it as absent lets a later
+ *  write overwrite durable presence with fresh state. */
 async function readJson<T>(path: string): Promise<T | undefined> {
+  let raw: string;
   try {
-    return JSON.parse(await readFile(path, "utf8")) as T;
-  } catch {
-    return undefined;
+    raw = await readFile(path, "utf8");
+  } catch (error) {
+    if (isNodeError(error) && (error.code === "ENOENT" || error.code === "ENOTDIR")) {
+      return undefined;
+    }
+    throw new Error(`Presence shard ${path} is unreadable: ${String(error)}`);
+  }
+  try {
+    return JSON.parse(raw) as T;
+  } catch (error) {
+    throw new Error(`Presence shard ${path} is corrupt (invalid JSON): ${String(error)}`);
   }
 }
 
@@ -110,10 +127,14 @@ export async function loadShards<T extends ShardRecord>(
   }
   for (const file of files) {
     if (!file.endsWith(".json")) continue;
-    const record = await readJson<T>(join(dir, file));
+    const path = join(dir, file);
+    const record = await readJson<T>(path);
+    // A record that parses but does not match the shard shape is just as
+    // broken as invalid JSON: refuse loudly instead of pruning it like a
+    // dead session's shard — deletion is how durable presence gets destroyed
+    // by a read.
     if (!record || typeof record.name !== "string" || typeof record.pid !== "number") {
-      await unlink(join(dir, file)).catch(() => {});
-      continue;
+      throw new Error(`Presence shard ${path} does not match the shard shape.`);
     }
     registry[record.name] = record;
   }

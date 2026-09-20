@@ -24,7 +24,7 @@ messenger (action=release)                        # drop your reservations
 - Reservation enforcement covers the `edit` and `write` tools only; bash-based writes are not blocked. For strong isolation run workers in a sandbox or in worktrees (the `agents` extension does the latter).
 - Delivery always happens at a turn boundary — mail arriving mid-turn waits for the agent to settle; it is never injected into an in-flight request. Mail to an agent in a different project directory waits in their mailbox there.
 - A session resumed via `pi -c` re-adopts its claims within the 10-minute grace window; after that, claims held before the quit have expired and must be re-reserved.
-- Forking a session duplicates the persisted identity: two live sessions under one name share presence and mailboxes.
+- Forking a session does NOT duplicate the identity: the fork detects its persisted name is held by another live process and atomically claims the next suffixed name (`name-2`, `name-3`, …) under the registry lock, so two live sessions never share presence or a mailbox. A name whose holding process is dead is reusable immediately; claims themselves survive with a 10-minute orphan grace window.
 
 ## Pi APIs Used
 
