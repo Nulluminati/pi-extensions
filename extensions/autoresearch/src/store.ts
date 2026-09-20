@@ -81,6 +81,19 @@ export async function loadConfig(cwd: string): Promise<AutoConfig | undefined> {
   return isActiveConfig(parsed) ? parsed : undefined;
 }
 
+export async function requireActiveConfig(cwd: string): Promise<AutoConfig> {
+  const config = await loadConfig(cwd);
+  if (!config) {
+    throw new Error(
+      "No autoresearch session. Use action=init with objective, metric, direction, and measure command.",
+    );
+  }
+  if (config.stopped) {
+    throw new Error("This autoresearch session is stopped. Re-init to start a new one.");
+  }
+  return config;
+}
+
 // --- Log ---
 
 export async function readLog(cwd: string): Promise<RunEntry[]> {

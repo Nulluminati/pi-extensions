@@ -2,7 +2,41 @@
  * Everything lives under `<cwd>/.pi/autoresearch/` so a fresh session can
  * resume from files alone. */
 
+import type { ExtensionContext } from "pi";
+
 // --- Types ---
+
+/** A measurement observed by `run` and awaiting keep/discard by `log`. */
+export interface PendingMeasurement {
+  run: number;
+  metric?: number;
+  durationMs: number;
+  description: string;
+  hypothesis?: string;
+}
+
+/** Per-Pi-instance state, owned by the composition root and passed explicitly
+ *  to modules: the pending-measurement slot plus continuation-loop guards. */
+export interface InstanceState {
+  /** In-memory pending measurement between `run` and `log`. */
+  pending?: PendingMeasurement | undefined;
+  /** Autoresearch tool calls this session; engagement signal for the stall guard. */
+  toolActivity: number;
+  lastSeenActivity: number;
+  continuationQueued: boolean;
+  idleWakes: number;
+}
+
+/** Loose tool-call parameters; fields are narrowed at runtime against
+ *  AUTORESEARCH_PARAMETERS in schemas.ts. */
+export type AutoresearchParams = Record<string, unknown>;
+
+/** Publish campaign state to the state event, footer status, and widget. */
+export type PublishFn = (
+  ctx: ExtensionContext,
+  config: AutoConfig | undefined,
+  entries: RunEntry[],
+) => void;
 
 export interface AutoConfig {
   objective: string;
