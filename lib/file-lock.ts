@@ -11,12 +11,21 @@
  * interval while it works, so a long critical section is never mistaken for
  * a crashed holder.
  *
- * Consumers: messenger (reservations, mailbox compaction) and missions
- * (mission saves, via the acquire/release adapter in its storage module).
+ * Consumption model: every acquisition creates the lock file with
+ * `open(path, "wx")` — an atomic create-or-fail on every platform we target —
+ * and writes a `<pid> <token>` ownership record into it. The token binds the
+ * holder to the exact inode it created: refreshes go through the original
+ * file handle (never the pathname), and release verifies ownership before
+ * unlinking, so a lock that was reclaimed and recreated by a waiter is never
+ * refreshed or deleted by the old holder. Waiters poll until the holder
+ * unlinks the file; a lock whose mtime has not moved for `staleMs` is
+ * reclaimed only when the recorded pid is no longer alive, so a live holder
+ * that merely stalled past the stale window is never robbed.
  */
 
+import { randomBytes } from "node:crypto";
 import type { FileHandle } from "node:fs/promises";
-import { mkdir, open, stat, unlink, utimes } from "node:fs/promises";
+import { mkdir, open, readFile, stat, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 
 // --- Constants ---
@@ -29,6 +38,11 @@ const LOCK_STALE_MS = 15_000;
 const LOCK_REFRESH_MS = 5_000;
 
 // --- Types ---
+
+interface LockOwnership {
+  pid: number;
+  token: string | undefined;
+}
 
 export interface FileLockOptions {
   /** Lock whose mtime is older than this is treated as abandoned by a
@@ -51,22 +65,51 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
 }
 
+/** Best-effort liveness probe: signal 0 throws ESRCH for a dead pid and
+ *  EPERM for a live one we cannot signal. */
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return isNodeError(error) && error.code === "EPERM";
+  }
+}
+
+function parseLockOwner(content: string): LockOwnership | undefined {
+  const [pidField, tokenField] = content.trim().split(/\s+/);
+  const pid = Number.parseInt(pidField ?? "", 10);
+  if (!Number.isInteger(pid) || pid <= 0) return undefined;
+  return { pid, token: tokenField };
+}
+
+async function readLockOwner(lockPath: string): Promise<LockOwnership | undefined> {
+  const content = await readFile(lockPath, "utf8").catch(() => undefined);
+  return content === undefined ? undefined : parseLockOwner(content);
+}
+
 async function acquireFileLock(
   lockPath: string,
   staleMs: number,
   timeoutMs: number,
   timeoutMessage: string,
-): Promise<FileHandle> {
+): Promise<{ handle: FileHandle; token: string }> {
   const deadline = Date.now() + timeoutMs;
   while (true) {
     try {
-      return await open(lockPath, "wx", 0o600);
+      return { handle: await open(lockPath, "wx", 0o600), token: randomBytes(8).toString("hex") };
     } catch (error) {
       if (!isNodeError(error) || error.code !== "EEXIST") throw error;
       const lockStat = await stat(lockPath).catch(() => undefined);
       if (lockStat && Date.now() - lockStat.mtimeMs >= staleMs) {
-        await unlink(lockPath).catch(() => {});
-        continue;
+        // Reclaim only when the recorded holder is gone. A live process that
+        // stalled past the stale window must never be robbed of its lock,
+        // and the pid is the only signal that survives an mtime race.
+        const owner = await readLockOwner(lockPath);
+        if (owner === undefined || !isProcessAlive(owner.pid)) {
+          await unlink(lockPath).catch(() => {});
+          continue;
+        }
       }
       if (Date.now() >= deadline) {
         throw new Error(timeoutMessage);
@@ -89,22 +132,34 @@ export async function withFileLock<T>(
   const timeoutMs = options.timeoutMs ?? LOCK_TIMEOUT_MS;
   const timeoutMessage = options.timeoutMessage ?? `Timed out waiting for lock ${lockPath}.`;
   await mkdir(dirname(lockPath), { recursive: true });
-  const handle = await acquireFileLock(lockPath, staleMs, timeoutMs, timeoutMessage);
+  const { handle, token } = await acquireFileLock(lockPath, staleMs, timeoutMs, timeoutMessage);
+  const content = `${process.pid} ${token}\n`;
   let refresh: ReturnType<typeof setInterval> | undefined;
   try {
-    await handle.writeFile(`${process.pid}\n`, "utf8");
-    // Keep the mtime fresh while held so waiters never reclaim the lock from
-    // a live holder whose critical section outlasts the stale window.
+    await handle.writeFile(content, "utf8");
+    // Keep the lock's mtime fresh while held so waiters never reclaim the
+    // lock from a live holder whose critical section outlasts the stale
+    // window. The write goes through the original handle — the inode this
+    // holder created — so it updates our own lock even if the pathname was
+    // replaced, and can never touch a replacement created by someone else.
+    const buffer = Buffer.from(content, "utf8");
     refresh = setInterval(() => {
-      void utimes(lockPath, new Date(), new Date()).catch(() => {
-        // Best-effort: a failed refresh (e.g. the lock was already reclaimed
-        // and unlinked) must not abort fn(); the finally below cleans up.
+      void handle.write(buffer, 0, buffer.length, 0).catch(() => {
+        // Best-effort: a failed refresh (e.g. the handle was closed by an
+        // in-flight release) must not abort fn(); the finally below cleans up.
       });
     }, refreshMs);
     return await fn();
   } finally {
     if (refresh !== undefined) clearInterval(refresh);
     await handle.close().catch(() => {});
-    await unlink(lockPath).catch(() => {});
+    // Unlink only when the pathname still holds our own lock. After a
+    // reclaim, the file at lockPath was recreated by another holder; deleting
+    // it by pathname would let a third process into the critical section
+    // while that holder is still active.
+    const owner = await readLockOwner(lockPath);
+    if (owner !== undefined && owner.pid === process.pid && owner.token === token) {
+      await unlink(lockPath).catch(() => {});
+    }
   }
 }
