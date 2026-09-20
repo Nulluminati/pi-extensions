@@ -48,6 +48,7 @@ import {
   listMissionSummaries,
   loadMission,
   saveMission,
+  validateMissionId,
 } from "./src/storage.ts";
 import type { Mission } from "./src/types.ts";
 
@@ -202,6 +203,7 @@ export default async function missionsExtension(pi: ExtensionAPI) {
       if (action === "switch") {
         const id = (params.id ?? "").trim();
         if (!id) throw new Error("switch requires id.");
+        validateMissionId(id);
         const mission = await loadMission(ctx.cwd, id);
         if (!mission) throw new Error(`No mission found with id ${id}.`);
         setActiveMission(mission.id);

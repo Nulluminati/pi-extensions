@@ -1,15 +1,21 @@
-import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionCommandContext } from "pi";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import missionsExtension from "../../extensions/missions/missions.ts";
 import {
   acquireMissionLock,
+  ensureInsideMissionsDir,
+  generateCheckpointId,
   generateMissionId,
+  generateTaskId,
   loadMission,
+  missionsDir,
+  validateCheckpointId,
+  validateMissionId,
+  validateTaskId,
 } from "../../extensions/missions/src/storage.ts";
 import { runGit } from "../../lib/git.ts";
 import { projectStateRelative } from "../../lib/paths.ts";
@@ -284,8 +290,9 @@ describe("missions-extension", () => {
   it("switch selects another mission by id", async () => {
     await executeTool({ action: "create", title: "first", objective: "o" });
     // Manually create a second mission file (create is blocked while active).
+    const secondId = generateMissionId();
     const second = {
-      id: "mission-second",
+      id: secondId,
       title: "second",
       objective: "o",
       status: "paused",
@@ -298,13 +305,13 @@ describe("missions-extension", () => {
       spent: { iterations: 0, tokens: 0 },
     };
     await writeFile(
-      join(cwd, CONFIG_DIR_NAME, "missions", "mission-second.json"),
+      join(cwd, CONFIG_DIR_NAME, "missions", `${secondId}.json`),
       JSON.stringify(second),
     );
 
-    const res = await executeTool({ action: "switch", id: "mission-second" });
-    expect(res.content[0].text).toContain("Switched to mission-second");
-    expect(lastActiveEntryId()).toBe("mission-second");
+    const res = await executeTool({ action: "switch", id: secondId });
+    expect(res.content[0].text).toContain(`Switched to ${secondId}`);
+    expect(lastActiveEntryId()).toBe(secondId);
   });
 
   it("session_start keeps mission state out of git status", async () => {
@@ -320,8 +327,9 @@ describe("missions-extension", () => {
   });
 
   it("session_start restores the active mission into the status line", async () => {
+    const restoredId = generateMissionId();
     const mission = {
-      id: "mission-restore",
+      id: restoredId,
       title: "restored",
       objective: "o",
       status: "active",
@@ -335,12 +343,12 @@ describe("missions-extension", () => {
     };
     await mkdir(join(cwd, CONFIG_DIR_NAME, "missions"), { recursive: true });
     await writeFile(
-      join(cwd, CONFIG_DIR_NAME, "missions", "mission-restore.json"),
+      join(cwd, CONFIG_DIR_NAME, "missions", `${restoredId}.json`),
       JSON.stringify(mission),
     );
     // The active pointer lives in the session transcript now.
     mockCtx.sessionManager.getBranch = vi.fn(() => [
-      { type: "custom", customType: "missions-active", data: { id: "mission-restore" } },
+      { type: "custom", customType: "missions-active", data: { id: restoredId } },
     ]);
 
     const handler = getEventHandler("session_start");
@@ -434,7 +442,7 @@ describe("missions-extension", () => {
   });
 
   it("switch to an unknown id throws", async () => {
-    await expect(executeTool({ action: "switch", id: "mission-missing" })).rejects.toThrow(
+    await expect(executeTool({ action: "switch", id: generateMissionId() })).rejects.toThrow(
       /No mission found/,
     );
   });
@@ -536,12 +544,13 @@ describe("missions-extension", () => {
 
   it("loadMission rejects with a descriptive error for a corrupt mission file", async () => {
     await mkdir(join(cwd, CONFIG_DIR_NAME, "missions"), { recursive: true });
+    const corruptId = generateMissionId();
     await writeFile(
-      join(cwd, CONFIG_DIR_NAME, "missions", "mission-corrupt.json"),
+      join(cwd, CONFIG_DIR_NAME, "missions", `${corruptId}.json`),
       "{ this is not json",
     );
 
-    await expect(loadMission(cwd, "mission-corrupt")).rejects.toThrow(/mission-corrupt\.json/);
+    await expect(loadMission(cwd, corruptId)).rejects.toThrow(/invalid JSON/);
   });
 
   it("a dangling session pointer degrades to no active mission", async () => {
@@ -582,18 +591,19 @@ describe("missions-extension", () => {
   });
 
   it("a live lock hold is not stolen while the holder keeps it fresh", async () => {
-    const lockPath = join(cwd, CONFIG_DIR_NAME, "missions", ".locks", "lock-live.lock");
+    const lockId = generateMissionId();
+    const lockPath = join(cwd, CONFIG_DIR_NAME, "missions", ".locks", `${lockId}.lock`);
     // staleMs is far beyond the test horizon, so the staleness path can never
     // fire: the waiter must lose to its own timeout, not to a steal. Real
     // timers throughout — the staleness check compares Date.now() against
     // real filesystem mtimes, so a fake clock would desync the two.
-    const release = await acquireMissionLock(cwd, "lock-live", {
+    const release = await acquireMissionLock(cwd, lockId, {
       staleMs: 60_000,
       refreshMs: 50,
       timeoutMs: 900,
     });
     const initialMtime = (await stat(lockPath)).mtimeMs;
-    const waiter = acquireMissionLock(cwd, "lock-live", {
+    const waiter = acquireMissionLock(cwd, lockId, {
       staleMs: 60_000,
       refreshMs: 50,
       timeoutMs: 150,
@@ -609,13 +619,14 @@ describe("missions-extension", () => {
   });
 
   it("an abandoned stale lock is reclaimed", async () => {
-    const lockPath = join(cwd, CONFIG_DIR_NAME, "missions", ".locks", "lock-dead.lock");
+    const lockId = generateMissionId();
+    const lockPath = join(cwd, CONFIG_DIR_NAME, "missions", ".locks", `${lockId}.lock`);
     await mkdir(join(cwd, CONFIG_DIR_NAME, "missions", ".locks"), { recursive: true });
     await writeFile(lockPath, "0\n");
     const abandoned = new Date(Date.now() - 120_000);
     await utimes(lockPath, abandoned, abandoned);
 
-    const release = await acquireMissionLock(cwd, "lock-dead", { staleMs: 1_000 });
+    const release = await acquireMissionLock(cwd, lockId, { staleMs: 1_000 });
     await release();
   });
 
@@ -660,9 +671,129 @@ describe("missions-extension", () => {
     await handler("", mockCtx);
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Reconciled"), "info");
   });
+
+  // --- Id validation: ids from tool calls reach the filesystem, so anything
+  // --- that does not match a generated id is rejected before path use.
+
+  it("generators produce ids every validator accepts", () => {
+    expect(() => validateMissionId(generateMissionId())).not.toThrow();
+    expect(() => validateTaskId(generateTaskId())).not.toThrow();
+    expect(() => validateCheckpointId(generateCheckpointId())).not.toThrow();
+  });
+
+  it("switch rejects traversal and malformed mission ids before touching the filesystem", async () => {
+    const bad = [
+      "../outside",
+      "../../etc/passwd",
+      "/etc/passwd",
+      "mission-x/../../y",
+      "task-abc123",
+      "mission-abc-abc",
+      "mission-1-abcdef012345678z",
+    ];
+    for (const id of bad) {
+      await expect(executeTool({ action: "switch", id })).rejects.toThrow(/Invalid mission id/);
+    }
+    await expect(executeTool({ action: "switch", id: "" })).rejects.toThrow(/switch requires id/);
+    await expect(stat(join(cwd, CONFIG_DIR_NAME, "outside.json"))).rejects.toThrow();
+  });
+
+  it("task_update and task_verify reject traversal and malformed task ids", async () => {
+    await executeTool({ action: "create", title: "t", objective: "o" });
+    const bad = ["../task", "task-../../x", "task-abc12g", "mission-0000000000000000-abcdef"];
+    for (const taskId of bad) {
+      await expect(
+        executeTool({ action: "task_update", taskId, status: "done", summary: "s" }),
+      ).rejects.toThrow(/Invalid task id/);
+      await expect(
+        executeTool({ action: "task_verify", taskId, verification: { command: "true" } }),
+      ).rejects.toThrow(/Invalid task id/);
+    }
+  });
+
+  it("task_add rejects traversal ids in dependsOn and accepts generated ones", async () => {
+    await executeTool({ action: "create", title: "t", objective: "o" });
+    await expect(
+      executeTool({ action: "task_add", taskTitle: "T", dependsOn: ["../sneak"] }),
+    ).rejects.toThrow(/Invalid task id/);
+
+    const a = await executeTool({ action: "task_add", taskTitle: "A" });
+    const aId = a.details.taskId as string;
+    const b = await executeTool({ action: "task_add", taskTitle: "B", dependsOn: [aId] });
+    expect(b.details.taskId as string).toMatch(/^task-[0-9a-f]{6}$/);
+  });
+
+  it("loadMission rejects a crafted record whose stored id is a traversal id", async () => {
+    await mkdir(join(cwd, CONFIG_DIR_NAME, "missions"), { recursive: true });
+    const requested = generateMissionId();
+    await writeFile(
+      join(cwd, CONFIG_DIR_NAME, "missions", `${requested}.json`),
+      JSON.stringify(craftMission("../escape")),
+    );
+
+    await expect(loadMission(cwd, requested)).rejects.toThrow(/does not match/);
+    await expect(executeTool({ action: "switch", id: requested })).rejects.toThrow(
+      /does not match/,
+    );
+    // The traversal record must never be adopted as active or re-saved.
+    await expect(lastActiveEntryId()).toBeUndefined();
+    await expect(stat(join(cwd, CONFIG_DIR_NAME, "escape.json"))).rejects.toThrow();
+  });
+
+  it("loadMission rejects a record stored under a different valid mission id", async () => {
+    await mkdir(join(cwd, CONFIG_DIR_NAME, "missions"), { recursive: true });
+    const requested = generateMissionId();
+    const storedId = generateMissionId();
+    await writeFile(
+      join(cwd, CONFIG_DIR_NAME, "missions", `${requested}.json`),
+      JSON.stringify(craftMission(storedId)),
+    );
+
+    await expect(executeTool({ action: "switch", id: requested })).rejects.toThrow(
+      /does not match/,
+    );
+    await expect(lastActiveEntryId()).toBeUndefined();
+  });
+
+  it("containment guard rejects mission paths that escape the missions directory", () => {
+    const inside = join(missionsDir(cwd), `${generateMissionId()}.json`);
+    expect(ensureInsideMissionsDir(cwd, inside)).toBe(resolve(inside));
+    expect(() => ensureInsideMissionsDir(cwd, join(missionsDir(cwd), "..", "escape.json"))).toThrow(
+      /escapes the missions directory/,
+    );
+    expect(() => ensureInsideMissionsDir(cwd, "/etc/passwd")).toThrow(
+      /escapes the missions directory/,
+    );
+  });
+
+  it("list skips files that are not valid mission ids instead of crashing", async () => {
+    await executeTool({ action: "create", title: "real", objective: "o" });
+    await writeFile(join(cwd, CONFIG_DIR_NAME, "missions", "stray-file.json"), "{}\n");
+
+    const res = await executeTool({ action: "list" });
+    expect(res.details.count).toBe(1);
+    expect(res.content[0].text).toContain("real");
+  });
 });
 
 // --- Helpers ---
+
+/** A mission-shaped record for crafting corrupt files directly on disk. */
+function craftMission(id: string): Record<string, unknown> {
+  return {
+    id,
+    title: "crafted",
+    objective: "o",
+    status: "active",
+    createdAt: 1,
+    updatedAt: 2,
+    tasks: [],
+    checkpoints: [],
+    decisions: [],
+    budget: {},
+    spent: { iterations: 0, tokens: 0 },
+  };
+}
 
 /** Instantiate the last widget factory the extension published and render it. */
 function renderLastWidget(mockCtx: DeepMocked<ExtensionCommandContext>, width = 80): string[] {

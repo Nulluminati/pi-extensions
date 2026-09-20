@@ -7,7 +7,7 @@
 
 import { randomBytes } from "node:crypto";
 import { mkdir, readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { withFileLock } from "../../../lib/file-lock.ts";
 import { writeJsonAtomic } from "../../../lib/json-atomic.ts";
 import { projectStateDir } from "../../../lib/paths.ts";
@@ -23,6 +23,12 @@ const LOCK_STALE_MS = 30_000;
 // How often a held lock's mtime is touched; well under LOCK_STALE_MS so a
 // live hold never looks abandoned.
 const LOCK_REFRESH_MS = 10_000;
+// Ids come from tool calls and are joined into filesystem paths, so their
+// formats are anchored exactly to what the generators produce. Anything else
+// is rejected before it can reach a path.
+const MISSION_ID_PATTERN = /^mission-[0-9a-z]+-[0-9a-f]{16}$/;
+const TASK_ID_PATTERN = /^task-[0-9a-f]{6}$/;
+const CHECKPOINT_ID_PATTERN = /^ckpt-[0-9a-f]{6}$/;
 const ALL_TASK_STATUSES: TaskStatus[] = [
   "todo",
   "in_progress",
@@ -50,12 +56,59 @@ export function generateCheckpointId(): string {
   return `ckpt-${randomBytes(3).toString("hex")}`;
 }
 
+// --- Id validation ---
+
+export function isMissionId(id: string): boolean {
+  return MISSION_ID_PATTERN.test(id);
+}
+
+export function isTaskId(id: string): boolean {
+  return TASK_ID_PATTERN.test(id);
+}
+
+export function isCheckpointId(id: string): boolean {
+  return CHECKPOINT_ID_PATTERN.test(id);
+}
+
+/** Validate an id received from a tool call (or stored pointer) against the
+ *  generated format; returns the id or throws. */
+export function validateMissionId(id: string): string {
+  if (!isMissionId(id)) throw new Error(`Invalid mission id: ${id}`);
+  return id;
+}
+
+export function validateTaskId(id: string): string {
+  if (!isTaskId(id)) throw new Error(`Invalid task id: ${id}`);
+  return id;
+}
+
+export function validateCheckpointId(id: string): string {
+  if (!isCheckpointId(id)) throw new Error(`Invalid checkpoint id: ${id}`);
+  return id;
+}
+
+/** Defense-in-depth path containment: verify a candidate path resolves
+ *  inside this project's missions directory before it is used for reads or
+ *  writes. Id validation already excludes path separators, so a violation
+ *  means a bug — refuse loudly rather than touch the file. */
+export function ensureInsideMissionsDir(cwd: string, candidate: string): string {
+  const dir = resolve(missionsDir(cwd));
+  const resolved = resolve(candidate);
+  if (!resolved.startsWith(`${dir}${sep}`)) {
+    throw new Error(`Mission path escapes the missions directory: ${candidate}`);
+  }
+  return resolved;
+}
+
 function missionPath(cwd: string, id: string): string {
-  return join(missionsDir(cwd), `${id}.json`);
+  return ensureInsideMissionsDir(cwd, join(missionsDir(cwd), `${validateMissionId(id)}.json`));
 }
 
 function missionLockPath(cwd: string, id: string): string {
-  return join(missionsDir(cwd), ".locks", `${encodeURIComponent(id)}.lock`);
+  return ensureInsideMissionsDir(
+    cwd,
+    join(missionsDir(cwd), ".locks", `${encodeURIComponent(validateMissionId(id))}.lock`),
+  );
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
@@ -129,6 +182,7 @@ function isActiveMission(value: unknown): value is Mission {
 // --- Mission CRUD ---
 
 export async function saveMission(cwd: string, mission: Mission): Promise<void> {
+  validateMissionId(mission.id);
   await mkdir(missionsDir(cwd), { recursive: true });
   const release = await acquireMissionLock(cwd, mission.id);
   try {
@@ -147,6 +201,7 @@ export async function saveMission(cwd: string, mission: Mission): Promise<void> 
 }
 
 export async function loadMission(cwd: string, id: string): Promise<Mission | undefined> {
+  validateMissionId(id);
   const path = missionPath(cwd, id);
   let raw: string;
   try {
@@ -165,6 +220,14 @@ export async function loadMission(cwd: string, id: string): Promise<Mission | un
   if (!isActiveMission(parsed)) {
     throw new Error(`Mission file ${path} is corrupt (does not match the mission shape).`);
   }
+  // A record on disk may carry an id it was not stored under (older file or
+  // tampered content). Operating on it would re-save it wherever its id
+  // points, so refuse instead.
+  if (parsed.id !== id) {
+    throw new Error(
+      `Mission file ${path} is corrupt: stored id "${parsed.id}" does not match the requested id "${id}".`,
+    );
+  }
   return parsed;
 }
 
@@ -178,7 +241,11 @@ export async function listMissionSummaries(cwd: string): Promise<MissionSummary[
   const summaries: MissionSummary[] = [];
   for (const file of files) {
     if (!file.endsWith(".json")) continue;
-    const mission = await loadMission(cwd, file.replace(/\.json$/, ""));
+    const stem = file.replace(/\.json$/, "");
+    // Stray files that do not carry a valid mission id are skipped: a
+    // listing must not crash on hand-created or foreign files.
+    if (!isMissionId(stem)) continue;
+    const mission = await loadMission(cwd, stem);
     if (!mission) continue;
     const taskCounts = Object.fromEntries(ALL_TASK_STATUSES.map((s) => [s, 0])) as Record<
       TaskStatus,

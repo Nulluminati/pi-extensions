@@ -5,7 +5,7 @@
  * `updatedAt` via saveMission, not here.
  */
 
-import { generateCheckpointId, generateTaskId } from "./storage.ts";
+import { generateCheckpointId, generateTaskId, validateTaskId } from "./storage.ts";
 import type {
   Mission,
   MissionBudget,
@@ -84,6 +84,7 @@ export function addTask(mission: Mission, input: TaskAddInput): MissionTask {
 
   const deps = input.dependsOn ?? [];
   for (const dep of deps) {
+    validateTaskId(dep); // throws on malformed dep id
     findTask(mission, dep); // throws on unknown dep
   }
   if (input.verification !== undefined && !input.verification.command.trim()) {
@@ -120,6 +121,7 @@ export interface TaskUpdateInput {
 
 export function updateTask(mission: Mission, input: TaskUpdateInput): MissionTask {
   requireOpen(mission);
+  validateTaskId(input.taskId);
   const task = findTask(mission, input.taskId);
 
   if (input.status !== undefined) {
@@ -165,6 +167,7 @@ export function setTaskVerification(
   verification: TaskVerification | undefined,
 ): MissionTask {
   requireOpen(mission);
+  validateTaskId(taskId);
   const task = findTask(mission, taskId);
   if (verification === undefined) {
     delete task.verification;
