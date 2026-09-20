@@ -1,0 +1,187 @@
+/**
+ * Workers tool action handlers: list, tail, status, cancel, collect, and
+ * remove. Each action receives what it needs (cwd, live-worker map, publish
+ * callback) explicitly from the composition root and returns the tool
+ * response; they never touch Pi registration or per-instance state directly.
+ */
+
+import { existsSync } from "node:fs";
+import { access, readFile } from "node:fs/promises";
+import type { AgentToolResult } from "pi";
+import { formatStreamEntries, formatWorkerList, formatWorkerStatus } from "./format.ts";
+import type { RunningWorker } from "./runner.ts";
+import { loadWorkers, removeWorkerRecord, saveWorker, streamPath } from "./store.ts";
+import type { WorkerRecord } from "./types.ts";
+import { applyPatch, removeWorktree, worktreePath } from "./worktree.ts";
+
+// --- Actions ---
+
+/** Every recorded worker in start order (live map not merged: list is historical). */
+export async function listWorkers(cwd: string): Promise<AgentToolResult> {
+  const workers = await loadWorkers(cwd);
+  const sorted = Object.values(workers).sort((a, b) => a.startedAt - b.startedAt);
+  return {
+    content: [{ type: "text", text: formatWorkerList(sorted) }],
+    details: { count: sorted.length },
+  };
+}
+
+/** Last N spool stream entries for one worker (post-mortem tails included). */
+export async function tailWorkerStream(
+  cwd: string,
+  id: string,
+  requestedLines: number | undefined,
+): Promise<AgentToolResult> {
+  const lines =
+    typeof requestedLines === "number" && requestedLines > 0 ? Math.floor(requestedLines) : 40;
+  let raw = "";
+  try {
+    raw = await readFile(streamPath(cwd, id), "utf8");
+  } catch {
+    throw new Error(
+      `No stream captured for worker ${id}. Streams exist for workers started after this feature landed.`,
+    );
+  }
+  const all = formatStreamEntries(raw);
+  const shown = all.slice(-lines);
+  const text =
+    shown.length > 0
+      ? shown.join("\n") +
+        (all.length > shown.length
+          ? `\n… (older ${all.length - shown.length} entries omitted)`
+          : "")
+      : "Stream is empty.";
+  return {
+    content: [{ type: "text", text }],
+    details: { entries: all.length, shown: shown.length },
+  };
+}
+
+/** Full status/report read for one worker. */
+export function workerStatusResponse(record: WorkerRecord): AgentToolResult {
+  return {
+    content: [{ type: "text", text: formatWorkerStatus(record) }],
+    details: { worker: record },
+  };
+}
+
+/**
+ * Cancel a live worker owned by this session. Workers from other sessions or
+ * earlier runs have no process here to signal and are refused.
+ */
+export async function cancelWorker(options: {
+  running: Map<string, RunningWorker>;
+  publish: () => Promise<void>;
+  id: string;
+  record: WorkerRecord;
+}): Promise<AgentToolResult> {
+  const { running, publish, id, record } = options;
+  const runningWorker = running.get(id);
+  if (!runningWorker) {
+    throw new Error(
+      record.status === "running"
+        ? `Worker ${id} belongs to another session or an earlier run and cannot be cancelled here (pid ${record.pid ?? "?"}).`
+        : `Worker ${id} is already ${record.status}.`,
+    );
+  }
+  await runningWorker.cancel();
+  running.delete(id);
+  await publish();
+  // cancel() is a no-op on a non-running record; if the worker reached
+  // a terminal state on its own first, say so instead of claiming the
+  // cancel stopped it.
+  const status = runningWorker.record.status;
+  if (status !== "cancelled") {
+    return {
+      content: [{ type: "text", text: `Worker ${record.name} is already ${status}.` }],
+      details: { worker: runningWorker.record },
+    };
+  }
+  return {
+    content: [{ type: "text", text: `Worker ${record.name} (${id}) cancelled.` }],
+    details: { worker: runningWorker.record },
+  };
+}
+
+/**
+ * Apply an isolated worker's captured patch to the working tree and remove
+ * its worktree/branch. The patch file itself survives collect.
+ */
+export async function collectWorkerPatch(
+  cwd: string,
+  id: string,
+  record: WorkerRecord,
+  params: { apply?: boolean; cleanup?: boolean },
+): Promise<AgentToolResult> {
+  if (!record.patchPath) {
+    throw new Error(
+      `Worker ${id} has no patch (only isolated workers produce patches, after finishing).`,
+    );
+  }
+  if (record.collectedAt !== undefined) {
+    throw new Error(`Worker ${id}'s patch was already collected.`);
+  }
+  const shouldApply = params.apply !== false;
+  const shouldCleanup = params.cleanup !== false;
+  const lines: string[] = [];
+  if (shouldApply) {
+    try {
+      await applyPatch(cwd, record.patchPath);
+      lines.push(`Applied patch ${record.patchPath} to the working tree.`);
+    } catch (err) {
+      throw new Error(
+        `Patch apply failed: ${(err as Error).message}. The patch file is kept at ${record.patchPath}; resolve conflicts manually if needed.`,
+      );
+    }
+  } else {
+    lines.push(`Patch left unapplied at ${record.patchPath}.`);
+  }
+  if (shouldCleanup && record.worktree) {
+    // Never remove a worktree whose changes are not durably captured:
+    // if the patch file is gone, removal would destroy the only copy.
+    const patchMissing = await access(record.patchPath).then(
+      () => false,
+      () => true,
+    );
+    if (patchMissing) {
+      throw new Error(
+        `Patch file ${record.patchPath} is missing; keeping worktree ${record.worktree} so the worker's changes are not lost.`,
+      );
+    }
+    await removeWorktree(cwd, id);
+    // git worktree removal can fail without throwing here; never claim
+    // success while the directory is still on disk.
+    if (existsSync(worktreePath(cwd, id))) {
+      lines.push(
+        `Warning: worktree removal failed; remove it manually at ${worktreePath(cwd, id)}.`,
+      );
+    } else {
+      lines.push("Worktree and branch removed.");
+    }
+  }
+  // The stream spool outlives the collect: post-mortem tails stay
+  // available for 24h after the worker finished (session_start prunes
+  // them). Collect removes the worktree/branch, not the forensics.
+  record.collectedAt = Date.now();
+  await saveWorker(cwd, record);
+  return { content: [{ type: "text", text: lines.join(" ") }], details: { worker: record } };
+}
+
+/** Drop a terminal worker's record and artifacts from the project registry. */
+export async function removeWorker(
+  cwd: string,
+  id: string,
+  publish: () => Promise<void>,
+): Promise<AgentToolResult> {
+  await removeWorkerRecord(cwd, id);
+  await publish();
+  return {
+    content: [
+      {
+        type: "text",
+        text: `Worker ${id} removed: record, stream spool and patch deleted from the project registry.`,
+      },
+    ],
+    details: { removed: id },
+  };
+}

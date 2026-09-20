@@ -236,7 +236,7 @@ export async function pruneWorkerRecords(cwd: string, now = Date.now()): Promise
  *  artifacts. Refuse un record running et un id inconnu. */
 export async function removeWorkerRecord(cwd: string, id: string): Promise<void> {
   return withFileLock(registryLockPath(cwd), async () => {
-    const { workers, changed } = await loadWorkersUnlocked(cwd);
+    const { workers } = await loadWorkersUnlocked(cwd);
     const rec = workers[id];
     if (!rec) throw new Error(`Unknown worker ${id}. Use action=list to see workers.`);
     if (rec.status === "running") {

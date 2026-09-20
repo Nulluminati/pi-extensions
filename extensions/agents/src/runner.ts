@@ -12,7 +12,7 @@ import { join } from "node:path";
 import type { ThinkingLevel } from "pi";
 import { cleanGitEnv } from "../../../lib/git.ts";
 import { patchesDir, STREAM_MAX_BYTES, streamPath } from "./store.ts";
-import type { WorkerActivity, WorkerEvents, WorkerRecord, WorkerUsage } from "./types.ts";
+import type { WorkerActivity, WorkerEvents, WorkerRecord } from "./types.ts";
 import { captureWorktreePatch } from "./worktree.ts";
 
 // --- Constants ---
