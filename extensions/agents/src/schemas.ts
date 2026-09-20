@@ -39,13 +39,13 @@ export const WORKERS_PARAMETERS = {
   type: "object",
   properties: {
     action: {
-      enum: ["list", "status", "tail", "cancel", "collect"],
+      enum: ["list", "status", "tail", "cancel", "collect", "remove"],
       description:
-        "Worker registry operation. tail: read the bounded stream tail of a running or finished worker (tool calls, assistant texts) without anything auto-delivering into the conversation.",
+        "Worker registry operation. tail: read the bounded stream tail of a running or finished worker (tool calls, assistant texts) without anything auto-delivering into the conversation. remove: delete a finished worker's record and artifacts (stream spool, patch) from the project registry.",
     },
     id: {
       type: "string",
-      description: "Worker id, required for status / tail / cancel / collect.",
+      description: "Worker id, required for status / tail / cancel / collect / remove.",
     },
     lines: {
       type: "number",

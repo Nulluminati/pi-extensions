@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -14,6 +14,8 @@ import {
   generateWorkerId,
   loadWorker,
   loadWorkers,
+  pruneWorkerRecords,
+  reserveWorkerSlot,
   saveWorker,
   streamPath,
 } from "../../extensions/agents/src/store.ts";
@@ -25,8 +27,17 @@ import {
   isGitRepo,
   removeWorktree,
 } from "../../extensions/agents/src/worktree.ts";
+import { withFileLock } from "../../lib/file-lock.ts";
 import { cleanGitEnv, runGit } from "../../lib/git.ts";
 import { projectStateRelative } from "../../lib/paths.ts";
+
+// Call-through spy: real cross-process locking behavior stays active for
+// every code path, while tests can assert who took which lock.
+vi.mock("../../lib/file-lock.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../lib/file-lock.ts")>();
+  return { ...actual, withFileLock: vi.fn(actual.withFileLock) };
+});
+
 import { __resetWidgetStrip, STRIP_KEY_ABOVE } from "../../lib/widget-strip.ts";
 import { createMockContext } from "../mocks/context-mocks.ts";
 import type { DeepMocked } from "../mocks/mock-types.ts";
@@ -1033,6 +1044,59 @@ sleep 30
       expect(raw).toContain("stream truncated");
     });
   });
+  it("workers remove deletes a finished worker's record and artifacts", async () => {
+    const finished = makeWorkerRecord({
+      id: "w-done",
+      name: "done",
+      pid: process.pid,
+      status: "completed",
+      startedAt: Date.now(),
+      endedAt: Date.now(),
+    });
+    await saveWorker(cwd, finished);
+    await mkdir(join(cwd, CONFIG_DIR_NAME, "workers", "patches"), { recursive: true });
+    const patchFile = join(cwd, CONFIG_DIR_NAME, "workers", "patches", "w-done.diff");
+    await writeFile(patchFile, "diff", "utf8");
+
+    const result = await executeTool("workers", { action: "remove", id: "w-done" });
+    expect(result.content[0].text).toContain("removed");
+    expect(await loadWorker(cwd, "w-done")).toBeUndefined();
+    await expect(stat(patchFile)).rejects.toMatchObject({ code: "ENOENT" });
+
+    // Running and unknown ids are refused.
+    await saveWorker(cwd, makeWorkerRecord({ id: "w-live", name: "live", pid: process.pid }));
+    await expect(executeTool("workers", { action: "remove", id: "w-live" })).rejects.toThrow(
+      /still running/,
+    );
+    await expect(executeTool("workers", { action: "remove", id: "w-ghost" })).rejects.toThrow(
+      /Unknown worker/,
+    );
+  });
+
+  it("session_start prunes records past the retention window", async () => {
+    await saveWorker(
+      cwd,
+      makeWorkerRecord({
+        id: "w-ancient",
+        name: "ancient",
+        pid: process.pid,
+        status: "failed",
+        startedAt: Date.now() - 8 * 24 * 60 * 60_000,
+        endedAt: Date.now() - 8 * 24 * 60 * 60_000,
+      }),
+    );
+    await saveWorker(cwd, makeWorkerRecord({ id: "w-keep", name: "keep", pid: process.pid }));
+
+    await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+
+    expect(await loadWorker(cwd, "w-ancient")).toBeUndefined();
+    expect((await loadWorker(cwd, "w-keep"))?.status).toBe("running");
+  });
+
+  it("the workers tool schema exposes the remove action", () => {
+    const definition = mockPi.registerTool.mock.calls.find((c) => c[0].name === "workers")?.[0];
+    expect(definition?.parameters.properties.action.enum).toContain("remove");
+  });
 });
 
 describe("agents-units", () => {
@@ -1193,6 +1257,114 @@ describe("agents-units", () => {
     } finally {
       await rm(repo, { recursive: true, force: true });
     }
+  });
+});
+
+describe("agents-registry persistence", () => {
+  let cwd: string;
+
+  beforeEach(async () => {
+    cwd = await mkdtemp(join(tmpdir(), "agents-store-"));
+    vi.mocked(withFileLock).mockClear();
+  });
+
+  afterEach(async () => {
+    await rm(cwd, { recursive: true, force: true });
+  });
+
+  it("saveWorker takes the cross-process registry lock", async () => {
+    await saveWorker(cwd, makeWorkerRecord({ pid: process.pid }));
+    expect(withFileLock).toHaveBeenCalledWith(
+      expect.stringMatching(/registry\.json\.lock$/),
+      expect.any(Function),
+    );
+  });
+
+  it("reserveWorkerSlot durably writes the running record under the lock", async () => {
+    await reserveWorkerSlot(cwd, makeWorkerRecord({ id: "w-a", name: "a", pid: process.pid }), 2);
+    const stored = await loadWorkers(cwd);
+    expect(stored["w-a"]?.status).toBe("running");
+    expect(withFileLock).toHaveBeenCalledWith(
+      expect.stringMatching(/registry\.json\.lock$/),
+      expect.any(Function),
+    );
+  });
+
+  it("reserveWorkerSlot refuses at the cap and writes nothing", async () => {
+    // The occupying record needs a live pid: a dead one is reconciled to
+    // failed on read and frees the slot.
+    await reserveWorkerSlot(cwd, makeWorkerRecord({ id: "w-a", name: "a", pid: process.pid }), 1);
+    await expect(
+      reserveWorkerSlot(cwd, makeWorkerRecord({ id: "w-b", name: "b" }), 1),
+    ).rejects.toThrow(/Worker limit reached \(1\/1\)/);
+    const stored = await loadWorkers(cwd);
+    expect(stored["w-b"]).toBeUndefined();
+    expect(stored["w-a"]?.status).toBe("running");
+  });
+
+  it("reserveWorkerSlot refuses a duplicate running name", async () => {
+    await reserveWorkerSlot(cwd, makeWorkerRecord({ id: "w-a", name: "dup", pid: process.pid }), 5);
+    await expect(
+      reserveWorkerSlot(cwd, makeWorkerRecord({ id: "w-b", name: "dup" }), 5),
+    ).rejects.toThrow(/already exists/);
+    const stored = await loadWorkers(cwd);
+    expect(stored["w-b"]).toBeUndefined();
+  });
+
+  it("loadWorkers fails closed on a corrupt registry", async () => {
+    const dir = join(cwd, CONFIG_DIR_NAME, "workers");
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, "registry.json"), "{not json", "utf8");
+    await expect(loadWorkers(cwd)).rejects.toThrow(/registry\.json/);
+  });
+
+  it("loadWorkers treats a missing registry as empty", async () => {
+    await expect(loadWorkers(cwd)).resolves.toEqual({});
+  });
+
+  it("pruneWorkerRecords removes past-retention terminal records and their artifacts", async () => {
+    const now = Date.now();
+    const old = makeWorkerRecord({
+      id: "w-old",
+      name: "old",
+      pid: process.pid,
+      status: "completed",
+      startedAt: now - 8 * 24 * 60 * 60_000,
+      endedAt: now - 8 * 24 * 60 * 60_000,
+    });
+    const recent = makeWorkerRecord({
+      id: "w-recent",
+      name: "recent",
+      pid: process.pid,
+      status: "completed",
+      startedAt: now - 1 * 24 * 60 * 60_000,
+      endedAt: now - 1 * 24 * 60 * 60_000,
+    });
+    const live = makeWorkerRecord({ id: "w-live", name: "live", pid: process.pid });
+    await saveWorker(cwd, old);
+    await saveWorker(cwd, recent);
+    await saveWorker(cwd, live);
+    // Artifacts for the old record: its stream spool and a captured patch.
+    const streamFile = streamPath(cwd, "w-old");
+    await mkdir(join(cwd, CONFIG_DIR_NAME, "workers", "streams"), { recursive: true });
+    await mkdir(join(cwd, CONFIG_DIR_NAME, "workers", "patches"), { recursive: true });
+    await writeFile(streamFile, '{"at":1}\n', "utf8");
+    const patchFile = join(cwd, CONFIG_DIR_NAME, "workers", "patches", "w-old.diff");
+    await writeFile(patchFile, "diff", "utf8");
+    await writeFile(streamPath(cwd, "w-recent"), '{"at":2}\n', "utf8");
+
+    const pruned = await pruneWorkerRecords(cwd);
+
+    expect(pruned).toContain("w-old");
+    expect(pruned).not.toContain("w-recent");
+    expect(pruned).not.toContain("w-live");
+    const stored = await loadWorkers(cwd);
+    expect(stored["w-old"]).toBeUndefined();
+    expect(stored["w-recent"]).toBeDefined();
+    expect(stored["w-live"]).toBeDefined();
+    await expect(stat(streamFile)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(patchFile)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(streamPath(cwd, "w-recent"))).resolves.toBeTruthy();
   });
 });
 

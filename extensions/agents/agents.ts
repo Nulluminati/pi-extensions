@@ -39,6 +39,9 @@ import {
   loadWorker,
   loadWorkers,
   pruneStreams,
+  pruneWorkerRecords,
+  removeWorkerRecord,
+  reserveWorkerSlot,
   saveWorker,
   streamPath,
 } from "./src/store.ts";
@@ -88,6 +91,10 @@ export default async function agentsExtension(pi: ExtensionAPI) {
     // Roll up token/cost usage across every worker on record (running merged
     // with finished) for the status bar. Worker spend is project state; the
     // status bar renders it separately from this session's own counters.
+    // Scope: project-lifetime spend BOUNDED BY THE 7-DAY RETENTION — records
+    // past the window are pruned from the registry on session_start
+    // (pruneWorkerRecords), so the roll-up never covers more than the last
+    // seven days of finished work plus the running workers.
     let workerCostUsd = 0;
     let workerTokens = 0;
     for (const w of Object.values(workers)) {
@@ -172,14 +179,12 @@ export default async function agentsExtension(pi: ExtensionAPI) {
       if (!task) throw new Error("delegate requires task.");
       const workerId = generateWorkerId();
 
-      const workers = await loadWorkers(ctx.cwd);
-      const activeCount = Object.values(workers).filter((w) => w.status === "running").length;
+      // La limite et l'unicité du nom sont tenues dans une section
+      // verrouillée et le record running est écrit AVANT le spawn : deux
+      // sessions qui délèguent en même temps ne peuvent pas franchir toutes
+      // deux la limite (le check-then-spawn d'avant perdait ce genre de
+      // course, et un worktree créé pour rien restait orphelin).
       const maxWorkers = envMaxWorkers();
-      if (activeCount >= maxWorkers) {
-        throw new Error(
-          `Worker limit reached (${activeCount}/${maxWorkers}). Wait for a worker to finish or raise PI_MAX_WORKERS.`,
-        );
-      }
 
       // The global environment/config selection is authoritative. Individual
       // delegate calls cannot silently substitute another model.
@@ -199,11 +204,6 @@ export default async function agentsExtension(pi: ExtensionAPI) {
         requestedName && requestedName.length <= 64 && /^[A-Za-z0-9_-]+$/.test(requestedName)
           ? requestedName
           : workerId;
-      const duplicate = Object.values(workers).some(
-        (w) => w.name === name && w.status === "running",
-      );
-      if (duplicate) throw new Error(`A running worker named "${name}" already exists.`);
-
       // Worker extension allowlist: delegate param -> PI_WORKER_EXTENSIONS ->
       // worker-extensions.json -> default set. Messenger and Gondolin are
       // mandatory; denylisted workflow extensions are rejected outright.
@@ -215,58 +215,94 @@ export default async function agentsExtension(pi: ExtensionAPI) {
       });
 
       let worktree: { path: string; branch: string } | undefined;
+      let runningWorker: RunningWorker | undefined;
       // Read-only planning workers inspect the parent's current files through
       // Gondolin and never need a branch or patch. Avoid changing git metadata
-      // merely to perform research during plan mode. Name and extension
-      // resolution happen first so a rejection cannot orphan a created tree.
+      // merely to perform research during plan mode.
       const wantIsolate = !parentPlanning && params.isolate !== false;
-      if (wantIsolate) {
-        if (!(await isGitRepo(ctx.cwd))) {
-          if (params.isolate === true) {
-            throw new Error("isolate=true requires a git repository.");
+      // La réservation précède la création du worktree : un refus (limite,
+      // nom déjà pris) ne doit pas laisser un arbre de travail orphelin. Si
+      // quoi que ce soit échoue après la réservation (worktree, spawn), le
+      // slot est libéré en marquant le record failed.
+      try {
+        await reserveWorkerSlot(
+          ctx.cwd,
+          {
+            id: workerId,
+            name,
+            task,
+            model,
+            thinkingLevel,
+            cwd: ctx.cwd,
+            status: "running",
+            startedAt: Date.now(),
+          },
+          maxWorkers,
+        );
+        if (wantIsolate) {
+          if (!(await isGitRepo(ctx.cwd))) {
+            if (params.isolate === true) {
+              throw new Error("isolate=true requires a git repository.");
+            }
+          } else {
+            worktree = await createWorktree(ctx.cwd, workerId);
           }
-        } else {
-          worktree = await createWorktree(ctx.cwd, workerId);
         }
-      }
 
-      // Every worker routes built-in file and shell tools through Gondolin.
-      // Planning workers additionally load the headless plan gate, which
-      // reduces active tools to the research allowlist and enforces read-only Bash.
-      const extensionPaths = resolvedExtensions.map((extension) => extension.path);
-      if (parentPlanning) {
-        extensionPaths.push(fileURLToPath(new URL("../plan/plan.ts", import.meta.url)));
-      }
-      const sandbox = true;
-      const readOnly = parentPlanning;
+        // Every worker routes built-in file and shell tools through Gondolin.
+        // Planning workers additionally load the headless plan gate, which
+        // reduces active tools to the research allowlist and enforces read-only Bash.
+        const extensionPaths = resolvedExtensions.map((extension) => extension.path);
+        if (parentPlanning) {
+          extensionPaths.push(fileURLToPath(new URL("../plan/plan.ts", import.meta.url)));
+        }
+        const sandbox = true;
+        const readOnly = parentPlanning;
 
-      const runningWorker = startWorker({
-        cwd: ctx.cwd,
-        task,
-        model,
-        thinkingLevel,
-        name,
-        timeoutMs,
-        workerId,
-        extensionPaths,
-        sandbox,
-        readOnly,
-        ...(worktree !== undefined ? { worktree } : {}),
-        events: makeEvents(ctx),
-        onRecord: (worker) => saveWorker(ctx.cwd, worker),
-      });
-      running.set(workerId, runningWorker);
-      // Finished fire-and-forget workers leave the map so it tracks only live
-      // children. done never rejects; the rejection branch is a no-op guard.
-      runningWorker.done.then(
-        () => {
-          running.delete(workerId);
-        },
-        () => {},
-      );
-      // Persist the running record immediately so concurrency limits,
-      // duplicate-name checks, and the workers list see it.
-      await saveWorker(ctx.cwd, runningWorker.record);
+        runningWorker = startWorker({
+          cwd: ctx.cwd,
+          task,
+          model,
+          thinkingLevel,
+          name,
+          timeoutMs,
+          workerId,
+          extensionPaths,
+          sandbox,
+          readOnly,
+          ...(worktree !== undefined ? { worktree } : {}),
+          events: makeEvents(ctx),
+          onRecord: (worker) => saveWorker(ctx.cwd, worker),
+        });
+        running.set(workerId, runningWorker);
+        // Finished fire-and-forget workers leave the map so it tracks only live
+        // children. done never rejects; the rejection branch is a no-op guard.
+        runningWorker.done.then(
+          () => {
+            running.delete(workerId);
+          },
+          () => {},
+        );
+        // Persist the running record (with the child pid): the reservation has
+        // already landed, this save adds the pid and the model fields.
+        await saveWorker(ctx.cwd, runningWorker.record);
+      } catch (error) {
+        // Libérer le slot : un record failed libère la place au prochain
+        // reconcile, au lieu de laisser un running fantôme bloquer la limite.
+        await saveWorker(ctx.cwd, {
+          id: workerId,
+          name,
+          task,
+          model,
+          thinkingLevel,
+          cwd: ctx.cwd,
+          status: "failed",
+          error: error instanceof Error ? error.message : String(error),
+          startedAt: Date.now(),
+          endedAt: Date.now(),
+        });
+        throw error;
+      }
       await publish(ctx);
 
       const isolateNote = parentPlanning
@@ -277,6 +313,7 @@ export default async function agentsExtension(pi: ExtensionAPI) {
       const waitNote = params.wait === true ? "" : " You will be woken when it exits.";
 
       if (params.wait === true) {
+        if (!runningWorker) throw new Error("Worker not started; nothing to wait for.");
         // A cancelled turn aborts this tool call; cancel the worker too so it
         // does not stay pending until the hard timeout.
         signal?.addEventListener(
@@ -451,6 +488,20 @@ export default async function agentsExtension(pi: ExtensionAPI) {
         return { content: [{ type: "text", text: lines.join(" ") }], details: { worker: record } };
       }
 
+      if (action === "remove") {
+        await removeWorkerRecord(ctx.cwd, id);
+        await publish(ctx);
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Worker ${id} removed: record, stream spool and patch deleted from the project registry.`,
+            },
+          ],
+          details: { removed: id },
+        };
+      }
+
       throw new Error(`Unknown workers action: ${String(action)}`);
     },
   });
@@ -461,7 +512,11 @@ export default async function agentsExtension(pi: ExtensionAPI) {
     // Event contexts carry a usable ui surface: capture it so the widget is
     // restored on session_start (reload) before any tool call has run.
     if (ctx.hasUI) lastUi = ctx.ui;
-    // Prune finished workers' stream spools (running ones are kept).
+    // Rétention : records terminaux au-delà de 7 jours sortis du registre
+    // avec leurs artifacts (stream, patch), puis spools orphelins (running
+    // conservés). Le roll-up de spend de la status bar est donc un
+    // project-lifetime borné à cette fenêtre de rétention.
+    await pruneWorkerRecords(ctx.cwd);
     await pruneStreams(ctx.cwd);
     // Keep worker state out of `git status`; best-effort outside repos.
     try {
