@@ -202,6 +202,16 @@ export default async function messengerExtension(pi: ExtensionAPI) {
       }
 
       if (action === "send") {
+        // Limite de confiance : un worker ne pousse jamais du texte généré
+        // par un modèle dans une autre conversation (mail auto-délivré avec
+        // triggerTurn). La sortie d'un worker ne remonte au parent que par
+        // les surfaces en lecture du tool workers (status, tail, spool).
+        // Les workers REÇOivent du courrier ; ils ne l'envoient pas.
+        if (process.env.PI_WORKER === "1") {
+          throw new Error(
+            "send is disabled for worker sessions: worker output reaches the parent only through the workers tool (status, tail). A worker receives mail but never sends it.",
+          );
+        }
         const to = typeof params.to === "string" ? params.to.trim() : "";
         const text = typeof params.text === "string" ? params.text.trim() : "";
         if (!to) throw new Error("send requires to (recipient agent name).");
