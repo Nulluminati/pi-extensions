@@ -22,6 +22,10 @@ export interface AutoConfig {
   /** Session that created the campaign; only it drives the continuation
    *  loop. Absent on legacy configs, which any session may continue. */
   ownerSessionId?: string;
+  /** Tracked files that were already dirty when the campaign started.
+   *  Keeps never stage them and discards never restore them. Normally
+   *  empty: init refuses to start while tracked files are dirty. */
+  dirtyAtInit?: string[];
   createdAt: number;
 }
 
@@ -52,5 +56,7 @@ export interface AutoSummary {
   bestRun?: number;
   lastStatus?: RunStatus;
   /** |best - baseline| relative to the noise floor (MAD), when computable. */
-  confidence?: number;
+  /** Descriptive spread score (see stats.ts): |best - baseline| relative to
+   *  observed run-to-run variation. Not a confidence measure. */
+  spread?: number;
 }

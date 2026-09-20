@@ -1,6 +1,6 @@
 import { exec, execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import autoresearchExtension from "../../extensions/autoresearch/autoresearch.ts";
 import { CHECKS_TIMEOUT_MS, parseMetric } from "../../extensions/autoresearch/src/measure.ts";
 import { AUTORESEARCH_PARAMETERS } from "../../extensions/autoresearch/src/schemas.ts";
-import { bestEntry, confidence } from "../../extensions/autoresearch/src/stats.ts";
+import { bestEntry, spreadScore } from "../../extensions/autoresearch/src/stats.ts";
 import { loadConfig, readLog } from "../../extensions/autoresearch/src/store.ts";
 import type { RunEntry } from "../../extensions/autoresearch/src/types.ts";
 import { cleanGitEnv } from "../../lib/git.ts";
@@ -180,6 +180,102 @@ describe("autoresearch-extension", () => {
     expect(existsSync(join(cwd, CONFIG_DIR_NAME, "autoresearch"))).toBe(false);
     const exclude = await readFile(join(cwd, ".git/info/exclude"), "utf8").catch(() => "");
     expect(exclude).not.toContain(`${projectStateRelative("autoresearch")}/`);
+  });
+
+  it("init rejects a tracked config-dir file that is dirty", async () => {
+    // A tracked file under the config dir predates the campaign: letting init
+    // proceed would let a later discard restore it from HEAD and destroy it.
+    const trackedConfig = join(cwd, CONFIG_DIR_NAME, "autoresearch", "config.json");
+    await mkdir(join(cwd, CONFIG_DIR_NAME, "autoresearch"), { recursive: true });
+    await writeFile(trackedConfig, "{}\n");
+    // -f: a global gitignore commonly lists the config dir, but the point of
+    // this test is a TRACKED file under it.
+    await execFileAsync("git", ["add", "-f", "."], gitOpts(cwd));
+    await execFileAsync("git", ["commit", "-qm", "track a config-dir file"], gitOpts(cwd));
+    await writeFile(trackedConfig, "edited\n");
+
+    await expect(initSession()).rejects.toThrow(/clean worktree/i);
+
+    expect(await readFile(trackedConfig, "utf8")).toBe("edited\n");
+    expect(existsSync(join(cwd, CONFIG_DIR_NAME, "autoresearch", "log.jsonl"))).toBe(false);
+  });
+
+  it("keep does not stage a tracked file that was dirty before the campaign", async () => {
+    await initSession();
+    await seedDirtyAtInit(cwd, ["code.txt"]);
+    await writeFile(join(cwd, "code.txt"), "foreign edit\n");
+    await writeFile(join(cwd, "metric.txt"), "90\n");
+
+    await executeTool({ action: "run", description: "experiment on metric only" });
+    const log = await executeTool({
+      action: "log",
+      status: "keep",
+      description: "experiment on metric only",
+    });
+    expect(log.content[0].text).toContain("Kept (commit");
+
+    const shown = await execFileAsync(
+      "git",
+      ["show", "--pretty=", "--name-only", "HEAD"],
+      gitOpts(cwd),
+    );
+    const committed = shown.stdout.split("\n").filter(Boolean);
+    expect(committed).toContain("metric.txt");
+    expect(committed).not.toContain("code.txt");
+    expect(await readFile(join(cwd, "code.txt"), "utf8")).toBe("foreign edit\n");
+  });
+
+  it("discard does not restore a tracked file that was dirty before the campaign", async () => {
+    await initSession();
+    await seedDirtyAtInit(cwd, ["code.txt"]);
+    await writeFile(join(cwd, "code.txt"), "foreign edit\n");
+    await writeFile(join(cwd, "metric.txt"), "120\n");
+
+    await executeTool({ action: "run", description: "slower experiment" });
+    await executeTool({ action: "log", status: "discard", description: "slower experiment" });
+
+    // The experiment's tracked change is reverted; the foreign edit survives.
+    expect(await readFile(join(cwd, "metric.txt"), "utf8")).toContain("100");
+    expect(await readFile(join(cwd, "code.txt"), "utf8")).toBe("foreign edit\n");
+  });
+
+  it("init refuses to overwrite a corrupt config.json and reports the path", async () => {
+    const stateDir = join(cwd, CONFIG_DIR_NAME, "autoresearch");
+    await mkdir(stateDir, { recursive: true });
+    await writeFile(join(stateDir, "config.json"), "{ not json");
+
+    await expect(initSession()).rejects.toThrow(/config\.json/);
+    expect(await readFile(join(stateDir, "config.json"), "utf8")).toBe("{ not json");
+  });
+
+  it("a config.json with a foreign shape is treated as absent, not corrupt", async () => {
+    const stateDir = join(cwd, CONFIG_DIR_NAME, "autoresearch");
+    await mkdir(stateDir, { recursive: true });
+    await writeFile(join(stateDir, "config.json"), JSON.stringify({ hello: "world" }));
+
+    const status = await executeTool({ action: "status" });
+    expect(status.content[0].text).toContain("No autoresearch session");
+  });
+
+  it("a missing config.json still reads as no session", async () => {
+    await initSession();
+    await rm(join(cwd, CONFIG_DIR_NAME, "autoresearch", "config.json"));
+
+    const status = await executeTool({ action: "status" });
+    expect(status.content[0].text).toContain("No autoresearch session");
+  });
+
+  it("an unreadable config.json throws with the file path", async () => {
+    // Root ignores file permissions, making the chmod scenario ineffective.
+    if (process.getuid?.() === 0) return;
+    await initSession();
+    const path = join(cwd, CONFIG_DIR_NAME, "autoresearch", "config.json");
+    await chmod(path, 0o000);
+    try {
+      await expect(executeTool({ action: "status" })).rejects.toThrow(/config\.json/);
+    } finally {
+      await chmod(path, 0o644);
+    }
   });
 
   it("init ignores untracked state under .pi/", async () => {
@@ -549,12 +645,26 @@ describe("autoresearch-extension", () => {
     expect(log.content[0].text).toContain("Kept (commit");
   });
 
-  it("reports confidence once enough runs exist", async () => {
+  it("reports a descriptive spread score once enough kept runs exist", async () => {
     await initSession();
-    await runAndLog("99.0", "keep", "big noisy improvement");
+    await runAndLog("99.0", "keep", "big improvement");
     await runAndLog("101.0", "discard", "noisy regression");
-    const log = await runAndLog("99.96", "discard", "tiny change");
-    expect(log.content[0].text).toContain("Confidence: 1.349x noise (marginal)");
+    const log = await runAndLog("99.96", "keep", "tiny change");
+    // Spread is descriptive (|best - baseline| relative to run-to-run
+    // variation); it must not claim whether the result is real or noise.
+    expect(log.content[0].text).toMatch(/Spread: [0-9.]+x MAD/);
+    expect(log.content[0].text).not.toMatch(/[Cc]onfidence|likely real|within noise|marginal/);
+  });
+
+  it("the headline best never comes from a discarded run", async () => {
+    await initSession();
+    await runAndLog("99.0", "keep", "kept improvement");
+    // A discarded run measured "better" but its changes were reverted: the
+    // working tree does not contain that result.
+    await runAndLog("50.0", "discard", "too good, reverted");
+    const log = await runAndLog("99.9", "discard", "tiny change");
+    expect(log.content[0].text).toContain("Best: 99");
+    expect(log.content[0].text).not.toContain("Best: 50");
   });
 
   it("iteration cap stops the loop", async () => {
@@ -774,6 +884,22 @@ describe("autoresearch-units", () => {
     expect(parseMetric("METRIC temp=-4 C", "temp")).toBe(-4);
   });
 
+  it("parseMetric matches the tagged line for the configured metric only", () => {
+    expect(parseMetric("METRIC latency=10\nMETRIC memory=500", "memory")).toBe(500);
+    expect(parseMetric("METRIC memory=500\nMETRIC latency=10", "latency")).toBe(10);
+  });
+
+  it("parseMetric skips tagged lines that merely contain or extend the metric name", () => {
+    expect(parseMetric("METRIC latencyness=99\nMETRIC latency=20", "latency")).toBe(20);
+    expect(parseMetric("METRIC LATENCY=10\nMETRIC latency=20", "latency")).toBe(20);
+  });
+
+  it("parseMetric still reads the plain name=value form and the last-number fallback", () => {
+    expect(parseMetric("latency=10", "latency")).toBe(10);
+    // Only unrelated tagged lines: the documented last-number fallback applies.
+    expect(parseMetric("METRIC memory=500\nMETRIC other=7", "latency")).toBe(7);
+  });
+
   it("bestEntry respects direction", () => {
     const entries: RunEntry[] = [
       { run: 1, at: 1, status: "baseline", description: "b", metric: 10 },
@@ -784,20 +910,45 @@ describe("autoresearch-units", () => {
     expect(bestEntry(entries, "higher")?.run).toBe(3);
   });
 
-  it("confidence is undefined under 3 runs and flags noise", () => {
+  it("spread score is undefined under 3 measured runs", () => {
     const few: RunEntry[] = [
       { run: 1, at: 1, status: "baseline", description: "b", metric: 100 },
       { run: 2, at: 2, status: "keep", description: "a", metric: 50 },
     ];
-    expect(confidence(few, "lower")).toBeUndefined();
+    expect(spreadScore(few, "lower")).toBeUndefined();
 
     const noisy: RunEntry[] = [
       { run: 1, at: 1, status: "baseline", description: "b", metric: 100 },
       { run: 2, at: 2, status: "keep", description: "a", metric: 99.9 },
-      { run: 3, at: 3, status: "discard", description: "c", metric: 100.1 },
+      { run: 3, at: 3, status: "keep", description: "d", metric: 100.1 },
     ];
-    const conf = confidence(noisy, "lower");
-    expect(conf).toBeDefined();
-    expect(conf ?? 0).toBeLessThan(1);
+    const spread = spreadScore(noisy, "lower");
+    expect(spread).toBeDefined();
+    expect(spread ?? 0).toBeGreaterThan(0);
+  });
+
+  it("spread score uses baseline plus kept runs only", () => {
+    const baselineAndKept: RunEntry[] = [
+      { run: 1, at: 1, status: "baseline", description: "b", metric: 100 },
+      { run: 2, at: 2, status: "keep", description: "a", metric: 98 },
+      { run: 3, at: 3, status: "keep", description: "d", metric: 99 },
+    ];
+    // A discarded outlier must not inflate the observed variation: the score
+    // with it present equals the score of the kept set alone.
+    const withDiscardedOutlier: RunEntry[] = [
+      ...baselineAndKept,
+      { run: 4, at: 4, status: "discard", description: "c", metric: 10 },
+    ];
+    expect(spreadScore(withDiscardedOutlier, "lower")).toBe(spreadScore(baselineAndKept, "lower"));
   });
 });
+
+/** Rewrite the campaign config to record tracked files that were already
+ * dirty when the campaign started. A normal init refuses to start on dirty
+ * tracked files, so tests seed the defensive record directly. */
+async function seedDirtyAtInit(dir: string, paths: string[]): Promise<void> {
+  const path = join(dir, CONFIG_DIR_NAME, "autoresearch", "config.json");
+  const config = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+  config.dirtyAtInit = paths;
+  await writeFile(path, JSON.stringify(config));
+}

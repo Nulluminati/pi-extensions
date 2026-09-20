@@ -42,28 +42,50 @@ function isActiveConfig(value: unknown): value is AutoConfig {
   );
 }
 
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error;
+}
+
+/** Read a state file, distinguishing "absent" from "broken": only ENOENT (or
+ *  ENOTDIR, i.e. a missing parent directory) returns undefined. A corrupt or
+ *  unreadable file must fail visibly — treating it as absent would let a
+ *  re-init silently overwrite an existing campaign. */
+async function readStateFile(path: string): Promise<string | undefined> {
+  try {
+    return await readFile(path, "utf8");
+  } catch (error) {
+    if (isNodeError(error) && (error.code === "ENOENT" || error.code === "ENOTDIR")) {
+      return undefined;
+    }
+    throw new Error(`autoresearch state file ${path} is unreadable: ${String(error)}`);
+  }
+}
+
 export async function saveConfig(cwd: string, config: AutoConfig): Promise<void> {
   await writeJsonAtomic(configPath(cwd), config);
 }
 
 export async function loadConfig(cwd: string): Promise<AutoConfig | undefined> {
+  const raw = await readStateFile(configPath(cwd));
+  if (raw === undefined) return undefined;
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(await readFile(configPath(cwd), "utf8"));
-    return isActiveConfig(parsed) ? parsed : undefined;
-  } catch {
-    return undefined;
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(
+      `autoresearch config ${configPath(cwd)} is corrupt (invalid JSON): ${String(error)}`,
+    );
   }
+  // A foreign shape (older version, hand-edited) is not corruption: treat it
+  // as absent rather than failing every subsequent call.
+  return isActiveConfig(parsed) ? parsed : undefined;
 }
 
 // --- Log ---
 
 export async function readLog(cwd: string): Promise<RunEntry[]> {
-  let raw: string;
-  try {
-    raw = await readFile(logPath(cwd), "utf8");
-  } catch {
-    return [];
-  }
+  const raw = await readStateFile(logPath(cwd));
+  if (raw === undefined) return [];
   const entries: RunEntry[] = [];
   for (const line of raw.split("\n")) {
     if (!line.trim()) continue;

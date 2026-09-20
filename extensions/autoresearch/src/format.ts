@@ -2,7 +2,7 @@
 
 import { createFramedWidget, type FramedWidgetFactory } from "../../../lib/framed-widget.ts";
 import { formatStatusLine } from "../../../lib/ui-format.ts";
-import { bestEntry, confidence } from "./stats.ts";
+import { bestEntry, spreadScore } from "./stats.ts";
 import type { AutoConfig, AutoSummary, RunEntry } from "./types.ts";
 
 // --- Constants ---
@@ -18,13 +18,18 @@ export const AUTORESEARCH_TEXT_COLOR = "muted";
 
 export function buildSummary(config: AutoConfig, entries: RunEntry[]): AutoSummary {
   const baseline = entries.find((e) => e.status === "baseline")?.metric;
+  // The headline best comes from the baseline plus kept runs only: discarded
+  // runs were reverted and are not present in the working tree.
   const best = bestEntry(
-    entries.filter((e) => e.status !== "baseline"),
+    entries.filter((e) => e.status === "keep"),
     config.direction,
   );
-  const bestBaseline = bestEntry(entries, config.direction);
+  const bestBaseline = bestEntry(
+    entries.filter((e) => e.status === "baseline" || e.status === "keep"),
+    config.direction,
+  );
   const last = entries[entries.length - 1];
-  const conf = confidence(entries, config.direction);
+  const spread = spreadScore(entries, config.direction);
   return {
     active: config.stopped !== true,
     objective: config.objective,
@@ -40,7 +45,7 @@ export function buildSummary(config: AutoConfig, entries: RunEntry[]): AutoSumma
         ? { best: bestBaseline.metric, bestRun: bestBaseline.run }
         : {}),
     ...(last !== undefined ? { lastStatus: last.status } : {}),
-    ...(conf !== undefined ? { confidence: conf } : {}),
+    ...(spread !== undefined ? { spread } : {}),
   };
 }
 
@@ -61,10 +66,8 @@ export function formatSummary(summary: AutoSummary, recent: RunEntry[]): string 
   }
   const cap = summary.maxIterations !== undefined ? `/${summary.maxIterations}` : "";
   lines.push(`Iterations: ${summary.iterations}${cap}`);
-  if (summary.confidence !== undefined) {
-    lines.push(
-      `Confidence: ${round(summary.confidence)}x noise (${confidenceLabel(summary.confidence)})`,
-    );
+  if (summary.spread !== undefined) {
+    lines.push(`Spread: ${round(summary.spread)}x MAD`);
   }
   if (recent.length > 0) {
     lines.push("Recent runs:");
@@ -74,12 +77,6 @@ export function formatSummary(summary: AutoSummary, recent: RunEntry[]): string 
     }
   }
   return lines.join("\n");
-}
-
-function confidenceLabel(value: number): string {
-  if (value >= 2) return "likely real";
-  if (value >= 1) return "marginal";
-  return "within noise";
 }
 
 function round(value: number): number {
@@ -93,7 +90,7 @@ export function statusText(summary: AutoSummary): string | undefined {
     `it ${summary.iterations}${summary.maxIterations !== undefined ? `/${summary.maxIterations}` : ""}`,
   ];
   if (summary.best !== undefined) parts.push(`best ${round(summary.best)}`);
-  if (summary.confidence !== undefined) parts.push(`conf ${round(summary.confidence)}x`);
+  if (summary.spread !== undefined) parts.push(`spread ${round(summary.spread)}x`);
   return parts.join(" · ");
 }
 
@@ -135,7 +132,7 @@ export function createAutoresearchWidget(
       const lines: string[] = [];
       const bestParts: string[] = [];
       if (summary.best !== undefined) bestParts.push(`best ${round(summary.best)}`);
-      if (summary.confidence !== undefined) bestParts.push(`conf ${round(summary.confidence)}x`);
+      if (summary.spread !== undefined) bestParts.push(`spread ${round(summary.spread)}x`);
       if (bestParts.length > 0) lines.push(bestParts.join(" · "));
       const last = entries[entries.length - 1];
       if (last) {

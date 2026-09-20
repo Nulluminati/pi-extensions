@@ -27,11 +27,16 @@ export function parseMetric(output: string, metric: string): number | undefined 
     const tagged = line.match(/^\s*METRIC\s+(.+)$/);
     if (tagged?.[1]) {
       // Split on the first "=" only: values may carry further "=" signs or
-      // trailing unit text ("METRIC time=42 ms"). The leading numeric token
-      // of the remainder is the value; anything else falls through.
+      // trailing unit text ("METRIC time=42 ms"). Only a line whose name
+      // matches the configured metric exactly (case-sensitive) counts —
+      // `METRIC memory=500` must not be read as the latency metric, and a
+      // name that merely extends it ("latencyness") must not match either.
       const eq = tagged[1].indexOf("=");
-      const rest = eq === -1 ? undefined : tagged[1].slice(eq + 1);
-      const numeric = rest?.match(/^\s*([-+]?[0-9]+(?:\.[0-9]+)?(?:[eE][-+]?[0-9]+)?)/);
+      if (eq === -1) continue;
+      const name = tagged[1].slice(0, eq).trim();
+      if (name !== metric) continue;
+      const rest = tagged[1].slice(eq + 1);
+      const numeric = rest.match(/^\s*([-+]?[0-9]+(?:\.[0-9]+)?(?:[eE][-+]?[0-9]+)?)/);
       if (numeric?.[1]) {
         const value = Number.parseFloat(numeric[1]);
         if (Number.isFinite(value)) return value;
@@ -161,17 +166,25 @@ export async function listUntracked(cwd: string): Promise<string[]> {
 /**
  * Commit the current experiment's changes only: tracked worktree changes plus
  * untracked files created after the campaign's baseline snapshot. Files that
- * existed before the experiment — unrelated tracked edits or untracked state —
- * are never staged. Returns the short commit id.
+ * existed before the experiment — unrelated tracked edits, untracked state, or
+ * tracked files already dirty when the campaign started (`dirtyAtInit`) — are
+ * never staged. Returns the short commit id.
  */
 export async function commitExperiment(
   cwd: string,
   message: string,
   baselineUntracked?: string[],
+  dirtyAtInit?: string[],
 ): Promise<string> {
   const { tracked, untracked } = await changedFiles(cwd);
   const baseline = new Set(baselineUntracked ?? []);
-  const paths = [...new Set([...tracked, ...untracked.filter((p) => !baseline.has(p))])];
+  const preExisting = new Set(dirtyAtInit ?? []);
+  const paths = [
+    ...new Set([
+      ...tracked.filter((p) => !preExisting.has(p)),
+      ...untracked.filter((p) => !baseline.has(p)),
+    ]),
+  ];
   if (paths.length === 0) throw new Error("No experiment changes to commit.");
   await runGit(cwd, ["add", "--", ...paths]);
   // Message passed via env to avoid shell-quoting bugs. Git env must be
@@ -191,16 +204,23 @@ export async function commitExperiment(
 /**
  * Revert the current experiment: tracked changes are restored from HEAD, and
  * untracked files created after the campaign's baseline snapshot are removed.
- * Pre-existing work — unrelated tracked edits or untracked files captured in
- * the baseline — is never touched. A missing snapshot (legacy campaigns)
+ * Pre-existing work — unrelated tracked edits, untracked files captured in
+ * the baseline, or tracked files already dirty when the campaign started
+ * (`dirtyAtInit`) — is never touched. A missing snapshot (legacy campaigns)
  * leaves untracked files alone for the same reason.
  */
-export async function discardExperiment(cwd: string, baselineUntracked?: string[]): Promise<void> {
+export async function discardExperiment(
+  cwd: string,
+  baselineUntracked?: string[],
+  dirtyAtInit?: string[],
+): Promise<void> {
   const { tracked, untracked } = await changedFiles(cwd);
-  if (tracked.length > 0) {
+  const preExisting = new Set(dirtyAtInit ?? []);
+  const restore = tracked.filter((p) => !preExisting.has(p));
+  if (restore.length > 0) {
     // Restore both index and worktree so an experiment that staged a new file
     // is discarded just as safely as an unstaged edit or deletion.
-    await runGit(cwd, ["restore", "--source=HEAD", "--staged", "--worktree", "--", ...tracked]);
+    await runGit(cwd, ["restore", "--source=HEAD", "--staged", "--worktree", "--", ...restore]);
   }
   if (baselineUntracked === undefined) return;
   const baseline = new Set(baselineUntracked);

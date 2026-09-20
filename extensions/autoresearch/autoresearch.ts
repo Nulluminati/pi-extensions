@@ -10,8 +10,9 @@
  *
  * Continuation: while the loop is active the extension re-prompts the agent
  * after each turn, with runaway guards (iteration cap, stall detection).
- * Metrics alone don't justify keeps — confidence (best vs noise floor) is
- * reported after every run and the agent is told to re-measure when low.
+ * Metrics alone don't justify keeps — a descriptive spread score (best vs
+ * observed run-to-run variation) is reported after every run and the agent
+ * is told to re-measure when the delta is small relative to that spread.
  */
 
 import { readFile, unlink, writeFile } from "node:fs/promises";
@@ -164,7 +165,7 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
       "Autonomous experiment loop: init a measurable optimization (metric + measure command), then repeat — edit code, run (action=run), log keep-or-discard (action=log). Keeps are git commits, discards revert everything. Use for optimizing measurable targets: test speed, build time, bundle size, benchmark scores.",
     promptGuidelines: [
       "Use autoresearch when the user asks to optimize a measurable metric autonomously. Init needs a deterministic measure command emitting 'METRIC name=value'. After each result, propose the next hypothesis from what was learned before editing again.",
-      "Never keep a result whose confidence is below 1x noise without re-measuring first; the tool reports confidence after every log.",
+      "A spread score below 1x means the best-vs-baseline delta is small relative to observed run-to-run variation; re-measure before trusting a keep. The tool reports the spread score after every log.",
     ],
     parameters: AUTORESEARCH_PARAMETERS,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -187,31 +188,39 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
         if (!direction) throw new Error("init requires direction (lower or higher).");
         if (!measure)
           throw new Error("init requires measure (shell command that prints the metric).");
-        const existing = await loadConfig(cwd);
-        if (existing && !existing.stopped) {
-          throw new Error(
-            "An active autoresearch session exists. Stop it (action=stop) before re-initializing.",
-          );
-        }
+        // Worktree safety first: the clean-tree precondition protects user
+        // data from keep/discard, so it must win over config-state errors
+        // (a corrupt config still refuses init — just with the tree error
+        // when both are wrong).
         if (!(await isGitRepo(cwd))) {
           throw new Error(
             "autoresearch requires a git repository (keeps are commits, discards are reverts).",
           );
         }
-        // Clean-tree precondition, checked before any campaign state is written:
-        // keeps stage worktree changes and discards restore tracked files from
-        // HEAD, so pre-existing edits must be committed or stashed first.
         const dirty = await changedFiles(cwd);
-        // Everything under the config dir is extension state (autoresearch,
-        // missions, messenger, …) and is never treated as pre-existing work.
-        const blocking = [...dirty.tracked, ...dirty.untracked].filter(
-          (path) => !isProjectStatePath(path),
-        );
+        // Tracked changes always block: keeps stage worktree changes and
+        // discards restore tracked files from HEAD, so any pre-existing
+        // tracked edit — even under the config dir — could be committed or
+        // wiped by the loop. Only untracked extension-state files (missions,
+        // messenger, …) are exempt; they are never staged or restored.
+        const blocking = [
+          ...dirty.tracked,
+          ...dirty.untracked.filter((path) => !isProjectStatePath(path)),
+        ];
         if (blocking.length > 0) {
           const shown = blocking.slice(0, 10).join("\n");
           const more = blocking.length > 10 ? `\n…and ${blocking.length - 10} more` : "";
           throw new Error(
             `autoresearch requires a clean worktree. Commit or stash these changes first:\n${shown}${more}`,
+          );
+        }
+        // Campaign-state checks come after worktree safety: an active session
+        // refuses re-init, a corrupt config fails visibly (never silently
+        // overwritten), and a stopped session archives its log.
+        const existing = await loadConfig(cwd);
+        if (existing && !existing.stopped) {
+          throw new Error(
+            "An active autoresearch session exists. Stop it (action=stop) before re-initializing.",
           );
         }
         if (existing?.stopped) {
@@ -240,6 +249,11 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
             ? { ownerSessionId: ctx.sessionManager.getSessionId() }
             : {}),
           createdAt: Date.now(),
+          // Defensive record of tracked files already dirty when the
+          // campaign started (normally empty: the precondition above refuses
+          // to start on tracked changes). Keeps never stage these files and
+          // discards never restore them.
+          ...(dirty.tracked.length > 0 ? { dirtyAtInit: dirty.tracked } : {}),
         };
         await saveConfig(cwd, config);
         await excludeAutoFromGit(cwd);
@@ -311,7 +325,7 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
         if (config.checks) {
           const checks = await runCommand(config.checks, cwd, CHECKS_TIMEOUT_MS);
           if (!checks.ok) {
-            await discardExperiment(cwd, await loadUntrackedSnapshot(cwd));
+            await discardExperiment(cwd, await loadUntrackedSnapshot(cwd), config.dirtyAtInit);
             await saveUntrackedSnapshot(cwd, await listUntracked(cwd));
             const entries = await readLog(cwd);
             const entry: RunEntry = {
@@ -387,9 +401,10 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
             cwd,
             `autoresearch: ${description} (${config.metric}=${pending.metric ?? "?"})`,
             await loadUntrackedSnapshot(cwd),
+            config.dirtyAtInit,
           );
         } else {
-          await discardExperiment(cwd, await loadUntrackedSnapshot(cwd));
+          await discardExperiment(cwd, await loadUntrackedSnapshot(cwd), config.dirtyAtInit);
         }
         // Re-baseline the untracked set so the next experiment's keep/discard
         // scope starts from the state this log left behind.
@@ -420,15 +435,15 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
         } else {
           publish(ctx, config, entries);
         }
-        const confidenceNote =
-          summary.confidence !== undefined && summary.confidence < 1
-            ? " Confidence is within noise — re-run before trusting this result."
+        const spreadNote =
+          summary.spread !== undefined && summary.spread < 1
+            ? " Spread is below 1x MAD — re-measure before trusting this result."
             : "";
         return {
           content: [
             {
               type: "text",
-              text: `${status === "keep" ? `Kept (commit ${commit})` : "Discarded (reverted)"}. ${formatSummary(summary, entries)}.${confidenceNote}${stopNote}`,
+              text: `${status === "keep" ? `Kept (commit ${commit})` : "Discarded (reverted)"}. ${formatSummary(summary, entries)}.${spreadNote}${stopNote}`,
             },
           ],
           details: { entry, summary, stopped: config.stopped === true },
@@ -440,7 +455,7 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
         if (pending) {
           // A pending run means uncommitted experiment changes; revert them.
           // Failures surface instead of being swallowed so state stays honest.
-          await discardExperiment(cwd, await loadUntrackedSnapshot(cwd));
+          await discardExperiment(cwd, await loadUntrackedSnapshot(cwd), config.dirtyAtInit);
           await clearPending(cwd);
         }
         config.stopped = true;
