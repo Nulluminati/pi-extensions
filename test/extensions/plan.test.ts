@@ -1214,6 +1214,63 @@ describe("isSafeBashCommand", () => {
     }
   });
 
+  it("allows read-only argument forms of allowlisted commands", () => {
+    const safe = [
+      "git branch -a -v",
+      "git branch --show-current",
+      "git branch --list 'fix*'",
+      "git branch --contains HEAD",
+      "git remote -v",
+      "git remote get-url origin",
+      "git config --get user.name",
+      "git config --global --get user.name",
+      "git rev-parse HEAD",
+      "git log --format=%H -3",
+      "npm audit",
+      "npm ls --depth=0",
+      "npm view pi versions --json",
+      "yarn why lodash",
+      "jq .name package.json",
+      "rg -n 'pattern' src",
+      "df -h",
+      "du -sh .",
+      "echo hello",
+      "printf '%s\\n' hi",
+    ];
+    for (const command of safe) {
+      expect(isSafeBashCommand(command), command).toBe(true);
+    }
+  });
+
+  it("blocks argument-level mutations of allowlisted commands", () => {
+    const blocked = [
+      "git branch review-mutates",
+      "git remote add ex https://example.com/repo.git",
+      "npm audit --fix",
+      "git branch -d old",
+      "git branch -D old",
+      "git branch -m a b",
+      "git config user.email evil@x",
+      "git stash drop",
+      "git stash pop",
+      "git remote rename a b",
+      "git remote set-url origin https://example.com/repo.git",
+      "npm audit --fix --force",
+      "env FOO=1 bash",
+      "env node evil.js",
+      "node --version extra",
+      "python --version --help",
+      'git log "unterminated',
+      "git status; git branch x",
+      "git diff --output=/tmp/patch file",
+      "journalctl --vacuum-size=1M",
+      "date -s 2020-01-01",
+    ];
+    for (const command of blocked) {
+      expect(isSafeBashCommand(command), command).toBe(false);
+    }
+  });
+
   it("blocks shell command and process substitutions", () => {
     const blocked = [
       `echo "$(node -e 'require("fs").writeFileSync("pwned","1")')"`,
