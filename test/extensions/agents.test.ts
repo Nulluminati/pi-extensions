@@ -84,6 +84,25 @@ const NOISY_FAILING_WORKER =
   "#!/bin/sh\necho 'line one failure' >&2\necho 'line two failure' >&2\necho 'line three failure' >&2\nexit 3\n";
 const SLOW_WORKER = "#!/bin/sh\nsleep 30\n";
 
+/**
+ * A late messenger-write teardown race can hit the temp dir between rm's
+ * readdir and rmdir; retry the transient codes instead of failing a green
+ * test on teardown timing.
+ */
+async function removeTempDir(path: string): Promise<void> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await rm(path, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException | null)?.code;
+      const transient = code === "ENOTEMPTY" || code === "ENOENT" || code === "EBUSY";
+      if (!transient || attempt >= 20) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 25 * (attempt + 1)));
+    }
+  }
+}
+
 async function writeFixture(dir: string, name: string, body: string): Promise<string> {
   const path = join(dir, name);
   await writeFile(path, body);
@@ -216,8 +235,8 @@ describe("agents-extension", () => {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
     }
-    await rm(cwd, { recursive: true, force: true });
-    await rm(fixtureDir, { recursive: true, force: true });
+    await removeTempDir(cwd);
+    await removeTempDir(fixtureDir);
   });
 
   it("registers delegate and workers tools without a per-call model override", () => {
@@ -753,6 +772,29 @@ sleep 30
 
     const record = await loadWorker(cwd, id);
     expect(record?.status).toBe("cancelled");
+  });
+
+  it("onChange and onActivity do not publish after session_shutdown", async () => {
+    const fixture = await writeFixture(fixtureDir, "slow-worker.sh", SLOW_WORKER);
+    setEnv("PI_WORKER_COMMAND", fixture);
+
+    await executeTool("delegate", { task: "long", isolate: false });
+    const stateEmitCount = () =>
+      mockPi.events.emit.mock.calls.filter(([event]) => event === "agents:state").length;
+
+    await getEventHandler("session_shutdown")(
+      { type: "session_shutdown", reason: "quit" },
+      mockCtx,
+    );
+    const emitsAfterShutdown = stateEmitCount();
+    const widgetCallsAfterShutdown = mockCtx.ui.setWidget.mock.calls.length;
+
+    // The cancel path fires onChange from the runner; a pending 500ms activity
+    // refresh would land within this window if shutdown did not gate it.
+    await new Promise((resolve) => setTimeout(resolve, 700));
+
+    expect(stateEmitCount()).toBe(emitsAfterShutdown);
+    expect(mockCtx.ui.setWidget.mock.calls.length).toBe(widgetCallsAfterShutdown);
   });
 
   it("workers cancel stops a running worker", async () => {
@@ -1316,6 +1358,13 @@ describe("agents-registry persistence", () => {
     await mkdir(dir, { recursive: true });
     await writeFile(join(dir, "registry.json"), "{not json", "utf8");
     await expect(loadWorkers(cwd)).rejects.toThrow(/registry\.json/);
+  });
+
+  it("loadWorkers rejects a registry whose workers field is not an object", async () => {
+    const dir = join(cwd, CONFIG_DIR_NAME, "workers");
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, "registry.json"), '{"workers":"x"}\n', "utf8");
+    await expect(loadWorkers(cwd)).rejects.toThrow(/corrupt.*shape/s);
   });
 
   it("loadWorkers treats a missing registry as empty", async () => {

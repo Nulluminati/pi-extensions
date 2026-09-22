@@ -53,6 +53,9 @@ export default async function agentsExtension(pi: ExtensionAPI) {
 
   /** Live activity churn must not re-render (or disk-read) per event. */
   let activityRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+  // Once shutdown starts, worker events racing it (cancel-time terminal saves,
+  // in-flight stream reads) must not publish or schedule refreshes anymore.
+  let shutDown = false;
 
   async function publish(ctx: ExtensionContext): Promise<void> {
     const workers = await loadWorkers(ctx.cwd);
@@ -121,14 +124,20 @@ export default async function agentsExtension(pi: ExtensionAPI) {
         }
       },
       onChange() {
-        void publish(ctx);
+        if (shutDown) return;
+        publish(ctx).catch((error) => {
+          console.error(`[agents] publish failed: ${(error as Error).message}`);
+        });
       },
       onActivity() {
+        if (shutDown) return;
         // Throttle widget refreshes: many stream events can arrive per second.
         if (activityRefreshTimer) return;
         activityRefreshTimer = setTimeout(() => {
           activityRefreshTimer = undefined;
-          void publish(ctx);
+          publish(ctx).catch((error) => {
+            console.error(`[agents] publish failed: ${(error as Error).message}`);
+          });
         }, 500);
       },
     };
@@ -242,6 +251,11 @@ export default async function agentsExtension(pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
+    shutDown = true;
+    if (activityRefreshTimer) {
+      clearTimeout(activityRefreshTimer);
+      activityRefreshTimer = undefined;
+    }
     for (const [id, worker] of running) {
       running.delete(id);
       await worker.cancel();

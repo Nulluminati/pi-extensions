@@ -85,6 +85,10 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 // --- Ids ---
 
 export function generateWorkerId(): string {
@@ -120,6 +124,15 @@ async function loadWorkersUnlocked(cwd: string): Promise<RegistrySnapshot> {
   } catch (error) {
     throw new Error(
       `Worker registry ${registryPath(cwd)} is corrupt (invalid JSON): ${String(error)}`,
+    );
+  }
+  // Shape validation on the raw parse result: JSON.parse returns whatever the
+  // file holds, and the cast above asserts nothing. A registry written by a
+  // foreign tool (or truncated mid-write) must fail loudly instead of
+  // masquerading as an empty registry.
+  if (!isPlainObject(parsed) || ("workers" in parsed && !isPlainObject(parsed.workers))) {
+    throw new Error(
+      `Worker registry ${registryPath(cwd)} is corrupt (unexpected shape): expected an object with a workers map.`,
     );
   }
   const workers = parsed.workers ?? {};
