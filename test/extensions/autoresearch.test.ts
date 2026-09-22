@@ -376,7 +376,13 @@ describe("autoresearch-extension", () => {
     await initSession();
     await writeFile(join(cwd, "code.txt"), "pending edit\n");
     await executeTool({ action: "run", description: "pending experiment" });
-    expect(existsSync(join(cwd, CONFIG_DIR_NAME, "autoresearch", "pending.json"))).toBe(true);
+    const pendingPath = join(cwd, CONFIG_DIR_NAME, "autoresearch", "pending.json");
+    expect(existsSync(pendingPath)).toBe(true);
+    // The file must be parseable JSON so a reloaded instance can rehydrate it.
+    const pendingOnDisk = JSON.parse(await readFile(pendingPath, "utf8")) as {
+      description?: string;
+    };
+    expect(pendingOnDisk.description).toBe("pending experiment");
 
     // Simulate a reload: a fresh extension instance over the same cwd.
     const mockPi2 = createMockPi() as DeepMocked<ExtensionAPI>;
@@ -667,6 +673,14 @@ describe("autoresearch-extension", () => {
     expect(log.content[0].text).not.toContain("Best: 50");
   });
 
+  it("a kept regression cannot displace the baseline as the headline best", async () => {
+    await initSession();
+    await runAndLog("120", "keep", "kept regression");
+    const log = await runAndLog("119", "keep", "another kept regression");
+    expect(log.content[0].text).toContain("Best: 100 (run 1)");
+    expect(log.content[0].text).not.toContain("Best: 120");
+  });
+
   it("iteration cap stops the loop", async () => {
     await initSession({ maxIterations: 1 });
     const log = await runAndLog("90", "keep", "one change");
@@ -894,10 +908,15 @@ describe("autoresearch-units", () => {
     expect(parseMetric("METRIC LATENCY=10\nMETRIC latency=20", "latency")).toBe(20);
   });
 
-  it("parseMetric still reads the plain name=value form and the last-number fallback", () => {
+  it("parseMetric still reads the plain name=value form and the no-tag fallback", () => {
     expect(parseMetric("latency=10", "latency")).toBe(10);
-    // Only unrelated tagged lines: the documented last-number fallback applies.
-    expect(parseMetric("METRIC memory=500\nMETRIC other=7", "latency")).toBe(7);
+    // Only unrelated tagged lines: no guess is made, the run stays unmeasured.
+    expect(parseMetric("METRIC memory=500\nMETRIC other=7", "latency")).toBeUndefined();
+  });
+
+  it("parseMetric falls back to a bare number only when no METRIC lines exist", () => {
+    expect(parseMetric("METRIC memory=500\nMETRIC other=1", "latency")).toBeUndefined();
+    expect(parseMetric("12.5", "latency")).toBe(12.5);
   });
 
   it("bestEntry respects direction", () => {

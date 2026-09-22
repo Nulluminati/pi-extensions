@@ -19,12 +19,9 @@ export const AUTORESEARCH_TEXT_COLOR = "muted";
 export function buildSummary(config: AutoConfig, entries: RunEntry[]): AutoSummary {
   const baseline = entries.find((e) => e.status === "baseline")?.metric;
   // The headline best comes from the baseline plus kept runs only: discarded
-  // runs were reverted and are not present in the working tree.
+  // runs were reverted and are not present in the working tree, and a kept
+  // regression must not displace the baseline as the best known state.
   const best = bestEntry(
-    entries.filter((e) => e.status === "keep"),
-    config.direction,
-  );
-  const bestBaseline = bestEntry(
     entries.filter((e) => e.status === "baseline" || e.status === "keep"),
     config.direction,
   );
@@ -39,11 +36,7 @@ export function buildSummary(config: AutoConfig, entries: RunEntry[]): AutoSumma
     iterations: entries.filter((e) => e.status === "keep" || e.status === "discard").length,
     ...(config.maxIterations !== undefined ? { maxIterations: config.maxIterations } : {}),
     ...(baseline !== undefined ? { baseline } : {}),
-    ...(best?.metric !== undefined
-      ? { best: best.metric, bestRun: best.run }
-      : bestBaseline?.metric !== undefined
-        ? { best: bestBaseline.metric, bestRun: bestBaseline.run }
-        : {}),
+    ...(best?.metric !== undefined ? { best: best.metric, bestRun: best.run } : {}),
     ...(last !== undefined ? { lastStatus: last.status } : {}),
     ...(spread !== undefined ? { spread } : {}),
   };

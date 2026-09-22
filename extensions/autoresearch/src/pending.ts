@@ -2,8 +2,9 @@
  *  mirrored to pending.json so a reload or fresh instance can still log (or
  *  must discard) a mid-experiment run. */
 
-import { readFile, unlink, writeFile } from "node:fs/promises";
+import { readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
+import { writeJsonAtomic } from "../../../lib/json-atomic.ts";
 import { autoDir, readLog } from "./store.ts";
 import type { InstanceState, RunEntry } from "./types.ts";
 
@@ -43,7 +44,7 @@ export async function entriesAndPending(state: InstanceState, cwd: string): Prom
 
 export async function savePending(state: InstanceState, cwd: string): Promise<void> {
   if (state.pending) {
-    await writeFile(join(autoDir(cwd), PENDING_FILE), JSON.stringify(state.pending), "utf8");
+    await writeJsonAtomic(join(autoDir(cwd), PENDING_FILE), state.pending);
   }
 }
 

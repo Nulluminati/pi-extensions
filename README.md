@@ -44,7 +44,7 @@ pi -e git:github.com/Nulluminati/pi-extensions/extensions/goal/goal.ts
 | [`missions/`](extensions/missions/README.md) | Durable missions: long-lived objectives with a task graph, checkpoints, decisions, and budget, persisted in the project across restarts. `reconcile` re-runs done tasks' verification commands and flags regressions. |
 | [`messenger/`](extensions/messenger/README.md) | File-based coordination between Pi sessions sharing a project: presence, mailboxes with automatic delivery into the conversation, and path reservations that block other sessions' edits. |
 | [`agents/`](extensions/agents/README.md) | Multi-agent workflows: delegate bounded tasks to Gondolin-sandboxed worker sessions. Mutating workers use isolated git worktrees; plan-mode workers get research-only tools. Collect reports and patches through the durable worker registry. |
-| [`autoresearch/`](extensions/autoresearch/README.md) | Autonomous experiment loop: measure a metric, keep improvements (commit), discard regressions (revert), repeat with correctness gates and MAD-based confidence scoring. |
+| [`autoresearch/`](extensions/autoresearch/README.md) | Autonomous experiment loop: measure a metric, keep improvements (commit), discard regressions (revert), repeat with correctness gates and descriptive spread scoring. |
 
 Per-extension configuration (flags, env vars, config files) lives in each extension's own `README.md` under the **Configuration** section.
 

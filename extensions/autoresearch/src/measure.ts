@@ -19,7 +19,8 @@ export const CHECKS_TIMEOUT_MS = 300_000;
  * Parse the configured metric out of measure output. Recognized forms:
  * - `METRIC name=value` lines (anywhere in output)
  * - `name=value` where name matches the configured metric
- * - fallback: the last bare number in the output
+ * - fallback: the last bare number in the output, but only when the output
+ *   contains no METRIC-tagged lines at all
  */
 export function parseMetric(output: string, metric: string): number | undefined {
   const lines = output.split("\n");
@@ -53,12 +54,17 @@ export function parseMetric(output: string, metric: string): number | undefined 
       if (Number.isFinite(value)) return value;
     }
   }
-  const numbers = output.match(/-?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/g);
-  if (numbers && numbers.length > 0) {
-    const last = numbers[numbers.length - 1];
-    if (last !== undefined) {
-      const value = Number.parseFloat(last);
-      if (Number.isFinite(value)) return value;
+  // The last-number fallback only applies when the output carries no METRIC
+  // tags: if tagged lines exist but none matches the configured metric,
+  // guessing an unrelated number would corrupt the campaign log.
+  if (!lines.some((line) => /^\s*METRIC\b/.test(line))) {
+    const numbers = output.match(/-?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/g);
+    if (numbers && numbers.length > 0) {
+      const last = numbers[numbers.length - 1];
+      if (last !== undefined) {
+        const value = Number.parseFloat(last);
+        if (Number.isFinite(value)) return value;
+      }
     }
   }
   return undefined;
