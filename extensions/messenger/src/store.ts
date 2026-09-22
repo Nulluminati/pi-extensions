@@ -190,6 +190,16 @@ export async function claimIdentity(
 const MAX_MAILBOX_NAME_LENGTH = 200;
 
 /**
+ * 8 random bytes: markRead deletes every message matching an id it is given,
+ * so a duplicate id would silently drop unread mail. Two bytes collided
+ * inside a single busy millisecond (30-message bursts hit this in practice);
+ * 64 bits makes a same-millisecond collision negligible.
+ */
+export function generateMessageId(): string {
+  return `msg-${Date.now().toString(36)}-${randomBytes(8).toString("hex")}`;
+}
+
+/**
  * Reject mailbox identities that cannot be a single path segment even after
  * percent-encoding (separators, NUL) or that are empty/absurdly long. Name
  * encoding alone keeps traversal inside the inbox; validation fails closed
@@ -209,11 +219,7 @@ export async function sendMessage(
 ): Promise<Message> {
   assertValidMailboxName(to);
   const message: Message = {
-    // 8 random bytes: markRead deletes every message matching an id it is
-    // given, so a duplicate id would silently drop unread mail. Two bytes
-    // collided inside a single busy millisecond (30-message bursts hit this
-    // in practice); 64 bits makes a same-millisecond collision negligible.
-    id: `msg-${Date.now().toString(36)}-${randomBytes(8).toString("hex")}`,
+    id: generateMessageId(),
     from,
     to,
     text,
