@@ -3,17 +3,17 @@
  *
  * Read-modify-write cycles over shared state files need mutual exclusion
  * across sessions; two sessions doing them at once would otherwise save
- * stale maps over each other's changes. Every acquisition creates the lock
- * file with `open(path, "wx")` — an atomic create-or-fail on every platform
- * we target. Waiters poll until the holder unlinks the file, and a lock
- * whose mtime has not moved for `staleMs` is treated as abandoned by a
- * crashed holder and reclaimed. The holder refreshes the mtime on an
- * interval while it works, so a long critical section is never mistaken for
- * a crashed holder.
+ * stale maps over each other's changes. Every acquisition stages its
+ * `<pid> <token>` ownership record in a unique temp sibling and links it
+ * onto the lock pathname, so the lock carries its owner from the first
+ * instant it exists and a waiter never observes an ownerless lock. Waiters
+ * poll until the holder unlinks the file, and a lock whose mtime has not
+ * moved for `staleMs` is treated as abandoned by a crashed holder and
+ * reclaimed. The holder refreshes the mtime on an interval while it works,
+ * so a long critical section is never mistaken for a crashed holder.
  *
- * Consumption model: every acquisition creates the lock file with
- * `open(path, "wx")` — an atomic create-or-fail on every platform we target —
- * and writes a `<pid> <token>` ownership record into it. The token binds the
+ * Consumption model: the record is placed with `link(tempPath, lockPath)` —
+ * an all-or-nothing create on every platform we target. The token binds the
  * holder to the exact inode it created: refreshes go through the original
  * file handle (never the pathname), and release verifies ownership before
  * unlinking, so a lock that was reclaimed and recreated by a waiter is never
@@ -25,7 +25,7 @@
 
 import { randomBytes } from "node:crypto";
 import type { FileHandle } from "node:fs/promises";
-import { mkdir, open, readFile, stat, unlink } from "node:fs/promises";
+import { link, mkdir, open, readFile, stat, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 
 // --- Constants ---
@@ -42,6 +42,13 @@ const LOCK_REFRESH_MS = 5_000;
 interface LockOwnership {
   pid: number;
   token: string | undefined;
+}
+
+/** An acquired lock: the still-open handle to the lock inode and the token
+ *  recorded in its ownership content. */
+interface AcquiredLock {
+  handle: FileHandle;
+  token: string;
 }
 
 export interface FileLockOptions {
@@ -88,34 +95,71 @@ async function readLockOwner(lockPath: string): Promise<LockOwnership | undefine
   return content === undefined ? undefined : parseLockOwner(content);
 }
 
+/**
+ * One atomic create-with-content attempt: the `<pid> <token>` ownership
+ * record is staged in a private temp sibling and linked onto the lock
+ * pathname, so the lock carries its owner from its first observable instant
+ * and a waiter never sees an ownerless lock it could mistake for abandoned.
+ * Returns the still-open handle when this caller won the pathname, or
+ * undefined when it was already taken (EEXIST). Any other failure
+ * propagates. The temp directory entry never survives this function.
+ */
+async function createLockFile(lockPath: string): Promise<AcquiredLock | undefined> {
+  const token = randomBytes(8).toString("hex");
+  const tempPath = `${lockPath}.${process.pid}.${randomBytes(8).toString("hex")}.tmp`;
+  let handle: FileHandle | undefined;
+  try {
+    handle = await open(tempPath, "wx", 0o600);
+    await handle.writeFile(`${process.pid} ${token}\n`, "utf8");
+    try {
+      await link(tempPath, lockPath);
+    } catch (error) {
+      if (!isNodeError(error) || error.code !== "EEXIST") throw error;
+      // The pathname is taken: close the staging handle and let the caller
+      // fall into its waiter logic.
+      await handle.close().catch(() => {});
+      handle = undefined;
+      return undefined;
+    }
+    return { handle, token };
+  } catch (error) {
+    if (handle !== undefined) {
+      await handle.close().catch(() => {});
+    }
+    throw error;
+  } finally {
+    // After a win the temp entry is a redundant hard link to the lock inode
+    // (the open handle keeps the inode alive); after a loss it is staging
+    // garbage. Either way the name must go.
+    await unlink(tempPath).catch(() => {});
+  }
+}
+
 async function acquireFileLock(
   lockPath: string,
   staleMs: number,
   timeoutMs: number,
   timeoutMessage: string,
-): Promise<{ handle: FileHandle; token: string }> {
+): Promise<AcquiredLock> {
   const deadline = Date.now() + timeoutMs;
   while (true) {
-    try {
-      return { handle: await open(lockPath, "wx", 0o600), token: randomBytes(8).toString("hex") };
-    } catch (error) {
-      if (!isNodeError(error) || error.code !== "EEXIST") throw error;
-      const lockStat = await stat(lockPath).catch(() => undefined);
-      if (lockStat && Date.now() - lockStat.mtimeMs >= staleMs) {
-        // Reclaim only when the recorded holder is gone. A live process that
-        // stalled past the stale window must never be robbed of its lock,
-        // and the pid is the only signal that survives an mtime race.
-        const owner = await readLockOwner(lockPath);
-        if (owner === undefined || !isProcessAlive(owner.pid)) {
-          await unlink(lockPath).catch(() => {});
-          continue;
-        }
+    const acquired = await createLockFile(lockPath);
+    if (acquired !== undefined) return acquired;
+    const lockStat = await stat(lockPath).catch(() => undefined);
+    if (lockStat && Date.now() - lockStat.mtimeMs >= staleMs) {
+      // Reclaim only when the recorded holder is gone. A live process that
+      // stalled past the stale window must never be robbed of its lock,
+      // and the pid is the only signal that survives an mtime race.
+      const owner = await readLockOwner(lockPath);
+      if (owner === undefined || !isProcessAlive(owner.pid)) {
+        await unlink(lockPath).catch(() => {});
+        continue;
       }
-      if (Date.now() >= deadline) {
-        throw new Error(timeoutMessage);
-      }
-      await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS));
     }
+    if (Date.now() >= deadline) {
+      throw new Error(timeoutMessage);
+    }
+    await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS));
   }
 }
 
@@ -133,16 +177,14 @@ export async function withFileLock<T>(
   const timeoutMessage = options.timeoutMessage ?? `Timed out waiting for lock ${lockPath}.`;
   await mkdir(dirname(lockPath), { recursive: true });
   const { handle, token } = await acquireFileLock(lockPath, staleMs, timeoutMs, timeoutMessage);
-  const content = `${process.pid} ${token}\n`;
   let refresh: ReturnType<typeof setInterval> | undefined;
   try {
-    await handle.writeFile(content, "utf8");
     // Keep the lock's mtime fresh while held so waiters never reclaim the
     // lock from a live holder whose critical section outlasts the stale
     // window. The write goes through the original handle — the inode this
     // holder created — so it updates our own lock even if the pathname was
     // replaced, and can never touch a replacement created by someone else.
-    const buffer = Buffer.from(content, "utf8");
+    const buffer = Buffer.from(`${process.pid} ${token}\n`, "utf8");
     refresh = setInterval(() => {
       void handle.write(buffer, 0, buffer.length, 0).catch(() => {
         // Best-effort: a failed refresh (e.g. the handle was closed by an

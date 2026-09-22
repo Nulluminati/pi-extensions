@@ -26,6 +26,19 @@ describe("file-lock", () => {
     await expect(readdir(join(dir, "nested"))).resolves.toEqual([]);
   });
 
+  it("carries the ownership record at first observation of the lock file", async () => {
+    const lockPath = join(dir, "test.lock");
+
+    await withFileLock(lockPath, async () => {
+      // First observation happens while the lock is held: the `<pid> <token>`
+      // record must already be there — the lock is never observable empty,
+      // and no staging temp sibling survives acquisition.
+      const content = await readFile(lockPath, "utf8");
+      expect(content).toMatch(new RegExp(`^${process.pid} [0-9a-f]+\\n$`));
+      await expect(readdir(dir)).resolves.toEqual(["test.lock"]);
+    });
+  });
+
   it("serializes overlapping critical sections", async () => {
     const lockPath = join(dir, "test.lock");
     const events: string[] = [];
@@ -65,7 +78,7 @@ describe("file-lock", () => {
       await gate;
     });
     // withFileLock acquires asynchronously — wait until the holder actually
-    // holds before starting the waiter, or the two opens race.
+    // holds before starting the waiter, or the two acquisitions race.
     await vi.waitFor(() => expect(events).toContain("holder-start"));
     const waiter = withFileLock(lockPath, async () => "unreachable", { timeoutMs: 100 });
     // Attach the rejection expectation before the waiter's deadline passes.
