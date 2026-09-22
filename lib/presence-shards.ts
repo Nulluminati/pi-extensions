@@ -122,8 +122,13 @@ export async function loadShards<T extends ShardRecord>(
   let files: string[] = [];
   try {
     files = await readdir(dir);
-  } catch {
-    // No registry yet.
+  } catch (error) {
+    // No registry yet (ENOENT, or ENOTDIR for a missing parent). Any other
+    // error must fail visibly: an unreadable registry must not read as an
+    // empty one, or a later write can clobber durable presence.
+    if (!isNodeError(error) || (error.code !== "ENOENT" && error.code !== "ENOTDIR")) {
+      throw new Error(`Presence registry ${dir} is unreadable: ${String(error)}`);
+    }
   }
   for (const file of files) {
     if (!file.endsWith(".json")) continue;

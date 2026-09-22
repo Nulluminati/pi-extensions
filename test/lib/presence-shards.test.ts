@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -82,6 +82,25 @@ describe("presence-shards", () => {
     // shard must fail visibly and stay on disk for inspection or repair.
     await expect(loadShards(dir)).rejects.toThrow(/broken\.json/);
     expect(existsSync(join(dir, "broken.json"))).toBe(true);
+  });
+
+  it("loadShards rejects when the registry directory exists but is unreadable", async () => {
+    // Root ignores file permissions, making the chmod scenario ineffective.
+    if (process.getuid?.() === 0) return;
+    await chmod(dir, 0o000);
+    try {
+      // An unreadable registry must not read as an empty one, or a later
+      // write can clobber durable presence.
+      await expect(loadShards(dir)).rejects.toThrow(/unreadable/);
+    } finally {
+      await chmod(dir, 0o700);
+    }
+  });
+
+  it("a missing registry directory still resolves to an empty registry", async () => {
+    await rm(dir, { recursive: true, force: true });
+
+    await expect(loadShards(dir)).resolves.toEqual({});
   });
 
   it("migrates a legacy single-file registry to shards on read", async () => {
