@@ -253,31 +253,39 @@ export async function startDelegatedWorker(
       },
       () => {},
     );
-    // Persist the running record (with the child pid): the transcript entry
-    // and the artifact record file make the worker the session's own.
-    await persist(runningWorker.record);
   } catch (error) {
     // Record the failure so history keeps it; a failed record frees its slot
-    // immediately (nothing to reconcile later).
-    await persist({
-      id: workerId,
-      name,
-      task,
-      model,
-      thinkingLevel,
-      cwd,
-      status: "failed",
-      parentPid: process.pid,
-      parentSessionId: plan.parentSessionId,
-      error: error instanceof Error ? error.message : String(error),
-      startedAt: Date.now(),
-      endedAt: Date.now(),
-    });
+    // immediately (nothing to reconcile later). A persist failure here must
+    // not mask the original spawn error.
+    try {
+      await persist({
+        id: workerId,
+        name,
+        task,
+        model,
+        thinkingLevel,
+        cwd,
+        status: "failed",
+        parentPid: process.pid,
+        parentSessionId: plan.parentSessionId,
+        error: error instanceof Error ? error.message : String(error),
+        startedAt: Date.now(),
+        endedAt: Date.now(),
+      });
+    } catch {
+      // persist already logged the failure; the spawn error propagates below.
+    }
     throw error;
   } finally {
     state.reserved.delete(workerId);
   }
   if (!runningWorker) throw new Error("Worker not started; nothing to wait for.");
+  // Persist the running record (with the child pid): the transcript entry
+  // and the artifact record file make the worker the session's own. The
+  // child is already live, so a persistence failure here must not fail the
+  // delegate call — persist logs it, the widget still tracks the live child,
+  // and the runner's terminal save retries the transcript entry.
+  await persist(runningWorker.record).catch(() => {});
   return worktree === undefined ? { runningWorker } : { runningWorker, worktree };
 }
 

@@ -434,6 +434,41 @@ ${SUCCESS_WORKER}`,
     );
   });
 
+  it("delegate returns the report when terminal persistence fails", async () => {
+    const fixture = await writeFixture(fixtureDir, "ok-worker.sh", SUCCESS_WORKER);
+    setEnv("PI_WORKER_COMMAND", fixture);
+    // Transcript entry writes fail at the worst moment: the terminal save.
+    // done must still settle and the wake must still fire, or wait=true
+    // hangs forever and the fire-and-forget cleanup never runs.
+    mockPi.appendEntry.mockImplementation(() => {
+      throw new Error("ENOSPC: transcript write failed");
+    });
+
+    const result = await executeTool("delegate", {
+      task: "Summarize the auth module",
+      isolate: false,
+      wait: true,
+    });
+
+    expect(result.details.worker.status).toBe("completed");
+    expect(result.details.worker.outputText).toContain("JWT tokens");
+    await waitForWake(mockPi);
+  });
+
+  it("workers cancel settles when terminal persistence fails", async () => {
+    const fixture = await writeFixture(fixtureDir, "slow-worker.sh", SLOW_WORKER);
+    setEnv("PI_WORKER_COMMAND", fixture);
+    mockPi.appendEntry.mockImplementation(() => {
+      throw new Error("ENOSPC: transcript write failed");
+    });
+
+    const started = await executeTool("delegate", { task: "long", isolate: false });
+    const id = started.details.workerId as string;
+
+    const cancelled = await executeTool("workers", { action: "cancel", id });
+    expect(cancelled.details.worker.status).toBe("cancelled");
+  });
+
   it("delegate fails with a descriptive error when no worker model is configured", async () => {
     setEnv("PI_WORKER_MODEL", undefined);
     // No worker-model.json config exists in the temp cwd's agent dir.

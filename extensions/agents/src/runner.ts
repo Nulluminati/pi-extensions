@@ -395,7 +395,21 @@ export function startWorker(options: StartWorkerOptions): RunningWorker {
         record.error = record.error !== undefined ? `${record.error}; ${patchError}` : patchError;
       }
     }
-    await options.onRecord(record);
+    // Terminal persistence must never wedge the completion path: the close
+    // handler's `finish(...).then` chain has no rejection handler, so a
+    // rejection here would leave `done` unsettled forever (wait=true hangs,
+    // the live-worker map leaks, the wake never fires). Instead the record
+    // stays terminal in memory — the session's view remains correct, wakes
+    // fire — and the next session reconciles the missing terminal entry.
+    try {
+      await options.onRecord(record);
+    } catch (error) {
+      console.error(`[agents] terminal record persistence failed: ${(error as Error).message}`);
+      events.notify(
+        "error",
+        `worker ${record.name} (${record.id}) finished but its record could not be persisted: ${(error as Error).message}`,
+      );
+    }
     events.onChange();
     return record;
   };
