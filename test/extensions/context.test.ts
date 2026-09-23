@@ -1,3 +1,4 @@
+import type { ExtensionCommandContext } from "pi";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import contextExtension from "../../extensions/context/context.ts";
 import { measureContext, sumSessionUsage } from "../../extensions/context/src/measure.ts";
@@ -7,13 +8,27 @@ import { createMockPi } from "../mocks/pi-mocks.ts";
 
 // --- Test helpers (bottom of file keeps the describe block readable) ---
 
-function getCommandRegistration(mockPi: any): { name: string; options: any } {
-  const calls = mockPi.registerCommand.mock.calls;
-  expect(calls.length).toBeGreaterThan(0);
-  return { name: calls[0][0], options: calls[0][1] };
+interface RegisteredCommand {
+  name: string;
+  options: {
+    description: string;
+    handler: (args: string, ctx: ExtensionCommandContext) => Promise<void>;
+  };
 }
 
-function getCommandHandler(mockPi: any): (args: string, ctx: any) => Promise<void> {
+function getCommandRegistration(mockPi: {
+  registerCommand: { mock: { calls: unknown[][] } };
+}): RegisteredCommand {
+  const calls = mockPi.registerCommand.mock.calls;
+  expect(calls.length).toBeGreaterThan(0);
+  const call = calls[0];
+  if (!call) throw new Error("no command registered");
+  return { name: call[0] as string, options: call[1] as RegisteredCommand["options"] };
+}
+
+function getCommandHandler(mockPi: {
+  registerCommand: { mock: { calls: unknown[][] } };
+}): (args: string, ctx: ExtensionCommandContext) => Promise<void> {
   return getCommandRegistration(mockPi).options.handler;
 }
 
@@ -246,8 +261,9 @@ describe("context-extension", () => {
       ctx.getSystemPrompt = vi.fn(() => "You are Pi.\n".repeat(40));
       ctx.sessionManager.getBranch = vi.fn(() => SESSION_ENTRIES);
 
-      let component: any;
+      let component!: { render(width: number): string[]; handleInput(data: string): void };
       ctx.ui.custom = vi.fn(
+        // biome-ignore lint/suspicious/noExplicitAny: test mock
         (factory: any) =>
           new Promise((resolve) => {
             component = factory(
@@ -287,8 +303,9 @@ describe("context-extension", () => {
       ctx.getContextUsage = vi.fn(() => undefined);
       ctx.sessionManager.getBranch = vi.fn(() => []);
 
-      let component: any;
+      let component!: { render(width: number): string[]; handleInput(data: string): void };
       ctx.ui.custom = vi.fn(
+        // biome-ignore lint/suspicious/noExplicitAny: test mock
         (factory: any) =>
           new Promise((resolve) => {
             component = factory(
@@ -321,10 +338,11 @@ describe("context-extension", () => {
         percent: 19.5,
       }));
 
-      let component: any;
+      let component!: { render(width: number): string[]; handleInput(data: string): void };
       const done = vi.fn();
-      let resolveModal!: (value: void) => void;
+      let resolveModal!: () => void;
       ctx.ui.custom = vi.fn(
+        // biome-ignore lint/suspicious/noExplicitAny: test mock
         (factory: any) =>
           new Promise<void>((resolve) => {
             resolveModal = resolve;

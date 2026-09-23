@@ -74,7 +74,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
   class CustomMessageComponent extends RenderedComponent {}
   // Mirrors pi's chars/4 heuristic (see estimateTokens in the real package):
   // text blocks count chars/4, images count as 4800 chars each.
-  const estimateTokens = vi.fn((message: any) => {
+  const estimateTokens = vi.fn((message: { content?: unknown }) => {
     let chars = 0;
     const content = message?.content;
     if (typeof content === "string") {

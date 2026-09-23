@@ -427,7 +427,7 @@ describe("messenger-extension", () => {
       mockCtx,
     );
 
-    expect((await loadRegistry(cwd))["returning"]).toBeUndefined();
+    expect((await loadRegistry(cwd)).returning).toBeUndefined();
     expect((await loadReservations(cwd))["src/kept"]).toBeDefined();
     // Mailbox survives on purpose.
     await sendMessage(cwd, "returning", "x", "late mail");
@@ -504,12 +504,12 @@ describe("messenger-extension", () => {
 
     const set = await executeTool({ action: "status", status: "refactoring auth" });
     expect(set.content[0].text).toBe("Status set: refactoring auth");
-    expect((await loadRegistry(cwd))["statusful"]?.status).toBe("refactoring auth");
+    expect((await loadRegistry(cwd)).statusful?.status).toBe("refactoring auth");
 
     const cleared = await executeTool({ action: "status" });
     expect(cleared.content[0].text).toBe("Status cleared.");
     // Cleared means removed, not stored as an empty string.
-    expect((await loadRegistry(cwd))["statusful"]?.status).toBeUndefined();
+    expect((await loadRegistry(cwd)).statusful?.status).toBeUndefined();
     const shard = JSON.parse(
       await readFile(join(cwd, CONFIG_DIR_NAME, "messenger", "registry", "statusful.json"), "utf8"),
     ) as Record<string, unknown>;
@@ -609,7 +609,7 @@ describe("messenger-extension", () => {
 
       const registry = await loadRegistry(cwd);
       // The live holder keeps its name; this session takes the next free one.
-      expect(registry["collider"]?.pid).toBe(helperPid);
+      expect(registry.collider?.pid).toBe(helperPid);
       expect(registry["collider-2"]?.pid).toBe(process.pid);
     } finally {
       helper.kill();
@@ -793,7 +793,7 @@ describe("messenger-store", () => {
       expect(await claimIdentity(cwd, "collider", process.pid)).toBe("collider-2");
 
       const registry = await loadRegistry(cwd);
-      expect(registry["collider"]?.pid).toBe(helperPid);
+      expect(registry.collider?.pid).toBe(helperPid);
       expect(registry["collider-2"]?.pid).toBe(process.pid);
     } finally {
       helper.kill();

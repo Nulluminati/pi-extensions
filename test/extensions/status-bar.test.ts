@@ -2495,7 +2495,6 @@ describe("status-bar worker roll-up", () => {
       const text = component.render(width).join(" ");
       const hasWorker = text.includes("⚙");
       const hasCost = /\$0\.0/.test(text);
-      const hasMail = text.includes("✉");
       if (hasWorker) {
         expect(hasCost, `width ${width}: worker without cost`).toBe(true);
       }

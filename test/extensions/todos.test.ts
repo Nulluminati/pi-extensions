@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import todosExtension from "../../extensions/todos/todos.ts";
 import { getTodoItems } from "../../lib/todos.ts";
-import { __resetWidgetStrip, STRIP_KEY_ABOVE } from "../../lib/widget-strip.ts";
+import { STRIP_KEY_ABOVE } from "../../lib/widget-strip.ts";
 import { createMockCommandContext } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
 import { getCommandHandler, getEventHandler } from "../mocks/test-helpers.ts";

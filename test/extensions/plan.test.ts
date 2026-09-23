@@ -730,7 +730,7 @@ describe("plan-extension", () => {
       await planExtension(mockPi);
       await getCommandHandler(mockPi, "plan")("", mockCtx);
 
-      let component: any;
+      let component!: { render(width: number): string[]; handleInput(data: string): void };
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       mockCtx.ui.custom = vi.fn((factory: any) => {
         return new Promise((resolve) => {
@@ -794,7 +794,7 @@ describe("plan-extension", () => {
       await planExtension(mockPi);
       await getCommandHandler(mockPi, "plan")("", mockCtx);
 
-      let component: any;
+      let component!: { render(width: number): string[]; handleInput(data: string): void };
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       mockCtx.ui.custom = vi.fn((factory: any) => {
         return new Promise((resolve) => {

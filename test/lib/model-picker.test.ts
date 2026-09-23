@@ -65,6 +65,7 @@ describe("selectModelWithSearch", () => {
   function pickerContext() {
     let component: { render(width: number): string[]; handleInput(data: string): void } | undefined;
     const custom = vi.fn(
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
       (factory: any) =>
         new Promise<string | undefined>((resolve) => {
           component = factory(
