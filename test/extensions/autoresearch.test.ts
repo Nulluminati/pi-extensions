@@ -437,6 +437,20 @@ describe("autoresearch-extension", () => {
     expect(stopped.details.summary.active).toBe(false);
   });
 
+  it("re-init refuses to overwrite a corrupt pending file from a stopped campaign", async () => {
+    await initSession();
+    await executeTool({ action: "stop" });
+    const path = join(cwd, CONFIG_DIR_NAME, "autoresearch", "pending.json");
+    const logPath = join(cwd, CONFIG_DIR_NAME, "autoresearch", "log.jsonl");
+    const originalLog = await readFile(logPath, "utf8");
+    await writeFile(path, "{ invalid");
+
+    await expect(initSession()).rejects.toThrow(/pending\.json.*corrupt/i);
+    expect(await readFile(path, "utf8")).toBe("{ invalid");
+    expect(await readFile(logPath, "utf8")).toBe(originalLog);
+    expect((await loadConfig(cwd))?.stopped).toBe(true);
+  });
+
   it("re-init after stop starts a fresh campaign log", async () => {
     await initSession();
     await runAndLog("90", "keep", "first campaign");
@@ -539,6 +553,61 @@ describe("autoresearch-extension", () => {
     const run = await executeTool({ action: "run", description: "unparseable metric" });
     expect(run.content[0].text).toContain("status=discard");
     expect(run.content[0].text).toContain("reverts the working-tree changes");
+  });
+
+  it("corrupt pending JSON blocks run, log, stop, and status without changing experiment files", async () => {
+    await initSession();
+    await writeFile(join(cwd, "code.txt"), "orphaned experiment\n");
+    const path = join(cwd, CONFIG_DIR_NAME, "autoresearch", "pending.json");
+    await writeFile(path, "{ invalid");
+    for (const action of ["run", "log", "stop", "status"] as const) {
+      await expect(executeTool({ action, description: "next", status: "discard" })).rejects.toThrow(
+        /pending\.json.*corrupt/i,
+      );
+    }
+    expect(await readFile(path, "utf8")).toBe("{ invalid");
+    expect(await readFile(join(cwd, "code.txt"), "utf8")).toBe("orphaned experiment\n");
+    expect((await loadConfig(cwd))?.stopped).toBeUndefined();
+  });
+
+  it.each([
+    "null",
+    "{}",
+    '{"run":2,"description":"test","durationMs":null}',
+    '{"run":2,"description":"test","durationMs":4,"metric":"not a number"}',
+  ])("rejects wrong-shaped pending state: %s", async (content) => {
+    await initSession();
+    const path = join(cwd, CONFIG_DIR_NAME, "autoresearch", "pending.json");
+    await writeFile(path, content);
+    await expect(executeTool({ action: "run", description: "next" })).rejects.toThrow(
+      /pending\.json.*corrupt/i,
+    );
+    expect(await readFile(path, "utf8")).toBe(content);
+  });
+
+  it("unreadable pending state fails closed rather than becoming a missing run", async () => {
+    if (process.getuid?.() === 0) return;
+    await initSession();
+    const path = join(cwd, CONFIG_DIR_NAME, "autoresearch", "pending.json");
+    await writeFile(path, '{"run":2,"description":"test","durationMs":1}');
+    await chmod(path, 0o000);
+    try {
+      await expect(executeTool({ action: "run", description: "next" })).rejects.toThrow(
+        /pending\.json.*unreadable/i,
+      );
+    } finally {
+      await chmod(path, 0o644);
+    }
+  });
+
+  it("detects damaged pending state even when a measurement is cached in memory", async () => {
+    await initSession();
+    await executeTool({ action: "run", description: "cached" });
+    const path = join(cwd, CONFIG_DIR_NAME, "autoresearch", "pending.json");
+    await writeFile(path, "{ invalid");
+    await expect(executeTool({ action: "log", status: "discard" })).rejects.toThrow(
+      /pending\.json.*corrupt/i,
+    );
   });
 
   it("a second run while a measurement is pending still throws", async () => {
@@ -662,6 +731,52 @@ describe("autoresearch-extension", () => {
     expect(log.content[0].text).not.toMatch(/[Cc]onfidence|likely real|within noise|marginal/);
   });
 
+  it.each([
+    { content: "{ invalid\n", line: 2 },
+    { content: '{"run":"bad","status":"keep","description":"foreign","at":1}\n', line: 2 },
+  ])(
+    "rejects damaged log entries with a line number without appending",
+    async ({ content, line }) => {
+      await initSession();
+      const path = join(cwd, CONFIG_DIR_NAME, "autoresearch", "log.jsonl");
+      const original = await readFile(path, "utf8");
+      await writeFile(path, original + content);
+      await expect(executeTool({ action: "status" })).rejects.toThrow(
+        new RegExp(`log\\.jsonl.*line ${line}.*corrupt`, "i"),
+      );
+      await expect(executeTool({ action: "run", description: "next" })).rejects.toThrow(
+        /log\.jsonl/,
+      );
+      expect(await readFile(path, "utf8")).toBe(original + content);
+    },
+  );
+
+  it("a damaged log blocks keep, discard, stop, and failing checks before any mutation", async () => {
+    await initSession({ checks: "! grep -q BROKEN code.txt" });
+    await writeFile(join(cwd, "code.txt"), "pending edit\n");
+    await executeTool({ action: "run", description: "pending" });
+    const path = join(cwd, CONFIG_DIR_NAME, "autoresearch", "log.jsonl");
+    await writeFile(path, `${await readFile(path, "utf8")}{ invalid\n`);
+    for (const status of ["keep", "discard"] as const) {
+      await expect(executeTool({ action: "log", status })).rejects.toThrow(/log\.jsonl/);
+      expect(await readFile(join(cwd, "code.txt"), "utf8")).toBe("pending edit\n");
+    }
+    await expect(executeTool({ action: "stop" })).rejects.toThrow(/log\.jsonl/);
+    expect((await loadConfig(cwd))?.stopped).toBeUndefined();
+    // Clear the cached pending slot; a damaged log must also block a
+    // checks-failed run before it reverts the working tree.
+    await getEventHandler("session_shutdown")(
+      { type: "session_shutdown", reason: "reload" },
+      mockCtx,
+    );
+    await rm(join(cwd, CONFIG_DIR_NAME, "autoresearch", "pending.json"));
+    await writeFile(join(cwd, "code.txt"), "BROKEN\n");
+    await expect(executeTool({ action: "run", description: "bad checks" })).rejects.toThrow(
+      /log\.jsonl/,
+    );
+    expect(await readFile(join(cwd, "code.txt"), "utf8")).toBe("BROKEN\n");
+  });
+
   it("the headline best never comes from a discarded run", async () => {
     await initSession();
     await runAndLog("99.0", "keep", "kept improvement");
@@ -742,6 +857,33 @@ describe("autoresearch-extension", () => {
     expect(mockPi2.sendUserMessage).not.toHaveBeenCalled();
   });
 
+  it("a non-owner cannot run, log, or stop an owned campaign", async () => {
+    mockCtx.sessionManager.getSessionId = vi.fn(() => "session-A");
+    await initSession();
+    await writeFile(join(cwd, "code.txt"), "owner experiment\n");
+    await executeTool({ action: "run", description: "owner run" });
+
+    const foreignCtx = createMockContext();
+    (foreignCtx as { cwd: string }).cwd = cwd;
+    foreignCtx.sessionManager.getSessionId = vi.fn(() => "session-B");
+    const tool = mockPi.registerTool.mock.calls[0][0];
+    for (const action of ["run", "log", "stop"] as const) {
+      await expect(
+        tool.execute(
+          "foreign-call",
+          { action, description: "foreign run", status: "discard" } as never,
+          undefined,
+          undefined,
+          foreignCtx,
+        ),
+      ).rejects.toThrow(/owned by another session/i);
+    }
+    expect(await readFile(join(cwd, "code.txt"), "utf8")).toBe("owner experiment\n");
+    expect((await loadConfig(cwd))?.stopped).toBeUndefined();
+    expect(await readLog(cwd)).toHaveLength(1);
+    await executeTool({ action: "log", status: "discard" });
+  });
+
   it("the owning session keeps driving the continuation loop", async () => {
     mockCtx.sessionManager.getSessionId = vi.fn(() => "session-A");
     await initSession();
@@ -766,6 +908,20 @@ describe("autoresearch-extension", () => {
     const agentEnd = getEventHandler("agent_end");
     await agentEnd({ type: "agent_end", messages: [] }, mockCtx);
     expect(mockPi.sendUserMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("legacy campaigns without an owner allow tool actions from any session", async () => {
+    await initSession();
+    const path = join(cwd, CONFIG_DIR_NAME, "autoresearch", "config.json");
+    const config = JSON.parse(await readFile(path, "utf8"));
+    config.ownerSessionId = undefined;
+    await writeFile(path, JSON.stringify(config));
+    mockCtx.sessionManager.getSessionId = vi.fn(() => "unrelated-session");
+    await writeFile(join(cwd, "code.txt"), "legacy edit\n");
+    await executeTool({ action: "run", description: "legacy run" });
+    await executeTool({ action: "log", status: "discard" });
+    await executeTool({ action: "stop" });
+    expect((await loadConfig(cwd))?.stopped).toBe(true);
   });
 
   it("stops after repeated stalls with no new experiments", async () => {

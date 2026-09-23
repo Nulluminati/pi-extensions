@@ -97,7 +97,7 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
       // Status works without an active campaign, and reports a stopped one
       // rather than being blocked by the active-session precondition.
       if (action === "status") return statusAction(state, ctx, publish);
-      const config = await requireActiveConfig(ctx.cwd);
+      const config = await requireActiveConfig(ctx.cwd, ctx.sessionManager.getSessionId());
       if (action === "run") return runAction(state, config, params, ctx, publish);
       if (action === "log") return logAction(state, config, params, ctx, publish);
       if (action === "stop") return stopAction(state, config, ctx, publish);

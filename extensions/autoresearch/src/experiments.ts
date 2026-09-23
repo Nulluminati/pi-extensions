@@ -45,6 +45,8 @@ export async function runAction(
   await loadPending(state, cwd);
   if (state.pending)
     throw new Error("A run is already pending. Log it (action=log) before running again.");
+  // Validate the history before checks or a measurement can change the tree.
+  const entries = await readLog(cwd);
 
   // Correctness gate first.
   if (config.checks) {
@@ -52,7 +54,6 @@ export async function runAction(
     if (!checks.ok) {
       await discardExperiment(cwd, await loadUntrackedSnapshot(cwd), config.dirtyAtInit);
       await saveUntrackedSnapshot(cwd, await listUntracked(cwd));
-      const entries = await readLog(cwd);
       const entry: RunEntry = {
         run: nextRunNumber(entries),
         at: Date.now(),
@@ -78,7 +79,7 @@ export async function runAction(
 
   const measured = await runCommand(config.measure, cwd, MEASURE_TIMEOUT_MS);
   const metricValue = parseMetric(measured.metricOutput, config.metric);
-  const runNumber = nextRunNumber(await readLog(cwd));
+  const runNumber = nextRunNumber(entries);
   state.pending = {
     run: runNumber,
     ...(metricValue !== undefined ? { metric: metricValue } : {}),
@@ -124,6 +125,7 @@ export async function logAction(
   const status =
     params.status === "keep" ? "keep" : params.status === "discard" ? "discard" : undefined;
   if (!status) throw new Error("log requires status (keep or discard).");
+  const entries = await readLog(cwd);
   const description =
     typeof params.description === "string" && params.description.trim()
       ? params.description.trim()
@@ -144,7 +146,6 @@ export async function logAction(
   // scope starts from the state this log left behind.
   await saveUntrackedSnapshot(cwd, await listUntracked(cwd));
 
-  const entries = await readLog(cwd);
   const entry: RunEntry = {
     run: state.pending.run,
     at: Date.now(),

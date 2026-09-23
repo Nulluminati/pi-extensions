@@ -13,7 +13,7 @@ import {
   parseMetric,
   runCommand,
 } from "./measure.ts";
-import { clearPending } from "./pending.ts";
+import { clearPending, loadPending } from "./pending.ts";
 import {
   appendLog,
   archiveLog,
@@ -86,6 +86,8 @@ export async function initAction(
       "An active autoresearch session exists. Stop it (action=stop) before re-initializing.",
     );
   }
+  // Re-init must not erase an unreadable or corrupt pending experiment.
+  await loadPending(state, cwd);
   if (existing?.stopped) {
     // A stop only deactivates the campaign; archive its log so the new
     // campaign starts with a clean baseline and run numbering.

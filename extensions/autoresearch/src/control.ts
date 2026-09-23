@@ -43,6 +43,7 @@ export async function stopAction(
 ): Promise<AgentToolResult> {
   const cwd = ctx.cwd;
   await loadPending(state, cwd);
+  const entries = await readLog(cwd);
   if (state.pending) {
     // A pending run means uncommitted experiment changes; revert them.
     // Failures surface instead of being swallowed so state stays honest.
@@ -51,7 +52,6 @@ export async function stopAction(
   }
   config.stopped = true;
   await saveConfig(cwd, config);
-  const entries = await readLog(cwd);
   publish(ctx, config, entries);
   return {
     content: [

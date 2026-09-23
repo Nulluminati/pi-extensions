@@ -81,7 +81,10 @@ export async function loadConfig(cwd: string): Promise<AutoConfig | undefined> {
   return isActiveConfig(parsed) ? parsed : undefined;
 }
 
-export async function requireActiveConfig(cwd: string): Promise<AutoConfig> {
+export async function requireActiveConfig(
+  cwd: string,
+  sessionId: string | undefined,
+): Promise<AutoConfig> {
   const config = await loadConfig(cwd);
   if (!config) {
     throw new Error(
@@ -91,22 +94,58 @@ export async function requireActiveConfig(cwd: string): Promise<AutoConfig> {
   if (config.stopped) {
     throw new Error("This autoresearch session is stopped. Re-init to start a new one.");
   }
+  if (config.ownerSessionId !== undefined && config.ownerSessionId !== sessionId) {
+    throw new Error(
+      "This autoresearch campaign is owned by another session. Only its owner can run, log, or stop it; recover an abandoned campaign manually.",
+    );
+  }
   return config;
 }
 
 // --- Log ---
 
+function isRunEntry(value: unknown): value is RunEntry {
+  if (!value || typeof value !== "object") return false;
+  const entry = value as Partial<RunEntry>;
+  return (
+    Number.isSafeInteger(entry.run) &&
+    (entry.run as number) > 0 &&
+    typeof entry.at === "number" &&
+    Number.isFinite(entry.at) &&
+    ["baseline", "keep", "discard", "checks_failed", "invalid"].includes(entry.status ?? "") &&
+    typeof entry.description === "string" &&
+    (entry.hypothesis === undefined || typeof entry.hypothesis === "string") &&
+    (entry.metric === undefined ||
+      (typeof entry.metric === "number" && Number.isFinite(entry.metric))) &&
+    (entry.durationMs === undefined ||
+      (typeof entry.durationMs === "number" &&
+        Number.isFinite(entry.durationMs) &&
+        entry.durationMs >= 0)) &&
+    (entry.commit === undefined || typeof entry.commit === "string") &&
+    (entry.checksFailed === undefined || typeof entry.checksFailed === "boolean")
+  );
+}
+
 export async function readLog(cwd: string): Promise<RunEntry[]> {
   const raw = await readStateFile(logPath(cwd));
   if (raw === undefined) return [];
   const entries: RunEntry[] = [];
-  for (const line of raw.split("\n")) {
+  for (const [index, line] of raw.split("\n").entries()) {
     if (!line.trim()) continue;
+    let parsed: unknown;
     try {
-      entries.push(JSON.parse(line) as RunEntry);
-    } catch {
-      // Skip malformed lines; the log stays append-only.
+      parsed = JSON.parse(line);
+    } catch (error) {
+      throw new Error(
+        `autoresearch log ${logPath(cwd)} line ${index + 1} is corrupt (invalid JSON): ${String(error)}`,
+      );
     }
+    if (!isRunEntry(parsed)) {
+      throw new Error(
+        `autoresearch log ${logPath(cwd)} line ${index + 1} is corrupt (invalid run entry).`,
+      );
+    }
+    entries.push(parsed);
   }
   return entries;
 }

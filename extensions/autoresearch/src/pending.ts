@@ -6,7 +6,7 @@ import { readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { writeJsonAtomic } from "../../../lib/json-atomic.ts";
 import { autoDir, readLog } from "./store.ts";
-import type { InstanceState, RunEntry } from "./types.ts";
+import type { InstanceState, PendingMeasurement, RunEntry } from "./types.ts";
 
 // --- Constants ---
 
@@ -14,15 +14,51 @@ const PENDING_FILE = "pending.json";
 
 // --- Pending measurement ---
 
+function isPendingMeasurement(value: unknown): value is PendingMeasurement {
+  if (!value || typeof value !== "object") return false;
+  const pending = value as Partial<PendingMeasurement>;
+  return (
+    Number.isSafeInteger(pending.run) &&
+    (pending.run as number) > 0 &&
+    typeof pending.description === "string" &&
+    typeof pending.durationMs === "number" &&
+    Number.isFinite(pending.durationMs) &&
+    pending.durationMs >= 0 &&
+    (pending.metric === undefined ||
+      (typeof pending.metric === "number" && Number.isFinite(pending.metric))) &&
+    (pending.hypothesis === undefined || typeof pending.hypothesis === "string")
+  );
+}
+
 /** Rehydrate a pending measurement left on disk by a reload or fresh instance. */
 export async function loadPending(state: InstanceState, cwd: string): Promise<void> {
-  if (state.pending) return;
+  const path = join(autoDir(cwd), PENDING_FILE);
+  let raw: string;
   try {
-    const raw = await readFile(join(autoDir(cwd), PENDING_FILE), "utf8");
-    state.pending = JSON.parse(raw) as typeof state.pending;
-  } catch {
-    // No pending run.
+    raw = await readFile(path, "utf8");
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      "code" in error &&
+      (error.code === "ENOENT" || error.code === "ENOTDIR")
+    )
+      return;
+    throw new Error(`autoresearch pending state ${path} is unreadable: ${String(error)}`);
   }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(
+      `autoresearch pending state ${path} is corrupt (invalid JSON); repair it before continuing: ${String(error)}`,
+    );
+  }
+  if (!isPendingMeasurement(parsed)) {
+    throw new Error(
+      `autoresearch pending state ${path} is corrupt (invalid measurement); repair it before continuing.`,
+    );
+  }
+  state.pending = parsed;
 }
 
 export async function entriesAndPending(state: InstanceState, cwd: string): Promise<RunEntry[]> {
