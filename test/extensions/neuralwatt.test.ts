@@ -39,6 +39,8 @@ function makeModel(id: string, provider = "neuralwatt") {
 const EXPECTED_MODEL_IDS = [
   "deepseek-ai/DeepSeek-V4-Flash",
   "deepseek-v4-flash",
+  "deepseek-v4-flash-speed",
+  "deepseek-v4.1-flash",
   "gemma-4-31b",
   "glm-5.2",
   "glm-5.2-fast",
@@ -235,6 +237,28 @@ describe("neuralwatt-extension", () => {
       xhigh: "xhigh",
     });
     expect(byId["deepseek-v4-flash"].thinkingLevelMap).toEqual({
+      off: "none",
+      minimal: "minimal",
+      low: "low",
+      medium: "medium",
+      high: "high",
+      xhigh: "xhigh",
+    });
+    // deepseek-v4-flash-speed (2026-09 probe): same checkpoint as
+    // deepseek-v4-flash and also disableable, but the catalog aliases
+    // xhigh -> max, so xhigh maps to "max" like the GLM/Kimi full-enum models.
+    expect(byId["deepseek-v4-flash-speed"].thinkingLevelMap).toEqual({
+      off: "none",
+      minimal: "minimal",
+      low: "low",
+      medium: "medium",
+      high: "high",
+      xhigh: "max",
+    });
+    // deepseek-v4.1-flash (2026-09 probe): disableable, full enum accepted.
+    // The catalog aliases medium -> high and minimal -> low but keeps xhigh
+    // and max distinct, so identity through xhigh is correct.
+    expect(byId["deepseek-v4.1-flash"].thinkingLevelMap).toEqual({
       off: "none",
       minimal: "minimal",
       low: "low",

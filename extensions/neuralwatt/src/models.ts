@@ -102,9 +102,10 @@ const ALWAYS_ON_FULL_MAP: ThinkingLevelMap = {
  * that model's levels were probed against the gateway.
  *
  * The GLM-5.2, Kimi, and Qwen3.6 reasoning/fast pairs share pricing; their
- * "-fast" variants are non-reasoning. glm-5.3-flash is the exception: it is a
- * reasoning fast variant at its own pricing. Neuralwatt publishes both DeepSeek
- * ids for the same 0731 checkpoint. The glm-5.3 family (gated glm-5.3 preview,
+ * "-fast" variants are non-reasoning. glm-5.3-flash and
+ * deepseek-v4-flash-speed are the exceptions: reasoning fast/speed variants.
+ * Neuralwatt publishes both DeepSeek V4 Flash ids (and the Speed variant) for
+ * the same 0731 checkpoint. The glm-5.3 family (gated glm-5.3 preview,
  * glm-5.3-flash) forces always-on thinking (catalog marks reasoning mandatory;
  * see their entries); every other reasoning model is disableable
  * (qwen3.6-35b's previous restriction was lifted in 2026-08, and qwen-3.8-27b
@@ -254,6 +255,46 @@ export const STATIC_MODELS: ProviderModelConfig[] = [
     cost: { input: 0.14, output: 0.28, cacheRead: 0.028, cacheWrite: 0 },
     contextWindow: 1048560,
     maxTokens: 65536,
+    compat: NEURALWATT_REASONING_COMPAT,
+  },
+
+  // deepseek-v4-flash-speed — the same 0731 checkpoint as deepseek-v4-flash
+  // (identical huggingface_id and pricing) with improved speculative decoding
+  // ("Speed" tier). Despite the name it reasons: probed 2026-09, every effort
+  // returns HTTP 200 with `reasoning` output and `none` produces no thinking,
+  // so thinking is disableable. The catalog aliases xhigh -> max (plus
+  // medium/low/minimal -> high), so the gateway's real deepest level is `max`
+  // and xhigh maps to `max` like the GLM/Kimi full-enum models.
+  {
+    id: "deepseek-v4-flash-speed",
+    name: "DeepSeek V4 Flash (Speed)",
+    api: "openai-completions",
+    reasoning: true,
+    thinkingLevelMap: DISABLEABLE_FULL_MAP,
+    input: ["text"],
+    cost: { input: 0.14, output: 0.28, cacheRead: 0.028, cacheWrite: 0 },
+    contextWindow: 1048560,
+    maxTokens: 393216,
+    compat: NEURALWATT_REASONING_COMPAT,
+  },
+
+  // --- DeepSeek V4.1 Flash (DeepSeek) ---
+  // New V4.1 generation: vision-capable MoE with 1M context. Probed 2026-09:
+  // every effort returns HTTP 200 and `none` produces no thinking, so thinking
+  // is disableable. The catalog aliases medium -> high and minimal -> low but
+  // keeps xhigh and max as distinct levels, and the probe showed no benefit
+  // routing xhigh to max (xhigh produced the deepest thinking), so the
+  // identity map through xhigh is correct.
+  {
+    id: "deepseek-v4.1-flash",
+    name: "DeepSeek V4.1 Flash",
+    api: "openai-completions",
+    reasoning: true,
+    thinkingLevelMap: DISABLEABLE_IDENTITY_MAP,
+    input: ["text", "image"],
+    cost: { input: 0.15, output: 0.6, cacheRead: 0.015, cacheWrite: 0 },
+    contextWindow: 1048560,
+    maxTokens: 393216,
     compat: NEURALWATT_REASONING_COMPAT,
   },
 
