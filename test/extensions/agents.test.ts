@@ -12,12 +12,17 @@ import { createWorkersWidget } from "../../extensions/agents/src/format.ts";
 import { extractAssistantText } from "../../extensions/agents/src/runner.ts";
 import {
   generateWorkerId,
+  listRecordFiles,
   loadWorker,
-  loadWorkers,
-  pruneWorkerRecords,
-  reserveWorkerSlot,
-  saveWorker,
+  loadWorkersFromBranch,
+  migrateLegacyRegistry,
+  persistWorkerRecord,
+  pruneWorkerArtifacts,
+  reconcileRunning,
   streamPath,
+  sweepWorkerArtifacts,
+  updateRecordFile,
+  WORKER_RECORD_ENTRY,
 } from "../../extensions/agents/src/store.ts";
 import type { WorkerRecord } from "../../extensions/agents/src/types.ts";
 import {
@@ -175,6 +180,21 @@ async function waitForRecord(
     }
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
+}
+
+/** Seed a worker's artifact record file directly (no transcript): the
+ *  pre-existing-state setup path for store-level and cross-session tests. */
+async function seedRecord(dir: string, record: WorkerRecord): Promise<void> {
+  await persistWorkerRecord(() => {}, dir, record);
+}
+
+/** Transcript entry shape the extension appends worker records under. */
+function branchEntry(record: WorkerRecord): {
+  type: string;
+  customType: string;
+  data: WorkerRecord;
+} {
+  return { type: "custom", customType: WORKER_RECORD_ENTRY, data: record };
 }
 
 // --- Suite ---
@@ -434,9 +454,14 @@ ${SUCCESS_WORKER}`,
 
     expect(result.details.worker.status).toBe("completed");
     expect(result.details.worker.outputText).toContain("JWT tokens");
-    const stored = await loadWorkers(cwd);
-    expect(Object.values(stored)).toHaveLength(1);
-    expect(Object.values(stored)[0].outputText).toContain("JWT tokens");
+    // The record is persisted both as a transcript entry (ownership) and as
+    // the worker's artifact record file (janitor metadata).
+    expect(mockPi.appendEntry).toHaveBeenCalledWith(
+      WORKER_RECORD_ENTRY,
+      expect.objectContaining({ outputText: expect.stringContaining("JWT tokens") }),
+    );
+    const stored = await loadWorker(cwd, result.details.worker.id as string);
+    expect(stored?.outputText).toContain("JWT tokens");
   });
 
   it("delegate sets PI_MESSENGER_NAME so workers are addressable by their worker name", async () => {
@@ -585,7 +610,7 @@ sleep 30
     await executeTool("delegate", { task: "one", isolate: false, name: "scout" });
     await expect(
       executeTool("delegate", { task: "two", isolate: false, name: "scout" }),
-    ).rejects.toThrow(/already exists/);
+    ).rejects.toThrow(/already running/);
   });
 
   it("workers status reads a finished worker's report", async () => {
@@ -607,7 +632,7 @@ sleep 30
 
   it("workers throws on an unknown action", async () => {
     const id = generateWorkerId();
-    await saveWorker(cwd, {
+    await seedRecord(cwd, {
       id,
       name: "known",
       task: "t",
@@ -623,8 +648,9 @@ sleep 30
     );
   });
 
-  it("saveWorker ignores a stale running snapshot for a terminal record", async () => {
-    await saveWorker(cwd, {
+  it("persistWorkerRecord ignores a stale running snapshot for a terminal record", async () => {
+    const appendEntry = vi.fn();
+    await persistWorkerRecord(appendEntry, cwd, {
       id: "w-done",
       name: "done",
       task: "t",
@@ -638,8 +664,9 @@ sleep 30
     });
 
     // A late-arriving initial snapshot (parent bookkeeping) must not clobber
-    // the terminal record the runner already wrote.
-    await saveWorker(cwd, {
+    // the terminal record the runner already wrote — neither on disk nor in
+    // the transcript.
+    const persisted = await persistWorkerRecord(appendEntry, cwd, {
       id: "w-done",
       name: "done",
       task: "t",
@@ -650,13 +677,16 @@ sleep 30
       startedAt: Date.now(),
     });
 
+    expect(persisted).toBe(false);
+    expect(appendEntry).toHaveBeenCalledTimes(1);
     const record = await loadWorker(cwd, "w-done");
     expect(record?.status).toBe("completed");
     expect(record?.outputText).toBe("the report");
   });
 
   it("concurrent initial-save and completion-save keep the terminal record", async () => {
-    const running = saveWorker(cwd, {
+    const appendEntry = vi.fn();
+    const running = persistWorkerRecord(appendEntry, cwd, {
       id: "w-race",
       name: "race",
       task: "t",
@@ -666,7 +696,7 @@ sleep 30
       status: "running",
       startedAt: Date.now(),
     });
-    await saveWorker(cwd, {
+    await persistWorkerRecord(appendEntry, cwd, {
       id: "w-race",
       name: "race",
       task: "t",
@@ -687,27 +717,29 @@ sleep 30
 
   it("session_start reconciles orphaned running workers", async () => {
     const id = generateWorkerId();
-    await loadWorkers(cwd);
-    const { saveWorker } = await import("../../extensions/agents/src/store.ts");
-    await saveWorker(cwd, {
+    // A running record restored from the session transcript (pi -r) whose
+    // worker pid is dead: session_start heals it and persists the fix.
+    const record = makeWorkerRecord({
       id,
       name: "ghost",
-      task: "t",
-      model: "m",
       pid: 999_999_999,
-      cwd,
       status: "running",
-      startedAt: Date.now(),
+      startedAt: Date.now() - 5_000,
     });
+    mockCtx.sessionManager.getBranch = vi.fn(() => [branchEntry(record)]);
 
     await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
 
-    const record = await loadWorker(cwd, id);
-    expect(record?.status).toBe("failed");
-    expect(record?.error).toContain("gone");
+    const stored = await loadWorker(cwd, id);
+    expect(stored?.status).toBe("failed");
+    expect(stored?.error).toContain("gone");
+    expect(mockPi.appendEntry).toHaveBeenCalledWith(
+      WORKER_RECORD_ENTRY,
+      expect.objectContaining({ id, status: "failed" }),
+    );
   });
 
-  it("session_start keeps worker state out of git status", async () => {
+  it("session_start keeps worker state out of git status and migrates the legacy registry", async () => {
     await initGitRepo(cwd);
     await mkdir(join(cwd, CONFIG_DIR_NAME, "workers"), { recursive: true });
     await writeFile(join(cwd, CONFIG_DIR_NAME, "workers", "registry.json"), "{}\n");
@@ -718,44 +750,49 @@ sleep 30
     expect(exclude.split("\n")).toContain(`${projectStateRelative("workers")}/`);
     expect(exclude.split("\n")).toContain(`${projectStateRelative("worktrees")}/`);
     expect(await runGit(cwd, ["status", "--porcelain"])).toBe("");
+    // The shared registry is gone after the one-time migration.
+    await expect(
+      stat(join(cwd, CONFIG_DIR_NAME, "workers", "registry.json")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  it("loadWorkers reconciles stuck-running records whose pid is dead on any read", async () => {
-    // The parent may have died with no session_start ever running again; the
-    // read itself must heal stuck-running records.
-    await saveWorker(cwd, {
+  it("reconcileRunning marks stuck-running records failed when the worker pid is dead", () => {
+    const stuck = makeWorkerRecord({
       id: "w-stuck",
       name: "stuck",
-      task: "orphaned task",
-      model: "m",
       pid: 999_999_999,
-      cwd,
       status: "running",
       startedAt: Date.now() - 5_000,
     });
+    const terminal = makeWorkerRecord({
+      id: "w-done",
+      name: "done",
+      status: "completed",
+      startedAt: Date.now() - 5_000,
+      endedAt: Date.now(),
+    });
 
-    const workers = await loadWorkers(cwd);
+    const changed = reconcileRunning([stuck, terminal]);
 
-    expect(workers["w-stuck"].status).toBe("failed");
-    expect(workers["w-stuck"].error).toContain("gone");
-    expect(workers["w-stuck"].endedAt).toBeDefined();
+    expect(changed).toHaveLength(1);
+    expect(changed[0].id).toBe("w-stuck");
+    expect(stuck.status).toBe("failed");
+    expect(stuck.error).toContain("gone");
+    expect(stuck.endedAt).toBeDefined();
+    expect(terminal.status).toBe("completed");
   });
 
-  it("loadWorkers leaves live running records alone", async () => {
-    await saveWorker(cwd, {
+  it("reconcileRunning leaves live running records alone", () => {
+    const live = makeWorkerRecord({
       id: "w-live",
       name: "live",
-      task: "live task",
-      model: "m",
       pid: process.pid,
-      cwd,
       status: "running",
       startedAt: Date.now(),
     });
 
-    const workers = await loadWorkers(cwd);
-
-    expect(workers["w-live"].status).toBe("running");
+    expect(reconcileRunning([live])).toHaveLength(0);
+    expect(live.status).toBe("running");
   });
 
   it("session_shutdown cancels running workers", async () => {
@@ -1095,7 +1132,7 @@ sleep 30
       startedAt: Date.now(),
       endedAt: Date.now(),
     });
-    await saveWorker(cwd, finished);
+    await seedRecord(cwd, finished);
     await mkdir(join(cwd, CONFIG_DIR_NAME, "workers", "patches"), { recursive: true });
     const patchFile = join(cwd, CONFIG_DIR_NAME, "workers", "patches", "w-done.diff");
     await writeFile(patchFile, "diff", "utf8");
@@ -1106,7 +1143,7 @@ sleep 30
     await expect(stat(patchFile)).rejects.toMatchObject({ code: "ENOENT" });
 
     // Running and unknown ids are refused.
-    await saveWorker(cwd, makeWorkerRecord({ id: "w-live", name: "live", pid: process.pid }));
+    await seedRecord(cwd, makeWorkerRecord({ id: "w-live", name: "live", pid: process.pid }));
     await expect(executeTool("workers", { action: "remove", id: "w-live" })).rejects.toThrow(
       /still running/,
     );
@@ -1116,7 +1153,7 @@ sleep 30
   });
 
   it("session_start prunes records past the retention window", async () => {
-    await saveWorker(
+    await seedRecord(
       cwd,
       makeWorkerRecord({
         id: "w-ancient",
@@ -1127,7 +1164,7 @@ sleep 30
         endedAt: Date.now() - 8 * 24 * 60 * 60_000,
       }),
     );
-    await saveWorker(cwd, makeWorkerRecord({ id: "w-keep", name: "keep", pid: process.pid }));
+    await seedRecord(cwd, makeWorkerRecord({ id: "w-keep", name: "keep", pid: process.pid }));
 
     await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
 
@@ -1302,7 +1339,7 @@ describe("agents-units", () => {
   });
 });
 
-describe("agents-registry persistence", () => {
+describe("agents-worker store (session-scoped)", () => {
   let cwd: string;
 
   beforeEach(async () => {
@@ -1314,69 +1351,148 @@ describe("agents-registry persistence", () => {
     await rm(cwd, { recursive: true, force: true });
   });
 
-  it("saveWorker takes the cross-process registry lock", async () => {
-    await saveWorker(cwd, makeWorkerRecord({ pid: process.pid }));
+  it("loadWorkersFromBranch keeps the last entry per worker id", () => {
+    const first = makeWorkerRecord({ id: "w-a", name: "a", status: "running" });
+    const second = makeWorkerRecord({
+      id: "w-a",
+      name: "a",
+      status: "completed",
+      startedAt: 1,
+      endedAt: 2,
+    });
+    const other = makeWorkerRecord({ id: "w-b", name: "b", status: "failed" });
+
+    const workers = loadWorkersFromBranch([
+      branchEntry(first),
+      { type: "custom", customType: "other-entry", data: {} },
+      { type: "message", role: "user" },
+      branchEntry(other),
+      branchEntry(second),
+    ]);
+
+    expect(workers.size).toBe(2);
+    expect(workers.get("w-a")?.status).toBe("completed");
+    expect(workers.get("w-b")?.status).toBe("failed");
+  });
+
+  it("loadWorkersFromBranch skips corrupt entries", () => {
+    const workers = loadWorkersFromBranch([
+      { type: "custom", customType: WORKER_RECORD_ENTRY, data: { id: "no status" } },
+      { type: "custom", customType: WORKER_RECORD_ENTRY, data: null },
+    ]);
+    expect(workers.size).toBe(0);
+  });
+
+  it("updateRecordFile read-modify-writes under the per-record lock", async () => {
+    await seedRecord(cwd, makeWorkerRecord({ id: "w-x", name: "x", status: "completed" }));
+
+    const updated = await updateRecordFile(cwd, "w-x", (record) => ({
+      ...record,
+      collectedAt: 1234,
+    }));
+
+    expect(updated.collectedAt).toBe(1234);
+    expect((await loadWorker(cwd, "w-x"))?.collectedAt).toBe(1234);
     expect(withFileLock).toHaveBeenCalledWith(
-      expect.stringMatching(/registry\.json\.lock$/),
+      expect.stringMatching(/records\/w-x\.lock$/),
       expect.any(Function),
     );
   });
 
-  it("reserveWorkerSlot durably writes the running record under the lock", async () => {
-    await reserveWorkerSlot(cwd, makeWorkerRecord({ id: "w-a", name: "a", pid: process.pid }), 2);
-    const stored = await loadWorkers(cwd);
-    expect(stored["w-a"]?.status).toBe("running");
-    expect(withFileLock).toHaveBeenCalledWith(
-      expect.stringMatching(/registry\.json\.lock$/),
-      expect.any(Function),
+  it("updateRecordFile throws for an unknown worker", async () => {
+    await expect(updateRecordFile(cwd, "w-nope", (r) => r)).rejects.toThrow(/No artifact record/);
+  });
+
+  it("listRecordFiles skips corrupt record files", async () => {
+    const dir = join(cwd, CONFIG_DIR_NAME, "workers", "records");
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, "w-bad.json"), "{not json", "utf8");
+    await seedRecord(cwd, makeWorkerRecord({ id: "w-good", name: "good" }));
+
+    const records = await listRecordFiles(cwd);
+    expect(records.map((r) => r.id)).toEqual(["w-good"]);
+  });
+
+  it("sweepWorkerArtifacts classifies foreign-live, orphan, and own records", async () => {
+    const foreignLive = makeWorkerRecord({
+      id: "w-foreign",
+      name: "foreign",
+      parentPid: process.pid,
+      status: "running",
+    });
+    const orphan = makeWorkerRecord({
+      id: "w-orphan",
+      name: "orphan",
+      parentPid: 999_999_999,
+      status: "completed",
+      startedAt: Date.now(),
+      endedAt: Date.now(),
+    });
+    const legacy = makeWorkerRecord({ id: "w-legacy", name: "legacy", status: "failed" });
+    await seedRecord(cwd, foreignLive);
+    await seedRecord(cwd, orphan);
+    await seedRecord(cwd, legacy);
+
+    // "mine" contains the session's own ids; the rest classify by parent pid.
+    const sweep = await sweepWorkerArtifacts(cwd, new Set(["w-mine"]));
+
+    expect(sweep.foreignLive.map((r) => r.id)).toEqual(["w-foreign"]);
+    expect(sweep.orphans.map((r) => r.id).sort()).toEqual(["w-legacy", "w-orphan"]);
+  });
+
+  it("sweepWorkerArtifacts treats a live parent as a live session even for finished workers", async () => {
+    await seedRecord(
+      cwd,
+      makeWorkerRecord({
+        id: "w-theirs",
+        name: "theirs",
+        parentPid: process.pid,
+        status: "completed",
+        startedAt: Date.now(),
+        endedAt: Date.now(),
+      }),
     );
+
+    const sweep = await sweepWorkerArtifacts(cwd, new Set());
+    expect(sweep.foreignLive.map((r) => r.id)).toEqual(["w-theirs"]);
+    expect(sweep.orphans).toHaveLength(0);
   });
 
-  it("reserveWorkerSlot refuses at the cap and writes nothing", async () => {
-    // The occupying record needs a live pid: a dead one is reconciled to
-    // failed on read and frees the slot.
-    await reserveWorkerSlot(cwd, makeWorkerRecord({ id: "w-a", name: "a", pid: process.pid }), 1);
-    await expect(
-      reserveWorkerSlot(cwd, makeWorkerRecord({ id: "w-b", name: "b" }), 1),
-    ).rejects.toThrow(/Worker limit reached \(1\/1\)/);
-    const stored = await loadWorkers(cwd);
-    expect(stored["w-b"]).toBeUndefined();
-    expect(stored["w-a"]?.status).toBe("running");
+  it("migrateLegacyRegistry imports registry records as parentless artifacts", async () => {
+    const dir = join(cwd, CONFIG_DIR_NAME, "workers");
+    await mkdir(dir, { recursive: true });
+    const legacy = makeWorkerRecord({ id: "w-old", name: "old", status: "completed" });
+    await writeFile(
+      join(dir, "registry.json"),
+      JSON.stringify({ workers: { "w-old": legacy } }),
+      "utf8",
+    );
+
+    expect(await migrateLegacyRegistry(cwd)).toBe(true);
+
+    const imported = await loadWorker(cwd, "w-old");
+    expect(imported?.id).toBe("w-old");
+    await expect(stat(join(dir, "registry.json"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  it("reserveWorkerSlot refuses a duplicate running name", async () => {
-    await reserveWorkerSlot(cwd, makeWorkerRecord({ id: "w-a", name: "dup", pid: process.pid }), 5);
-    await expect(
-      reserveWorkerSlot(cwd, makeWorkerRecord({ id: "w-b", name: "dup" }), 5),
-    ).rejects.toThrow(/already exists/);
-    const stored = await loadWorkers(cwd);
-    expect(stored["w-b"]).toBeUndefined();
-  });
-
-  it("loadWorkers fails closed on a corrupt registry", async () => {
+  it("migrateLegacyRegistry survives a corrupt registry file", async () => {
     const dir = join(cwd, CONFIG_DIR_NAME, "workers");
     await mkdir(dir, { recursive: true });
     await writeFile(join(dir, "registry.json"), "{not json", "utf8");
-    await expect(loadWorkers(cwd)).rejects.toThrow(/registry\.json/);
+
+    expect(await migrateLegacyRegistry(cwd)).toBe(true);
+    await expect(stat(join(dir, "registry.json"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  it("loadWorkers rejects a registry whose workers field is not an object", async () => {
-    const dir = join(cwd, CONFIG_DIR_NAME, "workers");
-    await mkdir(dir, { recursive: true });
-    await writeFile(join(dir, "registry.json"), '{"workers":"x"}\n', "utf8");
-    await expect(loadWorkers(cwd)).rejects.toThrow(/corrupt.*shape/s);
+  it("migrateLegacyRegistry is a no-op without a legacy registry", async () => {
+    expect(await migrateLegacyRegistry(cwd)).toBe(false);
   });
 
-  it("loadWorkers treats a missing registry as empty", async () => {
-    await expect(loadWorkers(cwd)).resolves.toEqual({});
-  });
-
-  it("pruneWorkerRecords removes past-retention terminal records and their artifacts", async () => {
+  it("pruneWorkerArtifacts removes past-retention terminal artifacts, never running ones", async () => {
     const now = Date.now();
     const old = makeWorkerRecord({
       id: "w-old",
       name: "old",
-      pid: process.pid,
       status: "completed",
       startedAt: now - 8 * 24 * 60 * 60_000,
       endedAt: now - 8 * 24 * 60 * 60_000,
@@ -1384,15 +1500,14 @@ describe("agents-registry persistence", () => {
     const recent = makeWorkerRecord({
       id: "w-recent",
       name: "recent",
-      pid: process.pid,
       status: "completed",
       startedAt: now - 1 * 24 * 60 * 60_000,
       endedAt: now - 1 * 24 * 60 * 60_000,
     });
     const live = makeWorkerRecord({ id: "w-live", name: "live", pid: process.pid });
-    await saveWorker(cwd, old);
-    await saveWorker(cwd, recent);
-    await saveWorker(cwd, live);
+    await seedRecord(cwd, old);
+    await seedRecord(cwd, recent);
+    await seedRecord(cwd, live);
     // Artifacts for the old record: its stream spool and a captured patch.
     const streamFile = streamPath(cwd, "w-old");
     await mkdir(join(cwd, CONFIG_DIR_NAME, "workers", "streams"), { recursive: true });
@@ -1402,22 +1517,239 @@ describe("agents-registry persistence", () => {
     await writeFile(patchFile, "diff", "utf8");
     await writeFile(streamPath(cwd, "w-recent"), '{"at":2}\n', "utf8");
 
-    const pruned = await pruneWorkerRecords(cwd);
+    const pruned = await pruneWorkerArtifacts(cwd);
 
     expect(pruned).toContain("w-old");
     expect(pruned).not.toContain("w-recent");
     expect(pruned).not.toContain("w-live");
-    const stored = await loadWorkers(cwd);
-    expect(stored["w-old"]).toBeUndefined();
-    expect(stored["w-recent"]).toBeDefined();
-    expect(stored["w-live"]).toBeDefined();
+    expect(await loadWorker(cwd, "w-old")).toBeUndefined();
+    expect(await loadWorker(cwd, "w-recent")).toBeDefined();
+    expect(await loadWorker(cwd, "w-live")).toBeDefined();
     await expect(stat(streamFile)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(stat(patchFile)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(stat(streamPath(cwd, "w-recent"))).resolves.toBeTruthy();
   });
 });
 
+describe("agents-worker session scoping", () => {
+  let cwd: string;
+  let fixtureDir: string;
+  let mockPi: DeepMocked<ExtensionAPI>;
+  let mockCtx: DeepMocked<ExtensionContext>;
+  const oldEnv: Record<string, string | undefined> = {};
+
+  const executeTool = async (
+    name: string,
+    params: Record<string, unknown>,
+    sessionBranch: unknown[] = [],
+  ) => {
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionBranch);
+    const call = mockPi.registerTool.mock.calls.find((c) => c[0].name === name);
+    if (!call) throw new Error(`tool ${name} not registered`);
+    return call[0].execute("call-1", params as never, undefined, undefined, mockCtx);
+  };
+
+  const setEnv = (key: string, value: string | undefined) => {
+    if (!(key in oldEnv)) oldEnv[key] = process.env[key];
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  };
+
+  beforeEach(async () => {
+    __resetWidgetStrip();
+    cwd = await mkdtemp(join(tmpdir(), "agents-scope-"));
+    fixtureDir = await mkdtemp(join(tmpdir(), "agents-scope-fixture-"));
+    mockPi = createMockPi() as DeepMocked<ExtensionAPI>;
+    mockCtx = createMockContext();
+    (mockCtx as { cwd: string }).cwd = cwd;
+    setEnv("PI_WORKER_MODEL", "opencode-go/glm-5.3-flash");
+    setEnv("PI_MAX_WORKERS", "1");
+    await agentsExtension(mockPi);
+  });
+
+  afterEach(async () => {
+    await getEventHandlerFrom(mockPi, "session_shutdown")(
+      { type: "session_shutdown", reason: "quit" },
+      mockCtx,
+    );
+    for (const [key, value] of Object.entries(oldEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    await removeTempDir(cwd);
+    await removeTempDir(fixtureDir);
+  });
+
+  it("workers list (default scope mine) hides another session's live workers", async () => {
+    // A worker running under another live session: parent pid alive.
+    await seedRecord(
+      cwd,
+      makeWorkerRecord({
+        id: "w-theirs",
+        name: "theirs",
+        parentPid: process.pid,
+        status: "running",
+      }),
+    );
+
+    const result = await executeTool("workers", { action: "list" });
+    const text = result.content[0].text as string;
+    expect(text).toContain("No workers yet");
+    expect(text).not.toContain("theirs");
+  });
+
+  it("workers list scope=orphans shows ended sessions' leftovers, tagged", async () => {
+    await seedRecord(
+      cwd,
+      makeWorkerRecord({
+        id: "w-orphan",
+        name: "abandoned",
+        parentPid: 999_999_999,
+        status: "completed",
+        startedAt: Date.now(),
+        endedAt: Date.now(),
+        outputText: "orphan report",
+      }),
+    );
+
+    const result = await executeTool("workers", { action: "list", scope: "orphans" });
+    const text = result.content[0].text as string;
+    expect(text).toContain("[orphan]");
+    expect(text).toContain("abandoned");
+    // Orphans remain actionable: status reads their report.
+    const status = await executeTool("workers", { action: "status", id: "w-orphan" });
+    expect(status.content[0].text).toContain("orphan report");
+  });
+
+  it("workers list scope=all tags workers of other live sessions", async () => {
+    await seedRecord(
+      cwd,
+      makeWorkerRecord({
+        id: "w-theirs",
+        name: "theirs",
+        parentPid: process.pid,
+        status: "running",
+      }),
+    );
+
+    const result = await executeTool("workers", { action: "list", scope: "all" });
+    const text = result.content[0].text as string;
+    expect(text).toContain("[other session]");
+    expect(text).toContain("theirs");
+  });
+
+  it("the per-session worker cap ignores other sessions' live workers", async () => {
+    const fixture = await writeFixture(fixtureDir, "slow-worker.sh", SLOW_WORKER);
+    setEnv("PI_WORKER_COMMAND", fixture);
+    // Another session is already at the (per-session) cap.
+    await seedRecord(
+      cwd,
+      makeWorkerRecord({
+        id: "w-theirs",
+        name: "theirs",
+        parentPid: process.pid,
+        status: "running",
+      }),
+    );
+
+    // Cap is 1 for THIS session; the foreign running worker must not consume it.
+    const started = await executeTool("delegate", { task: "t", isolate: false });
+    expect(started.details.workerId).toBeDefined();
+    await executeTool("workers", { action: "cancel", id: started.details.workerId as string });
+  });
+
+  it("a delegate records the owning session on the worker", async () => {
+    const fixture = await writeFixture(fixtureDir, "ok-worker.sh", SUCCESS_WORKER);
+    setEnv("PI_WORKER_COMMAND", fixture);
+
+    const started = await executeTool("delegate", { task: "t", isolate: false, wait: true });
+    // wait=true returns the full record, not the started-response shape.
+    const id = started.details.worker.id as string;
+
+    const stored = await loadWorker(cwd, id);
+    expect(stored?.parentPid).toBe(process.pid);
+    expect(stored?.parentSessionId).toBe("test-session");
+  });
+
+  it("collect on an orphan updates its artifact record, not this session's transcript", async () => {
+    await initGitRepo(cwd);
+    // An ended session left a completed isolated worker with a patch.
+    const patchFile = join(cwd, CONFIG_DIR_NAME, "workers", "patches", "w-orphan.diff");
+    await mkdir(join(cwd, CONFIG_DIR_NAME, "workers", "patches"), { recursive: true });
+    await writeFile(patchFile, "diff", "utf8");
+    await seedRecord(
+      cwd,
+      makeWorkerRecord({
+        id: "w-orphan",
+        name: "abandoned",
+        parentPid: 999_999_999,
+        status: "completed",
+        patchPath: patchFile,
+        startedAt: Date.now(),
+        endedAt: Date.now(),
+      }),
+    );
+
+    const collected = await executeTool("workers", {
+      action: "collect",
+      id: "w-orphan",
+      apply: false,
+    });
+    expect(collected.content[0].text).toContain("Patch left unapplied");
+    const stored = await loadWorker(cwd, "w-orphan");
+    expect(stored?.collectedAt).toBeDefined();
+    // No transcript entry: this session never owned the worker.
+    expect(mockPi.appendEntry).not.toHaveBeenCalled();
+  });
+
+  it("session_start reports orphaned artifacts from ended sessions", async () => {
+    await seedRecord(
+      cwd,
+      makeWorkerRecord({
+        id: "w-orphan",
+        name: "abandoned",
+        parentPid: 999_999_999,
+        status: "completed",
+        startedAt: Date.now(),
+        endedAt: Date.now(),
+      }),
+    );
+
+    await getEventHandlerFrom(mockPi, "session_start")(
+      { type: "session_start", reason: "startup" },
+      mockCtx,
+    );
+
+    const notifications = mockCtx.ui.notify.mock.calls.map((call) => call[0] as string);
+    expect(notifications.some((text) => text.includes("orphaned worker"))).toBe(true);
+  });
+
+  it("resumed sessions see their own workers via the transcript branch", async () => {
+    const record = makeWorkerRecord({
+      id: "w-mine",
+      name: "mine",
+      status: "completed",
+      startedAt: Date.now(),
+      endedAt: Date.now(),
+      outputText: "resumed report",
+    });
+
+    // pi -r restores the branch, entries included.
+    const result = await executeTool("workers", { action: "list" }, [branchEntry(record)]);
+    const text = result.content[0].text as string;
+    expect(text).toContain("mine");
+    expect(text).not.toContain("[orphan]");
+  });
+});
+
 // --- Helpers ---
+
+function getEventHandlerFrom(mockPi: DeepMocked<ExtensionAPI>, eventType: string) {
+  for (const call of mockPi.on.mock.calls) {
+    if (call[0] === eventType) return call[1];
+  }
+  throw new Error(`Handler for ${eventType} not found`);
+}
 
 function makeWorkerRecord(overrides: Partial<WorkerRecord> = {}): WorkerRecord {
   return {

@@ -21,10 +21,11 @@ const STATUS_ICONS: Record<WorkerRecord["status"], string> = {
   cancelled: "⊘",
 };
 
-export function formatWorkerLine(worker: WorkerRecord): string {
+export function formatWorkerLine(worker: WorkerRecord, tag?: "orphan" | "other session"): string {
   const icon = STATUS_ICONS[worker.status];
   const isolated = worker.worktree ? " [worktree]" : "";
-  const base = `${icon} ${worker.id} "${worker.name}" ${worker.status} · ${worker.model}${isolated}`;
+  const prefix = tag === undefined ? "" : `[${tag}] `;
+  const base = `${prefix}${icon} ${worker.id} "${worker.name}" ${worker.status} · ${worker.model}${isolated}`;
   if (worker.activity === undefined) return base;
   // Live activity: what the worker is doing right now (last started tool).
   const detail = worker.activity.detail !== undefined ? ` ${worker.activity.detail}` : "";
@@ -51,19 +52,12 @@ export function formatWorkerStatus(worker: WorkerRecord): string {
   return lines.join("\n");
 }
 
-export function formatWorkerList(workers: WorkerRecord[]): string {
-  if (workers.length === 0) {
-    return "No workers yet. Use the delegate tool to hand a task to a cheap-model worker session.";
-  }
-  return workers.map((w) => formatWorkerLine(w)).join("\n");
-}
-
 /** Framed editor widget: the running workers, read at render time. */
 export function createWorkersWidget(getWorkers: () => WorkerRecord[]): FramedWidgetFactory {
   return createFramedWidget({
     title: "Workers",
     titleRight: () => `${getWorkers().length} running`,
-    getBodyLines: () => getWorkers().map(formatWorkerLine),
+    getBodyLines: () => getWorkers().map((w) => formatWorkerLine(w)),
     maxBodyLines: MAX_WIDGET_WORKERS,
   });
 }

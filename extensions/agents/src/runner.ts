@@ -270,6 +270,10 @@ export interface StartWorkerOptions {
   readOnly?: boolean;
   /** Isolated worktree; when set the captured patch is stored on the record. */
   worktree?: { path: string; branch: string };
+  /** Owning session identity, stamped on the record so artifact files can
+   *  be classified after the session ends. */
+  parentPid?: number;
+  parentSessionId?: string;
   events: WorkerEvents;
   /** Registry persistence callback (persist into .pi/workers). */
   onRecord(worker: WorkerRecord): Promise<void>;
@@ -315,6 +319,8 @@ export function startWorker(options: StartWorkerOptions): RunningWorker {
     ...(options.worktree !== undefined
       ? { worktree: options.worktree.path, branch: options.worktree.branch }
       : {}),
+    ...(options.parentPid !== undefined ? { parentPid: options.parentPid } : {}),
+    ...(options.parentSessionId !== undefined ? { parentSessionId: options.parentSessionId } : {}),
     status: "running",
     startedAt: Date.now(),
   };

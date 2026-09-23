@@ -8,21 +8,81 @@
 import { existsSync } from "node:fs";
 import { access, readFile } from "node:fs/promises";
 import type { AgentToolResult } from "pi";
-import { formatStreamEntries, formatWorkerList, formatWorkerStatus } from "./format.ts";
+import { formatStreamEntries, formatWorkerLine, formatWorkerStatus } from "./format.ts";
 import type { RunningWorker } from "./runner.ts";
-import { loadWorkers, removeWorkerRecord, saveWorker, streamPath } from "./store.ts";
+import { streamPath } from "./store.ts";
 import type { WorkerRecord } from "./types.ts";
 import { applyPatch, removeWorktree, worktreePath } from "./worktree.ts";
 
 // --- Actions ---
 
-/** Every recorded worker in start order (live map not merged: list is historical). */
-export async function listWorkers(cwd: string): Promise<AgentToolResult> {
-  const workers = await loadWorkers(cwd);
-  const sorted = Object.values(workers).sort((a, b) => a.startedAt - b.startedAt);
+/** Which workers the list action shows: this session's own, orphans left by
+ *  ended sessions, or everything (including other live sessions' workers). */
+export type WorkerListScope = "mine" | "orphans" | "all";
+
+/** Formatted, scope-filtered worker listing. The caller classifies records
+ *  (transcript cache vs janitor sweep); this only renders. */
+export function listWorkers(options: {
+  mine: WorkerRecord[];
+  orphans: WorkerRecord[];
+  foreignLive: WorkerRecord[];
+  scope: WorkerListScope;
+}): AgentToolResult {
+  const { mine, orphans, foreignLive, scope } = options;
+  const byStart = (a: WorkerRecord, b: WorkerRecord) => a.startedAt - b.startedAt;
+  const sections: string[] = [];
+  const count = mine.length + orphans.length + foreignLive.length;
+  if (scope !== "orphans" && mine.length > 0) {
+    sections.push(
+      `This session (${mine.length}):` +
+        "\n" +
+        [...mine]
+          .sort(byStart)
+          .map((w) => formatWorkerLine(w))
+          .join("\n"),
+    );
+  }
+  if (scope !== "mine" && orphans.length > 0) {
+    sections.push(
+      `Orphans — owning session ended (${orphans.length}):` +
+        "\n" +
+        [...orphans]
+          .sort(byStart)
+          .map((w) => formatWorkerLine(w, "orphan"))
+          .join("\n"),
+    );
+  }
+  if (scope === "all" && foreignLive.length > 0) {
+    sections.push(
+      `Other live sessions (${foreignLive.length}):` +
+        "\n" +
+        [...foreignLive]
+          .sort(byStart)
+          .map((w) => formatWorkerLine(w, "other session"))
+          .join("\n"),
+    );
+  }
+  const hiddenForeign = scope === "orphans" ? foreignLive.length : 0;
+  const text =
+    sections.length > 0
+      ? sections.join("\n\n") +
+        (hiddenForeign > 0
+          ? `\n(${hiddenForeign} worker(s) running in other live sessions, hidden)`
+          : "")
+      : scope === "orphans"
+        ? "No orphaned worker artifacts." +
+          (foreignLive.length > 0
+            ? ` (${foreignLive.length} worker(s) running in other live sessions, hidden)`
+            : "")
+        : "No workers yet. Use the delegate tool to hand a task to a cheap-model worker session.";
   return {
-    content: [{ type: "text", text: formatWorkerList(sorted) }],
-    details: { count: sorted.length },
+    content: [{ type: "text", text }],
+    details: {
+      count,
+      mine: mine.length,
+      orphans: orphans.length,
+      foreignLive: foreignLive.length,
+    },
   };
 }
 
@@ -105,13 +165,17 @@ export async function cancelWorker(options: {
 
 /**
  * Apply an isolated worker's captured patch to the working tree and remove
- * its worktree/branch. The patch file itself survives collect.
+ * its worktree/branch. The patch file itself survives collect. Works for
+ * the session's own workers and for orphans; `persistCollected` records
+ * `collectedAt` in the right place (transcript for own workers, artifact
+ * record file for orphans).
  */
 export async function collectWorkerPatch(
   cwd: string,
   id: string,
   record: WorkerRecord,
   params: { apply?: boolean; cleanup?: boolean },
+  persistCollected: (record: WorkerRecord) => Promise<void>,
 ): Promise<AgentToolResult> {
   if (!record.patchPath) {
     throw new Error(
@@ -163,25 +227,10 @@ export async function collectWorkerPatch(
   // available for 24h after the worker finished (session_start prunes
   // them). Collect removes the worktree/branch, not the forensics.
   record.collectedAt = Date.now();
-  await saveWorker(cwd, record);
+  await persistCollected(record);
   return { content: [{ type: "text", text: lines.join(" ") }], details: { worker: record } };
 }
 
-/** Drop a terminal worker's record and artifacts from the project registry. */
-export async function removeWorker(
-  cwd: string,
-  id: string,
-  publish: () => Promise<void>,
-): Promise<AgentToolResult> {
-  await removeWorkerRecord(cwd, id);
-  await publish();
-  return {
-    content: [
-      {
-        type: "text",
-        text: `Worker ${id} removed: record, stream spool and patch deleted from the project registry.`,
-      },
-    ],
-    details: { removed: id },
-  };
-}
+/** Drop a terminal worker's record and artifacts (record file, stream spool,
+ *  patch) — the composition root calls removeWorkerRecord directly so it can
+ *  also drop the record from its transcript cache. */

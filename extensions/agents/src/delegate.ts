@@ -12,7 +12,7 @@ import { isPlanModeActive } from "../../../lib/plan-state.ts";
 import { resolveWorkerModelSpec } from "../../../lib/worker-model.ts";
 import { formatWorkerStatus } from "./format.ts";
 import { type RunningWorker, startWorker } from "./runner.ts";
-import { generateWorkerId, reserveWorkerSlot, saveWorker } from "./store.ts";
+import { generateWorkerId, sweepWorkerArtifacts } from "./store.ts";
 import type { WorkerEvents, WorkerRecord } from "./types.ts";
 import { resolveWorkerExtensions } from "./worker-extensions.ts";
 import { createWorktree, isGitRepo } from "./worktree.ts";
@@ -60,6 +60,9 @@ export interface DelegatePlan {
   /** The caller demanded isolation (isolate=true): error outside git repos. */
   isolateRequired: boolean;
   maxWorkers: number;
+  /** Owning session id (transcript ownership is implicit; this labels the
+   *  artifact record file for the janitor). */
+  parentSessionId: string;
 }
 
 // --- Argument resolution ---
@@ -77,11 +80,6 @@ export async function planDelegate(
   if (!task) throw new Error("delegate requires task.");
   const workerId = generateWorkerId();
 
-  // La limite et l'unicité du nom sont tenues dans une section
-  // verrouillée et le record running est écrit AVANT le spawn : deux
-  // sessions qui délèguent en même temps ne peuvent pas franchir toutes
-  // deux la limite (le check-then-spawn d'avant perdait ce genre de
-  // course, et un worktree créé pour rien restait orphelin).
   const maxWorkers = envMaxWorkers();
 
   // The global environment/config selection is authoritative. Individual
@@ -137,54 +135,85 @@ export async function planDelegate(
     wantIsolate,
     isolateRequired: params.isolate === true,
     maxWorkers,
+    parentSessionId: ctx.sessionManager.getSessionId(),
   };
 }
 
 // --- Reservation and spawn ---
 
+/**
+ * Per-session worker state owned by the composition root: live children,
+ * the session's transcript-derived records, and ids reserved by in-flight
+ * delegate calls (checked against the cap before their record exists).
+ */
+export interface WorkerSessionState {
+  /** Live-worker map owned by the composition root for this Pi instance. */
+  running: Map<string, RunningWorker>;
+  /** The session's own worker records (transcript branch, last-wins). */
+  branchWorkers: Map<string, WorkerRecord>;
+  /** Worker ids reserved but not yet spawned/recorded, keyed by name. */
+  reserved: Map<string, string>;
+}
+
 export interface StartDelegatedWorkerOptions {
   cwd: string;
   plan: DelegatePlan;
-  /** Live-worker map owned by the composition root for this Pi instance. */
-  running: Map<string, RunningWorker>;
+  /** Per-session worker state (see WorkerSessionState). */
+  state: WorkerSessionState;
   /** Lifecycle callbacks (wake, notify, republish) built by the root. */
   events: WorkerEvents;
+  /** Persist a state transition (transcript entry + artifact record file).
+   *  Returns false when a stale running snapshot lost to a terminal state. */
+  persist(record: WorkerRecord): Promise<boolean>;
 }
 
 /**
  * Reserve a worker slot, create the worktree when wanted, and spawn the
- * child session. The slot reservation precedes the worktree: a refusal
- * (limit, name already taken) must not leave an orphaned worktree behind.
- * Returns the spawned worker and its worktree (when isolated).
+ * child session. The cap is per session and enforced in-process: the check
+ * plus the reservation are synchronous (no await between them), so parallel
+ * delegate calls in one session cannot both cross the limit. The
+ * reservation precedes the worktree: a refusal (limit, name already taken)
+ * must not leave an orphaned worktree behind. If anything fails after the
+ * reservation (worktree, spawn), the worker is recorded failed.
  */
 export async function startDelegatedWorker(
   options: StartDelegatedWorkerOptions,
 ): Promise<{ runningWorker: RunningWorker; worktree?: { path: string; branch: string } }> {
-  const { cwd, plan, running, events } = options;
+  const { cwd, plan, state, events, persist } = options;
   const { workerId, name, task, model, thinkingLevel, timeoutMs, parentPlanning, extensionPaths } =
     plan;
 
+  // Foreign-live names (workers of other live sessions) keep messenger-name
+  // collisions unlikely; the check is best-effort (no lock, small race
+  // window) because names route mail, not correctness.
+  const foreignLive = (await sweepWorkerArtifacts(cwd, new Set(state.branchWorkers.keys())))
+    .foreignLive;
+  const takenNames = new Set<string>([
+    ...state.reserved.values(),
+    ...foreignLive.map((w) => w.name),
+  ]);
+  let runningCount = 0;
+  for (const record of state.branchWorkers.values()) {
+    if (record.status !== "running") continue;
+    runningCount += 1;
+    takenNames.add(record.name);
+  }
+  runningCount += state.reserved.size;
+  if (takenNames.has(name)) {
+    throw new Error(`A worker named "${name}" is already running.`);
+  }
+  if (runningCount >= plan.maxWorkers) {
+    throw new Error(
+      `Worker limit reached (${runningCount}/${plan.maxWorkers}). Wait for a worker to finish or raise PI_MAX_WORKERS.`,
+    );
+  }
+  // Reserve synchronously (no await between check and add): single-threaded,
+  // so concurrent delegate calls in this session serialize here.
+  state.reserved.set(workerId, name);
+
   let worktree: { path: string; branch: string } | undefined;
   let runningWorker: RunningWorker | undefined;
-  // La réservation précède la création du worktree : un refus (limite,
-  // nom déjà pris) ne doit pas laisser un arbre de travail orphelin. Si
-  // quoi que ce soit échoue après la réservation (worktree, spawn), le
-  // slot est libéré en marquant le record failed.
   try {
-    await reserveWorkerSlot(
-      cwd,
-      {
-        id: workerId,
-        name,
-        task,
-        model,
-        thinkingLevel,
-        cwd,
-        status: "running",
-        startedAt: Date.now(),
-      },
-      plan.maxWorkers,
-    );
     if (plan.wantIsolate) {
       if (!(await isGitRepo(cwd))) {
         if (plan.isolateRequired) {
@@ -209,26 +238,28 @@ export async function startDelegatedWorker(
       extensionPaths,
       sandbox,
       readOnly,
+      parentPid: process.pid,
+      parentSessionId: plan.parentSessionId,
       ...(worktree !== undefined ? { worktree } : {}),
       events,
-      onRecord: (worker) => saveWorker(cwd, worker),
+      onRecord: (worker) => persist(worker).then(() => undefined),
     });
-    running.set(workerId, runningWorker);
+    state.running.set(workerId, runningWorker);
     // Finished fire-and-forget workers leave the map so it tracks only live
     // children. done never rejects; the rejection branch is a no-op guard.
     runningWorker.done.then(
       () => {
-        running.delete(workerId);
+        state.running.delete(workerId);
       },
       () => {},
     );
-    // Persist the running record (with the child pid): the reservation has
-    // already landed, this save adds the pid and the model fields.
-    await saveWorker(cwd, runningWorker.record);
+    // Persist the running record (with the child pid): the transcript entry
+    // and the artifact record file make the worker the session's own.
+    await persist(runningWorker.record);
   } catch (error) {
-    // Libérer le slot : un record failed libère la place au prochain
-    // reconcile, au lieu de laisser un running fantôme bloquer la limite.
-    await saveWorker(cwd, {
+    // Record the failure so history keeps it; a failed record frees its slot
+    // immediately (nothing to reconcile later).
+    await persist({
       id: workerId,
       name,
       task,
@@ -236,11 +267,15 @@ export async function startDelegatedWorker(
       thinkingLevel,
       cwd,
       status: "failed",
+      parentPid: process.pid,
+      parentSessionId: plan.parentSessionId,
       error: error instanceof Error ? error.message : String(error),
       startedAt: Date.now(),
       endedAt: Date.now(),
     });
     throw error;
+  } finally {
+    state.reserved.delete(workerId);
   }
   if (!runningWorker) throw new Error("Worker not started; nothing to wait for.");
   return worktree === undefined ? { runningWorker } : { runningWorker, worktree };

@@ -41,11 +41,16 @@ export const WORKERS_PARAMETERS = {
     action: {
       enum: ["list", "status", "tail", "cancel", "collect", "remove"],
       description:
-        "Worker registry operation. tail: read the bounded stream tail of a running or finished worker (tool calls, assistant texts) without anything auto-delivering into the conversation. remove: delete a finished worker's record and artifacts (stream spool, patch) from the project registry.",
+        "Worker registry operation. tail: read the bounded stream tail of a running or finished worker (tool calls, assistant texts) without anything auto-delivering into the conversation. remove: delete a finished worker's record and artifacts (stream spool, patch).",
     },
     id: {
       type: "string",
       description: "Worker id, required for status / tail / cancel / collect / remove.",
+    },
+    scope: {
+      enum: ["mine", "orphans", "all"],
+      description:
+        "list: which workers to show. mine (default) is this session's own workers. orphans shows artifacts left by ended sessions (collectable). all adds workers running in other live sessions, tagged as foreign.",
     },
     lines: {
       type: "number",

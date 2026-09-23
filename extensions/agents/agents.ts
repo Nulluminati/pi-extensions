@@ -9,6 +9,11 @@
  * (ids and status words only); worker reports and patches are read/collected
  * via the workers tool.
  *
+ * Worker state is session-scoped: the owning session's transcript carries
+ * its worker records (restored by `pi -c`/`-r`), and project disk keeps only
+ * per-worker artifact files plus a janitor that classifies leftovers from
+ * ended sessions. Other live sessions' workers are never shown as one's own.
+ *
  * Isolation is for coordination, not security: workers run with user
  * privileges. The worker model is selected globally through PI_WORKER_MODEL
  * or worker-model.json; keep orchestration and judgment in the main session.
@@ -22,8 +27,8 @@ import {
   cancelWorker,
   collectWorkerPatch,
   listWorkers,
-  removeWorker,
   tailWorkerStream,
+  type WorkerListScope,
   workerStatusResponse,
 } from "./src/actions.ts";
 import {
@@ -32,11 +37,24 @@ import {
   type DelegateParams,
   planDelegate,
   startDelegatedWorker,
+  type WorkerSessionState,
 } from "./src/delegate.ts";
 import { AGENTS_STATE_EVENT, createWorkersWidget, WORKERS_WIDGET_KEY } from "./src/format.ts";
 import type { RunningWorker } from "./src/runner.ts";
 import { DELEGATE_PARAMETERS, WORKERS_PARAMETERS } from "./src/schemas.ts";
-import { loadWorker, loadWorkers, pruneStreams, pruneWorkerRecords } from "./src/store.ts";
+import {
+  loadWorker,
+  loadWorkersFromBranch,
+  migrateLegacyRegistry,
+  persistWorkerRecord,
+  pruneStreams,
+  pruneWorkerArtifacts,
+  reconcileRunning,
+  removeWorkerRecord,
+  sweepWorkerArtifacts,
+  updateRecordFile,
+  WORKER_RETENTION_MS,
+} from "./src/store.ts";
 import type { WorkerEvents, WorkerRecord } from "./src/types.ts";
 
 // --- Constants ---
@@ -46,8 +64,33 @@ const WAKE_CUSTOM_TYPE = "agents:wake";
 // --- Extension ---
 
 export default async function agentsExtension(pi: ExtensionAPI) {
-  const running = new Map<string, RunningWorker>();
+  const state: WorkerSessionState = {
+    running: new Map<string, RunningWorker>(),
+    branchWorkers: new Map<string, WorkerRecord>(),
+    reserved: new Map<string, string>(),
+  };
   let lastUi: ExtensionUIContext | undefined;
+  // The worker cwd is fixed per session; publish and persistence need it
+  // between tool calls and lifecycle events.
+  let lastCwd = process.cwd();
+
+  // --- Persistence ---
+
+  /**
+   * One worker state transition: transcript entry (ownership) plus artifact
+   * record file (janitor), then the in-memory cache. Returns false when a
+   * stale running snapshot lost to an already-durable terminal state; the
+   * cache must not adopt it either.
+   */
+  async function persistRecord(record: WorkerRecord): Promise<boolean> {
+    const persisted = await persistWorkerRecord(
+      (customType, data) => pi.appendEntry(customType, data),
+      lastCwd,
+      record,
+    );
+    if (persisted) state.branchWorkers.set(record.id, record);
+    return persisted;
+  }
 
   // --- Publishing ---
 
@@ -57,24 +100,44 @@ export default async function agentsExtension(pi: ExtensionAPI) {
   // in-flight stream reads) must not publish or schedule refreshes anymore.
   let shutDown = false;
 
-  async function publish(ctx: ExtensionContext): Promise<void> {
-    const workers = await loadWorkers(ctx.cwd);
-    // Live running-map records win over disk: they carry the freshest stream
-    // activity snapshot (activity is never persisted per update).
-    for (const [id, runningWorker] of running) {
-      if (workers[id]?.status === "running") workers[id] = runningWorker.record;
+  /** The session's own records, with live children overlaid for freshness.
+   *  Records past the retention window are excluded from views so the
+   *  status-bar spend roll-up keeps its documented 7-day bound. */
+  function mergedWorkers(): Map<string, WorkerRecord> {
+    const now = Date.now();
+    const workers = new Map<string, WorkerRecord>();
+    for (const record of state.branchWorkers.values()) {
+      if (record.status === "running") workers.set(record.id, record);
+      else if (record.endedAt !== undefined && now - record.endedAt <= WORKER_RETENTION_MS) {
+        workers.set(record.id, record);
+      }
     }
-    const runningCount = Object.values(workers).filter((w) => w.status === "running").length;
-    // Roll up token/cost usage across every worker on record (running merged
-    // with finished) for the status bar. Worker spend is project state; the
-    // status bar renders it separately from this session's own counters.
-    // Scope: project-lifetime spend BOUNDED BY THE 7-DAY RETENTION — records
-    // past the window are pruned from the registry on session_start
-    // (pruneWorkerRecords), so the roll-up never covers more than the last
-    // seven days of finished work plus the running workers.
+    for (const [id, runningWorker] of state.running) {
+      const known = workers.get(id);
+      if (known === undefined || known.status === "running") workers.set(id, runningWorker.record);
+    }
+    return workers;
+  }
+
+  /** Adopt transcript entries added since the last refresh (pi -r restore,
+   *  or another writer of this same session). The transcript is the truth;
+   *  the live-activity overlay happens at render time. */
+  function refreshFromBranch(ctx: ExtensionContext): void {
+    const branch = ctx.sessionManager.getBranch() ?? [];
+    for (const [id, record] of loadWorkersFromBranch(branch)) {
+      state.branchWorkers.set(id, record);
+    }
+  }
+
+  async function publish(ctx: ExtensionContext): Promise<void> {
+    const workers = mergedWorkers();
+    const runningCount = [...workers.values()].filter((w) => w.status === "running").length;
+    // Roll up token/cost usage across this session's workers (running merged
+    // with finished) for the status bar. Session-scoped by design: another
+    // session's spend belongs to that session's status bar.
     let workerCostUsd = 0;
     let workerTokens = 0;
-    for (const w of Object.values(workers)) {
+    for (const w of workers.values()) {
       if (w.usage === undefined) continue;
       workerCostUsd += w.usage.costUsd;
       workerTokens +=
@@ -89,7 +152,7 @@ export default async function agentsExtension(pi: ExtensionAPI) {
       workerTokens,
     });
     if (!ctx.hasUI || !lastUi?.setWidget) return;
-    const live = Object.values(workers)
+    const live = [...workers.values()]
       .filter((w) => w.status === "running")
       .sort((a, b) => a.startedAt - b.startedAt);
     setStripWidget(lastUi, "aboveEditor", {
@@ -158,12 +221,15 @@ export default async function agentsExtension(pi: ExtensionAPI) {
     parameters: DELEGATE_PARAMETERS,
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       lastUi = ctx.ui;
+      lastCwd = ctx.cwd;
+      refreshFromBranch(ctx);
       const plan = await planDelegate(params as DelegateParams, ctx);
       const { runningWorker, worktree } = await startDelegatedWorker({
         cwd: ctx.cwd,
         plan,
-        running,
+        state,
         events: makeEvents(ctx),
+        persist: persistRecord,
       });
       await publish(ctx);
 
@@ -178,7 +244,7 @@ export default async function agentsExtension(pi: ExtensionAPI) {
           { once: true },
         );
         const record = await runningWorker.done;
-        running.delete(plan.workerId);
+        state.running.delete(plan.workerId);
         await publish(ctx);
         return buildDelegateWaitedResponse(record);
       }
@@ -193,33 +259,71 @@ export default async function agentsExtension(pi: ExtensionAPI) {
     name: "workers",
     label: "Workers",
     description:
-      "Manage delegated worker sessions: list all workers, read a worker's report (status), cancel a running worker, or collect an isolated worker's patch into the working tree (collect).",
+      "Manage delegated worker sessions: list this session's workers (optionally orphans left by ended sessions), read a worker's report (status), cancel a running worker, or collect an isolated worker's patch into the working tree (collect).",
     parameters: WORKERS_PARAMETERS,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       lastUi = ctx.ui;
+      lastCwd = ctx.cwd;
+      refreshFromBranch(ctx);
       const action = params.action;
 
-      if (action === "list") return listWorkers(ctx.cwd);
+      if (action === "list") {
+        const scope: WorkerListScope =
+          params.scope === "orphans" || params.scope === "all" ? params.scope : "mine";
+        const sweep =
+          scope === "mine"
+            ? { orphans: [], foreignLive: [] }
+            : await sweepWorkerArtifacts(ctx.cwd, new Set(state.branchWorkers.keys()));
+        return listWorkers({
+          mine: [...mergedWorkers().values()],
+          orphans: sweep.orphans,
+          foreignLive: sweep.foreignLive,
+          scope,
+        });
+      }
 
       const id = typeof params.id === "string" ? params.id.trim() : "";
       if (!id) throw new Error(`workers ${String(action)} requires id.`);
 
-      const live = running.get(id)?.record;
-      const record: WorkerRecord | undefined = live ?? (await loadWorker(ctx.cwd, id));
+      const live = state.running.get(id)?.record;
+      const record: WorkerRecord | undefined =
+        live ?? state.branchWorkers.get(id) ?? (await loadWorker(ctx.cwd, id));
       if (!record) throw new Error(`Unknown worker ${id}. Use action=list to see workers.`);
 
       if (action === "tail") return tailWorkerStream(ctx.cwd, id, params.lines);
       if (action === "status") return workerStatusResponse(record);
       if (action === "cancel") {
-        return cancelWorker({ running, publish: () => publish(ctx), id, record });
+        return cancelWorker({ running: state.running, publish: () => publish(ctx), id, record });
       }
       if (action === "collect") {
-        return collectWorkerPatch(ctx.cwd, id, record, {
-          apply: params.apply,
-          cleanup: params.cleanup,
-        });
+        // Own workers record the collect in this session's transcript;
+        // orphans update their artifact record file instead.
+        const persistCollected = state.branchWorkers.has(id)
+          ? (updated: WorkerRecord) => persistRecord(updated).then(() => undefined)
+          : (updated: WorkerRecord) =>
+              updateRecordFile(ctx.cwd, id, () => updated).then(() => undefined);
+        return collectWorkerPatch(
+          ctx.cwd,
+          id,
+          record,
+          { apply: params.apply, cleanup: params.cleanup },
+          persistCollected,
+        );
       }
-      if (action === "remove") return removeWorker(ctx.cwd, id, () => publish(ctx));
+      if (action === "remove") {
+        await removeWorkerRecord(ctx.cwd, id);
+        state.branchWorkers.delete(id);
+        await publish(ctx);
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Worker ${id} removed: record, stream spool and patch deleted.`,
+            },
+          ],
+          details: { removed: id },
+        };
+      }
 
       throw new Error(`Unknown workers action: ${String(action)}`);
     },
@@ -228,14 +332,24 @@ export default async function agentsExtension(pi: ExtensionAPI) {
   // --- Lifecycle ---
 
   pi.on("session_start", async (_event, ctx) => {
+    lastCwd = ctx.cwd;
     // Event contexts carry a usable ui surface: capture it so the widget is
     // restored on session_start (reload) before any tool call has run.
     if (ctx.hasUI) lastUi = ctx.ui;
-    // Rétention : records terminaux au-delà de 7 jours sortis du registre
-    // avec leurs artifacts (stream, patch), puis spools orphelins (running
-    // conservés). Le roll-up de spend de la status bar est donc un
-    // project-lifetime borné à cette fenêtre de rétention.
-    await pruneWorkerRecords(ctx.cwd);
+    // One-time migration from the legacy shared registry to per-worker
+    // artifact files (old records classify as orphans: no owner is known).
+    await migrateLegacyRegistry(ctx.cwd);
+    // Ownership: this session's transcript. Resume (`pi -c`/`-r`) restores
+    // the records with the session.
+    state.branchWorkers = loadWorkersFromBranch(ctx.sessionManager.getBranch() ?? []);
+    // Reconcile the session's own stuck-running records (dead worker pid)
+    // and persist the healed states.
+    for (const changed of reconcileRunning(state.branchWorkers.values())) {
+      await persistRecord(changed);
+    }
+    // Rétention : artifacts des records terminaux au-delà de 7 jours sortis,
+    // puis spools orphelins (running conservés).
+    await pruneWorkerArtifacts(ctx.cwd);
     await pruneStreams(ctx.cwd);
     // Keep worker state out of `git status`; best-effort outside repos.
     try {
@@ -244,9 +358,20 @@ export default async function agentsExtension(pi: ExtensionAPI) {
     } catch (error) {
       console.error(`[agents] git exclude failed: ${(error as Error).message}`);
     }
-    // loadWorkers heals stuck-running records on read (dead pid → failed),
-    // so loading the registry reconciles orphans left by a crashed parent.
-    await loadWorkers(ctx.cwd);
+    // Janitor: leftovers from ended sessions are reported, never deleted
+    // silently; they stay collectable via workers (action=collect).
+    const sweep = await sweepWorkerArtifacts(ctx.cwd, new Set(state.branchWorkers.keys()));
+    if (sweep.orphans.length > 0 && ctx.hasUI) {
+      const ids = sweep.orphans
+        .slice(0, 5)
+        .map((w) => `${w.name} (${w.id}, ${w.status})`)
+        .join("; ");
+      const more = sweep.orphans.length > 5 ? ` … +${sweep.orphans.length - 5} more` : "";
+      ctx.ui.notify(
+        `${sweep.orphans.length} orphaned worker artifact(s) from ended sessions: ${ids}${more}. Inspect with workers (action=list, scope=orphans); collect or remove them explicitly.`,
+        "warning",
+      );
+    }
     await publish(ctx);
   });
 
@@ -256,8 +381,9 @@ export default async function agentsExtension(pi: ExtensionAPI) {
       clearTimeout(activityRefreshTimer);
       activityRefreshTimer = undefined;
     }
-    for (const [id, worker] of running) {
-      running.delete(id);
+    state.reserved.clear();
+    for (const [id, worker] of state.running) {
+      state.running.delete(id);
       await worker.cancel();
     }
     if (ctx.hasUI)

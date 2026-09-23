@@ -14,6 +14,11 @@ export interface WorkerRecord {
   /** Optional for compatibility with worker records created before thinking was configurable. */
   thinkingLevel?: ThinkingLevel;
   pid?: number;
+  /** Owning session's process pid and session id: artifact files carry them
+   *  so a later session can classify leftovers (live owner vs orphan). The
+   *  transcript, not these fields, is the ownership authority. */
+  parentPid?: number;
+  parentSessionId?: string;
   /** Directory the worker session ran in (worktree path when isolated). */
   cwd: string;
   worktree?: string;
