@@ -1187,6 +1187,72 @@ sleep 30
     );
   });
 
+  it("workers remove discards a finished worker's worktree and branch", async () => {
+    await initGitRepo(cwd);
+    const wt = await createWorktree(cwd, "w-wt");
+    const patchFile = join(cwd, CONFIG_DIR_NAME, "workers", "patches", "w-wt.diff");
+    await mkdir(join(cwd, CONFIG_DIR_NAME, "workers", "patches"), { recursive: true });
+    const { writeFile: wf } = await import("node:fs/promises");
+    await wf(join(wt.path, "W.md"), "w\n");
+    await captureWorktreePatch(wt.path, patchFile);
+    await seedRecord(
+      cwd,
+      makeWorkerRecord({
+        id: "w-wt",
+        name: "wt",
+        status: "cancelled",
+        worktree: wt.path,
+        branch: wt.branch,
+        patchPath: patchFile,
+        startedAt: Date.now(),
+        endedAt: Date.now(),
+      }),
+    );
+
+    const result = await executeTool("workers", { action: "remove", id: "w-wt" });
+
+    expect(result.content[0].text).toContain("Worktree and branch discarded");
+    expect(existsSync(wt.path)).toBe(false);
+    await expect(runGit(cwd, ["rev-parse", "--verify", "agents/w-wt"])).rejects.toThrow();
+    expect(await loadWorker(cwd, "w-wt")).toBeUndefined();
+  });
+
+  it("workers remove keeps the worktree when the patch file is missing", async () => {
+    await initGitRepo(cwd);
+    const wt = await createWorktree(cwd, "w-keep");
+    await seedRecord(
+      cwd,
+      makeWorkerRecord({
+        id: "w-keep",
+        name: "keep",
+        status: "completed",
+        worktree: wt.path,
+        branch: wt.branch,
+        patchPath: join(cwd, CONFIG_DIR_NAME, "workers", "patches", "w-keep.diff"),
+        startedAt: Date.now(),
+        endedAt: Date.now(),
+      }),
+    );
+
+    await expect(executeTool("workers", { action: "remove", id: "w-keep" })).rejects.toThrow(
+      /patch/i,
+    );
+    expect(existsSync(wt.path)).toBe(true);
+    expect(await loadWorker(cwd, "w-keep")).toBeDefined();
+  });
+
+  it("workers remove discards an unowned leftover worktree", async () => {
+    await initGitRepo(cwd);
+    const wt = await createWorktree(cwd, "w-lost");
+    // No record file: the record was pruned or lost; the worktree remains.
+
+    const result = await executeTool("workers", { action: "remove", id: "w-lost" });
+
+    expect(result.content[0].text).toContain("worktree");
+    expect(existsSync(wt.path)).toBe(false);
+    await expect(runGit(cwd, ["rev-parse", "--verify", "agents/w-lost"])).rejects.toThrow();
+  });
+
   it("session_start prunes records past the retention window", async () => {
     await seedRecord(
       cwd,
@@ -1564,6 +1630,54 @@ describe("agents-worker store (session-scoped)", () => {
     await expect(stat(patchFile)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(stat(streamPath(cwd, "w-recent"))).resolves.toBeTruthy();
   });
+  it("pruneWorkerArtifacts removes past-retention worktrees and branches", async () => {
+    await initGitRepo(cwd);
+    const wt = await createWorktree(cwd, "w-old");
+    const now = Date.now();
+    await seedRecord(
+      cwd,
+      makeWorkerRecord({
+        id: "w-old",
+        name: "old",
+        status: "failed",
+        worktree: wt.path,
+        branch: wt.branch,
+        startedAt: now - 8 * 24 * 60 * 60_000,
+        endedAt: now - 8 * 24 * 60 * 60_000,
+      }),
+    );
+    await seedRecord(cwd, makeWorkerRecord({ id: "w-live", name: "live", pid: process.pid }));
+
+    const pruned = await pruneWorkerArtifacts(cwd);
+
+    expect(pruned).toContain("w-old");
+    expect(existsSync(wt.path)).toBe(false);
+    await expect(runGit(cwd, ["rev-parse", "--verify", "agents/w-old"])).rejects.toThrow();
+    expect(await loadWorker(cwd, "w-live")).toBeDefined();
+  });
+
+  it("sweepWorkerArtifacts reports worktree dirs with no record file as unowned", async () => {
+    await initGitRepo(cwd);
+    await createWorktree(cwd, "w-unowned");
+    await seedRecord(
+      cwd,
+      makeWorkerRecord({
+        id: "w-orphan",
+        name: "orphan",
+        parentPid: 999_999_999,
+        status: "failed",
+        worktree: join(cwd, CONFIG_DIR_NAME, "worktrees", "w-orphan"),
+        branch: "agents/w-orphan",
+        startedAt: Date.now(),
+        endedAt: Date.now(),
+      }),
+    );
+
+    const sweep = await sweepWorkerArtifacts(cwd, new Set());
+
+    expect(sweep.orphans.map((r) => r.id)).toEqual(["w-orphan"]);
+    expect(sweep.unownedWorktrees).toEqual(["w-unowned"]);
+  });
 });
 
 describe("agents-worker session scoping", () => {
@@ -1757,6 +1871,36 @@ describe("agents-worker session scoping", () => {
 
     const notifications = mockCtx.ui.notify.mock.calls.map((call) => call[0] as string);
     expect(notifications.some((text) => text.includes("orphaned worker"))).toBe(true);
+  });
+
+  it("session_start reports orphaned worktrees, including unowned ones", async () => {
+    await initGitRepo(cwd);
+    const wt = await createWorktree(cwd, "w-orphan-wt");
+    await seedRecord(
+      cwd,
+      makeWorkerRecord({
+        id: "w-orphan-wt",
+        name: "abandoned",
+        parentPid: 999_999_999,
+        status: "failed",
+        worktree: wt.path,
+        branch: wt.branch,
+        startedAt: Date.now(),
+        endedAt: Date.now(),
+      }),
+    );
+    // An unowned worktree with no record at all.
+    await createWorktree(cwd, "w-unowned");
+
+    await getEventHandlerFrom(mockPi, "session_start")(
+      { type: "session_start", reason: "startup" },
+      mockCtx,
+    );
+
+    const notifications = mockCtx.ui.notify.mock.calls.map((call) => call[0] as string);
+    const orphanNotice = notifications.find((text) => text.includes("orphaned worker"));
+    expect(orphanNotice).toBeDefined();
+    expect(orphanNotice).toContain("worktree");
   });
 
   it("resumed sessions see their own workers via the transcript branch", async () => {
