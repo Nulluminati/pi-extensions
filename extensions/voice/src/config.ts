@@ -55,6 +55,13 @@ export function loadActiveModelId(configPath: string): string {
 
 export function loadActiveSpeakerId(configPath: string): number {
   const voice = readVoiceConfig(configPath).voice;
+  // Numeric voices are speaker indexes for models that expose several (e.g.
+  // Supertonic); validate against the active model's speaker count.
+  if (typeof voice === "number" && Number.isInteger(voice) && voice >= 0) {
+    const model = TTS_MODELS.find((entry) => entry.id === loadActiveTtsModelId(configPath));
+    const count = model?.speakerCount;
+    return count === undefined || voice < count ? voice : 0;
+  }
   if (typeof voice !== "string") return 0;
   const speakerId = KITTEN_VOICES.indexOf(voice as (typeof KITTEN_VOICES)[number]);
   return speakerId >= 0 ? speakerId : 0;
@@ -71,7 +78,7 @@ export function saveActiveModel(configPath: string, modelId: string): void {
   writeVoiceConfig(configPath, { dictationModel: modelId });
 }
 
-export function saveActiveVoice(configPath: string, voice: (typeof KITTEN_VOICES)[number]): void {
+export function saveActiveVoice(configPath: string, voice: string | number): void {
   writeVoiceConfig(configPath, { voice });
 }
 

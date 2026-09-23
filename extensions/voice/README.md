@@ -2,7 +2,7 @@
 
 Adds local speech-to-text dictation and text-to-speech playback to Pi with [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) and ONNX Runtime.
 
-Hold Space for one second to dictate without leaving the editor. The extension can also summarize the latest assistant response with the global small model and read it aloud using Kitten Nano, Inflect Nano v2, or Inflect Micro v2. Recording, transcription, and speech synthesis run locally. Only summary generation uses a cloud model.
+Hold Space for one second to dictate without leaving the editor. The extension can also summarize the latest assistant response with the global small model and read it aloud using Kitten Nano, Supertonic 3, Inflect Nano v2, or Inflect Micro v2. Recording, transcription, and speech synthesis run locally. Only summary generation uses a cloud model.
 
 ## Installation
 
@@ -16,7 +16,7 @@ pi install git:github.com/Nulluminati/pi-extensions
 
 The extension currently targets Linux audio systems.
 
-- `sherpa-onnx-node` for transcription and Kitten speech synthesis. It is installed with this extension collection.
+- `sherpa-onnx-node` for transcription and Kitten/Supertonic speech synthesis. It is installed with this extension collection.
 - `onnxruntime-node` for Inflect speech synthesis. It is installed with this extension collection and loaded only when an Inflect model is first used.
 - `espeak-ng` for the Inflect English phoneme frontend.
 - `ffmpeg` or `arecord` for microphone capture.
@@ -35,22 +35,35 @@ The extension prefers `ffmpeg` for recording when both recorders are installed. 
 
 Models are stored in `$PI_VOICE_MODELS`, or `$XDG_CACHE_HOME/pi-voice/models` (default `~/.cache/pi-voice/models`) when the variable is unset. Open `/voice:settings` to check whether each selected model is ready or missing.
 
-For the default setup, download Moonshine Base, Kitten Nano, and Silero VAD:
+For the default setup, download Moonshine v2 Base, Kitten Nano, and Silero VAD:
 
 ```bash
 models_dir="${PI_VOICE_MODELS:-${XDG_CACHE_HOME:-$HOME/.cache}/pi-voice/models}"
 mkdir -p "$models_dir"
 cd "$models_dir"
 
-wget https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-moonshine-base-en-int8.tar.bz2
-tar xf sherpa-onnx-moonshine-base-en-int8.tar.bz2
-rm sherpa-onnx-moonshine-base-en-int8.tar.bz2
+wget https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-moonshine-base-en-quantized-2026-02-27.tar.bz2
+tar xf sherpa-onnx-moonshine-base-en-quantized-2026-02-27.tar.bz2
+rm sherpa-onnx-moonshine-base-en-quantized-2026-02-27.tar.bz2
 
-wget https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kitten-nano-en-v0_1-fp16.tar.bz2
-tar xf kitten-nano-en-v0_1-fp16.tar.bz2
-rm kitten-nano-en-v0_1-fp16.tar.bz2
+wget https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kitten-nano-en-v0_8-int8.tar.bz2
+tar xf kitten-nano-en-v0_8-int8.tar.bz2
+rm kitten-nano-en-v0_8-int8.tar.bz2
 
 wget https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx
+```
+
+Optional additions: Moonshine v2 Tiny for the smallest footprint, Parakeet TDT 0.6B v2 for the highest English accuracy, and Supertonic 3 for a 31-language speech model with ten voices:
+
+```bash
+wget https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-moonshine-tiny-en-quantized-2026-02-27.tar.bz2
+tar xf sherpa-onnx-moonshine-tiny-en-quantized-2026-02-27.tar.bz2 && rm sherpa-onnx-moonshine-tiny-en-quantized-2026-02-27.tar.bz2
+
+wget https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.tar.bz2
+tar xf sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.tar.bz2 && rm sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.tar.bz2
+
+wget https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-supertonic-3-tts-int8-2026-05-11.tar.bz2
+tar xf sherpa-onnx-supertonic-3-tts-int8-2026-05-11.tar.bz2 && rm sherpa-onnx-supertonic-3-tts-int8-2026-05-11.tar.bz2
 ```
 
 Silero VAD is recommended but optional. Without it, the extension sends the full recording to the transcription model.
@@ -92,7 +105,7 @@ The modal shows the complete local audio route:
 
 - Dictation model, with `Ready` or `Missing` beside each choice.
 - Speech model, with the same download status.
-- Local voice. Kitten exposes eight choices; Inflect shows `Fixed voice` and disables this row.
+- Local voice. Kitten exposes eight named choices, Supertonic 3 exposes ten indexed choices, and Inflect shows `Fixed voice` and disables this row.
 - Recording input, playback output, and Silero VAD status.
 
 A missing model stays visible but cannot be selected. Download it with the commands in [Model setup](#model-setup), then reopen `/voice:settings`.
@@ -108,7 +121,7 @@ The overlay shows the input level, elapsed recording time, and a partial transcr
 - Enter to stop recording, finalize the transcript, and paste it into the editor.
 - Escape, Ctrl+C, or Ctrl+X to cancel.
 
-The default transcription model is Moonshine Base int8. Silero VAD removes silence before final transcription. The extension also drops common filler hallucinations and trims repeated-word loops.
+The default transcription model is Moonshine v2 Base int8. Silero VAD removes silence before final transcription. The extension also drops common filler hallucinations and trims repeated-word loops.
 
 Hold-to-dictate requires Pi's interactive TUI. It supports terminals with key-release reporting and terminals that expose a usable Space auto-repeat sequence.
 
@@ -126,18 +139,18 @@ Model engines are loaded on first use and cached. This keeps them out of Pi's st
 
 ## Speech synthesis models
 
-| Model | Backend | Weight size | Voice | Local benchmark |
-|-------|---------|------------:|-------|----------------:|
-| `kitten-nano-en-v0_1-fp16` | sherpa-onnx | About 42 MB extracted | Eight selectable English voices | RTF 0.355 |
-| `inflect-nano-v2-onnx` | ONNX Runtime | 16.21 MB | One fixed English male voice | RTF 0.141 |
-| `inflect-micro-v2-onnx` | ONNX Runtime | 37.75 MB | One fixed English male voice | RTF 0.232 |
+| Model | Backend | Download size | Voice | Languages |
+|-------|---------|--------------:|-------|-----------|
+| `kitten-nano-en-v0_8-int8` | sherpa-onnx | 29 MB | Eight selectable English voices | English |
+| `supertonic-3-int8` | sherpa-onnx | 122 MB | Ten selectable voices | 31 |
+| `inflect-nano-v2-onnx` | ONNX Runtime | 16 MB extracted | One fixed English male voice | English |
+| `inflect-micro-v2-onnx` | ONNX Runtime | 38 MB extracted | One fixed English male voice | English |
 
-RTF is synthesis time divided by generated audio duration, so lower is faster. The Inflect measurements used the extension's inference path on the development machine. Nano generated 2.06 seconds of audio in 0.29 seconds; Micro generated 2.16 seconds in 0.50 seconds. Kitten was measured with a longer sample.
+Kitten Nano v0.8 is a 15M-parameter model that produces noticeably more natural speech than the previous v0.1 release while shipping smaller. Supertonic 3 is a 99M-parameter model covering 31 languages with ten speakers; it needs roughly 500 MB of RAM at synthesis time, and its upstream repository is no longer maintained (the weights remain available). The Inflect measurements used the extension's inference path on the development machine: Nano generated 2.06 seconds of audio in 0.29 seconds; Micro generated 2.16 seconds in 0.50 seconds.
 
 Inflect's official ONNX export uses a duration graph and a decode graph. The extension runs both through ONNX Runtime, uses eSpeak-ng for English phonemes, and joins long text at punctuation-aware boundaries. Inflect models have fixed voices, so the voice row in `/voice` becomes read-only while either one is active.
 
 Use `/voice` to switch models. The default remains Kitten Nano.
-
 ## Local voices
 
 Kitten Nano provides eight speaker choices:
@@ -153,13 +166,16 @@ Kitten Nano provides eight speaker choices:
 | `expr-voice-5-m` | Voice 5, masculine |
 | `expr-voice-5-f` | Voice 5, feminine |
 
-The default is `expr-voice-2-m`. Use the local voice row in `/voice` to choose another speaker. These choices apply only to Kitten Nano because both Inflect models have fixed voices.
+The default is `expr-voice-2-m`. Use the local voice row in `/voice` to choose another speaker. These choices apply to both Kitten models. Supertonic 3 exposes ten voices addressed by index (`Voice 1` through `Voice 10`); both Inflect models have fixed voices.
 
 ## Transcription models
 
 | Model | Notes |
 |-------|-------|
-| `moonshine-base-int8` | Default. Fast English transcription and good tolerance for noisy microphones. |
+| `moonshine-v2-base-en` | Default. Moonshine v2 (February 2026), trained on about 300k hours. More accurate than v1 with punctuation in the transcript. |
+| `moonshine-v2-tiny-en` | Smallest and fastest v2 model; accuracy comparable to v1 Base at half the size. |
+| `parakeet-tdt-0.6b-v2-int8` | NVIDIA Parakeet TDT 0.6B v2. Highest English accuracy with punctuation and capitalization. Large download (about 460 MB). |
+| `moonshine-base-int8` | Previous-generation Moonshine. Fast English transcription and good tolerance for noisy microphones. |
 | `whisper-tiny-en-int8` | Small general-purpose English model. |
 | `whisper-small-en-int8` | More accurate than Tiny, with higher CPU and memory use. |
 
@@ -179,11 +195,13 @@ The file contains the three selections:
 
 ```json
 {
-  "dictationModel": "whisper-tiny-en-int8",
-  "ttsModel": "inflect-nano-v2-onnx",
-  "voice": "expr-voice-3-f"
+  "dictationModel": "parakeet-tdt-0.6b-v2-int8",
+  "ttsModel": "supertonic-3-int8",
+  "voice": 4
 }
 ```
+
+Kitten voices are stored by name (`"expr-voice-3-f"`); Supertonic voices are stored by speaker index (`4`).
 
 Set `PI_VOICE_CONFIG` before starting Pi to use a different config path:
 
@@ -191,7 +209,7 @@ Set `PI_VOICE_CONFIG` before starting Pi to use a different config path:
 export PI_VOICE_CONFIG="$HOME/.config/pi-voice.json"
 ```
 
-Missing, malformed, and unknown values fall back to Moonshine Base, Kitten Nano, and `expr-voice-2-m`. Choosing a setting replaces its invalid value with a valid one.
+Missing, malformed, and unknown values fall back to Moonshine v2 Base, Kitten Nano, and `expr-voice-2-m`. Choosing a setting replaces its invalid value with a valid one.
 
 ### Model directory
 

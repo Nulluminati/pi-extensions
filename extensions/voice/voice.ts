@@ -55,13 +55,14 @@ import {
 import { addHoldToVoice } from "./src/hold.ts";
 import type { InflectTtsEngine as InflectTtsEngineType } from "./src/inflect.ts";
 import { InflectTtsEngine } from "./src/inflect.ts";
-import { buildKittenConfig, modelDirPath, TTS_MODELS } from "./src/models.ts";
+import { buildTtsConfig, modelDirPath, TTS_MODELS } from "./src/models.ts";
 import { loadOnnxRuntime, loadSherpa } from "./src/native.ts";
 import { runVoiceOverlay } from "./src/overlay.ts";
 import {
   createSpeechJob,
   playInflectSpeech,
   playKittenSpeech,
+  playSupertonicSpeech,
   stopSpeechJob,
 } from "./src/playback.ts";
 import { runVoiceSettings } from "./src/settings.ts";
@@ -89,6 +90,8 @@ export {
   buildKittenConfig,
   buildOfflineConfig,
   buildOnlineConfig,
+  buildSupertonicConfig,
+  buildTtsConfig,
   getModel,
   MODELS,
   modelDirPath,
@@ -150,8 +153,11 @@ export default async function voiceExtension(pi: ExtensionAPI) {
     model: TtsModelDef,
     modelsDir: string,
   ): Promise<{ sherpa: SherpaOnnx & TtsSherpa; engine: OfflineTtsInstance }> {
+    if (model.backend !== "kitten" && model.backend !== "supertonic") {
+      throw new Error(`Model ${model.id} does not use the sherpa speech engine.`);
+    }
     ttsSherpa ??= loadSherpa() as SherpaOnnx & TtsSherpa;
-    ttsEnginePromise ??= ttsSherpa.OfflineTts.createAsync(buildKittenConfig(model, modelsDir, 4));
+    ttsEnginePromise ??= ttsSherpa.OfflineTts.createAsync(buildTtsConfig(model, modelsDir, 4));
     try {
       return { sherpa: ttsSherpa, engine: await ttsEnginePromise };
     } catch (error) {
@@ -424,6 +430,16 @@ export default async function voiceExtension(pi: ExtensionAPI) {
           activeTtsModelId = modelId;
         },
         onSpeakerSelect: (speakerId) => {
+          const ttsModel = TTS_MODELS.find((model) => model.id === activeTtsModelId);
+          if (ttsModel?.backend === "supertonic") {
+            // Supertonic voices are unnamed speakers addressed by index.
+            if (speakerId < 0 || speakerId >= (ttsModel.speakerCount ?? 0)) {
+              throw new Error(`Unknown local voice index: ${speakerId}`);
+            }
+            saveActiveVoice(voiceConfigPath, speakerId);
+            activeSpeakerId = speakerId;
+            return;
+          }
           const voice = KITTEN_VOICES[speakerId];
           if (!voice) throw new Error(`Unknown local voice index: ${speakerId}`);
           saveActiveVoice(voiceConfigPath, voice);
@@ -452,6 +468,11 @@ export default async function voiceExtension(pi: ExtensionAPI) {
           if (ttsModel.backend === "kitten") {
             const { sherpa, engine } = await getTtsEngine(ttsModel, modelsDir);
             await playKittenSpeech(sherpa, engine, text, speakerId, job);
+            return;
+          }
+          if (ttsModel.backend === "supertonic") {
+            const { sherpa, engine } = await getTtsEngine(ttsModel, modelsDir);
+            await playSupertonicSpeech(sherpa, engine, text, speakerId, job);
             return;
           }
           const engine = await getInflectEngine(ttsModel, modelsDir);

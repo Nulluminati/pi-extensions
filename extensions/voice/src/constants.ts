@@ -22,11 +22,16 @@ export const HOLD_REPEAT_GAP_MS = 1200;
 
 export const HOLD_REPEAT_MIN_EVENTS = 2;
 
-export const DEFAULT_MODEL_ID = "moonshine-base-int8";
+export const DEFAULT_MODEL_ID = "moonshine-v2-base-en";
 
-export const DEFAULT_TTS_MODEL_ID = "kitten-nano-en-v0_1-fp16";
+export const DEFAULT_TTS_MODEL_ID = "kitten-nano-en-v0_8-int8";
 
 export const TTS_WIDGET_KEY = "voice-speak";
+
+// Supertonic 3 generates with a fixed denoising step count and language tag;
+// all shipped dictation models are English, so the voice language follows.
+export const SUPERTONIC_NUM_STEPS = 8;
+export const SUPERTONIC_LANG = "en";
 
 export const KITTEN_VOICES = [
   "expr-voice-2-m",
