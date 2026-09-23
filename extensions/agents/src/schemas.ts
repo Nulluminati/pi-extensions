@@ -41,7 +41,7 @@ export const WORKERS_PARAMETERS = {
     action: {
       enum: ["list", "status", "tail", "cancel", "collect", "remove"],
       description:
-        "Worker registry operation. tail: read the bounded stream tail of a running or finished worker (tool calls, assistant texts) without anything auto-delivering into the conversation. remove: delete a finished worker's record and artifacts (stream spool, patch).",
+        "Worker registry operation. tail: read the bounded stream tail of a running or finished worker (tool calls, assistant texts) without anything auto-delivering into the conversation. remove: delete a finished worker's record and artifacts (stream spool, patch) and discard its worktree and branch; on an id with no record but a leftover worktree, discards that worktree.",
     },
     id: {
       type: "string",

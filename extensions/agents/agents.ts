@@ -19,6 +19,7 @@
  * or worker-model.json; keep orchestration and judgment in the main session.
  */
 
+import { existsSync } from "node:fs";
 import type { ExtensionAPI, ExtensionContext, ExtensionUIContext } from "pi";
 import { excludeFromGit } from "../../lib/git.ts";
 import { projectStateRelative } from "../../lib/paths.ts";
@@ -56,6 +57,7 @@ import {
   WORKER_RETENTION_MS,
 } from "./src/store.ts";
 import type { WorkerEvents, WorkerRecord } from "./src/types.ts";
+import { discardWorktree, removeWorktree, worktreePath } from "./src/worktree.ts";
 
 // --- Constants ---
 
@@ -288,7 +290,26 @@ export default async function agentsExtension(pi: ExtensionAPI) {
       const live = state.running.get(id)?.record;
       const record: WorkerRecord | undefined =
         live ?? state.branchWorkers.get(id) ?? (await loadWorker(ctx.cwd, id));
-      if (!record) throw new Error(`Unknown worker ${id}. Use action=list to see workers.`);
+      if (!record) {
+        // No record file: the id may still own a leftover worktree (its
+        // record was pruned or lost). Explicit cleanup of that worktree.
+        if (action === "remove" && existsSync(worktreePath(ctx.cwd, id))) {
+          await removeWorktree(ctx.cwd, id);
+          const gone = !existsSync(worktreePath(ctx.cwd, id));
+          return {
+            content: [
+              {
+                type: "text",
+                text: gone
+                  ? `Leftover worktree for ${id} discarded (no worker record remained).`
+                  : `Warning: worktree removal failed for ${id}; remove it manually at ${worktreePath(ctx.cwd, id)}.`,
+              },
+            ],
+            details: { removed: gone ? id : undefined },
+          };
+        }
+        throw new Error(`Unknown worker ${id}. Use action=list to see workers.`);
+      }
 
       if (action === "tail") return tailWorkerStream(ctx.cwd, id, params.lines);
       if (action === "status") return workerStatusResponse(record);
@@ -311,14 +332,32 @@ export default async function agentsExtension(pi: ExtensionAPI) {
         );
       }
       if (action === "remove") {
+        if (record.status === "running") {
+          throw new Error(`Worker ${id} is still running; cancel it before removing.`);
+        }
+        // Deliberate abandonment: discard the worktree and branch too — but
+        // never when the patch file is gone and the worktree would be the
+        // only remaining copy of the worker's changes.
+        const worktreeOutcome = await discardWorktree(ctx.cwd, record);
+        if (worktreeOutcome === "kept") {
+          throw new Error(
+            `Patch file ${record.patchPath} is missing; keeping worktree ${record.worktree} so the worker's changes are not lost.`,
+          );
+        }
         await removeWorkerRecord(ctx.cwd, id);
         state.branchWorkers.delete(id);
         await publish(ctx);
+        const worktreeNote =
+          worktreeOutcome === "removed"
+            ? " Worktree and branch discarded."
+            : worktreeOutcome === "failed"
+              ? ` Warning: worktree removal failed; remove it manually at ${worktreePath(ctx.cwd, id)}.`
+              : "";
         return {
           content: [
             {
               type: "text",
-              text: `Worker ${id} removed: record, stream spool and patch deleted.`,
+              text: `Worker ${id} removed: record, stream spool and patch deleted.${worktreeNote}`,
             },
           ],
           details: { removed: id },
@@ -359,16 +398,24 @@ export default async function agentsExtension(pi: ExtensionAPI) {
       console.error(`[agents] git exclude failed: ${(error as Error).message}`);
     }
     // Janitor: leftovers from ended sessions are reported, never deleted
-    // silently; they stay collectable via workers (action=collect).
+    // silently; they stay collectable via workers (action=collect), and
+    // remove discards their worktrees.
     const sweep = await sweepWorkerArtifacts(ctx.cwd, new Set(state.branchWorkers.keys()));
-    if (sweep.orphans.length > 0 && ctx.hasUI) {
-      const ids = sweep.orphans
-        .slice(0, 5)
-        .map((w) => `${w.name} (${w.id}, ${w.status})`)
-        .join("; ");
-      const more = sweep.orphans.length > 5 ? ` … +${sweep.orphans.length - 5} more` : "";
+    const leftovers = sweep.orphans.length + sweep.unownedWorktrees.length;
+    if (leftovers > 0 && ctx.hasUI) {
+      const items = [
+        ...sweep.orphans.map((w) => `${w.name} (${w.id}, ${w.status})`),
+        ...sweep.unownedWorktrees.map((wid) => `${wid} (unowned worktree)`),
+      ];
+      const ids = items.slice(0, 5).join("; ");
+      const more = items.length > 5 ? ` … +${items.length - 5} more` : "";
+      const withWorktrees =
+        sweep.orphans.filter((w) => w.worktree !== undefined).length +
+        sweep.unownedWorktrees.length;
+      const worktreeNote =
+        withWorktrees > 0 ? ` ${withWorktrees} still hold worktree(s) on disk.` : "";
       ctx.ui.notify(
-        `${sweep.orphans.length} orphaned worker artifact(s) from ended sessions: ${ids}${more}. Inspect with workers (action=list, scope=orphans); collect or remove them explicitly.`,
+        `${leftovers} orphaned worker artifact(s) from ended sessions: ${ids}${more}.${worktreeNote} Inspect with workers (action=list, scope=orphans); collect or remove them explicitly — remove also discards leftover worktrees.`,
         "warning",
       );
     }

@@ -19,6 +19,7 @@ import { writeJsonAtomic } from "../../../lib/json-atomic.ts";
 import { projectStateDir } from "../../../lib/paths.ts";
 import { isProcessAlive } from "../../../lib/presence-shards.ts";
 import type { WorkerRecord } from "./types.ts";
+import { discardWorktree, worktreesDir } from "./worktree.ts";
 
 // --- Rétention ---
 
@@ -235,6 +236,9 @@ export interface ArtifactSweep {
   foreignLive: WorkerRecord[];
   /** Owning session is gone (or predates ownership): collectable leftovers. */
   orphans: WorkerRecord[];
+  /** Worktree directories with no record file at all (record pruned or
+   *  lost). Removable by id via workers (action=remove). */
+  unownedWorktrees: string[];
 }
 
 /**
@@ -247,14 +251,28 @@ export async function sweepWorkerArtifacts(
   cwd: string,
   myWorkerIds: ReadonlySet<string>,
 ): Promise<ArtifactSweep> {
-  const sweep: ArtifactSweep = { foreignLive: [], orphans: [] };
+  const sweep: ArtifactSweep = { foreignLive: [], orphans: [], unownedWorktrees: [] };
+  const recorded = new Set<string>();
   for (const record of await listRecordFiles(cwd)) {
+    recorded.add(record.id);
     if (myWorkerIds.has(record.id)) continue;
     if (record.parentPid !== undefined && isProcessAlive(record.parentPid)) {
       sweep.foreignLive.push(record);
     } else {
       sweep.orphans.push(record);
     }
+  }
+  // Worktree dirs whose record file is gone: the 7-day purge deletes the
+  // record while the worktree can survive a failed git removal, and legacy
+  // states may never have had one on this layout.
+  let entries: string[] = [];
+  try {
+    entries = await readdir(worktreesDir(cwd));
+  } catch {
+    return sweep;
+  }
+  for (const id of entries) {
+    if (!recorded.has(id)) sweep.unownedWorktrees.push(id);
   }
   return sweep;
 }
@@ -265,13 +283,24 @@ export async function sweepWorkerArtifacts(
  *  Records still running, and anything whose parent session may still want
  *  it, are never touched. Returns the pruned ids. */
 export async function pruneWorkerArtifacts(cwd: string, now = Date.now()): Promise<string[]> {
+  const all = await listRecordFiles(cwd);
+  const prunedRecords = new Map<string, WorkerRecord>();
   const pruned: string[] = [];
-  for (const record of await listRecordFiles(cwd)) {
+  for (const record of all) {
     if (record.status === "running") continue;
     if (record.endedAt === undefined || now - record.endedAt <= WORKER_RETENTION_MS) continue;
     pruned.push(record.id);
+    prunedRecords.set(record.id, record);
   }
   for (const id of pruned) {
+    // Worktree and branch go with the rest of the purge: retention deletes
+    // the captured patch too, so keeping the checkout would only strand an
+    // unowned worktree. The record carries the worktree path; find it again
+    // for the discard.
+    const record = prunedRecords.get(id);
+    if (record) {
+      await discardWorktree(cwd, record).catch(() => "failed");
+    }
     await unlink(recordPath(cwd, id)).catch(() => {});
     await unlink(streamPath(cwd, id)).catch(() => {});
     await unlink(join(patchesDir(cwd), `${id}.diff`)).catch(() => {});

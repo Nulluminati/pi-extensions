@@ -5,10 +5,12 @@
  * provide *isolation*, not security: workers still run with user privileges.
  */
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { runGit } from "../../../lib/git.ts";
 import { isProjectStatePath, projectStateDir } from "../../../lib/paths.ts";
+import type { WorkerRecord } from "./types.ts";
 
 // --- Constants ---
 
@@ -119,6 +121,32 @@ export async function removeWorktree(cwd: string, workerId: string): Promise<voi
   const path = worktreePath(cwd, workerId);
   await runGit(cwd, ["worktree", "remove", "--force", path]).catch(() => {});
   await runGit(cwd, ["branch", "-D", worktreeBranch(workerId)]).catch(() => {});
+}
+
+/** Outcome of a worktree discard attempt. */
+export type WorktreeDiscard = "removed" | "absent" | "kept" | "failed";
+
+/**
+ * Remove a worker's worktree and branch when its captured work is durably
+ * saved elsewhere (or no patch was ever captured — the failed/cancelled
+ * case that otherwise rots forever). Returns "kept" without touching
+ * anything when the record references a patch file that no longer exists:
+ * the worktree would be the only remaining copy of the worker's changes.
+ */
+export async function discardWorktree(
+  cwd: string,
+  record: Pick<WorkerRecord, "id" | "worktree" | "patchPath">,
+): Promise<WorktreeDiscard> {
+  if (record.worktree === undefined) return "absent";
+  if (record.patchPath !== undefined) {
+    const patchMissing = await access(record.patchPath).then(
+      () => false,
+      () => true,
+    );
+    if (patchMissing) return "kept";
+  }
+  await removeWorktree(cwd, record.id);
+  return existsSync(worktreePath(cwd, record.id)) ? "failed" : "removed";
 }
 
 /** Apply a worker patch file onto the main working tree. */
