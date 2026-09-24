@@ -58,6 +58,13 @@ function mailboxLockPath(cwd: string, name: string): string {
   return join(messengerDir(cwd), "inbox", `${encodeURIComponent(name)}.lock`);
 }
 
+/** Sibling of the mailbox holding lines that failed JSON.parse, byte for
+ *  byte, so corruption stays visible and recoverable instead of being
+ *  silently skipped or rewritten away. */
+function quarantinePath(cwd: string, name: string): string {
+  return `${inboxPath(cwd, name)}.quarantine`;
+}
+
 /** Mailbox filename for an agent name. Percent-encoding keeps a recipient
  *  like "../escape" from addressing a file outside the inbox directory. */
 export function inboxFileName(name: string): string {
@@ -211,6 +218,24 @@ function assertValidMailboxName(name: string): void {
   }
 }
 
+/** Splits JSONL content into non-blank lines, keeping both the trimmed text
+ *  (for parsing) and the original bytes including the newline (so malformed
+ *  lines can be moved to quarantine exactly as they were written). */
+function jsonlLines(raw: string): Array<{ text: string; bytes: string }> {
+  const lines: Array<{ text: string; bytes: string }> = [];
+  let start = 0;
+  while (start < raw.length) {
+    const newline = raw.indexOf("\n", start);
+    const end = newline === -1 ? raw.length : newline;
+    const text = raw.slice(start, end);
+    if (text.trim()) {
+      lines.push({ text, bytes: raw.slice(start, newline === -1 ? end : newline + 1) });
+    }
+    start = newline === -1 ? raw.length : newline + 1;
+  }
+  return lines;
+}
+
 export async function sendMessage(
   cwd: string,
   to: string,
@@ -233,32 +258,88 @@ export async function sendMessage(
   return message;
 }
 
+/** One inbox read: the still-unread messages, plus how many malformed lines
+ *  this read moved into quarantine. */
+export interface InboxRead {
+  unread: Message[];
+  quarantined: number;
+}
+
 /** Unread messages for `name`, oldest first. Only a missing mailbox reads as
  *  empty; an unreadable one fails visibly, so delivery never mistakes a
- *  broken mailbox for an empty one and later compaction cannot destroy it. */
-export async function readInbox(cwd: string, name: string): Promise<Message[]> {
+ *  broken mailbox for an empty one and later compaction cannot destroy it.
+ *  Malformed lines are not skipped: they are moved byte for byte into the
+ *  sibling `<mailbox>.quarantine` file (delivery continues, corruption stays
+ *  visible), and `quarantined` reports how many lines this read moved. */
+export async function readInbox(cwd: string, name: string): Promise<InboxRead> {
   const path = inboxPath(cwd, name);
   let raw: string;
   try {
     raw = await readFile(path, "utf8");
   } catch (error) {
-    if (isNodeError(error) && (error.code === "ENOENT" || error.code === "ENOTDIR")) return [];
+    if (isNodeError(error) && (error.code === "ENOENT" || error.code === "ENOTDIR")) {
+      return { unread: [], quarantined: 0 };
+    }
     throw new Error(`Mailbox ${path} is unreadable: ${String(error)}`);
   }
   const messages: Message[] = [];
-  for (const line of raw.split("\n")) {
-    if (!line.trim()) continue;
+  let malformed = false;
+  for (const { text } of jsonlLines(raw)) {
     try {
-      const parsed = JSON.parse(line) as Message;
+      const parsed = JSON.parse(text) as Message;
       if (parsed && typeof parsed.text === "string" && !parsed.read) messages.push(parsed);
     } catch {
-      // Skip malformed lines rather than failing the whole mailbox.
+      malformed = true;
     }
   }
-  return messages;
+  if (!malformed) return { unread: messages, quarantined: 0 };
+  // Quarantine under the mailbox lock so the rewrite cannot race sendMessage
+  // appends or markRead compaction. The locked body re-reads the mailbox, so
+  // mail appended since the unlocked scan above is never touched.
+  const quarantined = await withFileLock(mailboxLockPath(cwd, name), () =>
+    quarantineMalformedLocked(cwd, name),
+  );
+  return { unread: messages, quarantined };
 }
 
-/** Mark messages read by rewriting the mailbox without them. */
+/** Move every malformed line of the mailbox into the sibling quarantine file
+ *  and rewrite the mailbox without them. Caller holds the mailbox lock.
+ *  Returns the number of lines moved; zero when the mailbox is already
+ *  clean, so repeated reads never append duplicate quarantine entries. */
+async function quarantineMalformedLocked(cwd: string, name: string): Promise<number> {
+  const path = inboxPath(cwd, name);
+  let raw: string;
+  try {
+    raw = await readFile(path, "utf8");
+  } catch (error) {
+    if (isNodeError(error) && (error.code === "ENOENT" || error.code === "ENOTDIR")) return 0;
+    throw new Error(`Mailbox ${path} is unreadable: ${String(error)}`);
+  }
+  const kept: string[] = [];
+  const malformed: string[] = [];
+  for (const { text, bytes } of jsonlLines(raw)) {
+    try {
+      JSON.parse(text);
+      kept.push(text);
+    } catch {
+      malformed.push(bytes);
+    }
+  }
+  if (malformed.length === 0) return 0;
+  await appendFile(quarantinePath(cwd, name), malformed.join(""), "utf8");
+  if (kept.length === 0) {
+    await unlink(path).catch(() => {});
+    return malformed.length;
+  }
+  const tmp = `${path}.${process.pid}.${randomBytes(2).toString("hex")}.tmp`;
+  await writeFile(tmp, `${kept.join("\n")}\n`, "utf8");
+  await rename(tmp, path);
+  return malformed.length;
+}
+
+/** Mark messages read by rewriting the mailbox without them. Malformed lines
+ *  met during compaction move to the quarantine file instead of being
+ *  preserved in place. */
 export async function markRead(cwd: string, name: string, ids: string[]): Promise<void> {
   if (ids.length === 0) return;
   const path = inboxPath(cwd, name);
@@ -274,14 +355,17 @@ export async function markRead(cwd: string, name: string, ids: string[]): Promis
     }
     const idSet = new Set(ids);
     const kept: string[] = [];
-    for (const line of raw.split("\n")) {
-      if (!line.trim()) continue;
+    const malformed: string[] = [];
+    for (const { text, bytes } of jsonlLines(raw)) {
       try {
-        const parsed = JSON.parse(line) as Message;
-        if (!idSet.has(parsed.id)) kept.push(line);
+        const parsed = JSON.parse(text) as Message;
+        if (!idSet.has(parsed.id)) kept.push(text);
       } catch {
-        kept.push(line); // preserve malformed lines
+        malformed.push(bytes); // corrupted lines move to quarantine below
       }
+    }
+    if (malformed.length > 0) {
+      await appendFile(quarantinePath(cwd, name), malformed.join(""), "utf8");
     }
     if (kept.length === 0) {
       await unlink(path).catch(() => {});

@@ -31,7 +31,7 @@ export async function deliverUnreadMail(
   agentName: string,
   refreshStatus: (ctx: ExtensionContext) => Promise<number>,
 ): Promise<void> {
-  const unread = await readInbox(ctx.cwd, agentName);
+  const { unread } = await readInbox(ctx.cwd, agentName);
   if (unread.length === 0) return;
   if (!ctx.isIdle()) {
     await refreshStatus(ctx);

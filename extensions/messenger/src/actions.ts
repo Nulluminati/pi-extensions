@@ -89,7 +89,7 @@ export async function runMessengerAction(
   }
 
   if (action === "inbox") {
-    const unread = await readInbox(ctx.cwd, agentName);
+    const { unread } = await readInbox(ctx.cwd, agentName);
     await markRead(
       ctx.cwd,
       agentName,

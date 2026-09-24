@@ -175,13 +175,13 @@ describe("messenger-extension", () => {
     mockCtx.isIdle = vi.fn(() => false);
 
     await executeTool({ action: "send", to: "receiver", text: "hello from tests" });
-    expect(await readInbox(cwd, "receiver")).toHaveLength(1);
+    expect((await readInbox(cwd, "receiver")).unread).toHaveLength(1);
 
     const res = await executeTool({ action: "inbox" });
     expect(res.content[0].text).toContain("hello from tests");
     expect(res.details.count).toBe(1);
     // Cleared after reading.
-    expect(await readInbox(cwd, "receiver")).toHaveLength(0);
+    expect((await readInbox(cwd, "receiver")).unread).toHaveLength(0);
   });
 
   it("send warns when the recipient is offline but still stores mail", async () => {
@@ -190,7 +190,7 @@ describe("messenger-extension", () => {
 
     const res = await executeTool({ action: "send", to: "ghost", text: "anyone there?" });
     expect(res.content[0].text).toContain("not currently online");
-    expect(await readInbox(cwd, "ghost")).toHaveLength(1);
+    expect((await readInbox(cwd, "ghost")).unread).toHaveLength(1);
   });
 
   it("send is refused in a worker session (pull-only output boundary)", async () => {
@@ -205,7 +205,7 @@ describe("messenger-extension", () => {
       executeTool({ action: "send", to: "parent", text: "texte arbitraire du worker" }),
     ).rejects.toThrow(/worker/);
     // Rien n'a été déposé dans la mailbox du destinataire.
-    expect(await readInbox(cwd, "parent")).toHaveLength(0);
+    expect((await readInbox(cwd, "parent")).unread).toHaveLength(0);
   });
 
   it("reserve claims paths and tool_call blocks other agents from editing them", async () => {
@@ -302,7 +302,7 @@ describe("messenger-extension", () => {
     ]);
 
     expect(mockPi.sendMessage).toHaveBeenCalledTimes(1);
-    expect(await readInbox(cwd, "busy")).toHaveLength(0);
+    expect((await readInbox(cwd, "busy")).unread).toHaveLength(0);
   });
 
   it("agent_settled delivers unread mail into the conversation and marks it read", async () => {
@@ -327,7 +327,7 @@ describe("messenger-extension", () => {
       }),
       { triggerTurn: true },
     );
-    expect(await readInbox(cwd, "busy")).toHaveLength(0);
+    expect((await readInbox(cwd, "busy")).unread).toHaveLength(0);
   });
 
   it("incoming mail wakes an idle session without a settle", async () => {
@@ -346,7 +346,7 @@ describe("messenger-extension", () => {
       WATCHER_WAIT,
     );
     await vi.waitFor(
-      async () => expect(await readInbox(cwd, "watched")).toHaveLength(0),
+      async () => expect((await readInbox(cwd, "watched")).unread).toHaveLength(0),
       WATCHER_WAIT,
     );
   });
@@ -431,7 +431,7 @@ describe("messenger-extension", () => {
     expect((await loadReservations(cwd))["src/kept"]).toBeDefined();
     // Mailbox survives on purpose.
     await sendMessage(cwd, "returning", "x", "late mail");
-    expect(await readInbox(cwd, "returning")).toHaveLength(1);
+    expect((await readInbox(cwd, "returning")).unread).toHaveLength(1);
   });
 
   it("session_shutdown keeps claims for session-persisted identities too", async () => {
@@ -931,7 +931,7 @@ describe("messenger-store", () => {
   });
 
   it("readInbox treats a missing mailbox as empty but fails closed on an unreadable one", async () => {
-    expect(await readInbox(cwd, "ghost")).toEqual([]);
+    expect((await readInbox(cwd, "ghost")).unread).toEqual([]);
     await expect(markRead(cwd, "ghost", ["m1"])).resolves.toBeUndefined();
 
     // A directory where the mailbox should be makes the read fail with
@@ -987,19 +987,74 @@ describe("messenger-store", () => {
     expect(await readFile(shard, "utf8")).toBe("{not json");
   });
 
-  it("mailbox preserves malformed lines when marking read", async () => {
+  it("readInbox quarantines malformed lines and reports the count", async () => {
     await mkdir(join(cwd, CONFIG_DIR_NAME, "messenger", "inbox"), { recursive: true });
     const path = join(cwd, CONFIG_DIR_NAME, "messenger", "inbox", "a.jsonl");
+    const quarantine = join(cwd, CONFIG_DIR_NAME, "messenger", "inbox", "a.jsonl.quarantine");
+    const good = { id: "m1", from: "x", to: "a", text: "hi", at: 1 };
+    await writeFile(path, `${JSON.stringify(good)}\nnot-json\n{"broken": `, "utf8");
+
+    const { unread, quarantined } = await readInbox(cwd, "a");
+    expect(unread).toHaveLength(1);
+    expect(unread[0]?.id).toBe("m1");
+    expect(quarantined).toBe(2);
+
+    // The junk is out of the main mailbox and preserved beside it, byte for
+    // byte, so corruption is visible and recoverable instead of hidden.
+    const raw = await readFile(path, "utf8");
+    expect(raw).not.toContain("not-json");
+    expect(raw).not.toContain("broken");
+    expect(raw).toContain("m1");
+    expect(await readFile(quarantine, "utf8")).toBe('not-json\n{"broken": ');
+  });
+
+  it("readInbox on a clean mailbox reports zero quarantined and writes no quarantine file", async () => {
+    await sendMessage(cwd, "a", "peer", "valid mail");
+
+    const { unread, quarantined } = await readInbox(cwd, "a");
+    expect(unread).toHaveLength(1);
+    expect(quarantined).toBe(0);
+    expect(existsSync(join(cwd, CONFIG_DIR_NAME, "messenger", "inbox", "a.jsonl.quarantine"))).toBe(
+      false,
+    );
+  });
+
+  it("markRead quarantines malformed lines instead of preserving them", async () => {
+    await mkdir(join(cwd, CONFIG_DIR_NAME, "messenger", "inbox"), { recursive: true });
+    const path = join(cwd, CONFIG_DIR_NAME, "messenger", "inbox", "a.jsonl");
+    const quarantine = join(cwd, CONFIG_DIR_NAME, "messenger", "inbox", "a.jsonl.quarantine");
     const good = { id: "m1", from: "x", to: "a", text: "hi", at: 1 };
     await writeFile(path, `${JSON.stringify(good)}\nnot-json\n`, "utf8");
 
-    const unread = await readInbox(cwd, "a");
+    const { unread } = await readInbox(cwd, "a");
     expect(unread).toHaveLength(1);
 
+    // Corruption that lands after the read is markRead's to handle: the
+    // compaction pass must move it to quarantine, not preserve it in place.
+    await writeFile(path, `${JSON.stringify(good)}\nrecorrupted\n`, "utf8");
+
     await markRead(cwd, "a", ["m1"]);
-    const raw = await readFile(path, "utf8");
-    expect(raw).toContain("not-json");
-    expect(raw).not.toContain("m1");
+    // Every message is read, so the mailbox compacts away entirely; the
+    // corrupted lines survive only in the quarantine file.
+    expect(existsSync(path)).toBe(false);
+    expect(await readFile(quarantine, "utf8")).toBe("not-json\nrecorrupted\n");
+  });
+
+  it("markRead after readInbox does not duplicate quarantine entries", async () => {
+    // readInbox already moved the junk; the compaction pass must not append
+    // a second copy to the quarantine file.
+    await mkdir(join(cwd, CONFIG_DIR_NAME, "messenger", "inbox"), { recursive: true });
+    const path = join(cwd, CONFIG_DIR_NAME, "messenger", "inbox", "a.jsonl");
+    const quarantine = join(cwd, CONFIG_DIR_NAME, "messenger", "inbox", "a.jsonl.quarantine");
+    const good = { id: "m1", from: "x", to: "a", text: "hi", at: 1 };
+    await writeFile(path, `${JSON.stringify(good)}\nnot-json\n`, "utf8");
+
+    await readInbox(cwd, "a");
+    expect(await readFile(quarantine, "utf8")).toBe("not-json\n");
+
+    await markRead(cwd, "a", ["m1"]);
+    expect(await readFile(quarantine, "utf8")).toBe("not-json\n");
+    expect(existsSync(path)).toBe(false);
   });
 
   it("inboxPath encodes the agent name so traversal names stay inside the inbox", () => {
@@ -1115,7 +1170,7 @@ describe("messenger-store", () => {
     await Promise.all(
       Array.from({ length: 30 }, (_, i) => sendMessage(cwd, "a", "peer", `old-${i}`)),
     );
-    const unread = await readInbox(cwd, "a");
+    const { unread } = await readInbox(cwd, "a");
     const oldIds = unread.slice(0, 15).map((m) => m.id);
 
     await Promise.all([
@@ -1123,7 +1178,7 @@ describe("messenger-store", () => {
       ...Array.from({ length: 15 }, (_, i) => sendMessage(cwd, "a", "peer", `new-${i}`)),
     ]);
 
-    const remaining = await readInbox(cwd, "a");
+    const remaining = (await readInbox(cwd, "a")).unread;
     expect(remaining.filter((m) => m.text.startsWith("new-"))).toHaveLength(15);
     expect(remaining.filter((m) => m.text.startsWith("old-"))).toHaveLength(15);
   });
@@ -1151,7 +1206,7 @@ describe("messenger-store", () => {
     } finally {
       nowSpy.mockRestore();
     }
-    const messages = await readInbox(cwd, "a");
+    const messages = (await readInbox(cwd, "a")).unread;
     expect(messages).toHaveLength(5);
     expect(new Set(messages.map((m) => m.id)).size).toBe(5);
   });

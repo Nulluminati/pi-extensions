@@ -3,7 +3,7 @@
 - Category: bug (data integrity)
 - Severity: lower
 - Found during: PR #33 second-round review, 2026-09-21
-- Status: open
+- Status: resolved — `readInbox` and `markRead` now move malformed lines byte-for-byte into a sibling `<mailbox>.quarantine` file under the mailbox lock, and `readInbox` returns `{ unread, quarantined }` so the count is visible to callers.
 
 ## Evidence
 

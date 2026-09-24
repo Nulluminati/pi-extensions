@@ -58,7 +58,7 @@ export default async function messengerExtension(pi: ExtensionAPI) {
   // --- Status ---
 
   async function refreshStatus(ctx: ExtensionContext): Promise<number> {
-    const unread = agentName ? await readInbox(ctx.cwd, agentName) : [];
+    const unread = agentName ? (await readInbox(ctx.cwd, agentName)).unread : [];
     pi.events.emit(MESSENGER_STATE_EVENT, {
       name: agentName || null,
       unread: unread.length,
