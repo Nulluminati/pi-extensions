@@ -11,7 +11,7 @@ import { join, resolve, sep } from "node:path";
 import { withFileLock } from "../../../lib/file-lock.ts";
 import { writeJsonAtomic } from "../../../lib/json-atomic.ts";
 import { projectStateDir } from "../../../lib/paths.ts";
-import type { Mission, MissionSummary, TaskStatus } from "./types.ts";
+import type { Mission, MissionListResult, MissionSummary, TaskStatus } from "./types.ts";
 
 // --- Constants ---
 
@@ -231,21 +231,31 @@ export async function loadMission(cwd: string, id: string): Promise<Mission | un
   return parsed;
 }
 
-export async function listMissionSummaries(cwd: string): Promise<MissionSummary[]> {
+export async function listMissionSummaries(cwd: string): Promise<MissionListResult> {
   let files: string[] = [];
   try {
     files = await readdir(missionsDir(cwd));
   } catch {
-    return [];
+    return { summaries: [], skipped: [] };
   }
   const summaries: MissionSummary[] = [];
+  const skipped: string[] = [];
   for (const file of files) {
     if (!file.endsWith(".json")) continue;
     const stem = file.replace(/\.json$/, "");
     // Stray files that do not carry a valid mission id are skipped: a
     // listing must not crash on hand-created or foreign files.
     if (!isMissionId(stem)) continue;
-    const mission = await loadMission(cwd, stem);
+    // A corrupt file (invalid JSON, wrong shape, or mismatched stored id)
+    // must not fail the whole listing either: skip it and report it so the
+    // user can find and repair the file.
+    let mission: Mission | undefined;
+    try {
+      mission = await loadMission(cwd, stem);
+    } catch {
+      skipped.push(file);
+      continue;
+    }
     if (!mission) continue;
     const taskCounts = Object.fromEntries(ALL_TASK_STATUSES.map((s) => [s, 0])) as Record<
       TaskStatus,
@@ -260,5 +270,5 @@ export async function listMissionSummaries(cwd: string): Promise<MissionSummary[
       taskCounts,
     });
   }
-  return summaries.sort((a, b) => b.updatedAt - a.updatedAt);
+  return { summaries: summaries.sort((a, b) => b.updatedAt - a.updatedAt), skipped };
 }

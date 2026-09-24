@@ -3,7 +3,7 @@
 - Category: bug (robustness)
 - Severity: lower
 - Found during: PR #33 second-round review, 2026-09-21
-- Status: open
+- Status: resolved — `listMissionSummaries` now skips unreadable mission files and reports their filenames (`{ summaries, skipped }`; surfaced by `mission (action=list)` and `/missions`).
 
 ## Evidence
 

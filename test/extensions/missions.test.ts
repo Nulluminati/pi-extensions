@@ -11,6 +11,7 @@ import {
   generateCheckpointId,
   generateMissionId,
   generateTaskId,
+  listMissionSummaries,
   loadMission,
   missionsDir,
   validateCheckpointId,
@@ -577,6 +578,52 @@ describe("missions-extension", () => {
     // reads (switch loads the file directly).
     await expect(executeTool({ action: "status" })).rejects.toThrow(/No active mission/);
     await expect(executeTool({ action: "switch", id })).rejects.toThrow(/corrupt/);
+  });
+
+  it("list skips a corrupt mission file and reports its filename while still listing others", async () => {
+    await executeTool({ action: "create", title: "healthy", objective: "o" });
+    const corruptFile = `${generateMissionId()}.json`;
+    await writeFile(join(cwd, CONFIG_DIR_NAME, "missions", corruptFile), "{ this is not json");
+
+    const res = await executeTool({ action: "list" });
+    const text = res.content[0].text as string;
+    expect(text).toContain("healthy");
+    expect(text).toContain(corruptFile);
+    expect(res.details.count).toBe(1);
+    expect(res.details.skipped).toEqual([corruptFile]);
+  });
+
+  it("listMissionSummaries skips mission files that fail to load and reports them", async () => {
+    await mkdir(join(cwd, CONFIG_DIR_NAME, "missions"), { recursive: true });
+    // Stored under a valid-id filename, but the record's own id points
+    // elsewhere: loadMission refuses to operate on it.
+    const mismatchFile = `${generateMissionId()}.json`;
+    const storedId = generateMissionId();
+    await writeFile(
+      join(cwd, CONFIG_DIR_NAME, "missions", mismatchFile),
+      JSON.stringify({
+        id: storedId,
+        title: "mismatched",
+        objective: "o",
+        status: "planning",
+        tasks: [],
+        checkpoints: [],
+        decisions: [],
+        updatedAt: 1,
+      }),
+    );
+    // Right id shape, wrong record shape.
+    const shapeFile = `${generateMissionId()}.json`;
+    await writeFile(
+      join(cwd, CONFIG_DIR_NAME, "missions", shapeFile),
+      JSON.stringify({ nope: true }),
+    );
+
+    const { summaries, skipped } = await listMissionSummaries(cwd);
+    expect(summaries).toEqual([]);
+    expect(skipped).toHaveLength(2);
+    expect(skipped).toContain(mismatchFile);
+    expect(skipped).toContain(shapeFile);
   });
 
   it("generateMissionId produces unique ids for 1000 calls in one millisecond", () => {

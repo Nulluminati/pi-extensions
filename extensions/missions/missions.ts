@@ -30,6 +30,7 @@ import {
   formatMissionStatus,
   formatMissionSummaries,
   formatReconcileReport,
+  formatSkippedMissions,
   formatStatus,
   MISSION_STATE_EVENT,
   MISSION_STATUS_KEY,
@@ -122,8 +123,8 @@ export default async function missionsExtension(pi: ExtensionAPI) {
     description: "List all missions for this project",
     handler: async (_args: string, ctx: ExtensionCommandContext) => {
       if (!ctx.hasUI) return;
-      const summaries = await listMissionSummaries(ctx.cwd);
-      ctx.ui.notify(formatMissionSummaries(summaries), "info");
+      const { summaries, skipped } = await listMissionSummaries(ctx.cwd);
+      ctx.ui.notify(formatMissionSummaries(summaries) + formatSkippedMissions(skipped), "info");
     },
   });
 

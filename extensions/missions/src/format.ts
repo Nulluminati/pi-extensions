@@ -149,6 +149,12 @@ export function formatMissionSummaries(summaries: MissionSummary[]): string {
     .join("\n");
 }
 
+/** Note appended to a listing when some mission files could not be read. */
+export function formatSkippedMissions(skipped: string[]): string {
+  if (skipped.length === 0) return "";
+  return `\n\nSkipped ${skipped.length} unreadable mission file(s): ${skipped.join(", ")}`;
+}
+
 export function formatReconcileReport(report: ReconcileReport): string {
   const lines = [
     `Reconciled ${report.missionId}: ${report.checked} verified task(s) re-checked, ${report.passed} passed.`,

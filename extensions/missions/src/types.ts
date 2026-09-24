@@ -70,6 +70,13 @@ export interface MissionSummary {
   taskCounts: Record<TaskStatus, number>;
 }
 
+/** Result of listing missions: readable summaries plus files that were skipped. */
+export interface MissionListResult {
+  summaries: MissionSummary[];
+  /** Filenames of mission files that could not be read (corrupt content). */
+  skipped: string[];
+}
+
 /** Result of re-running verification commands for a mission's done tasks. */
 export interface ReconcileReport {
   missionId: string;

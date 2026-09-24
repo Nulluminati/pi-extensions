@@ -12,7 +12,12 @@
 import { exec as execCb } from "node:child_process";
 import { promisify } from "node:util";
 import type { AgentToolResult, ExtensionContext } from "pi";
-import { formatMissionStatus, formatMissionSummaries, formatReconcileReport } from "./format.ts";
+import {
+  formatMissionStatus,
+  formatMissionSummaries,
+  formatReconcileReport,
+  formatSkippedMissions,
+} from "./format.ts";
 import {
   addCheckpoint,
   addDecision,
@@ -178,10 +183,12 @@ export async function executeMissionAction(
   }
 
   if (action === "list") {
-    const summaries = await listMissionSummaries(ctx.cwd);
+    const { summaries, skipped } = await listMissionSummaries(ctx.cwd);
     return {
-      content: [{ type: "text", text: formatMissionSummaries(summaries) }],
-      details: { count: summaries.length },
+      content: [
+        { type: "text", text: formatMissionSummaries(summaries) + formatSkippedMissions(skipped) },
+      ],
+      details: { count: summaries.length, skipped },
     };
   }
 
