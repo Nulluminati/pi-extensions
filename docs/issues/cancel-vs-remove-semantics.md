@@ -3,7 +3,7 @@
 - Category: UX/design (operability)
 - Severity: lower
 - Found during: PR #33 second-round review, 2026-09-21
-- Status: open (partially addressed by the session-scoping rework)
+- Status: resolved (2026-09-24)
 
 ## Evidence
 
@@ -40,3 +40,20 @@ slot) is documented only in these descriptions, not in `promptGuidelines`,
 and cancel's error message for a foreign *live* session's worker still does
 not redirect to a useful action. Decide whether to fold the lifecycle into
 the delegate promptGuidelines or leave it to tool descriptions.
+
+## Resolution (2026-09-24)
+
+All three changes landed:
+
+1. The delegate tool's `promptGuidelines` now carry a lifecycle guideline:
+   only running workers hold a slot, workers in a terminal state consume
+   none, `cancel` stops a live process, `remove` deletes the terminal
+   worker's record and artifacts, and relaunching is just delegating again.
+2. The `workers` tool description and the `action` parameter description in
+   `src/schemas.ts` state the same lifecycle explicitly up front.
+3. `cancelWorker` redirects: a terminal-state worker now answers "is already
+   <status>; its slot is free. Use action=remove to delete the record and
+   artifacts, or delegate to start a new worker." (both the no-live-record
+   error and the raced-at-exit response), and the foreign-live error now
+   clarifies the worker holds no slot in this session and points at
+   `workers action=list scope=all` or a fresh `delegate`.

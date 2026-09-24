@@ -284,6 +284,7 @@ export default async function agentsExtension(pi: ExtensionAPI) {
       "Use delegate when a task is separable and well-specified: scouting a subsystem, mechanical edits across files, or trying an approach in isolation. Write the task so a fresh session with no conversation history can succeed: goal, files, constraints, verification.",
       "Do not delegate vague or judgment-heavy work; workers use the globally configured worker model. Escalate to the main session when a worker fails twice or the task turns ambiguous.",
       "After delegating, do not block: you are woken when the worker exits. Read its report with workers (action=status). Apply an implementation worker's patch with action=collect; planning workers are read-only and produce no patch.",
+      "Worker slots free themselves: only a running worker holds a slot, and a worker in a terminal state (completed, failed, timeout, cancelled) consumes none — never cancel it. cancel stops a live process; remove deletes a terminal worker's record and artifacts; to relaunch, just delegate again.",
     ],
     parameters: DELEGATE_PARAMETERS,
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
@@ -326,7 +327,7 @@ export default async function agentsExtension(pi: ExtensionAPI) {
     name: "workers",
     label: "Workers",
     description:
-      "Manage delegated worker sessions: list this session's workers (optionally orphans left by ended sessions), read a worker's report (status), cancel a running worker, or collect an isolated worker's patch into the working tree (collect).",
+      "Manage delegated worker sessions: list this session's workers (optionally orphans left by ended sessions), read a worker's report (status), cancel a running worker, or collect an isolated worker's patch into the working tree (collect). Lifecycle: only running workers hold a delegate slot — workers in a terminal state consume none. cancel stops a live process; remove deletes a terminal worker's record, artifacts, and worktree; to relaunch, just delegate again.",
     parameters: WORKERS_PARAMETERS,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       lastUi = ctx.ui;
@@ -391,7 +392,12 @@ export default async function agentsExtension(pi: ExtensionAPI) {
         }
         if (record.status !== "running") {
           return {
-            content: [{ type: "text", text: `Worker ${record.name} is already ${record.status}.` }],
+            content: [
+              {
+                type: "text",
+                text: `Worker ${record.name} is already ${record.status}; its slot is free. Use action=remove to delete the record and artifacts, or delegate to start a new worker.`,
+              },
+            ],
             details: { worker: record },
           };
         }

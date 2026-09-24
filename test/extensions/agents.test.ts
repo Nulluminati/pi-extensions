@@ -279,6 +279,16 @@ describe("agents-extension", () => {
     expect(definitions.some((definition) => definition.name === "workers")).toBe(true);
   });
 
+  it("delegate promptGuidelines state the worker slot lifecycle", () => {
+    const delegate = mockPi.registerTool.mock.calls.find((c) => c[0].name === "delegate")?.[0];
+    const guidelines = (delegate?.promptGuidelines ?? []).join(" ");
+    expect(guidelines).toContain("slot");
+    expect(guidelines).toContain("terminal state");
+    expect(guidelines).toContain("cancel");
+    expect(guidelines).toContain("remove");
+    expect(guidelines).toContain("delegate again");
+  });
+
   it("delegate throws on an empty task", async () => {
     await expect(executeTool("delegate", { task: "   " })).rejects.toThrow(
       /delegate requires task/,
@@ -884,6 +894,18 @@ sleep 30
     expect(cancelled.details.worker.status).toBe("cancelled");
     const record = await loadWorker(cwd, id);
     expect(record?.status).toBe("cancelled");
+  });
+
+  it("workers cancel on a terminal worker reports the free slot and redirects to remove", async () => {
+    // The observed failure mode: cancel called repeatedly on an already-dead
+    // worker because the response did not name the action that helps.
+    await seedRecord(cwd, makeWorkerRecord({ id: "w-timed", name: "timed", status: "timeout" }));
+
+    const result = await executeTool("workers", { action: "cancel", id: "w-timed" });
+    expect(result.content[0].text).toContain("is already timeout");
+    expect(result.content[0].text).toContain("slot is free");
+    expect(result.content[0].text).toContain("action=remove");
+    expect(result.content[0].text).toContain("delegate to start a new worker");
   });
 
   it("workers collect applies an isolated worker's patch and cleans up, keeping the stream", async () => {

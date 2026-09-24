@@ -153,8 +153,8 @@ export async function cancelWorker(options: {
   if (!runningWorker) {
     throw new Error(
       record.status === "running"
-        ? `Worker ${id} belongs to another session or an earlier run and cannot be cancelled here (pid ${record.pid ?? "?"}).`
-        : `Worker ${id} is already ${record.status}.`,
+        ? `Worker ${id} belongs to another session or an earlier run and cannot be cancelled here (pid ${record.pid ?? "?"}); it holds no slot in this session. Track it with workers action=list scope=all, or delegate to start a new worker.`
+        : `Worker ${id} is already ${record.status}; its slot is free. Use action=remove to delete the record and artifacts, or delegate to start a new worker.`,
     );
   }
   await runningWorker.cancel();
@@ -166,7 +166,12 @@ export async function cancelWorker(options: {
   const status = runningWorker.record.status;
   if (status !== "cancelled") {
     return {
-      content: [{ type: "text", text: `Worker ${record.name} is already ${status}.` }],
+      content: [
+        {
+          type: "text",
+          text: `Worker ${record.name} is already ${status}; its slot is free. Use action=remove to delete the record and artifacts, or delegate to start a new worker.`,
+        },
+      ],
       details: { worker: runningWorker.record },
     };
   }
