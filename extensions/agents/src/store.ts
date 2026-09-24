@@ -55,6 +55,12 @@ export function streamPath(cwd: string, workerId: string): string {
   return join(streamsDir(cwd), `${workerId}.jsonl`);
 }
 
+/** Child stderr capture: written by the child itself (survives parent
+ *  death), read for failure detail at finalization. */
+export function stderrLogPath(cwd: string, workerId: string): string {
+  return join(streamsDir(cwd), `${workerId}.stderr.log`);
+}
+
 /** Stream spool cap: past this, the runner stops appending and records a
  *  truncation marker (the head of the stream is preserved). */
 export const STREAM_MAX_BYTES = 512 * 1024;
@@ -207,35 +213,18 @@ export function persistWorkerRecord(
   return task;
 }
 
-// --- Reconciliation ---
-
-/**
- * Mark the session's own stuck-running records failed when their worker pid
- * is dead (the parent died before the worker finished, or the worker
- * process vanished). Returns the changed records for the caller to persist;
- * records without a pid (spawn never completed) are left for the caller.
- */
-export function reconcileRunning(workers: Iterable<WorkerRecord>): WorkerRecord[] {
-  const changed: WorkerRecord[] = [];
-  for (const worker of workers) {
-    if (worker.status !== "running" || worker.pid === undefined) continue;
-    if (isProcessAlive(worker.pid)) continue;
-    worker.status = "failed";
-    worker.error = "worker process is gone (session ended before completion)";
-    worker.endedAt = Date.now();
-    changed.push(worker);
-  }
-  return changed;
-}
-
 // --- Janitor ---
 
 /** Classification of artifact records left by other sessions. */
 export interface ArtifactSweep {
-  /** Worker process still alive: running under another live session. */
+  /** Live parent session: theirs, whatever the status. */
   foreignLive: WorkerRecord[];
-  /** Owning session is gone (or predates ownership): collectable leftovers. */
-  orphans: WorkerRecord[];
+  /** Running but parent session dead: alive right now, killable, watched
+   *  for finalization by the sweeping session. */
+  liveOrphans: WorkerRecord[];
+  /** Terminal records whose owning session is gone (or predates
+   *  ownership): collectable, silent, drained by retention. */
+  terminalOrphans: WorkerRecord[];
   /** Worktree directories with no record file at all (record pruned or
    *  lost). Removable by id via workers (action=remove). */
   unownedWorktrees: string[];
@@ -251,16 +240,30 @@ export async function sweepWorkerArtifacts(
   cwd: string,
   myWorkerIds: ReadonlySet<string>,
 ): Promise<ArtifactSweep> {
-  const sweep: ArtifactSweep = { foreignLive: [], orphans: [], unownedWorktrees: [] };
+  const sweep: ArtifactSweep = {
+    foreignLive: [],
+    liveOrphans: [],
+    terminalOrphans: [],
+    unownedWorktrees: [],
+  };
   const recorded = new Set<string>();
   for (const record of await listRecordFiles(cwd)) {
     recorded.add(record.id);
     if (myWorkerIds.has(record.id)) continue;
-    if (record.parentPid !== undefined && isProcessAlive(record.parentPid)) {
+    const parentAlive = record.parentPid !== undefined && isProcessAlive(record.parentPid);
+    if (parentAlive) {
       sweep.foreignLive.push(record);
-    } else {
-      sweep.orphans.push(record);
+      continue;
     }
+    if (record.status === "running") {
+      const workerAlive = record.pid !== undefined && isProcessAlive(record.pid);
+      if (workerAlive) sweep.liveOrphans.push(record);
+      // Running with a dead worker pid is NOT classified here: it is a
+      // finalization candidate (finalizeStaleWorkers) and disappears from
+      // the sweep once terminalized.
+      continue;
+    }
+    sweep.terminalOrphans.push(record);
   }
   // Worktree dirs whose record file is gone: the 7-day purge deletes the
   // record while the worktree can survive a failed git removal, and legacy
@@ -308,9 +311,16 @@ export async function pruneWorkerArtifacts(cwd: string, now = Date.now()): Promi
   return pruned;
 }
 
-/** Delete stream spool files that no record file claims and whose worker
- *  finished more than a day ago; post-mortem tails stay available for a day. */
-export async function pruneStreams(cwd: string, now = Date.now()): Promise<void> {
+/** Delete stream spool files that no record claims and whose worker
+ *  finished more than a day ago; post-mortem tails stay available for a day.
+ *  `protectIds` are spared unconditionally — transcript-owned running
+ *  workers whose record file does not exist yet (adoption pending) would
+ *  otherwise lose their spool before finalization can read it. */
+export async function pruneStreams(
+  cwd: string,
+  now = Date.now(),
+  protectIds: ReadonlySet<string> = new Set(),
+): Promise<void> {
   const records = new Map((await listRecordFiles(cwd)).map((r) => [r.id, r]));
   let files: string[] = [];
   try {
@@ -320,6 +330,7 @@ export async function pruneStreams(cwd: string, now = Date.now()): Promise<void>
   }
   for (const file of files) {
     const id = file.replace(/\.jsonl$/, "");
+    if (protectIds.has(id)) continue;
     const record = records.get(id);
     // Running workers keep their stream; known terminal records keep it for a
     // day (post-mortem tails); everything else is an orphan and goes.

@@ -227,7 +227,7 @@ export async function startDelegatedWorker(
     const sandbox = true;
     const readOnly = parentPlanning;
 
-    runningWorker = startWorker({
+    runningWorker = await startWorker({
       cwd,
       task,
       model,

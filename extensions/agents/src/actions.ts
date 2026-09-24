@@ -8,8 +8,13 @@
 import { existsSync } from "node:fs";
 import { access, readFile } from "node:fs/promises";
 import type { AgentToolResult } from "pi";
-import { formatStreamEntries, formatWorkerLine, formatWorkerStatus } from "./format.ts";
-import type { RunningWorker } from "./runner.ts";
+import {
+  formatRawStreamEntries,
+  formatStreamEntries,
+  formatWorkerLine,
+  formatWorkerStatus,
+} from "./format.ts";
+import { type RunningWorker, readSpoolLines } from "./runner.ts";
 import { streamPath } from "./store.ts";
 import type { WorkerRecord } from "./types.ts";
 import { applyPatch, removeWorktree, worktreePath } from "./worktree.ts";
@@ -86,23 +91,31 @@ export function listWorkers(options: {
   };
 }
 
-/** Last N spool stream entries for one worker (post-mortem tails included). */
+/** Last N spool stream entries for one worker (post-mortem tails included).
+ *  Raw-format spools are read bounded (the child may have written a lot);
+ *  legacy projected spools are small and read whole. */
 export async function tailWorkerStream(
   cwd: string,
   id: string,
   requestedLines: number | undefined,
+  record: WorkerRecord,
 ): Promise<AgentToolResult> {
   const lines =
     typeof requestedLines === "number" && requestedLines > 0 ? Math.floor(requestedLines) : 40;
-  let raw = "";
-  try {
-    raw = await readFile(streamPath(cwd, id), "utf8");
-  } catch {
-    throw new Error(
-      `No stream captured for worker ${id}. Streams exist for workers started after this feature landed.`,
-    );
-  }
-  const all = formatStreamEntries(raw);
+  const all =
+    record.streamFormat === "raw"
+      ? formatRawStreamEntries(await readSpoolLines(cwd, id))
+      : await (async () => {
+          let raw = "";
+          try {
+            raw = await readFile(streamPath(cwd, id), "utf8");
+          } catch {
+            throw new Error(
+              `No stream captured for worker ${id}. Streams exist for workers started after this feature landed.`,
+            );
+          }
+          return formatStreamEntries(raw);
+        })();
   const shown = all.slice(-lines);
   const text =
     shown.length > 0

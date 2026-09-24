@@ -9,7 +9,11 @@ import type { ExtensionAPI, ExtensionContext } from "pi";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import agentsExtension from "../../extensions/agents/agents.ts";
 import { createWorkersWidget } from "../../extensions/agents/src/format.ts";
-import { extractAssistantText } from "../../extensions/agents/src/runner.ts";
+import {
+  extractAssistantText,
+  finalizeWorker,
+  killPidTree,
+} from "../../extensions/agents/src/runner.ts";
 import {
   generateWorkerId,
   listRecordFiles,
@@ -18,7 +22,6 @@ import {
   migrateLegacyRegistry,
   persistWorkerRecord,
   pruneWorkerArtifacts,
-  reconcileRunning,
   streamPath,
   sweepWorkerArtifacts,
   updateRecordFile,
@@ -750,16 +753,50 @@ sleep 30
     expect(record?.outputText).toBe("final report");
   });
 
-  it("session_start reconciles orphaned running workers", async () => {
+  it("session_start salvage-finalizes an own stuck worker that finished while away", async () => {
     const id = generateWorkerId();
-    // A running record restored from the session transcript (pi -r) whose
-    // worker pid is dead: session_start heals it and persists the fix.
+    // Restored by pi -r as running; the worker pid is dead but its raw
+    // spool holds a final report: status must be completed, not failed.
     const record = makeWorkerRecord({
       id,
       name: "ghost",
       pid: 999_999_999,
       status: "running",
       startedAt: Date.now() - 5_000,
+      streamFormat: "raw",
+    });
+    mockCtx.sessionManager.getBranch = vi.fn(() => [branchEntry(record)]);
+    const spoolDir = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
+    await mkdir(spoolDir, { recursive: true });
+    await writeFile(
+      join(spoolDir, `${id}.jsonl`),
+      `{"type":"agents_start","at":1}\n{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"salvaged report"}]}}\n`,
+      "utf8",
+    );
+
+    await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+
+    const stored = await loadWorker(cwd, id);
+    expect(stored?.status).toBe("completed");
+    expect(stored?.outputText).toContain("salvaged report");
+    expect(mockPi.appendEntry).toHaveBeenCalledWith(
+      WORKER_RECORD_ENTRY,
+      expect.objectContaining({ id, status: "completed" }),
+    );
+    // The owner is woken: the report arrived after the session died.
+    const wake = findWakeCall(mockPi);
+    expect(wake.message.content[0].text).toContain(id);
+  });
+
+  it("session_start marks an own stuck worker failed when its spool has no report", async () => {
+    const id = generateWorkerId();
+    const record = makeWorkerRecord({
+      id,
+      name: "ghost",
+      pid: 999_999_999,
+      status: "running",
+      startedAt: Date.now() - 5_000,
+      streamFormat: "raw",
     });
     mockCtx.sessionManager.getBranch = vi.fn(() => [branchEntry(record)]);
 
@@ -767,11 +804,7 @@ sleep 30
 
     const stored = await loadWorker(cwd, id);
     expect(stored?.status).toBe("failed");
-    expect(stored?.error).toContain("gone");
-    expect(mockPi.appendEntry).toHaveBeenCalledWith(
-      WORKER_RECORD_ENTRY,
-      expect.objectContaining({ id, status: "failed" }),
-    );
+    expect(stored?.error).toMatch(/report/i);
   });
 
   it("session_start keeps worker state out of git status and migrates the legacy registry", async () => {
@@ -789,45 +822,6 @@ sleep 30
     await expect(
       stat(join(cwd, CONFIG_DIR_NAME, "workers", "registry.json")),
     ).rejects.toMatchObject({ code: "ENOENT" });
-  });
-
-  it("reconcileRunning marks stuck-running records failed when the worker pid is dead", () => {
-    const stuck = makeWorkerRecord({
-      id: "w-stuck",
-      name: "stuck",
-      pid: 999_999_999,
-      status: "running",
-      startedAt: Date.now() - 5_000,
-    });
-    const terminal = makeWorkerRecord({
-      id: "w-done",
-      name: "done",
-      status: "completed",
-      startedAt: Date.now() - 5_000,
-      endedAt: Date.now(),
-    });
-
-    const changed = reconcileRunning([stuck, terminal]);
-
-    expect(changed).toHaveLength(1);
-    expect(changed[0].id).toBe("w-stuck");
-    expect(stuck.status).toBe("failed");
-    expect(stuck.error).toContain("gone");
-    expect(stuck.endedAt).toBeDefined();
-    expect(terminal.status).toBe("completed");
-  });
-
-  it("reconcileRunning leaves live running records alone", () => {
-    const live = makeWorkerRecord({
-      id: "w-live",
-      name: "live",
-      pid: process.pid,
-      status: "running",
-      startedAt: Date.now(),
-    });
-
-    expect(reconcileRunning([live])).toHaveLength(0);
-    expect(live.status).toBe("running");
   });
 
   it("session_shutdown cancels running workers", async () => {
@@ -1057,8 +1051,8 @@ sleep 30
       // intentionally in-memory only — the widget reads the live record.)
       await vi.waitFor(async () => {
         const raw = await readFile(streamPath(cwd, id), "utf8").catch(() => "");
-        expect(raw).toContain('"kind":"tool_start"');
-        expect(raw).toContain('"kind":"tool_end"');
+        expect(raw).toContain('"type":"tool_execution_start"');
+        expect(raw).toContain('"type":"tool_execution_end"');
         expect(raw).toContain("Reading auth module");
       });
 
@@ -1141,7 +1135,7 @@ sleep 30
       expect(payload.workerCostUsd).toBeCloseTo(0.041);
     });
 
-    it("the stream spool caps itself and records truncation", async () => {
+    it("tail reads stay bounded however much the child wrote", async () => {
       const fixture = await writeFixture(fixtureDir, "spool-cap.sh", SPOOL_CAP_WORKER);
       setEnv("PI_WORKER_COMMAND", fixture);
 
@@ -1151,11 +1145,15 @@ sleep 30
         wait: true,
         timeout_seconds: 30,
       });
-      const id = (started.details.worker as WorkerRecord).id;
+      const worker = started.details.worker as WorkerRecord;
+      // The child owns its spool: it may grow well past the display window.
+      const raw = await readFile(streamPath(cwd, worker.id), "utf8");
+      expect(Buffer.byteLength(raw)).toBeGreaterThan(512 * 1024);
 
-      const raw = await readFile(streamPath(cwd, id), "utf8");
-      expect(Buffer.byteLength(raw)).toBeLessThanOrEqual(512 * 1024 + 4096);
-      expect(raw).toContain("stream truncated");
+      // The tail display stays bounded regardless.
+      const tail = await executeTool("workers", { action: "tail", id: worker.id, lines: 40 });
+      const text = tail.content[0].text as string;
+      expect(text.split("\n")).toHaveLength(41); // 40 entries + omission note
     });
   });
   it("workers remove deletes a finished worker's record and artifacts", async () => {
@@ -1534,11 +1532,23 @@ describe("agents-worker store (session-scoped)", () => {
     await seedRecord(cwd, orphan);
     await seedRecord(cwd, legacy);
 
-    // "mine" contains the session's own ids; the rest classify by parent pid.
+    // A live orphan: running, worker process alive, parent session dead.
+    const liveOrphan = makeWorkerRecord({
+      id: "w-live-orphan",
+      name: "live-orphan",
+      parentPid: 999_999_999,
+      pid: process.pid,
+      status: "running",
+    });
+    await seedRecord(cwd, liveOrphan);
+
+    // "mine" contains the session's own ids; the rest classify by parent
+    // and worker pids.
     const sweep = await sweepWorkerArtifacts(cwd, new Set(["w-mine"]));
 
     expect(sweep.foreignLive.map((r) => r.id)).toEqual(["w-foreign"]);
-    expect(sweep.orphans.map((r) => r.id).sort()).toEqual(["w-legacy", "w-orphan"]);
+    expect(sweep.terminalOrphans.map((r) => r.id).sort()).toEqual(["w-legacy", "w-orphan"]);
+    expect(sweep.liveOrphans.map((r) => r.id)).toEqual(["w-live-orphan"]);
   });
 
   it("sweepWorkerArtifacts treats a live parent as a live session even for finished workers", async () => {
@@ -1556,7 +1566,7 @@ describe("agents-worker store (session-scoped)", () => {
 
     const sweep = await sweepWorkerArtifacts(cwd, new Set());
     expect(sweep.foreignLive.map((r) => r.id)).toEqual(["w-theirs"]);
-    expect(sweep.orphans).toHaveLength(0);
+    expect(sweep.terminalOrphans).toHaveLength(0);
   });
 
   it("migrateLegacyRegistry imports registry records as parentless artifacts", async () => {
@@ -1675,8 +1685,80 @@ describe("agents-worker store (session-scoped)", () => {
 
     const sweep = await sweepWorkerArtifacts(cwd, new Set());
 
-    expect(sweep.orphans.map((r) => r.id)).toEqual(["w-orphan"]);
+    expect(sweep.terminalOrphans.map((r) => r.id)).toEqual(["w-orphan"]);
     expect(sweep.unownedWorktrees).toEqual(["w-unowned"]);
+  });
+
+  it("finalizeWorker infers completed from a raw spool and captures the patch", async () => {
+    await initGitRepo(cwd);
+    const wt = await createWorktree(cwd, "w-salvage");
+    await writeFile(join(wt.path, "SALVAGED.md"), "salvaged\n", "utf8");
+    const record = makeWorkerRecord({
+      id: "w-salvage",
+      name: "salvage",
+      status: "running",
+      worktree: wt.path,
+      branch: wt.branch,
+      streamFormat: "raw",
+    });
+    const spoolDir = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
+    await mkdir(spoolDir, { recursive: true });
+    await writeFile(
+      join(spoolDir, "w-salvage.jsonl"),
+      '{"type":"agents_start","at":1}\n{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"the salvaged report"}]}}\n',
+      "utf8",
+    );
+
+    const finalized = await finalizeWorker({ cwd, record });
+
+    expect(finalized.status).toBe("completed");
+    expect(finalized.outputText).toContain("the salvaged report");
+    expect(finalized.patchPath).toBeDefined();
+    // The end marker lands in the spool so later readers see terminal state.
+    const spool = await readFile(join(spoolDir, "w-salvage.jsonl"), "utf8");
+    expect(spool).toContain('"type":"agents_end"');
+    // Idempotent: re-finalizing a terminal record changes nothing.
+    const again = await finalizeWorker({ cwd, record: finalized });
+    expect(again.status).toBe("completed");
+    expect(again.endedAt).toBe(finalized.endedAt);
+  });
+
+  it("finalizeWorker fails with stderr detail when no report was produced", async () => {
+    const record = makeWorkerRecord({
+      id: "w-quiet",
+      name: "quiet",
+      status: "running",
+      streamFormat: "raw",
+    });
+    const spoolDir = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
+    await mkdir(spoolDir, { recursive: true });
+    await writeFile(join(spoolDir, "w-quiet.stderr.log"), "boom went the worker\n", "utf8");
+
+    const finalized = await finalizeWorker({ cwd, record });
+
+    expect(finalized.status).toBe("failed");
+    expect(finalized.error).toContain("boom went the worker");
+  });
+
+  it("finalizeWorker honors an explicit end marker over inference", async () => {
+    const record = makeWorkerRecord({
+      id: "w-marked",
+      name: "marked",
+      status: "running",
+      streamFormat: "raw",
+    });
+    const spoolDir = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
+    await mkdir(spoolDir, { recursive: true });
+    await writeFile(
+      join(spoolDir, "w-marked.jsonl"),
+      '{"type":"agents_end","at":2,"status":"timeout","error":"worker exceeded 30s timeout"}\n',
+      "utf8",
+    );
+
+    const finalized = await finalizeWorker({ cwd, record });
+
+    expect(finalized.status).toBe("timeout");
+    expect(finalized.error).toContain("30s timeout");
   });
 });
 
@@ -1851,7 +1933,8 @@ describe("agents-worker session scoping", () => {
     expect(mockPi.appendEntry).not.toHaveBeenCalled();
   });
 
-  it("session_start reports orphaned artifacts from ended sessions", async () => {
+  it("session_start warns only about workers still running from ended sessions", async () => {
+    // Terminal leftovers are silent (drained by retention, listed on demand)…
     await seedRecord(
       cwd,
       makeWorkerRecord({
@@ -1863,17 +1946,51 @@ describe("agents-worker session scoping", () => {
         endedAt: Date.now(),
       }),
     );
-
-    await getEventHandlerFrom(mockPi, "session_start")(
-      { type: "session_start", reason: "startup" },
-      mockCtx,
+    // …a stuck running record with a dead worker pid is finalized silently…
+    await seedRecord(
+      cwd,
+      makeWorkerRecord({
+        id: "w-stuck",
+        name: "stuck",
+        parentPid: 999_999_999,
+        pid: 999_999_999,
+        status: "running",
+        streamFormat: "raw",
+        startedAt: Date.now(),
+      }),
+    );
+    // …and a live orphan is the one thing worth a warning.
+    const sleeper = execFile("sleep", ["30"]);
+    await seedRecord(
+      cwd,
+      makeWorkerRecord({
+        id: "w-live",
+        name: "live-orphan",
+        parentPid: 999_999_999,
+        pid: sleeper.pid ?? 0,
+        status: "running",
+        streamFormat: "raw",
+        startedAt: Date.now(),
+      }),
     );
 
-    const notifications = mockCtx.ui.notify.mock.calls.map((call) => call[0] as string);
-    expect(notifications.some((text) => text.includes("orphaned worker"))).toBe(true);
+    try {
+      await getEventHandlerFrom(mockPi, "session_start")(
+        { type: "session_start", reason: "startup" },
+        mockCtx,
+      );
+
+      const notifications = mockCtx.ui.notify.mock.calls.map((call) => call[0] as string);
+      expect(notifications.some((text) => text.includes("still running"))).toBe(true);
+      expect(notifications.some((text) => text.includes("live-orphan"))).toBe(true);
+      // The stuck record was finalized silently (no report in its spool).
+      expect((await loadWorker(cwd, "w-stuck"))?.status).toBe("failed");
+    } finally {
+      if (sleeper.pid !== undefined) await killPidTree(sleeper.pid);
+    }
   });
 
-  it("session_start reports orphaned worktrees, including unowned ones", async () => {
+  it("session_start stays silent about terminal leftovers and their worktrees", async () => {
     await initGitRepo(cwd);
     const wt = await createWorktree(cwd, "w-orphan-wt");
     await seedRecord(
@@ -1897,10 +2014,84 @@ describe("agents-worker session scoping", () => {
       mockCtx,
     );
 
-    const notifications = mockCtx.ui.notify.mock.calls.map((call) => call[0] as string);
-    const orphanNotice = notifications.find((text) => text.includes("orphaned worker"));
-    expect(orphanNotice).toBeDefined();
-    expect(orphanNotice).toContain("worktree");
+    // Terminal leftovers (with or without worktrees) never warn; they are
+    // discoverable via scope=orphans and drained by retention/remove.
+    expect(mockCtx.ui.notify).not.toHaveBeenCalled();
+  });
+
+  it("workers cancel kills a live orphaned worker and finalizes its record", async () => {
+    // An ended session left a worker running; this session never owned it.
+    const sleeper = execFile("sleep", ["30"]);
+    await seedRecord(
+      cwd,
+      makeWorkerRecord({
+        id: "w-runaway",
+        name: "runaway",
+        parentPid: 999_999_999,
+        pid: sleeper.pid ?? 0,
+        status: "running",
+        streamFormat: "raw",
+        startedAt: Date.now(),
+      }),
+    );
+
+    try {
+      expect(sleeper.pid !== undefined && killSync(sleeper.pid)).toBe(true);
+      const result = await executeTool("workers", { action: "cancel", id: "w-runaway" });
+      expect(result.content[0].text).toContain("orphaned worker");
+      const stored = await loadWorker(cwd, "w-runaway");
+      expect(stored?.status).toBe("cancelled");
+      // No transcript entry: this session never owned the worker.
+      expect(mockPi.appendEntry).not.toHaveBeenCalled();
+    } finally {
+      if (sleeper.pid !== undefined) await killPidTree(sleeper.pid);
+    }
+  });
+
+  it("an adopted worker is finalized and wakes the resumed session when it exits", async () => {
+    // pi -c restored a running worker whose child exits on its own shortly
+    // after the session starts: the adopter must finalize and wake.
+    const shortSleeper = execFile("sleep", ["0.4"]);
+    const record = makeWorkerRecord({
+      id: "w-adopted",
+      name: "adopted",
+      pid: shortSleeper.pid ?? 0,
+      status: "running",
+      streamFormat: "raw",
+      startedAt: Date.now(),
+    });
+    const spoolDir = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
+    await mkdir(spoolDir, { recursive: true });
+    await writeFile(
+      join(spoolDir, "w-adopted.jsonl"),
+      '{"type":"agents_start","at":1}\n{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"adopted report"}]}}\n',
+      "utf8",
+    );
+
+    try {
+      mockCtx.sessionManager.getBranch = vi.fn(() => [branchEntry(record)]);
+      await getEventHandlerFrom(mockPi, "session_start")(
+        { type: "session_start", reason: "startup" },
+        mockCtx,
+      );
+
+      await vi.waitFor(
+        async () => {
+          const stored = await loadWorker(cwd, "w-adopted");
+          expect(stored?.status).toBe("completed");
+          expect(stored?.outputText).toContain("adopted report");
+        },
+        { timeout: 8_000 },
+      );
+      expect(mockPi.appendEntry).toHaveBeenCalledWith(
+        WORKER_RECORD_ENTRY,
+        expect.objectContaining({ id: "w-adopted", status: "completed" }),
+      );
+      const wake = findWakeCall(mockPi);
+      expect(wake.message.content[0].text).toContain("w-adopted");
+    } finally {
+      if (shortSleeper.pid !== undefined) await killPidTree(shortSleeper.pid);
+    }
   });
 
   it("resumed sessions see their own workers via the transcript branch", async () => {
@@ -1922,6 +2113,16 @@ describe("agents-worker session scoping", () => {
 });
 
 // --- Helpers ---
+
+/** True when the pid is alive right now (test-side liveness probe). */
+function killSync(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function getEventHandlerFrom(mockPi: DeepMocked<ExtensionAPI>, eventType: string) {
   for (const call of mockPi.on.mock.calls) {

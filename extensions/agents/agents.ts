@@ -23,6 +23,7 @@ import { existsSync } from "node:fs";
 import type { ExtensionAPI, ExtensionContext, ExtensionUIContext } from "pi";
 import { excludeFromGit } from "../../lib/git.ts";
 import { projectStateRelative } from "../../lib/paths.ts";
+import { isProcessAlive } from "../../lib/presence-shards.ts";
 import { setStripWidget, WIDGET_PRIORITY_WORKERS } from "../../lib/widget-strip.ts";
 import {
   cancelWorker,
@@ -41,20 +42,21 @@ import {
   type WorkerSessionState,
 } from "./src/delegate.ts";
 import { AGENTS_STATE_EVENT, createWorkersWidget, WORKERS_WIDGET_KEY } from "./src/format.ts";
-import type { RunningWorker } from "./src/runner.ts";
+import { finalizeWorker, killPidTree, type RunningWorker } from "./src/runner.ts";
 import { DELEGATE_PARAMETERS, WORKERS_PARAMETERS } from "./src/schemas.ts";
 import {
+  listRecordFiles,
   loadWorker,
   loadWorkersFromBranch,
   migrateLegacyRegistry,
   persistWorkerRecord,
   pruneStreams,
   pruneWorkerArtifacts,
-  reconcileRunning,
   removeWorkerRecord,
   sweepWorkerArtifacts,
   updateRecordFile,
   WORKER_RETENTION_MS,
+  writeRecordFile,
 } from "./src/store.ts";
 import type { WorkerEvents, WorkerRecord } from "./src/types.ts";
 import { discardWorktree, removeWorktree, worktreePath } from "./src/worktree.ts";
@@ -75,6 +77,50 @@ export default async function agentsExtension(pi: ExtensionAPI) {
   // The worker cwd is fixed per session; publish and persistence need it
   // between tool calls and lifecycle events.
   let lastCwd = process.cwd();
+  // Workers running under other (dead) sessions or restored by pi -c: this
+  // session watches their pid and finalizes them from disk when they exit.
+  const adopted = new Map<
+    string,
+    { pid: number; owned: boolean; timer: ReturnType<typeof setInterval> }
+  >();
+
+  /** Watch a running worker this session does not hold a RunningWorker for.
+   *  Owned workers (restored by pi -c) get wakes on completion; foreign
+   *  leftovers finalize silently into their record files. */
+  function adoptWorker(ctx: ExtensionContext, record: WorkerRecord, owned: boolean): boolean {
+    if (record.pid === undefined || !isProcessAlive(record.pid)) return false;
+    if (adopted.has(record.id)) return true;
+    const timer = setInterval(() => {
+      if (isProcessAlive(record.pid ?? -1)) return;
+      void stopWatching(record.id).then(async (stillRunning) => {
+        if (!stillRunning) return;
+        await finalizeWorker({
+          cwd: lastCwd,
+          record,
+          ...(owned ? { events: makeEvents(ctx) } : {}),
+          onRecord: owned
+            ? (finalized) => persistRecord(finalized)
+            : (finalized) => writeRecordFile(lastCwd, finalized),
+        });
+        if (shutDown) return;
+        publish(ctx).catch((error) => {
+          console.error(`[agents] publish failed: ${(error as Error).message}`);
+        });
+      });
+    }, 2_000);
+    timer.unref?.();
+    adopted.set(record.id, { pid: record.pid, owned, timer });
+    return true;
+  }
+
+  async function stopWatching(id: string): Promise<boolean> {
+    const entry = adopted.get(id);
+    if (entry === undefined) return false;
+    clearInterval(entry.timer);
+    adopted.delete(id);
+    const current = await loadWorker(lastCwd, id);
+    return current === undefined || current.status === "running";
+  }
 
   // --- Persistence ---
 
@@ -208,6 +254,25 @@ export default async function agentsExtension(pi: ExtensionAPI) {
     };
   }
 
+  /**
+   * Terminalize running leftovers whose worker process is dead (crashed
+   * session, no one left watching). Status comes from the spool, so a
+   * worker that actually finished is recorded as completed — with its
+   * patch captured — instead of being marked failed by a blunt reconcile.
+   */
+  async function finalizeStaleWorkers(ctx: ExtensionContext, myIds: ReadonlySet<string>) {
+    const sweepRecords = await listRecordFiles(ctx.cwd);
+    for (const record of sweepRecords) {
+      if (myIds.has(record.id) || record.status !== "running") continue;
+      if (record.pid !== undefined && isProcessAlive(record.pid)) continue;
+      await finalizeWorker({
+        cwd: ctx.cwd,
+        record,
+        onRecord: (finalized) => writeRecordFile(ctx.cwd, finalized),
+      });
+    }
+  }
+
   // --- delegate tool ---
 
   pi.registerTool({
@@ -272,13 +337,20 @@ export default async function agentsExtension(pi: ExtensionAPI) {
       if (action === "list") {
         const scope: WorkerListScope =
           params.scope === "orphans" || params.scope === "all" ? params.scope : "mine";
-        const sweep =
-          scope === "mine"
-            ? { orphans: [], foreignLive: [] }
-            : await sweepWorkerArtifacts(ctx.cwd, new Set(state.branchWorkers.keys()));
+        if (scope === "mine") {
+          return listWorkers({
+            mine: [...mergedWorkers().values()],
+            orphans: [],
+            foreignLive: [],
+            scope,
+          });
+        }
+        // Finalize dead running leftovers so the listing reflects reality.
+        await finalizeStaleWorkers(ctx, new Set(state.branchWorkers.keys()));
+        const sweep = await sweepWorkerArtifacts(ctx.cwd, new Set(state.branchWorkers.keys()));
         return listWorkers({
           mine: [...mergedWorkers().values()],
-          orphans: sweep.orphans,
+          orphans: [...sweep.liveOrphans, ...sweep.terminalOrphans],
           foreignLive: sweep.foreignLive,
           scope,
         });
@@ -311,10 +383,48 @@ export default async function agentsExtension(pi: ExtensionAPI) {
         throw new Error(`Unknown worker ${id}. Use action=list to see workers.`);
       }
 
-      if (action === "tail") return tailWorkerStream(ctx.cwd, id, params.lines);
+      if (action === "tail") return tailWorkerStream(ctx.cwd, id, params.lines, record);
       if (action === "status") return workerStatusResponse(record);
       if (action === "cancel") {
-        return cancelWorker({ running: state.running, publish: () => publish(ctx), id, record });
+        if (state.running.has(id)) {
+          return cancelWorker({ running: state.running, publish: () => publish(ctx), id, record });
+        }
+        if (record.status !== "running") {
+          return {
+            content: [{ type: "text", text: `Worker ${record.name} is already ${record.status}.` }],
+            details: { worker: record },
+          };
+        }
+        // Live worker without a local RunningWorker: adopted (pi -c) or an
+        // orphan from an ended session. Kill by pid and finalize from disk.
+        const parentAlive = record.parentPid !== undefined && isProcessAlive(record.parentPid);
+        if (parentAlive) {
+          throw new Error(
+            `Worker ${id} belongs to another live session and cannot be cancelled here (parent pid ${record.parentPid}).`,
+          );
+        }
+        if (record.pid !== undefined) await killPidTree(record.pid);
+        const owned = state.branchWorkers.has(id);
+        await stopWatching(id);
+        const finalized = await finalizeWorker({
+          cwd: ctx.cwd,
+          record,
+          statusOverride: "cancelled",
+          ...(owned ? { events: makeEvents(ctx) } : {}),
+          onRecord: owned
+            ? (final) => persistRecord(final)
+            : (final) => writeRecordFile(ctx.cwd, final),
+        });
+        await publish(ctx);
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Worker ${record.name} (${id}) cancelled${owned ? "" : " (orphaned worker)"}.`,
+            },
+          ],
+          details: { worker: finalized },
+        };
       }
       if (action === "collect") {
         // Own workers record the collect in this session's transcript;
@@ -381,15 +491,34 @@ export default async function agentsExtension(pi: ExtensionAPI) {
     // Ownership: this session's transcript. Resume (`pi -c`/`-r`) restores
     // the records with the session.
     state.branchWorkers = loadWorkersFromBranch(ctx.sessionManager.getBranch() ?? []);
-    // Reconcile the session's own stuck-running records (dead worker pid)
-    // and persist the healed states.
-    for (const changed of reconcileRunning(state.branchWorkers.values())) {
-      await persistRecord(changed);
+    // Own stuck-running records: salvage-finalize from disk (a worker that
+    // finished while the session was away is recorded completed, patch
+    // captured, and the user woken), or re-adopt live ones as watchers.
+    for (const record of state.branchWorkers.values()) {
+      if (record.status !== "running") continue;
+      if (adoptWorker(ctx, record, true)) continue;
+      await finalizeWorker({
+        cwd: ctx.cwd,
+        record,
+        events: makeEvents(ctx),
+        onRecord: (finalized) => persistRecord(finalized),
+      });
     }
+    // Terminalize dead leftovers BEFORE pruning: their spools are the
+    // status-of-record for salvage.
+    await finalizeStaleWorkers(ctx, new Set(state.branchWorkers.keys()));
     // Rétention : artifacts des records terminaux au-delà de 7 jours sortis,
-    // puis spools orphelins (running conservés).
+    // puis spools orphelins. Spools of any still-running worker (branch or
+    // record file) are protected — adoption may not have persisted its
+    // record file yet.
     await pruneWorkerArtifacts(ctx.cwd);
-    await pruneStreams(ctx.cwd);
+    const protectRunning = new Set<string>(
+      [...state.branchWorkers.values()].filter((w) => w.status === "running").map((w) => w.id),
+    );
+    for (const record of await listRecordFiles(ctx.cwd)) {
+      if (record.status === "running") protectRunning.add(record.id);
+    }
+    await pruneStreams(ctx.cwd, Date.now(), protectRunning);
     // Keep worker state out of `git status`; best-effort outside repos.
     try {
       await excludeFromGit(ctx.cwd, `${projectStateRelative("workers")}/`);
@@ -397,25 +526,21 @@ export default async function agentsExtension(pi: ExtensionAPI) {
     } catch (error) {
       console.error(`[agents] git exclude failed: ${(error as Error).message}`);
     }
-    // Janitor: leftovers from ended sessions are reported, never deleted
-    // silently; they stay collectable via workers (action=collect), and
-    // remove discards their worktrees.
+    // Janitor: terminalize dead leftovers (status inferred from their
+    // spools), watch live orphans until they exit, and warn only about
+    // workers still running from ended sessions — the one state that needs
+    // the user's attention. Terminal leftovers are silent: discoverable
+    // via workers (action=list, scope=orphans), drained by retention.
     const sweep = await sweepWorkerArtifacts(ctx.cwd, new Set(state.branchWorkers.keys()));
-    const leftovers = sweep.orphans.length + sweep.unownedWorktrees.length;
-    if (leftovers > 0 && ctx.hasUI) {
-      const items = [
-        ...sweep.orphans.map((w) => `${w.name} (${w.id}, ${w.status})`),
-        ...sweep.unownedWorktrees.map((wid) => `${wid} (unowned worktree)`),
-      ];
-      const ids = items.slice(0, 5).join("; ");
-      const more = items.length > 5 ? ` … +${items.length - 5} more` : "";
-      const withWorktrees =
-        sweep.orphans.filter((w) => w.worktree !== undefined).length +
-        sweep.unownedWorktrees.length;
-      const worktreeNote =
-        withWorktrees > 0 ? ` ${withWorktrees} still hold worktree(s) on disk.` : "";
+    for (const orphan of sweep.liveOrphans) adoptWorker(ctx, orphan, false);
+    if (sweep.liveOrphans.length > 0 && ctx.hasUI) {
+      const ids = sweep.liveOrphans
+        .slice(0, 5)
+        .map((w) => `${w.name} (${w.id})`)
+        .join("; ");
+      const more = sweep.liveOrphans.length > 5 ? ` … +${sweep.liveOrphans.length - 5} more` : "";
       ctx.ui.notify(
-        `${leftovers} orphaned worker artifact(s) from ended sessions: ${ids}${more}.${worktreeNote} Inspect with workers (action=list, scope=orphans); collect or remove them explicitly — remove also discards leftover worktrees.`,
+        `${sweep.liveOrphans.length} worker(s) from ended sessions are still running: ${ids}${more}. They finalize automatically when they exit; cancel with workers (action=cancel, id=…).`,
         "warning",
       );
     }
@@ -432,6 +557,23 @@ export default async function agentsExtension(pi: ExtensionAPI) {
     for (const [id, worker] of state.running) {
       state.running.delete(id);
       await worker.cancel();
+    }
+    for (const [id, entry] of adopted) {
+      clearInterval(entry.timer);
+      adopted.delete(id);
+      if (!entry.owned) continue;
+      // An adopted (restored) worker is ours: cancel it on the way out,
+      // same as locally spawned ones.
+      const record = await loadWorker(lastCwd, id);
+      if (record?.status === "running" && record.pid !== undefined) {
+        await killPidTree(record.pid);
+        await finalizeWorker({
+          cwd: lastCwd,
+          record,
+          statusOverride: "cancelled",
+          onRecord: (final) => persistRecord(final),
+        });
+      }
     }
     if (ctx.hasUI)
       setStripWidget(ctx.ui, "aboveEditor", {

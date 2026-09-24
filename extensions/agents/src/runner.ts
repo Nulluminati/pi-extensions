@@ -1,44 +1,52 @@
 /**
  * Worker runner: spawns a child `pi --mode json --no-session -p <task>`
- * process in its own process group, streams stdout for assistant text, and
- * enforces a hard timeout. Wake-ups are trusted messages (ids and status
- * words only); worker output lives in the registry and is read via the
- * workers tool.
+ * process in its own process group and enforces a hard timeout.
+ *
+ * The child's stdout and stderr are files in the worker directory, not pipes
+ * to the parent: the child writes its own JSON event stream to the spool
+ * (`streams/<id>.jsonl`) and its stderr to `streams/<id>.stderr.log`, so
+ * output survives the parent's death and any session can read it. The
+ * spawning parent tails the spool for live activity; finalization (status
+ * inference, patch capture, terminal persistence, wake) is a shared
+ * disk-based operation (`finalizeWorker`) that the parent, an adopting
+ * session, or a janitor sweep can all perform — idempotently.
+ *
+ * Wake-ups are trusted messages (ids and status words only); worker output
+ * lives in the spool and is read via the workers tool.
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
-import { appendFile, mkdir } from "node:fs/promises";
+import { appendFile, mkdir, open, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { ThinkingLevel } from "pi";
 import { cleanGitEnv } from "../../../lib/git.ts";
-import { patchesDir, STREAM_MAX_BYTES, streamPath } from "./store.ts";
+import { isProcessAlive } from "../../../lib/presence-shards.ts";
+import { patchesDir, stderrLogPath, streamPath } from "./store.ts";
 import type { WorkerActivity, WorkerEvents, WorkerRecord } from "./types.ts";
 import { captureWorktreePatch } from "./worktree.ts";
 
 // --- Constants ---
 
 export const CANCEL_GRACE_MS = 4_000;
-/** Arg/result summaries in the stream projection stay one line and short. */
+/** Arg/result summaries in stream displays stay one line and short. */
 export const STREAM_SUMMARY_CHARS = 200;
+/** How often the parent tails the spool for live activity. */
+const INGEST_POLL_MS = 400;
+/** Tail reads are bounded: the display never loads more than this much of
+ *  a spool, however much the child wrote. */
+export const STREAM_TAIL_BYTES = 512 * 1024;
 
-/** Worker binary override (tests point this at a fixture script). */
-function workerBinary(): string {
-  return process.env.PI_WORKER_COMMAND?.trim() || "pi";
-}
-
-// --- Stream projection ---
-
-/** One filtered stream event (spooled as JSONL, read by workers tail). */
-export interface StreamEvent {
+/** Parent-appended markers in the raw spool (distinguishable from pi JSON
+ *  events, which never use the `agents_` type prefix). */
+interface AgentSpoolMarker {
+  type: "agents_start" | "agents_end";
   at: number;
-  kind: "start" | "tool_start" | "tool_end" | "assistant" | "end";
   task?: string;
-  tool?: string;
-  detail?: string;
-  text?: string;
-  status?: string;
+  status?: WorkerRecord["status"];
   error?: string;
 }
+
+// --- Stream summaries ---
 
 /** One-line summary of tool args or results: prefer the common location /
  *  command keys, fall back to a truncated JSON dump. Never multi-line. */
@@ -54,6 +62,7 @@ export function summarizeStreamValue(value: unknown): string | undefined {
         (value as Record<string, unknown>).query ??
         (value as Record<string, unknown>).task)
       : value;
+  if (typeof preferred === "string" && !preferred.trim()) return undefined;
   const raw = typeof preferred === "string" && preferred.trim() ? preferred : JSON.stringify(value);
   const oneLine = raw.replace(/\\?\n/g, " ").replace(/\s+/g, " ").trim();
   if (!oneLine) return undefined;
@@ -62,77 +71,60 @@ export function summarizeStreamValue(value: unknown): string | undefined {
     : oneLine;
 }
 
-/**
- * Bounded append-only spool of the worker's filtered event stream. Appends
- * are serialized to keep line order; past the size cap, appending stops and
- * a truncation marker is recorded (the head is preserved).
- */
-class StreamSpool {
-  private readonly path: string;
-  private bytes = 0;
-  private overflow = false;
-  private queue: Promise<void> = Promise.resolve();
+// --- Spool IO ---
 
-  constructor(cwd: string, workerId: string) {
-    this.path = streamPath(cwd, workerId);
+async function appendSpoolLine(cwd: string, workerId: string, event: AgentSpoolMarker) {
+  await mkdir(join(streamPath(cwd, workerId), ".."), { recursive: true }).catch(() => {});
+  await appendFile(streamPath(cwd, workerId), `${JSON.stringify(event)}\n`, "utf8").catch(() => {});
+}
+
+/** Last `bytes` of a file, split into complete lines (a trailing partial
+ *  line without a newline is still returned). */
+async function readTailLines(path: string, bytes: number): Promise<string[]> {
+  let handle: import("node:fs/promises").FileHandle;
+  try {
+    handle = await open(path, "r");
+  } catch {
+    return [];
   }
-
-  write(event: StreamEvent): void {
-    if (this.overflow) return;
-    const line = `${JSON.stringify(event)}\n`;
-    this.bytes += Buffer.byteLength(line);
-    if (this.bytes > STREAM_MAX_BYTES) {
-      this.overflow = true;
-      this.enqueue({ at: Date.now(), kind: "end", detail: "stream truncated (size cap reached)" });
-      return;
-    }
-    this.enqueue(event);
-  }
-
-  /** Resolves when all queued events are on disk (used at terminal save so
-   *  the tail is complete the moment the worker finishes). */
-  flush(): Promise<void> {
-    return this.queue;
-  }
-
-  private enqueue(event: StreamEvent): void {
-    this.queue = this.queue
-      .then(async () => {
-        await mkdir(join(this.path, ".."), { recursive: true });
-        await appendFile(this.path, `${JSON.stringify(event)}\n`, "utf8");
-      })
-      .catch((error) => {
-        // A failed spool write must never affect the worker monitor; give up
-        // on this worker's stream rather than retrying forever.
-        this.overflow = true;
-        console.error(`[agents] stream spool failed: ${(error as Error).message}`);
-      });
+  try {
+    const { size } = await handle.stat();
+    const start = Math.max(0, size - bytes);
+    const buffer = Buffer.alloc(size - start);
+    await handle.read(buffer, 0, buffer.length, start);
+    const text = buffer.toString("utf8");
+    const lines = text.split("\n");
+    // Drop the trailing empty piece from a final newline; keep a partial
+    // last line (no trailing newline) as a line of its own.
+    if (lines[lines.length - 1] === "") lines.pop();
+    // Drop a possibly-partial first line unless it is the file's first.
+    if (start > 0 && lines.length > 0) lines.shift();
+    return lines;
+  } finally {
+    await handle.close().catch(() => {});
   }
 }
 
+// --- Ingestion (live activity + usage) ---
+
 /**
- * Ingest one JSON event line from the worker's stdout: track live activity on
- * the record (last tool + running tool count), append to the stream spool,
- * and return the updated final-assistant text.
+ * Ingest one raw pi JSON event line from the spool: track live activity on
+ * the record (last tool + running tool count) and roll up token/cost usage.
+ * The final assistant text is NOT tracked here — it is extracted from the
+ * spool at finalization, so it works identically for adopted workers whose
+ * parent never saw the output.
  */
-export function ingestStreamEvent(
-  jsonLine: string,
-  current: string,
-  record: WorkerRecord,
-  spool: StreamSpool,
-  events: WorkerEvents,
-): string {
+export function ingestStreamEvent(jsonLine: string, record: WorkerRecord): void {
   let event: {
     type?: string;
-    message?: { role?: string; content?: unknown; usage?: unknown };
+    message?: { role?: string; usage?: unknown };
     toolName?: string;
     args?: unknown;
-    result?: unknown;
   };
   try {
     event = JSON.parse(jsonLine);
   } catch {
-    return current;
+    return;
   }
 
   if (event.type === "tool_execution_start" && typeof event.toolName === "string") {
@@ -144,30 +136,10 @@ export function ingestStreamEvent(
       at: Date.now(),
     };
     record.activity = activity;
-    spool.write({
-      at: activity.at,
-      kind: "tool_start",
-      tool: activity.tool,
-      ...(detail !== undefined ? { detail } : {}),
-    });
-    events.onActivity();
-    return current;
+    return;
   }
 
-  if (event.type === "tool_execution_end" && typeof event.toolName === "string") {
-    const at = Date.now();
-    const toolEndDetail = summarizeStreamValue(event.result);
-    spool.write({
-      at,
-      kind: "tool_end",
-      tool: event.toolName,
-      ...(toolEndDetail !== undefined ? { detail: toolEndDetail } : {}),
-    });
-    return current;
-  }
-
-  if (event.type !== "message_end" || event.message?.role !== "assistant") return current;
-  // Roll up the worker's own token/cost usage (pi-ai Usage, per message).
+  if (event.type !== "message_end" || event.message?.role !== "assistant") return;
   if (
     event.message.usage !== undefined &&
     typeof event.message.usage === "object" &&
@@ -199,32 +171,14 @@ export function ingestStreamEvent(
     usage.cacheWriteTokens += num(u.cacheWrite);
     usage.costUsd += num(u.cost?.total);
   }
-  const content = event.message.content;
-  if (!Array.isArray(content)) return current;
-  const text = content
-    .filter(
-      (block): block is { type: string; text?: string } =>
-        typeof block === "object" &&
-        block !== null &&
-        (block as { type?: string }).type === "text" &&
-        typeof (block as { text?: unknown }).text === "string",
-    )
-    .map((block) => block.text ?? "")
-    .join("")
-    .trim();
-  if (text) {
-    const streamed = summarizeStreamValue(text);
-    if (streamed !== undefined) spool.write({ at: Date.now(), kind: "assistant", text: streamed });
-  }
-  return text || current;
 }
 
 // --- Parsing ---
 
 /**
- * Extract the last assistant text from a pi JSON event stream. Each stdout
- * line is a JSON event; we keep the text of the most recent assistant
- * message_end so the final response wins.
+ * Extract the last assistant text from a pi JSON event stream. Each line is
+ * a JSON event; we keep the text of the most recent assistant message_end so
+ * the final response wins.
  */
 export function extractAssistantText(jsonLine: string, current: string): string {
   try {
@@ -252,6 +206,216 @@ export function extractAssistantText(jsonLine: string, current: string): string 
   }
 }
 
+/** Final assistant text from a raw (child-written) spool. */
+function extractFinalTextRaw(lines: string[]): string {
+  let text = "";
+  for (const line of lines) text = extractAssistantText(line, text);
+  return text;
+}
+
+/** Final assistant text from a legacy parent-projected spool. */
+function extractFinalTextProjected(lines: string[]): string {
+  let text = "";
+  for (const line of lines) {
+    try {
+      const event = JSON.parse(line) as { kind?: string; text?: unknown };
+      if (event.kind === "assistant" && typeof event.text === "string") text = event.text;
+    } catch {}
+  }
+  return text;
+}
+
+function extractFinalText(lines: string[], format: WorkerRecord["streamFormat"]): string {
+  return format === "raw" ? extractFinalTextRaw(lines) : extractFinalTextProjected(lines);
+}
+
+/** Terminal status recorded in the spool's end marker, when present. */
+function spoolEndStatus(lines: string[]): { status?: string; error?: string } {
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i];
+    if (line === undefined) continue;
+    try {
+      const event = JSON.parse(line) as AgentSpoolMarker;
+      if (event.type === "agents_end") {
+        return {
+          ...(event.status !== undefined ? { status: event.status } : {}),
+          ...(event.error !== undefined ? { error: event.error } : {}),
+        };
+      }
+    } catch {}
+  }
+  return {};
+}
+
+/** Read stderr capture and return a short tail for error attribution. */
+async function readStderrTail(cwd: string, workerId: string): Promise<string> {
+  const raw = await readFile(stderrLogPath(cwd, workerId), "utf8").catch(() => "");
+  const tail = raw.trim().slice(-2000);
+  return summarizeStreamValue(tail) ?? tail.slice(0, STREAM_SUMMARY_CHARS);
+}
+
+/** Read the last `bytes` of a worker's spool as complete lines. Used by
+ *  the tail action so display never loads an unbounded file. */
+export async function readSpoolLines(
+  cwd: string,
+  workerId: string,
+  bytes = STREAM_TAIL_BYTES,
+): Promise<string[]> {
+  return readTailLines(streamPath(cwd, workerId), bytes);
+}
+
+// --- Finalization (shared by parent, adopter, janitor) ---
+
+export interface FinalizeOptions {
+  cwd: string;
+  record: WorkerRecord;
+  /** Status decided by the killer/timeout path; otherwise inferred. */
+  statusOverride?: WorkerRecord["status"];
+  /** Error detail for an overridden status (e.g. the timeout duration). */
+  errorOverride?: string;
+  /** Exit code, when the finalizer is the spawning parent. */
+  exitCode?: number | null;
+  /** Isolated worktree; patch captured for completed/timeout outcomes. */
+  worktree?: { path: string; branch: string };
+  events?: WorkerEvents;
+  /** Terminal persistence (transcript entry + record file for the owner;
+   *  record file only for non-owners). */
+  onRecord?(record: WorkerRecord): Promise<unknown>;
+}
+
+/**
+ * Terminalize a worker from its on-disk artifacts. Idempotent: a record
+ * already terminal is returned untouched. Status inference: an explicit
+ * override (cancel/timeout) wins; an end marker in the spool is honored;
+ * otherwise a final assistant report means completed and its absence means
+ * failed (with the stderr tail as the error detail).
+ */
+export async function finalizeWorker(options: FinalizeOptions): Promise<WorkerRecord> {
+  const { cwd, record, statusOverride, errorOverride, exitCode, events, onRecord } = options;
+  if (record.status !== "running") return record;
+  // Patch capture location: an explicit worktree (spawning parent) or the
+  // record's own worktree reference (adoption/janitor finalization).
+  const worktree =
+    options.worktree ??
+    (record.worktree !== undefined
+      ? { path: record.worktree, branch: record.branch ?? "" }
+      : undefined);
+
+  const lines = await readTailLines(streamPath(cwd, record.id), Number.MAX_SAFE_INTEGER);
+  const outputText = extractFinalText(lines, record.streamFormat);
+  const endMark = spoolEndStatus(lines);
+
+  let status: WorkerRecord["status"];
+  let error: string | undefined;
+  if (statusOverride !== undefined) {
+    status = statusOverride;
+    error = errorOverride ?? (statusOverride === "cancelled" ? "cancelled by user" : undefined);
+  } else if (endMark.status !== undefined) {
+    status = endMark.status as WorkerRecord["status"];
+    error = endMark.error;
+  } else if (outputText !== "") {
+    status = "completed";
+  } else {
+    status = "failed";
+    const stderrTail = await readStderrTail(cwd, record.id);
+    error = stderrTail || "worker exited without producing a report";
+  }
+
+  record.status = status;
+  record.endedAt = Date.now();
+  if (exitCode !== undefined) record.exitCode = exitCode;
+  if (outputText !== "") record.outputText = outputText;
+  else delete record.outputText;
+  if (error !== undefined) record.error = error;
+  else delete record.error;
+
+  if (worktree !== undefined && (status === "completed" || status === "timeout")) {
+    const patchPath = join(patchesDir(cwd), `${record.id}.diff`);
+    try {
+      await captureWorktreePatch(worktree.path, patchPath);
+      record.patchPath = patchPath;
+    } catch (err) {
+      // Keep an earlier terminal error (e.g. the timeout reason) and append
+      // the patch failure instead of overwriting it.
+      const patchError = `patch capture failed: ${(err as Error).message}`;
+      record.error = record.error !== undefined ? `${record.error}; ${patchError}` : patchError;
+    }
+  }
+
+  await appendSpoolLine(cwd, record.id, {
+    type: "agents_end",
+    at: record.endedAt,
+    status,
+    ...((error !== undefined && summarizeStreamValue(error) !== undefined
+      ? { error: summarizeStreamValue(error) }
+      : {}) as Partial<AgentSpoolMarker>),
+  });
+
+  if (onRecord) {
+    try {
+      await onRecord(record);
+    } catch (err) {
+      console.error(`[agents] terminal record persistence failed: ${(err as Error).message}`);
+      events?.notify(
+        "error",
+        `worker ${record.name} (${record.id}) finished but its record could not be persisted: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  if (events) {
+    if (status === "completed") {
+      events.wake(
+        `[worker ${record.name} (${record.id}) finished]. Use the workers tool (action=status, id=${record.id}) to read its report${record.patchPath ? " and (action=collect) to apply its patch" : ""}.`,
+      );
+    } else if (status === "failed") {
+      events.notify(
+        "error",
+        `worker ${record.name} (${record.id}) failed: ${error ?? "unknown error"}`,
+      );
+      events.wake(
+        `[worker ${record.name} (${record.id}) failed]. Use the workers tool (action=status, id=${record.id}) for details.`,
+      );
+    } else if (status === "timeout") {
+      events.notify("warning", `worker ${record.name} (${record.id}) timed out`);
+      events.wake(
+        `[worker ${record.name} (${record.id}) timed out]. Use the workers tool (action=status, id=${record.id}) for details.`,
+      );
+    }
+  }
+  return record;
+}
+
+// --- Process-group kill (works with or without a ChildProcess handle) ---
+
+/** Kill a worker's whole process group, escalating to SIGKILL. Does not
+ *  wait for an exit event: callers poll liveness or rely on close. */
+export async function killPidTree(pid: number): Promise<void> {
+  try {
+    process.kill(-pid, "SIGTERM");
+  } catch {
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {
+      return; // Already gone.
+    }
+  }
+  const deadline = Date.now() + CANCEL_GRACE_MS;
+  while (Date.now() < deadline) {
+    if (!isProcessAlive(pid)) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      // Gone between check and kill; nothing to do.
+    }
+  }
+}
+
 // --- Runner ---
 
 export interface StartWorkerOptions {
@@ -275,8 +439,8 @@ export interface StartWorkerOptions {
   parentPid?: number;
   parentSessionId?: string;
   events: WorkerEvents;
-  /** Registry persistence callback (persist into .pi/workers). */
-  onRecord(worker: WorkerRecord): Promise<void>;
+  /** Terminal persistence callback (transcript entry + record file). */
+  onRecord(worker: WorkerRecord): Promise<unknown>;
 }
 
 export interface RunningWorker {
@@ -286,7 +450,7 @@ export interface RunningWorker {
   cancel(): Promise<void>;
 }
 
-export function startWorker(options: StartWorkerOptions): RunningWorker {
+export async function startWorker(options: StartWorkerOptions): Promise<RunningWorker> {
   const { events } = options;
   const args = ["--mode", "json", "--no-session", "--no-extensions", "-p", options.task];
   if (options.model) args.push("--model", options.model);
@@ -295,18 +459,8 @@ export function startWorker(options: StartWorkerOptions): RunningWorker {
   if (options.sandbox) args.push("--gondolin");
   if (options.readOnly) args.push("--worker-readonly");
 
-  const child = spawn(workerBinary(), args, {
-    cwd: options.worktree?.path ?? options.cwd,
-    env: {
-      ...cleanGitEnv(),
-      PI_WORKER: "1",
-      // Stable messenger identity: the worker is addressable in the mesh by
-      // its agents-registry name instead of a generated themed name.
-      PI_MESSENGER_NAME: options.name,
-    },
-    detached: true,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  const spoolFile = streamPath(options.cwd, options.workerId);
+  const stderrFile = stderrLogPath(options.cwd, options.workerId);
 
   const record: WorkerRecord = {
     id: options.workerId,
@@ -314,217 +468,208 @@ export function startWorker(options: StartWorkerOptions): RunningWorker {
     task: options.task,
     model: options.model,
     thinkingLevel: options.thinkingLevel,
-    ...(child.pid !== undefined ? { pid: child.pid } : {}),
+    ...(options.parentPid !== undefined ? { parentPid: options.parentPid } : {}),
+    ...(options.parentSessionId !== undefined ? { parentSessionId: options.parentSessionId } : {}),
     cwd: options.worktree?.path ?? options.cwd,
     ...(options.worktree !== undefined
       ? { worktree: options.worktree.path, branch: options.worktree.branch }
       : {}),
-    ...(options.parentPid !== undefined ? { parentPid: options.parentPid } : {}),
-    ...(options.parentSessionId !== undefined ? { parentSessionId: options.parentSessionId } : {}),
     status: "running",
     startedAt: Date.now(),
+    streamFormat: "raw",
   };
 
-  let stdoutText = "";
-  // A JSON event line can be split across data events; hold the trailing
-  // partial line until its newline arrives (or the stream closes). Decoding
-  // is left to setEncoding, which buffers a multibyte UTF-8 sequence split
-  // across chunk boundaries; per-chunk decoding would corrupt it.
-  let stdoutLineBuffer = "";
-  let stderrTail = "";
-  const spool = new StreamSpool(options.cwd, options.workerId);
-  const taskSummary = summarizeStreamValue(options.task);
-  spool.write({
-    at: Date.now(),
-    kind: "start",
-    ...(taskSummary !== undefined ? { task: taskSummary } : {}),
+  // The child's stdio ARE the worker-directory files: no pipe connects it
+  // to this process, so its output survives this process's death and any
+  // session can read or finalize it. The parent tails the spool file for
+  // live activity instead of reading a pipe.
+  const childRef: { value?: ChildProcess } = {};
+  let spawnError: Error | undefined;
+  const started = (async (): Promise<ChildProcess> => {
+    await mkdir(join(spoolFile, ".."), { recursive: true });
+    const taskSummary = summarizeStreamValue(options.task);
+    await appendSpoolLine(options.cwd, options.workerId, {
+      type: "agents_start",
+      at: Date.now(),
+      ...(taskSummary !== undefined ? { task: taskSummary } : {}),
+    });
+    const spoolHandle = await open(spoolFile, "a");
+    const stderrHandle = await open(stderrFile, "a");
+    const child = spawn(workerBinary(), args, {
+      cwd: options.worktree?.path ?? options.cwd,
+      env: {
+        ...cleanGitEnv(),
+        PI_WORKER: "1",
+        // Stable messenger identity: the worker is addressable in the mesh
+        // by its agents-registry name instead of a generated themed name.
+        PI_MESSENGER_NAME: options.name,
+      },
+      detached: true,
+      // The child holds its own dups of these descriptors; the parent closes
+      // its copies right after spawn.
+      stdio: ["ignore", spoolHandle.fd, stderrHandle.fd],
+    });
+    // Exit wiring BEFORE any await: the child may outpace the handle cleanup.
+    wireChildEvents(child);
+    await spoolHandle.close().catch(() => {});
+    await stderrHandle.close().catch(() => {});
+    childRef.value = child;
+    return child;
+  })().catch((error: Error) => {
+    // Spawn-time failures (unreadable paths, ENOSPC on the spool) must not
+    // reject into the completion chain: finalize as failed instead.
+    spawnError = error;
+    return undefined as unknown as ChildProcess;
   });
-  child.stdout?.setEncoding("utf8");
-  child.stderr?.setEncoding("utf8");
-  child.stdout?.on("data", (chunk: string) => {
-    stdoutLineBuffer += chunk;
-    const lines = stdoutLineBuffer.split("\n");
-    stdoutLineBuffer = lines.pop() ?? "";
-    for (const line of lines) {
-      stdoutText = ingestStreamEvent(line, stdoutText, record, spool, events);
+
+  if (childRef.value?.pid !== undefined) record.pid = childRef.value.pid;
+
+  // Live activity: tail the spool the child is writing. Poll (not watch) is
+  // deliberate — watch events are unreliable across platforms and the read
+  // is idempotent from a byte offset.
+  let ingestOffset = 0;
+  let ingestBuffer = "";
+  let lastActivityToolCount = 0;
+  const ingestTimer = setInterval(() => {
+    void ingestNewSpoolBytes(spoolFile).then((ingested) => {
+      if (ingested === undefined) return;
+      const [newBytes, nextOffset] = ingested;
+      ingestOffset = nextOffset;
+      ingestBuffer += newBytes;
+      const lines = ingestBuffer.split("\n");
+      ingestBuffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (line.trim()) ingestStreamEvent(line, record);
+      }
+      // The widget refreshes on activity changes (throttled by the root).
+      const toolCount = record.activity?.toolCount ?? 0;
+      if (toolCount !== lastActivityToolCount) {
+        lastActivityToolCount = toolCount;
+        events.onActivity();
+      }
+    });
+  }, INGEST_POLL_MS);
+  ingestTimer.unref?.();
+
+  async function ingestNewSpoolBytes(path: string): Promise<[string, number] | undefined> {
+    let handle: import("node:fs/promises").FileHandle;
+    try {
+      handle = await open(path, "r");
+    } catch {
+      return undefined;
     }
-  });
-  child.stderr?.on("data", (chunk: string) => {
-    stderrTail = `${stderrTail}${chunk}`.slice(-4000);
-  });
+    try {
+      const { size } = await handle.stat();
+      if (size <= ingestOffset) return undefined;
+      const buffer = Buffer.alloc(size - ingestOffset);
+      await handle.read(buffer, 0, buffer.length, ingestOffset);
+      return [buffer.toString("utf8"), size];
+    } finally {
+      await handle.close().catch(() => {});
+    }
+  }
 
   let cancelRequested = false;
   let timedOut = false;
   let finishPromise: Promise<WorkerRecord> | undefined;
 
-  const doFinish = async (
-    status: WorkerRecord["status"],
-    exitCode: number | null,
-    error?: string,
-  ) => {
-    if (record.status !== "running") return record;
-    record.status = status;
-    record.endedAt = Date.now();
-    record.exitCode = exitCode;
-    if (stdoutText) record.outputText = stdoutText;
-    else delete record.outputText;
-    if (error !== undefined) {
-      record.error = error;
-    } else {
-      delete record.error;
-    }
-    const endError = summarizeStreamValue(error);
-    spool.write({
-      at: record.endedAt,
-      kind: "end",
-      status,
-      ...(endError !== undefined ? { error: endError } : {}),
-    });
-    // Complete the stream before the terminal save so a post-mortem tail
-    // always sees the end marker.
-    await spool.flush();
-    if (options.worktree !== undefined && (status === "completed" || status === "timeout")) {
-      const patchPath = join(patchesDir(options.cwd), `${record.id}.diff`);
-      try {
-        await captureWorktreePatch(options.worktree.path, patchPath);
-        record.patchPath = patchPath;
-      } catch (err) {
-        // Keep an earlier terminal error (e.g. the timeout reason) and append
-        // the patch failure instead of overwriting it.
-        const patchError = `patch capture failed: ${(err as Error).message}`;
-        record.error = record.error !== undefined ? `${record.error}; ${patchError}` : patchError;
-      }
-    }
-    // Terminal persistence must never wedge the completion path: the close
-    // handler's `finish(...).then` chain has no rejection handler, so a
-    // rejection here would leave `done` unsettled forever (wait=true hangs,
-    // the live-worker map leaks, the wake never fires). Instead the record
-    // stays terminal in memory — the session's view remains correct, wakes
-    // fire — and the next session reconciles the missing terminal entry.
-    try {
-      await options.onRecord(record);
-    } catch (error) {
-      console.error(`[agents] terminal record persistence failed: ${(error as Error).message}`);
-      events.notify(
-        "error",
-        `worker ${record.name} (${record.id}) finished but its record could not be persisted: ${(error as Error).message}`,
-      );
-    }
-    events.onChange();
-    return record;
-  };
-
-  /** Single-flight completion: the first terminal status wins. */
+  /** Single-flight completion: the first terminal status wins. An undefined
+   *  override lets finalizeWorker infer completed vs failed from the spool
+   *  (no report → failed with the stderr tail as detail). */
   const finish = (
-    status: WorkerRecord["status"],
-    exitCode: number | null,
-    error?: string,
+    statusOverride?: WorkerRecord["status"],
+    _errorOverride?: string,
   ): Promise<WorkerRecord> => {
-    if (!finishPromise) finishPromise = doFinish(status, exitCode, error);
+    if (!finishPromise) {
+      finishPromise = (async () => {
+        clearInterval(ingestTimer);
+        // Drain any spool bytes the poller has not ingested yet so the
+        // activity snapshot in the terminal save is current.
+        const ingested = await ingestNewSpoolBytes(spoolFile);
+        if (ingested !== undefined) {
+          for (const line of `${ingestBuffer}${ingested[0]}`.split("\n")) {
+            if (line.trim()) ingestStreamEvent(line, record);
+          }
+          ingestBuffer = "";
+        }
+        const child = await started;
+        if (spawnError !== undefined || child === undefined) {
+          record.status = "failed";
+          record.endedAt = Date.now();
+          record.error = spawnError?.message ?? "worker failed to spawn";
+          await options.onRecord(record);
+          events.notify(
+            "error",
+            `worker ${record.name} (${record.id}) failed to spawn: ${record.error}`,
+          );
+          return record;
+        }
+        return finalizeWorker({
+          cwd: options.cwd,
+          record,
+          ...(statusOverride !== undefined ? { statusOverride } : {}),
+          ...(options.worktree !== undefined ? { worktree: options.worktree } : {}),
+          exitCode: child.exitCode,
+          events,
+          onRecord: options.onRecord,
+        });
+      })();
+    }
     return finishPromise;
   };
 
-  // The worker's terminal state is decided on `close`, not `exit`: Node can
-  // emit `exit` before stdout is fully drained, and a patch captured while
-  // the process is winding down misses its last writes. On timeout the child
-  // is killed first; `close` then fires only after it has stopped and its
-  // report and worktree are complete.
-  const timeoutSeconds = Math.round(options.timeoutMs / 1000);
-  const timer = setTimeout(() => {
-    timedOut = true;
-    void killTree(child);
-  }, options.timeoutMs);
-
+  // The child's exit triggers finalization; its output is already on disk.
+  // resolveDone is declared before the spawn so the wiring below can be
+  // attached synchronously: a fast child can exit before the spawn IIFE's
+  // handle-cleanup awaits resolve, and a listener attached only in .then
+  // would miss 'close' entirely (done would never settle).
+  let resolveDone!: (record: WorkerRecord) => void;
   const done = new Promise<WorkerRecord>((resolve) => {
-    child.on("close", (code) => {
+    resolveDone = resolve;
+  });
+
+  /** Attach exit/timeout wiring to the child. Synchronous, called directly
+   *  after spawn returns — never after an await. */
+  function wireChildEvents(child: ChildProcess): void {
+    const timeoutSeconds = Math.round(options.timeoutMs / 1000);
+    const timer = setTimeout(() => {
+      timedOut = true;
+      void killPidTree(child.pid ?? -1);
+    }, options.timeoutMs);
+    timer.unref?.();
+    child.on("close", () => {
       clearTimeout(timer);
-      if (stdoutLineBuffer !== "") {
-        stdoutText = extractAssistantText(stdoutLineBuffer, stdoutText);
-        stdoutLineBuffer = "";
-      }
-      const status = cancelRequested
-        ? "cancelled"
-        : timedOut
-          ? "timeout"
-          : code === 0 && stdoutText !== ""
-            ? "completed"
-            : "failed";
-      const failure =
-        status === "failed"
-          ? stderrTail.trim() ||
-            (code === 0 ? "worker exited without producing a report" : `exit ${code ?? "?"}`)
-          : status === "timeout"
-            ? `worker exceeded ${timeoutSeconds}s timeout`
-            : status === "cancelled"
-              ? "cancelled by user"
-              : undefined;
-      void finish(status, code, failure).then((w) => {
-        if (w.status === "completed") {
-          events.wake(
-            `[worker ${w.name} (${w.id}) finished (exit ${code ?? "?"})]. Use the workers tool (action=status, id=${w.id}) to read its report${w.patchPath ? " and (action=collect) to apply its patch" : ""}.`,
-          );
-        } else if (w.status === "failed") {
-          events.notify(
-            "error",
-            `worker ${w.name} (${w.id}) failed: ${w.error ?? "unknown error"}`,
-          );
-          // The wake carries ids and status words only; stderr detail stays
-          // in the registry and is read on demand via the workers tool.
-          events.wake(
-            `[worker ${w.name} (${w.id}) failed]. Use the workers tool (action=status, id=${w.id}) for details.`,
-          );
-        } else if (w.status === "timeout") {
-          events.notify("warning", `worker ${w.name} (${w.id}) timed out`);
-          events.wake(
-            `[worker ${w.name} (${w.id}) timed out after ${timeoutSeconds}s]. Use the workers tool (action=status, id=${w.id}) for details.`,
-          );
-        }
-        resolve(w);
-      });
+      const timedOutError = `worker exceeded ${timeoutSeconds}s timeout`;
+      void finish(
+        cancelRequested ? "cancelled" : timedOut ? "timeout" : undefined,
+        timedOutError,
+      ).then(resolveDone);
     });
     child.on("error", (err) => {
       clearTimeout(timer);
-      void finish("failed", null, err.message).then((w) => {
-        events.notify("error", `worker ${w.name} (${w.id}) failed to spawn: ${err.message}`);
-        resolve(w);
+      void finish("failed").then((finalized) => {
+        finalized.error =
+          finalized.error !== undefined ? `${finalized.error}; ${err.message}` : err.message;
+        resolveDone(finalized);
       });
     });
-  });
+  }
 
   const cancel = async (): Promise<void> => {
     if (record.status !== "running") return;
     cancelRequested = true;
-    clearTimeout(timer);
-    await killTree(child);
-    await finish("cancelled", null, "cancelled by user");
+    const child = await started;
+    if (child.pid !== undefined) await killPidTree(child.pid);
+    await finish("cancelled");
   };
 
-  return { record, child, done, cancel };
+  return { record, child: (childRef.value ?? ({} as ChildProcess)) as ChildProcess, done, cancel };
 }
 
-async function killTree(child: ChildProcess): Promise<void> {
-  if (child.pid === undefined) return;
-  const pid = child.pid;
-  try {
-    process.kill(-pid, "SIGTERM");
-  } catch {
-    child.kill("SIGTERM");
-  }
-  const exited = await Promise.race([
-    new Promise<boolean>((resolve) => {
-      if (child.exitCode !== null) {
-        resolve(true);
-        return;
-      }
-      child.once("exit", () => resolve(true));
-      setTimeout(() => resolve(false), CANCEL_GRACE_MS);
-    }),
-  ]);
-  if (!exited) {
-    try {
-      process.kill(-pid, "SIGKILL");
-    } catch {
-      child.kill("SIGKILL");
-    }
-  }
+/** Worker binary override (tests point this at a fixture script). */
+function workerBinary(): string {
+  return process.env.PI_WORKER_COMMAND?.trim() || "pi";
 }
+
+/** Unused stat import guard: kept for future offset persistence. */
+void stat;

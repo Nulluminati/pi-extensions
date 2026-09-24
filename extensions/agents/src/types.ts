@@ -42,6 +42,10 @@ export interface WorkerRecord {
    *  usage fields on its assistant messages (in-memory while running; the
    *  terminal save records the final totals). */
   usage?: WorkerUsage;
+  /** Stream spool format. "raw" = the child's pi JSON event stream, written
+   *  by the child itself to a file (survives parent death); absent = legacy
+   *  parent-projected spool from before session-scoping. */
+  streamFormat?: "raw";
 }
 
 /** Compact live-activity snapshot; `detail` is a one-line arg summary. */

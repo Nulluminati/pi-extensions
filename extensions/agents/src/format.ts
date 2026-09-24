@@ -1,6 +1,7 @@
 /** Rendering for worker lists, status output, and the editor widget. */
 
 import { createFramedWidget, type FramedWidgetFactory } from "../../../lib/framed-widget.ts";
+import { summarizeStreamValue } from "./runner.ts";
 import type { WorkerRecord } from "./types.ts";
 
 // --- Constants ---
@@ -70,7 +71,8 @@ function shortTime(at: number): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-/** Human-readable lines from the parsed stream spool entries (newest last). */
+/** Human-readable lines from the parsed stream spool entries (newest last).
+ *  Legacy projected-spool format. */
 export function formatStreamEntries(entries: string): string[] {
   const lines: string[] = [];
   for (const raw of entries.split("\n")) {
@@ -111,4 +113,68 @@ export function formatStreamEntries(entries: string): string[] {
     }
   }
   return lines;
+}
+
+interface RawSpoolEvent {
+  type?: string;
+  at?: number;
+  message?: { role?: string; content?: unknown };
+  toolName?: string;
+  args?: unknown;
+  result?: unknown;
+  task?: string;
+  status?: string;
+  error?: string;
+}
+
+/** Human-readable lines from a raw child-written spool (pi JSON events plus
+ *  agents_start/agents_end markers), newest last. Same visual language as
+ *  the legacy projection: ▸ started tool, ✓ finished tool, ✎ text,
+ *  ▷ started, ■ finished. */
+export function formatRawStreamEntries(lines: string[]): string[] {
+  const out: string[] = [];
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    let event: RawSpoolEvent;
+    try {
+      event = JSON.parse(line) as RawSpoolEvent;
+    } catch {
+      continue;
+    }
+    const time = typeof event.at === "number" ? `${shortTime(event.at)} ` : "";
+    if (event.type === "tool_execution_start" && typeof event.toolName === "string") {
+      const detail = summarizeStreamValue(event.args);
+      out.push(`${time}▸ ${event.toolName}${detail !== undefined ? ` ${detail}` : ""}`);
+    } else if (event.type === "tool_execution_end" && typeof event.toolName === "string") {
+      const detail = summarizeStreamValue(event.result);
+      out.push(`${time}✓ ${event.toolName}${detail !== undefined ? ` ${detail}` : ""}`);
+    } else if (event.type === "message_end" && event.message?.role === "assistant") {
+      const content = event.message.content;
+      const text = Array.isArray(content)
+        ? content
+            .filter(
+              (block): block is { type: string; text?: string } =>
+                typeof block === "object" &&
+                block !== null &&
+                (block as { type?: string }).type === "text" &&
+                typeof (block as { text?: unknown }).text === "string",
+            )
+            .map((block) => block.text ?? "")
+            .join("")
+            .trim()
+        : "";
+      if (text) {
+        const streamed = summarizeStreamValue(text);
+        if (streamed !== undefined) out.push(`${time}✎ ${streamed}`);
+      }
+    } else if (event.type === "agents_start") {
+      out.push(`${time}▷ started${typeof event.task === "string" ? ` ${event.task}` : ""}`);
+    } else if (event.type === "agents_end") {
+      const suffix =
+        (typeof event.status === "string" ? ` ${event.status}` : "") +
+        (typeof event.error === "string" ? ` — ${event.error}` : "");
+      out.push(`${time}■ finished${suffix}`);
+    }
+  }
+  return out;
 }
