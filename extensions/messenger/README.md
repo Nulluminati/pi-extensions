@@ -21,7 +21,7 @@ messenger (action=release)                        # drop your reservations
 
 ## Limitations
 
-- **Worker sessions cannot send mail**: a session spawned with `PI_WORKER=1` (the agents extension sets it) receives mail but cannot send any. This keeps the pull-only output boundary — worker output reaches the parent only through the workers tool (`status`, `tail`), never as auto-delivered mail.
+- **Worker sessions cannot send mail and cannot set free-text status**: a session spawned with `PI_WORKER=1` (the agents extension sets it) receives mail but cannot send any, and its `status` action is restricted to the bounded enum `working`, `blocked`, `waiting` (plus `""` to clear). This keeps the pull-only output boundary — worker output reaches the parent only through the workers tool (`status`, `tail`), never as auto-delivered mail or as free text rendered into every peer's `messenger list`.
 
 - Reservation enforcement covers the `edit` and `write` tools only; bash-based writes are not blocked. For strong isolation run workers in a sandbox or in worktrees (the `agents` extension does the latter).
 - Delivery always happens at a turn boundary — mail arriving mid-turn waits for the agent to settle; it is never injected into an in-flight request. Mail to an agent in a different project directory waits in their mailbox there.

@@ -516,6 +516,41 @@ describe("messenger-extension", () => {
     expect("status" in shard).toBe(false);
   });
 
+  it("worker status accepts the bounded enum values", async () => {
+    vi.stubEnv("PI_WORKER", "1");
+    vi.stubEnv("PI_MESSENGER_NAME", "worker-status");
+    await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+
+    for (const value of ["working", "blocked", "waiting"]) {
+      const res = await executeTool({ action: "status", status: value });
+      expect(res.content[0].text).toBe(`Status set: ${value}`);
+      expect((await loadRegistry(cwd))["worker-status"]?.status).toBe(value);
+    }
+  });
+
+  it("worker status rejects free text and lists the allowed values", async () => {
+    vi.stubEnv("PI_WORKER", "1");
+    vi.stubEnv("PI_MESSENGER_NAME", "worker-status");
+    await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+
+    await expect(executeTool({ action: "status", status: "refactoring auth" })).rejects.toThrow(
+      /"working", "blocked", "waiting"/,
+    );
+    // Nothing was written to the presence shard.
+    expect((await loadRegistry(cwd))["worker-status"]?.status).toBeUndefined();
+  });
+
+  it("worker status still clears with an empty string", async () => {
+    vi.stubEnv("PI_WORKER", "1");
+    vi.stubEnv("PI_MESSENGER_NAME", "worker-status");
+    await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+
+    await executeTool({ action: "status", status: "working" });
+    const cleared = await executeTool({ action: "status", status: "" });
+    expect(cleared.content[0].text).toBe("Status cleared.");
+    expect((await loadRegistry(cwd))["worker-status"]?.status).toBeUndefined();
+  });
+
   it("unread mail shows a themed messenger status line and clears when read", async () => {
     vi.stubEnv("PI_MESSENGER_NAME", "reader");
     await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);

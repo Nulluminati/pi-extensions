@@ -1,5 +1,8 @@
 /** Tool parameter schema for the messenger tool. */
 
+/** Status values a worker session may publish; free text is parent-only. */
+export const WORKER_STATUS_VALUES = ["working", "blocked", "waiting"] as const;
+
 export const MESSENGER_PARAMETERS = {
   type: "object",
   properties: {
@@ -11,7 +14,8 @@ export const MESSENGER_PARAMETERS = {
     text: { type: "string", description: "send: message text." },
     status: {
       type: "string",
-      description: 'status: short presence line, e.g. "refactoring auth".',
+      description:
+        'status: short presence line, e.g. "refactoring auth". Worker sessions are restricted to "working", "blocked", "waiting", or "" to clear; free text is parent-only.',
     },
     paths: {
       type: "array",

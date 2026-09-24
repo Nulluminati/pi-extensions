@@ -5,6 +5,7 @@
 
 import type { AgentToolResult, ExtensionContext } from "pi";
 import { formatMessages, formatPresence } from "./format.ts";
+import { WORKER_STATUS_VALUES } from "./schemas.ts";
 import {
   heartbeat,
   loadRegistry,
@@ -133,6 +134,19 @@ export async function runMessengerAction(
 
   if (action === "status") {
     const text = typeof params.status === "string" ? params.status.trim() : "";
+    // Même frontière de confiance que send : la ligne de présence d'un
+    // worker est rendue par le `messenger list` de chaque pair, donc un
+    // worker ne publie qu'une valeur bornée. Le texte libre reste réservé
+    // au parent. La chaîne vide est toujours permise (effacer le statut).
+    if (
+      process.env.PI_WORKER === "1" &&
+      text !== "" &&
+      !(WORKER_STATUS_VALUES as readonly string[]).includes(text)
+    ) {
+      throw new Error(
+        `status is restricted to ${WORKER_STATUS_VALUES.map((v) => `"${v}"`).join(", ")} (or an empty string to clear) for worker sessions: the presence line is rendered by every peer's messenger list. Free-text status is only available to non-worker sessions.`,
+      );
+    }
     // An empty string tells heartbeat to remove the stored status.
     await heartbeat(ctx.cwd, agentName, {
       pid: process.pid,

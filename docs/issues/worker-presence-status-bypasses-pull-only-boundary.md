@@ -3,7 +3,7 @@
 - Category: design (trust boundary)
 - Severity: lower
 - Found during: PR #33 second-round review, 2026-09-21
-- Status: open
+- Status: resolved — worker `status` is now restricted to the bounded enum `working`, `blocked`, `waiting` (plus `""` to clear); free text stays parent-only.
 
 ## Evidence
 
