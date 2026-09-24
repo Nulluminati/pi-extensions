@@ -6,6 +6,7 @@ import { completeSimple } from "@earendil-works/pi-ai";
 import { isKittyProtocolActive } from "@earendil-works/pi-tui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadActiveSpeakerId } from "../../extensions/voice/src/config.ts";
+import type { SherpaOnnx } from "../../extensions/voice/src/types.ts";
 import voiceExtension, {
   addHoldToVoice,
   buildInflectPhonemeText,
@@ -28,7 +29,9 @@ import voiceExtension, {
   resolveVoiceConfigPath,
   runVoiceSettings,
   runVoiceSpeak,
+  SttEngine,
   splitInflectText,
+  splitSamples,
   stripRepetitionLoop,
   summarizeForSpeech,
   TTS_MODELS,
@@ -1080,6 +1083,125 @@ describe("voice-extension", () => {
         writeFileSync(join(dir, model.dirName, file), "stub");
       }
       expect(modelIsDownloaded(dir, model)).toBe(true);
+    });
+  });
+
+  describe("moonshine v2 length cap", () => {
+    // sherpa-onnx 1.13.8 returns empty transcripts for Moonshine v2 decodes
+    // longer than ~9.2s; the engine must chunk audio below that.
+    const MAX_SEC = 9;
+
+    function chunkingFakeSherpa(text: string, sampleRate = 16000) {
+      const decodeLengths: number[] = [];
+      const vadConfigs: number[] = [];
+      const stream = {
+        acceptWaveform: (waveform: { samples: Float32Array }) => {
+          decodeLengths.push(waveform.samples.length);
+        },
+      };
+      const fake = {
+        decodeLengths,
+        vadConfigs,
+        readWave: () => ({ samples: new Float32Array(sampleRate * 12), sampleRate }),
+        writeWave: () => {},
+        Vad: class {
+          constructor(config: { sileroVad: { maxSpeechDuration: number } }) {
+            vadConfigs.push(config.sileroVad.maxSpeechDuration);
+          }
+          acceptWaveform() {}
+          isEmpty() {
+            return true;
+          }
+          front() {
+            return { start: 0, samples: new Float32Array(0) };
+          }
+          pop() {}
+          flush() {}
+        },
+        OnlineRecognizer: class {
+          createStream() {
+            return stream;
+          }
+          isReady() {
+            return false;
+          }
+          decode() {}
+          getResult() {
+            return { text };
+          }
+        },
+        OfflineRecognizer: class {
+          createStream() {
+            return stream;
+          }
+          decode() {}
+          getResult() {
+            return { text };
+          }
+        },
+      };
+      return {
+        fake,
+        asSherpa: () => fake as unknown as SherpaOnnx,
+      };
+    }
+
+    it("splitSamples keeps short audio as one chunk", () => {
+      const samples = new Float32Array(16000 * 5);
+      expect(splitSamples(samples, 16000, MAX_SEC)).toEqual([samples]);
+    });
+
+    it("splitSamples splits long audio into capped chunks", () => {
+      const samples = new Float32Array(16000 * 25);
+      const chunks = splitSamples(samples, 16000, MAX_SEC);
+      expect(chunks.length).toBe(3);
+      for (const chunk of chunks) {
+        expect(chunk.length).toBeLessThanOrEqual(MAX_SEC * 16000);
+      }
+      const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+      expect(total).toBe(samples.length);
+    });
+
+    it("SttEngine chunks long moonshine v2 input below the cap", () => {
+      const model = getModel("moonshine-v2-base-en");
+      if (!model) throw new Error("Missing moonshine v2 model");
+      const { fake, asSherpa } = chunkingFakeSherpa("chunk text");
+      const engine = new SttEngine(asSherpa(), model, "/models", 2);
+
+      const text = engine.recognize(new Float32Array(16000 * 12), 16000);
+
+      expect(text).toBe("chunk text chunk text");
+      expect(fake.decodeLengths.length).toBe(2);
+      for (const length of fake.decodeLengths) {
+        expect(length).toBeLessThanOrEqual(MAX_SEC * 16000);
+      }
+    });
+
+    it("SttEngine does not chunk models without a cap", () => {
+      const model = getModel("whisper-tiny-en-int8");
+      if (!model) throw new Error("Missing whisper model");
+      const { fake, asSherpa } = chunkingFakeSherpa("whole text");
+      const engine = new SttEngine(asSherpa(), model, "/models", 2);
+
+      const text = engine.recognize(new Float32Array(16000 * 12), 16000);
+
+      expect(text).toBe("whole text");
+      expect(fake.decodeLengths.length).toBe(1);
+      expect(fake.decodeLengths[0]).toBe(16000 * 12);
+    });
+
+    it("transcribeFile uses the capped VAD duration for moonshine v2", () => {
+      const model = getModel("moonshine-v2-base-en");
+      if (!model) throw new Error("Missing moonshine v2 model");
+      const capped = chunkingFakeSherpa("text");
+      transcribeFile(capped.asSherpa(), model, "/models-without-vad", "/audio.wav");
+      expect(capped.fake.vadConfigs).toEqual([]); // no VAD model in dir, so none built
+
+      const sherpa = chunkingFakeSherpa("text");
+      const dir = mkdtempSync(join(tmpdir(), "pi-voice-vad-"));
+      writeFileSync(join(dir, "silero_vad.onnx"), "stub");
+      transcribeFile(sherpa.asSherpa(), model, dir, "/audio.wav");
+      expect(sherpa.fake.vadConfigs).toEqual([MAX_SEC]);
     });
   });
 

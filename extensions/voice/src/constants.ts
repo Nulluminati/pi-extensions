@@ -60,4 +60,12 @@ export const VAD_SPEECH_DURATION = 0.1;
 
 export const VAD_MAX_SPEECH_DURATION = 20;
 
+// Moonshine v2 ONNX exports silently return an empty transcript for audio
+// longer than about 9.2 seconds: sherpa-onnx fed the decoder a frame-length
+// attention mask while the graphs expect raw audio length (k2-fsa/sherpa-onnx
+// issues #3471 and #3975, fixed upstream by PR #3976 but not yet in an npm
+// release). Keep decodes under the measured 9.2s threshold until the fixed
+// addon ships, then remove this cap.
+export const MOONSHINE_V2_MAX_SEGMENT_SEC = 9;
+
 export const SOURCE_ENV_VAR = "PI_VOICE_SOURCE";

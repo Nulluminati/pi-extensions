@@ -109,8 +109,10 @@ export {
 } from "./src/summary.ts";
 export {
   isHallucination,
+  maxDecodeSec,
   resolveVadModel,
   SttEngine,
+  splitSamples,
   stripRepetitionLoop,
   transcribeFile,
   transcribeSegment,

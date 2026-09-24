@@ -123,6 +123,8 @@ The overlay shows the input level, elapsed recording time, and a partial transcr
 
 The default transcription model is Moonshine v2 Base int8. Silero VAD removes silence before final transcription. The extension also drops common filler hallucinations and trims repeated-word loops.
 
+Moonshine v2 has an upstream limit: sherpa-onnx 1.13.8 returns an empty transcript for decodes longer than about 9.2 seconds ([#3471](https://github.com/k2-fsa/sherpa-onnx/issues/3471), fixed by [PR #3976](https://github.com/k2-fsa/sherpa-onnx/pull/3976), not yet in an npm release). Until the fixed addon ships, the extension decodes Moonshine v2 audio in at most 9-second chunks and joins the results, and cuts VAD segments at the same boundary.
+
 Hold-to-dictate requires Pi's interactive TUI. It supports terminals with key-release reporting and terminals that expose a usable Space auto-repeat sequence.
 
 ## Spoken responses

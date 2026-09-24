@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import {
+  MOONSHINE_V2_MAX_SEGMENT_SEC,
   VAD_MAX_SPEECH_DURATION,
   VAD_MODEL_FILE,
   VAD_SILENCE_DURATION,
@@ -121,12 +122,37 @@ export function resolveVadModel(modelsDir: string): string | undefined {
   return existsSync(path) ? path : undefined;
 }
 
+/**
+ * Longest single decode the model supports, or undefined for no limit.
+ * Moonshine v2 returns empty transcripts above ~9.2s (see constants), so its
+ * audio must be decoded in shorter chunks.
+ */
+export function maxDecodeSec(model: ModelDef): number | undefined {
+  return model.family === "moonshine-v2" ? MOONSHINE_V2_MAX_SEGMENT_SEC : undefined;
+}
+
+/** Split samples into at most maxSec-sized chunks; single chunk when short enough. */
+export function splitSamples(
+  samples: Float32Array,
+  sampleRate: number,
+  maxSec: number,
+): Float32Array[] {
+  const maxSamples = Math.floor(maxSec * sampleRate);
+  if (samples.length <= maxSamples) return [samples];
+  const chunks: Float32Array[] = [];
+  for (let offset = 0; offset < samples.length; offset += maxSamples) {
+    chunks.push(samples.subarray(offset, Math.min(offset + maxSamples, samples.length)));
+  }
+  return chunks;
+}
+
 /** Segment audio into speech regions using silero VAD. Returns speech segments. */
 export function vadSegment(
   sherpa: SherpaOnnx,
   vadModelPath: string,
   samples: Float32Array,
   sampleRate: number,
+  maxSpeechDuration: number = VAD_MAX_SPEECH_DURATION,
 ): Float32Array[] {
   const vad = new sherpa.Vad(
     {
@@ -136,7 +162,7 @@ export function vadSegment(
         minSilenceDuration: VAD_SILENCE_DURATION,
         minSpeechDuration: VAD_SPEECH_DURATION,
         windowSize: VAD_WINDOW_SIZE,
-        maxSpeechDuration: VAD_MAX_SPEECH_DURATION,
+        maxSpeechDuration,
       },
       sampleRate,
       numThreads: 1,
@@ -179,15 +205,21 @@ export function transcribeSegment(
     return recognizer.getResult(stream).text;
   }
   const recognizer = new sherpa.OfflineRecognizer(buildOfflineConfig(model, modelsDir, numThreads));
-  const stream = recognizer.createStream();
-  stream.acceptWaveform({ sampleRate, samples });
-  recognizer.decode(stream);
-  const raw = recognizer.getResult(stream).text;
-  // Anti-loop layers (offline models only — online models don't loop):
-  //   1. Drop the whole segment if it's a known Whisper filler/hallucination.
-  //   2. Strip a trailing repetition loop, keeping the legitimate lead text.
-  if (isHallucination(raw)) return "";
-  return stripRepetitionLoop(raw);
+  const parts: string[] = [];
+  const maxSec = maxDecodeSec(model);
+  for (const chunk of maxSec ? splitSamples(samples, sampleRate, maxSec) : [samples]) {
+    const stream = recognizer.createStream();
+    stream.acceptWaveform({ sampleRate, samples: chunk });
+    recognizer.decode(stream);
+    const raw = recognizer.getResult(stream).text;
+    // Anti-loop layers (offline models only — online models don't loop):
+    //   1. Drop the whole segment if it's a known Whisper filler/hallucination.
+    //   2. Strip a trailing repetition loop, keeping the legitimate lead text.
+    if (isHallucination(raw)) continue;
+    const cleaned = stripRepetitionLoop(raw);
+    if (cleaned.trim()) parts.push(cleaned.trim());
+  }
+  return parts.join(" ");
 }
 
 export function transcribeFile(
@@ -208,9 +240,12 @@ export function transcribeFile(
   // Without this, Whisper/Moonshine loop-hallucinate on silent audio,
   // wasting their token budget on repetition instead of actual speech.
   const vadModelPath = resolveVadModel(modelsDir);
+  // Moonshine v2 also needs short VAD segments so cuts land near pauses
+  // instead of mid-word when the decode cap splits a long utterance.
+  const vadMaxSpeech = maxDecodeSec(model) ?? VAD_MAX_SPEECH_DURATION;
   let text: string;
   if (vadModelPath) {
-    const segments = vadSegment(sherpa, vadModelPath, wave.samples, wave.sampleRate);
+    const segments = vadSegment(sherpa, vadModelPath, wave.samples, wave.sampleRate, vadMaxSpeech);
     if (segments.length === 0) {
       text = "";
     } else {
@@ -284,11 +319,17 @@ export class SttEngine {
       return r.getResult(stream).text;
     }
     const r = this.recognizer as OfflineRecognizer;
-    const stream = r.createStream();
-    stream.acceptWaveform({ samples, sampleRate });
-    r.decode(stream);
-    const raw = r.getResult(stream).text;
-    if (isHallucination(raw)) return "";
-    return stripRepetitionLoop(raw);
+    const parts: string[] = [];
+    const maxSec = maxDecodeSec(this.model);
+    for (const chunk of maxSec ? splitSamples(samples, sampleRate, maxSec) : [samples]) {
+      const stream = r.createStream();
+      stream.acceptWaveform({ samples: chunk, sampleRate });
+      r.decode(stream);
+      const raw = r.getResult(stream).text;
+      if (isHallucination(raw)) continue;
+      const cleaned = stripRepetitionLoop(raw);
+      if (cleaned.trim()) parts.push(cleaned.trim());
+    }
+    return parts.join(" ");
   }
 }
