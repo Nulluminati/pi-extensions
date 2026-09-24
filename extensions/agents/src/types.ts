@@ -1,6 +1,7 @@
 /** Worker session types for the agents extension. */
 
 import type { ThinkingLevel } from "pi";
+import type { WorkerBlocker } from "../../../lib/worker-blocker.ts";
 
 // --- Types ---
 
@@ -29,6 +30,10 @@ export interface WorkerRecord {
   exitCode?: number | null;
   /** Final assistant text extracted from the worker's JSON event stream. */
   outputText?: string;
+  /** Blocker the worker reported via its report_blocker tool (one sanitized
+   *  line, ingested from the spool). The wake carries no reason text; this
+   *  field is what the workers tool (action=status) reads back. */
+  blocker?: WorkerBlocker;
   /** Path to the captured patch file (isolated workers only). */
   patchPath?: string;
   /** When the patch was applied to the main tree (collect action). */

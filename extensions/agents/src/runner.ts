@@ -21,6 +21,11 @@ import { join } from "node:path";
 import type { ThinkingLevel } from "pi";
 import { cleanGitEnv } from "../../../lib/git.ts";
 import { isProcessAlive } from "../../../lib/presence-shards.ts";
+import {
+  BLOCKER_MARKER_TYPE,
+  parseBlockerMarker,
+  WORKER_STREAM_ENV_VAR,
+} from "../../../lib/worker-blocker.ts";
 import { patchesDir, stderrLogPath, streamPath } from "./store.ts";
 import type { WorkerActivity, WorkerEvents, WorkerRecord } from "./types.ts";
 import { captureWorktreePatch } from "./worktree.ts";
@@ -114,7 +119,7 @@ async function readTailLines(path: string, bytes: number): Promise<string[]> {
  * spool at finalization, so it works identically for adopted workers whose
  * parent never saw the output.
  */
-export function ingestStreamEvent(jsonLine: string, record: WorkerRecord): void {
+export function ingestStreamEvent(jsonLine: string, record: WorkerRecord): "blocker" | undefined {
   let event: {
     type?: string;
     message?: { role?: string; usage?: unknown };
@@ -124,7 +129,17 @@ export function ingestStreamEvent(jsonLine: string, record: WorkerRecord): void 
   try {
     event = JSON.parse(jsonLine);
   } catch {
-    return;
+    return undefined;
+  }
+
+  // Blocker marker from the worker's report_blocker tool: recorded on the
+  // live record; the caller wakes the parent (once). The reason stays here
+  // — the wake carries ids and status words only.
+  if (event.type === BLOCKER_MARKER_TYPE) {
+    const blocker = parseBlockerMarker(jsonLine);
+    if (blocker === undefined) return undefined;
+    record.blocker = blocker; // last report wins
+    return "blocker";
   }
 
   if (event.type === "tool_execution_start" && typeof event.toolName === "string") {
@@ -139,7 +154,7 @@ export function ingestStreamEvent(jsonLine: string, record: WorkerRecord): void 
     return;
   }
 
-  if (event.type !== "message_end" || event.message?.role !== "assistant") return;
+  if (event.type !== "message_end" || event.message?.role !== "assistant") return undefined;
   if (
     event.message.usage !== undefined &&
     typeof event.message.usage === "object" &&
@@ -304,6 +319,13 @@ export async function finalizeWorker(options: FinalizeOptions): Promise<WorkerRe
   const lines = await readTailLines(streamPath(cwd, record.id), Number.MAX_SAFE_INTEGER);
   const outputText = extractFinalText(lines, record.streamFormat);
   const endMark = spoolEndStatus(lines);
+
+  // A blocker reported while nobody was watching (adoption, janitor sweep)
+  // lives in the spool; recover it so the terminal record keeps the why.
+  for (const line of lines) {
+    const blocker = parseBlockerMarker(line);
+    if (blocker !== undefined) record.blocker = blocker;
+  }
 
   let status: WorkerRecord["status"];
   let error: string | undefined;
@@ -503,6 +525,10 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
         // Stable messenger identity: the worker is addressable in the mesh
         // by its agents-registry name instead of a generated themed name.
         PI_MESSENGER_NAME: options.name,
+        // Blocker channel: the worker-side report_blocker tool appends
+        // agents_blocker markers to this spool; the poller below ingests
+        // them and wakes this session once, ids and status words only.
+        [WORKER_STREAM_ENV_VAR]: spoolFile,
       },
       detached: true,
       // The child holds its own dups of these descriptors; the parent closes
@@ -530,6 +556,8 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
   let ingestOffset = 0;
   let ingestBuffer = "";
   let lastActivityToolCount = 0;
+  // A blocker wakes the parent exactly once, however many reports arrive.
+  let blockerWakeSent = false;
   const ingestTimer = setInterval(() => {
     void ingestNewSpoolBytes(spoolFile).then((ingested) => {
       if (ingested === undefined) return;
@@ -539,7 +567,13 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
       const lines = ingestBuffer.split("\n");
       ingestBuffer = lines.pop() ?? "";
       for (const line of lines) {
-        if (line.trim()) ingestStreamEvent(line, record);
+        if (!line.trim()) continue;
+        if (ingestStreamEvent(line, record) === "blocker" && !blockerWakeSent) {
+          blockerWakeSent = true;
+          events.wake(
+            `[worker ${record.name} (${record.id}) reported a blocker]. Use the workers tool (action=status, id=${record.id}) for details.`,
+          );
+        }
       }
       // The widget refreshes on activity changes (throttled by the root).
       const toolCount = record.activity?.toolCount ?? 0;

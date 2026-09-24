@@ -9,10 +9,12 @@
  *
  * Resolution order: the delegate call's explicit list, then
  * PI_WORKER_EXTENSIONS (comma-separated names), then the config file, then
- * the default set. `messenger` and `gondolin` are always included: messenger
- * is the coordination channel to the parent, and Gondolin is the mandatory
- * worker sandbox. A hard denylist rejects workflow extensions that would
- * break the one-level delegation model, even when explicitly requested.
+ * the default set. `messenger`, `worker-blocker`, and `gondolin` are always
+ * included: messenger is the coordination channel to the parent,
+ * worker-blocker is the blocker-reporting channel to the parent, and
+ * Gondolin is the mandatory worker sandbox. A hard denylist rejects
+ * workflow extensions that would break the one-level delegation model, even
+ * when explicitly requested.
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -51,8 +53,10 @@ export const FORBIDDEN_WORKER_EXTENSIONS = [
   "plan",
 ] as const;
 
-/** Coordination and sandbox extensions loaded by every worker. */
-export const REQUIRED_WORKER_EXTENSIONS = ["messenger", "gondolin"] as const;
+/** Coordination, blocker reporting, and sandbox extensions loaded by every
+ *  worker. Gondolin stays last so its built-in tool overrides cannot be
+ *  shadowed by an extension loaded afterward. */
+export const REQUIRED_WORKER_EXTENSIONS = ["messenger", "worker-blocker", "gondolin"] as const;
 
 /**
  * Extension names map to extensions/<name>/<name>.ts; names outside the
@@ -110,12 +114,13 @@ export function resolveWorkerExtensions(
 
   const forbidden = new Set<string>(FORBIDDEN_WORKER_EXTENSIONS);
   const requestedNames = names.map((name) => name.trim());
-  // Gondolin loads last so its built-in tool overrides cannot be shadowed by
-  // an optional worker extension loaded afterward.
+  // Mandatory extensions pin the ends of the load order: boundary machinery
+  // first, Gondolin's built-in tool overrides last. Requested duplicates of
+  // either fall out via the Set.
   const unique = new Set<string>([
-    REQUIRED_WORKER_EXTENSIONS[0],
+    ...REQUIRED_WORKER_EXTENSIONS.filter((name) => name !== "gondolin"),
     ...requestedNames.filter((name) => name !== "gondolin"),
-    REQUIRED_WORKER_EXTENSIONS[1],
+    "gondolin",
   ]);
   const resolved: ResolvedWorkerExtension[] = [];
   for (const name of unique) {

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_WORKER_EXTENSIONS,
   FORBIDDEN_WORKER_EXTENSIONS,
+  REQUIRED_WORKER_EXTENSIONS,
   resolveWorkerExtensions,
   WORKER_EXTENSIONS_ENV_VAR,
 } from "../../extensions/agents/src/worker-extensions.ts";
@@ -25,7 +26,7 @@ describe("worker-extensions", () => {
     root = await mkdtemp(join(tmpdir(), "worker-extensions-"));
     configPath = join(root, "worker-extensions.json");
     // Fake extension directories: <root>/<name>/<name>.ts
-    for (const name of DEFAULT_WORKER_EXTENSIONS) {
+    for (const name of new Set([...DEFAULT_WORKER_EXTENSIONS, ...REQUIRED_WORKER_EXTENSIONS])) {
       mkdirSync(join(root, name), { recursive: true });
       writeFileSync(join(root, name, `${name}.ts`), "export default async () => {};");
     }
@@ -64,7 +65,12 @@ describe("worker-extensions", () => {
       configPath,
     });
 
-    expect(resolved.map((r) => r.name)).toEqual(["messenger", "context7", "gondolin"]);
+    expect(resolved.map((r) => r.name)).toEqual([
+      "messenger",
+      "worker-blocker",
+      "context7",
+      "gondolin",
+    ]);
   });
 
   it("parses the environment list (comma-separated, trimmed)", () => {
@@ -75,7 +81,12 @@ describe("worker-extensions", () => {
       configPath,
     });
 
-    expect(resolved.map((r) => r.name)).toEqual(["messenger", "web-search", "gondolin"]);
+    expect(resolved.map((r) => r.name)).toEqual([
+      "messenger",
+      "worker-blocker",
+      "web-search",
+      "gondolin",
+    ]);
   });
 
   it("loads the config file when no env or explicit set", () => {
@@ -86,7 +97,12 @@ describe("worker-extensions", () => {
       configPath,
     });
 
-    expect(resolved.map((r) => r.name)).toEqual(["messenger", "web-search", "gondolin"]);
+    expect(resolved.map((r) => r.name)).toEqual([
+      "messenger",
+      "worker-blocker",
+      "web-search",
+      "gondolin",
+    ]);
   });
 
   it("force-includes messenger and gondolin even when the explicit list is empty", () => {
@@ -95,7 +111,28 @@ describe("worker-extensions", () => {
       configPath,
     });
 
-    expect(resolved.map((r) => r.name)).toEqual(["messenger", "gondolin"]);
+    expect(resolved.map((r) => r.name)).toEqual(["messenger", "worker-blocker", "gondolin"]);
+  });
+
+  it("always includes the blocker channel (worker-blocker) even when not requested", () => {
+    const resolved = resolveWorkerExtensions(["web-search"], {
+      extensionsRoot: root,
+      configPath,
+    });
+
+    const names = resolved.map((r) => r.name);
+    expect(names).toContain("worker-blocker");
+    expect(names[0]).toBe("messenger");
+    expect(names.at(-1)).toBe("gondolin");
+  });
+
+  it("dedupes worker-blocker when explicitly requested", () => {
+    const resolved = resolveWorkerExtensions(["worker-blocker", "worker-blocker"], {
+      extensionsRoot: root,
+      configPath,
+    });
+
+    expect(resolved.map((r) => r.name).filter((n) => n === "worker-blocker")).toHaveLength(1);
   });
 
   it("dedupes mandatory and requested extensions", () => {
@@ -161,7 +198,12 @@ describe("worker-extensions", () => {
       extensionsRoot: root,
       configPath,
     });
-    expect(resolved.map((r) => r.name)).toEqual(["messenger", "web-search", "gondolin"]);
+    expect(resolved.map((r) => r.name)).toEqual([
+      "messenger",
+      "worker-blocker",
+      "web-search",
+      "gondolin",
+    ]);
   });
 
   it("rejects malformed config files and env values with descriptive errors", () => {

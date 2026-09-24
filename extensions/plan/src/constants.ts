@@ -29,6 +29,7 @@ export const PLAN_WORKER_ALLOWED_TOOLS = new Set([
   "todo",
   "ask_user",
   "messenger",
+  "report_blocker",
   "code_search",
   "context7_resolve_library_id",
   "context7_get_library_docs",

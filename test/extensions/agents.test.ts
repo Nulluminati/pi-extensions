@@ -12,6 +12,7 @@ import { createWorkersWidget } from "../../extensions/agents/src/format.ts";
 import {
   extractAssistantText,
   finalizeWorker,
+  ingestStreamEvent,
   killPidTree,
 } from "../../extensions/agents/src/runner.ts";
 import {
@@ -91,6 +92,14 @@ exit 0
 const NOISY_FAILING_WORKER =
   "#!/bin/sh\necho 'line one failure' >&2\necho 'line two failure' >&2\necho 'line three failure' >&2\nexit 3\n";
 const SLOW_WORKER = "#!/bin/sh\nsleep 30\n";
+const BLOCKER_REASON = "this VM has no node_modules and no parent checkout";
+const BLOCKER_RUNNING_WORKER = `#!/bin/sh
+printf '%s\n' '{"type":"agents_blocker","at":123,"reason":"${BLOCKER_REASON}"}' >> "$PI_WORKER_STREAM"
+sleep 30
+`;
+const BLOCKER_DONE_WORKER = `#!/bin/sh
+printf '%s\n' '{"type":"agents_blocker","at":123,"reason":"blocked briefly, worked around it"}' >> "$PI_WORKER_STREAM"
+${SUCCESS_WORKER}`;
 
 /**
  * A late messenger-write teardown race can hit the temp dir between rm's
@@ -1156,6 +1165,87 @@ sleep 30
       expect(text.split("\n")).toHaveLength(41); // 40 entries + omission note
     });
   });
+
+  describe("worker blocker reporting", () => {
+    it("records a reported blocker on the running record and shows it in workers status", async () => {
+      const fixture = await writeFixture(fixtureDir, "blocker-worker.sh", BLOCKER_RUNNING_WORKER);
+      setEnv("PI_WORKER_COMMAND", fixture);
+
+      const started = await executeTool("delegate", { task: "stuck task", isolate: false });
+      const id = started.details.workerId as string;
+
+      // The spool poller ingests the marker into the live record.
+      await vi.waitFor(async () => {
+        const status = await executeTool("workers", { action: "status", id });
+        const worker = status.details.worker as WorkerRecord;
+        expect(worker.blocker).toMatchObject({ reason: BLOCKER_REASON, at: 123 });
+        expect(status.content[0].text).toContain(`Blocker: ${BLOCKER_REASON}`);
+      });
+
+      // Reporting a blocker does not kill the worker; the parent decides.
+      const status = await executeTool("workers", { action: "status", id });
+      expect((status.details.worker as WorkerRecord).status).toBe("running");
+
+      await executeTool("workers", { action: "cancel", id });
+    });
+
+    it("wakes the parent once with ids and status words only (no worker prose)", async () => {
+      const fixture = await writeFixture(fixtureDir, "blocker-wake.sh", BLOCKER_RUNNING_WORKER);
+      setEnv("PI_WORKER_COMMAND", fixture);
+
+      const started = await executeTool("delegate", { task: "stuck task", isolate: false });
+      const id = started.details.workerId as string;
+
+      await waitForWake(mockPi);
+      const wakes = mockPi.sendMessage.mock.calls.filter(
+        ([message]) => (message as WakeMessageShape).customType === "agents:wake",
+      );
+      expect(wakes).toHaveLength(1);
+      const [message, options] = wakes[0] as unknown as [WakeMessageShape, WakeOptionsShape];
+      expect(message.details).toMatchObject({ source: "agents", trusted: true });
+      expect(options.triggerTurn).toBe(true);
+      const text = message.content[0].text;
+      expect(text).toContain("reported a blocker");
+      expect(text).toContain(`id=${id}`);
+      // Trusted-channel contract: the reason text stays behind the pull
+      // boundary and is only readable via the workers tool.
+      expect(text).not.toContain("node_modules");
+      expect(text).not.toContain("no parent checkout");
+
+      await executeTool("workers", { action: "cancel", id });
+    });
+
+    it("keeps the blocker on the final record when the worker finishes", async () => {
+      const fixture = await writeFixture(fixtureDir, "blocker-done.sh", BLOCKER_DONE_WORKER);
+      setEnv("PI_WORKER_COMMAND", fixture);
+
+      const result = await executeTool("delegate", { task: "t", isolate: false, wait: true });
+
+      const worker = result.details.worker as WorkerRecord;
+      expect(worker.status).toBe("completed");
+      expect(worker.blocker).toMatchObject({
+        reason: "blocked briefly, worked around it",
+        at: 123,
+      });
+      const stored = await loadWorker(cwd, worker.id);
+      expect(stored?.blocker?.reason).toBe("blocked briefly, worked around it");
+    });
+
+    it("workers tail renders the blocker marker", async () => {
+      const fixture = await writeFixture(fixtureDir, "blocker-tail.sh", BLOCKER_DONE_WORKER);
+      setEnv("PI_WORKER_COMMAND", fixture);
+
+      const started = await executeTool("delegate", {
+        task: "t",
+        isolate: false,
+        wait: true,
+      });
+      const id = (started.details.worker as WorkerRecord).id;
+
+      const tail = await executeTool("workers", { action: "tail", id });
+      expect(tail.content[0].text).toContain("⚠ blocker blocked briefly, worked around it");
+    });
+  });
   it("workers remove deletes a finished worker's record and artifacts", async () => {
     const finished = makeWorkerRecord({
       id: "w-done",
@@ -1297,6 +1387,30 @@ describe("agents-units", () => {
       text,
     );
     expect(text).toBe("second");
+  });
+
+  it("ingestStreamEvent records blocker markers on the record", () => {
+    const record = makeWorkerRecord();
+
+    expect(
+      ingestStreamEvent('{"type":"agents_blocker","at":5,"reason":"a real blocker"}', record),
+    ).toBe("blocker");
+    expect(record.blocker).toEqual({ reason: "a real blocker", at: 5 });
+
+    // Non-marker and corrupt lines are ignored.
+    expect(
+      ingestStreamEvent(
+        '{"type":"tool_execution_start","toolName":"read","args":{"path":"a"}}',
+        record,
+      ),
+    ).toBeUndefined();
+    expect(ingestStreamEvent("not json", record)).toBeUndefined();
+
+    // Reasons are re-sanitized defensively and the last report wins.
+    ingestStreamEvent('{"type":"agents_blocker","at":6,"reason":"line1\\nline2"}', record);
+    expect(record.blocker).toEqual({ reason: "line1 line2", at: 6 });
+    ingestStreamEvent('{"type":"agents_blocker","at":7,"reason":"the final answer"}', record);
+    expect(record.blocker).toEqual({ reason: "the final answer", at: 7 });
   });
 
   it("isGitRepo detects git and non-git directories", async () => {
@@ -1759,6 +1873,28 @@ describe("agents-worker store (session-scoped)", () => {
 
     expect(finalized.status).toBe("timeout");
     expect(finalized.error).toContain("30s timeout");
+  });
+
+  it("finalizeWorker recovers a reported blocker from the spool", async () => {
+    const record = makeWorkerRecord({
+      id: "w-blocked",
+      name: "blocked",
+      status: "running",
+      streamFormat: "raw",
+    });
+    const spoolDir = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
+    await mkdir(spoolDir, { recursive: true });
+    await writeFile(
+      join(spoolDir, "w-blocked.jsonl"),
+      '{"type":"agents_blocker","at":9,"reason":"stuck on missing credentials"}\n{"type":"agents_end","at":10,"status":"timeout","error":"worker exceeded 30s timeout"}\n',
+      "utf8",
+    );
+
+    const finalized = await finalizeWorker({ cwd, record });
+
+    // The adoption/timeout path still surfaces why the worker got stuck.
+    expect(finalized.status).toBe("timeout");
+    expect(finalized.blocker).toEqual({ reason: "stuck on missing credentials", at: 9 });
   });
 });
 

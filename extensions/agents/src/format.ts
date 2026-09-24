@@ -1,6 +1,7 @@
 /** Rendering for worker lists, status output, and the editor widget. */
 
 import { createFramedWidget, type FramedWidgetFactory } from "../../../lib/framed-widget.ts";
+import { BLOCKER_MARKER_TYPE } from "../../../lib/worker-blocker.ts";
 import { summarizeStreamValue } from "./runner.ts";
 import type { WorkerRecord } from "./types.ts";
 
@@ -26,15 +27,19 @@ export function formatWorkerLine(worker: WorkerRecord, tag?: "orphan" | "other s
   const icon = STATUS_ICONS[worker.status];
   const isolated = worker.worktree ? " [worktree]" : "";
   const prefix = tag === undefined ? "" : `[${tag}] `;
+  // A reported blocker is visible at list level so a stuck worker is
+  // spottable without opening status.
+  const blocked = worker.blocker !== undefined ? " · ⚠ blocker" : "";
   const base = `${prefix}${icon} ${worker.id} "${worker.name}" ${worker.status} · ${worker.model}${isolated}`;
-  if (worker.activity === undefined) return base;
+  if (worker.activity === undefined) return `${base}${blocked}`;
   // Live activity: what the worker is doing right now (last started tool).
   const detail = worker.activity.detail !== undefined ? ` ${worker.activity.detail}` : "";
-  return `${base} · ▸ ${worker.activity.tool}${detail}`;
+  return `${base} · ▸ ${worker.activity.tool}${detail}${blocked}`;
 }
 
 export function formatWorkerStatus(worker: WorkerRecord): string {
   const lines = [formatWorkerLine(worker), `Task: ${worker.task}`, `cwd: ${worker.cwd}`];
+  if (worker.blocker !== undefined) lines.push(`Blocker: ${worker.blocker.reason}`);
   if (worker.usage !== undefined) {
     const tokens =
       worker.usage.inputTokens +
@@ -125,6 +130,7 @@ interface RawSpoolEvent {
   task?: string;
   status?: string;
   error?: string;
+  reason?: string;
 }
 
 /** Human-readable lines from a raw child-written spool (pi JSON events plus
@@ -169,6 +175,9 @@ export function formatRawStreamEntries(lines: string[]): string[] {
       }
     } else if (event.type === "agents_start") {
       out.push(`${time}▷ started${typeof event.task === "string" ? ` ${event.task}` : ""}`);
+    } else if (event.type === BLOCKER_MARKER_TYPE) {
+      const reason = typeof event.reason === "string" ? ` ${event.reason}` : "";
+      out.push(`${time}⚠ blocker${reason}`);
     } else if (event.type === "agents_end") {
       const suffix =
         (typeof event.status === "string" ? ` ${event.status}` : "") +

@@ -1128,6 +1128,7 @@ describe("plan tool allowlist", () => {
         "ls",
         "messenger",
         "read",
+        "report_blocker",
         "delegate",
         "workers",
         "todo",
@@ -1151,12 +1152,13 @@ describe("plan tool allowlist", () => {
         "read",
         "web_search",
         "code_search",
+        "report_blocker",
         "delegate",
         "workers",
         "background",
         "unknown_mutator",
       ]),
-    ).toEqual(["read", "web_search", "code_search"]);
+    ).toEqual(["read", "web_search", "code_search", "report_blocker"]);
   });
 });
 
