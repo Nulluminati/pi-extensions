@@ -663,7 +663,16 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
     await finish("cancelled");
   };
 
-  return { record, child: (childRef.value ?? ({} as ChildProcess)) as ChildProcess, done, cancel };
+  // The pid must be on the record before the caller's initial persist:
+  // adoption, orphan detection, and pid-based kill all key off it.
+  const child = await started;
+  if (child !== undefined && child.pid !== undefined) record.pid = child.pid;
+  return {
+    record,
+    child: child ?? ({} as ChildProcess),
+    done,
+    cancel,
+  };
 }
 
 /** Worker binary override (tests point this at a fixture script). */

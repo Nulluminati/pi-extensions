@@ -1889,6 +1889,24 @@ describe("agents-worker session scoping", () => {
     await executeTool("workers", { action: "cancel", id: started.details.workerId as string });
   });
 
+  it("a delegate persists the worker child pid on the record", async () => {
+    const fixture = await writeFixture(fixtureDir, "slow-worker.sh", SLOW_WORKER);
+    setEnv("PI_WORKER_COMMAND", fixture);
+
+    const started = await executeTool("delegate", { task: "long", isolate: false });
+    const id = started.details.workerId as string;
+
+    try {
+      const stored = await loadWorker(cwd, id);
+      expect(typeof stored?.pid).toBe("number");
+      expect(stored?.pid).toBeGreaterThan(0);
+      // The pid is live: it is the spawned child itself, not a placeholder.
+      expect(killSync(stored?.pid ?? 0)).toBe(true);
+    } finally {
+      await executeTool("workers", { action: "cancel", id });
+    }
+  });
+
   it("a delegate records the owning session on the worker", async () => {
     const fixture = await writeFixture(fixtureDir, "ok-worker.sh", SUCCESS_WORKER);
     setEnv("PI_WORKER_COMMAND", fixture);
