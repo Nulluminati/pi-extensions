@@ -3,7 +3,7 @@
 - Category: bug (environment provisioning) / design
 - Severity: important
 - Found during: PR #33 second-round review, 2026-09-21; expanded after the lower-sev mission, 2026-09-24/25
-- Status: open (design reviewed and spike-verified; implementation pending)
+- Status: resolved (2026-09-25) — design reviewed, spike-verified, implemented; see commits e7f9d65..8b40501
 
 ## Evidence
 
@@ -113,18 +113,18 @@ probes must assert on status, not on fetch rejection.
 
 ## Implementation checklist
 
-- [ ] Primitive order carry → share → provision; per-OS copy chain
-- [ ] Throwaway provision VM with worktree-only + cache mounts, `network`
+- [x] Primitive order carry → share → provision; per-OS copy chain
+- [x] Throwaway provision VM with worktree-only + cache mounts, `network`
       allowlist wiring into `VM.create({ httpHooks })`
-- [ ] Preflight refusal paths (missing / stale / failed / busy / skipped)
-- [ ] Fingerprint state file via `excludeFromGit`; lock with parameterized
+- [x] Preflight refusal paths (missing / stale / failed / busy / skipped)
+- [x] Fingerprint state file via `excludeFromGit`; lock with parameterized
       timeout
-- [ ] Host-side path-limited config commit with `ctx.ui.notify`; failure
+- [x] Host-side path-limited config commit with `ctx.ui.notify`; failure
       refuses (D2)
-- [ ] Task-prompt ENVIRONMENT block; `WorkerRecord.provision` rendering
-- [ ] Version-stamped skill materialization; `carryUnsafe` local-only
+- [x] Task-prompt ENVIRONMENT block; `WorkerRecord.provision` rendering
+- [x] Version-stamped skill materialization; `carryUnsafe` local-only
       validation; secret deny-globs; symlink-escape guard
-- [ ] Cache retention bound for `cacheDir("provision")`
-- [ ] Tests: failed-provision record carries `worktree` and prunes; stale
+- [x] Cache retention bound for `cacheDir("provision")`
+- [x] Tests: failed-provision record carries `worktree` and prunes; stale
       fingerprint refuses; preflight refusal precedes reservation; secret-glob
       carry refused; symlink escape skipped
