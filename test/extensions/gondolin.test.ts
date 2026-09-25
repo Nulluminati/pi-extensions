@@ -1,5 +1,5 @@
 import { readdir } from "node:fs/promises";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import gondolinExtension from "../../extensions/gondolin/gondolin.ts";
 import { GUEST_WORKSPACE } from "../../extensions/gondolin/src/constants.ts";
@@ -497,6 +497,14 @@ describe("gondolin-extension", () => {
       expect(mounts[MAIN_GIT_PATH]).toMatchObject({ readonly: true });
       expect(mounts[MAIN_GIT_PATH]?.backend).toMatchObject({ mountedPath: MAIN_GIT_PATH });
       expect(gondolin.ReadonlyProvider).toHaveBeenCalledTimes(1);
+
+      // Guest uid 0 vs uid-1000 mounts: git would refuse the repo as
+      // "dubious" without safe.directory declarations passed as VM env.
+      const env = getCreatedEnv(gondolin.VM.create);
+      expect(env.GIT_CONFIG_COUNT).toBe("3");
+      expect(env.GIT_CONFIG_KEY_0).toBe("safe.directory");
+      expect(env.GIT_CONFIG_VALUE_0).toBe(GUEST_WORKSPACE);
+      expect([env.GIT_CONFIG_VALUE_1, env.GIT_CONFIG_VALUE_2]).toContain(dirname(MAIN_GIT_PATH));
     });
 
     it("worker with a real .git directory (normal checkout) adds no extra mounts", async () => {
@@ -548,6 +556,13 @@ describe("gondolin-extension", () => {
 
       expect(Object.keys(getCreatedMounts(gondolin.VM.create))).toEqual([GUEST_WORKSPACE]);
       expect(gondolin.ReadonlyProvider).not.toHaveBeenCalled();
+
+      // Parent sessions still get the workspace declared safe: the uid
+      // mismatch exists for every sandbox, worker or not.
+      const env = getCreatedEnv(gondolin.VM.create);
+      expect(env.GIT_CONFIG_COUNT).toBe("1");
+      expect(env.GIT_CONFIG_KEY_0).toBe("safe.directory");
+      expect(env.GIT_CONFIG_VALUE_0).toBe(GUEST_WORKSPACE);
     });
 
     it("worker resolves an unusual commondir relative path to the main .git", async () => {
@@ -737,4 +752,9 @@ function getCreatedMounts(vmCreate: UntypedMock): Record<string, Record<string, 
     | { vfs?: { mounts?: Record<string, Record<string, unknown>> } }
     | undefined;
   return createArg?.vfs?.mounts ?? {};
+}
+
+function getCreatedEnv(vmCreate: UntypedMock): Record<string, string> {
+  const createArg = vmCreate.mock.calls[0]?.[0] as { env?: Record<string, string> } | undefined;
+  return createArg?.env ?? {};
 }

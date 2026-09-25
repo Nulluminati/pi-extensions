@@ -5,8 +5,8 @@
  * corrupts git calls made from tests and tools. */
 
 import { execFile } from "node:child_process";
-import { appendFile, readFile } from "node:fs/promises";
-import { isAbsolute, resolve } from "node:path";
+import { appendFile, mkdir, readFile } from "node:fs/promises";
+import { dirname, isAbsolute, resolve } from "node:path";
 import { promisify } from "node:util";
 
 // --- Constants ---
@@ -67,11 +67,14 @@ export async function excludeFromGit(cwd: string, pattern: string): Promise<bool
   try {
     current = await readFile(exclude, "utf8");
   } catch (error) {
-    // The file may not exist yet; appendFile creates it (.git/info always exists).
+    // The file may not exist yet; appendFile creates it. Its parent may be
+    // missing too: a template-less git (Alpine guests) creates no .git/info
+    // on init, so create the directory rather than assuming it.
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
   if (current.split("\n").includes(pattern)) return false;
 
+  await mkdir(dirname(exclude), { recursive: true });
   await appendFile(exclude, `${pattern}\n`, "utf8");
   return true;
 }

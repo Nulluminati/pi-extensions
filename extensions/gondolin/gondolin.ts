@@ -40,7 +40,7 @@ import {
   createGondolinReadOps,
   createGondolinWriteOps,
 } from "./src/file-operations.ts";
-import { resolveWorktreeGitDirs } from "./src/git-metadata.ts";
+import { resolveWorktreeGitDirs, type WorktreeGitDirs } from "./src/git-metadata.ts";
 import { executeGondolinGrep } from "./src/grep.ts";
 import { createGondolinFindOps } from "./src/traversal.ts";
 
@@ -84,18 +84,20 @@ async function appendWorktreeGitMounts(
   mounts: Record<string, VirtualProvider>,
   localCwd: string,
   providers: ProviderFactories,
-): Promise<void> {
-  if (process.env.PI_WORKER !== "1") return;
+): Promise<WorktreeGitDirs | undefined> {
+  if (process.env.PI_WORKER !== "1") return undefined;
   try {
     const gitDirs = await resolveWorktreeGitDirs(localCwd);
-    if (!gitDirs) return;
+    if (!gitDirs) return undefined;
     mounts[gitDirs.gitdir] = new providers.RealFSProvider(gitDirs.gitdir);
     mounts[gitDirs.mainGitDir] = new providers.ReadonlyProvider(
       new providers.RealFSProvider(gitDirs.mainGitDir),
     );
+    return gitDirs;
   } catch {
     // Metadata resolution must never break VM startup: on any failure the VM
     // starts with its base mount set instead.
+    return undefined;
   }
 }
 
@@ -152,9 +154,29 @@ export default async function gondolinExtension(pi: ExtensionAPI) {
       const mounts: Record<string, VirtualProvider> = {
         [GUEST_WORKSPACE]: new RealFSProvider(localCwd),
       };
-      await appendWorktreeGitMounts(mounts, localCwd, { RealFSProvider, ReadonlyProvider });
+      const gitDirs = await appendWorktreeGitMounts(mounts, localCwd, {
+        RealFSProvider,
+        ReadonlyProvider,
+      });
+      // The guest runs as uid 0 against mounts owned by the real user; git's
+      // ownership check would refuse the repository as "dubious" on every
+      // command. Declare the paths safe via process env — scoped to this VM,
+      // no config files written. The abs paths join the list only when the
+      // worker mounts expose the repo under its host path.
+      const safeDirectories = [
+        GUEST_WORKSPACE,
+        ...(gitDirs !== undefined ? [localCwd, path.dirname(gitDirs.mainGitDir)] : []),
+      ];
+      const env: Record<string, string> = {
+        GIT_CONFIG_COUNT: String(safeDirectories.length),
+      };
+      safeDirectories.forEach((dir, index) => {
+        env[`GIT_CONFIG_KEY_${index}`] = "safe.directory";
+        env[`GIT_CONFIG_VALUE_${index}`] = dir;
+      });
       created = await VM.create({
         sessionLabel: `pi ${path.basename(localCwd)}`,
+        env,
         vfs: {
           mounts,
         },
