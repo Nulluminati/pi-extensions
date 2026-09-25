@@ -3,7 +3,7 @@
 - Category: test infrastructure (environment sensitivity)
 - Severity: minor
 - Found during: provisioning field tests, 2026-09-25 — first full `npm run check` runs in provisioned worktree workers
-- Status: open (owner decision deferred: bump the cap, gate on environment, or keep as marker)
+- Status: resolved (2026-09-25) — owner decision: option 1, bump the cap to 60s for the path-conventions test
 
 ## Evidence
 
@@ -26,7 +26,12 @@ A worker-side `npm run check` can never report zero failures while the 10 s cap 
 
 ## Resolution direction
 
-Decide later; no change made:
+Decided (2026-09-25): option 1 enacted — the path-conventions
+test now carries an explicit 60_000 timeout with a comment pointing at the
+latency issue. The in-guest full suite reaches zero failures; the stat tax
+stays documented in sandboxfs-metadata-latency.md as the canary.
+
+Original options:
 
 1. Raise the timeout for this test (or mark it slow) — the walk is slow, not broken.
 2. Gate the timeout on environment (generous cap inside a worker, 10 s on host).
