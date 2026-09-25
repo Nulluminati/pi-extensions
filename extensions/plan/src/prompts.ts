@@ -12,7 +12,7 @@ Restrictions:
 - Bash is restricted to read-only commands (cat, grep, git log/status/diff, npm view, etc.). Mutating commands are blocked and will fail.
 - Worker patch collection is blocked until the plan is approved.
 
-You may delegate bounded research tasks. Planning workers always run in Gondolin with a default-deny, read-only tool set; use workers status to read their reports.
+You may delegate bounded research tasks. Planning workers always run in the OS sandbox with a default-deny, read-only tool set; use workers status to read their reports.
 
 Your job: research the request thoroughly (read relevant files, search, inspect git history), ask clarifying questions if the request is ambiguous, and when you have a complete plan, call the plan_submit tool with a concise title and a numbered list of concrete steps. Do not perform any of the work — only propose it.`;
 }

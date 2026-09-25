@@ -1,0 +1,93 @@
+import { randomUUID } from "node:crypto";
+import { mkdir, stat, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { cacheDir } from "../../../../lib/paths.ts";
+import { startWorkerSandbox } from "../../../worker-sandbox/src/client.ts";
+
+const HOOK_PATH = join("scripts", "provision-worktree");
+const MAX_LOG_BYTES = 5 * 1024 * 1024;
+const DETAIL_LENGTH = 400;
+
+export interface HookResult {
+  exitCode: number;
+  detail: string;
+  ms: number;
+  logPath: string;
+}
+
+/** Check the executable before reserving a worker slot or creating a worktree. */
+export async function assertSetupHook(cwd: string): Promise<void> {
+  const file = join(cwd, HOOK_PATH);
+  const entry = await stat(file).catch(() => null);
+  if (!entry?.isFile()) throw new Error(`worktree setup hook is missing: ${file}`);
+  if ((entry.mode & 0o111) === 0) throw new Error(`worktree setup hook is not executable: ${file}`);
+}
+
+/** Run the project-owned script once, inside the same OS sandbox as worker tools. */
+export async function runSetupHook(worktree: string, timeoutMs: number): Promise<HookResult> {
+  await assertSetupHook(worktree);
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new Error("worktree setup timeout must be positive");
+  }
+  const logDir = join(cacheDir("provision"), "runs");
+  await mkdir(logDir, { recursive: true });
+  const logPath = join(logDir, `${Date.now()}-${randomUUID()}.log`);
+  const started = Date.now();
+  const client = await startWorkerSandbox(worktree);
+  const controller = new AbortController();
+  const chunks: Buffer[] = [];
+  let bytes = 0;
+  let truncated = false;
+  let timedOut = false;
+  let exitCode = -1;
+  let failure: unknown;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  try {
+    const result = await client.runShell("./scripts/provision-worktree", {
+      cwd: worktree,
+      signal: controller.signal,
+      timeout: Math.max(1, Math.ceil(timeoutMs / 1000)),
+      onData(chunk) {
+        if (bytes >= MAX_LOG_BYTES) {
+          truncated = true;
+          return;
+        }
+        const kept = chunk.subarray(0, MAX_LOG_BYTES - bytes);
+        chunks.push(kept);
+        bytes += kept.length;
+        if (kept.length < chunk.length) truncated = true;
+      },
+    });
+    exitCode = result.exitCode ?? -1;
+  } catch (error) {
+    if (!timedOut) failure = error;
+  } finally {
+    clearTimeout(timer);
+    try {
+      await client.close();
+    } catch (error) {
+      failure =
+        failure === undefined
+          ? error
+          : new AggregateError([failure, error], "Setup and sandbox cleanup failed");
+    }
+  }
+  const output = Buffer.concat(chunks).toString("utf8");
+  await writeFile(logPath, truncated ? `${output}\n[output truncated]\n` : output, {
+    mode: 0o600,
+    flag: "wx",
+  });
+  if (failure !== undefined) throw failure;
+  const detail = timedOut
+    ? `command aborted after ${timeoutMs}ms`
+    : output.trim().slice(-DETAIL_LENGTH) || (exitCode === 0 ? "" : `exit ${exitCode}: no output`);
+  return {
+    exitCode: timedOut ? -1 : exitCode,
+    detail,
+    ms: Date.now() - started,
+    logPath,
+  };
+}

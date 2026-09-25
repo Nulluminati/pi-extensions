@@ -124,22 +124,14 @@ export const GOAL_STATUS_KEY = "goal";
 export const GOAL_STATE_EVENT = "goal:state-change";
 
 /**
- * Status key the gondolin extension publishes under. Suppressed from footer
- * line 2 because the workspace segment is shown on line 1 instead (see
- * GONDOLIN_VM_EVENT); the setStatus entry remains the fallback for the
- * default footer when the status bar is disabled.
- */
-export const GONDOLIN_STATUS_KEY = "gondolin";
-
-/**
  * Status keys the missions, messenger, and autoresearch extensions publish
  * under. All three are moving widget-first: their live state renders in
  * dedicated widgets, so their setStatus entries are only fallbacks for the
  * default footer when the status bar is disabled. Showing them on line 2
  * would double-render, so they are suppressed alongside STATUS_KEY,
- * SMALL_MODEL_STATUS_KEY, GONDOLIN_STATUS_KEY, and GOAL_STATUS_KEY. The
- * messenger's unread count reaches the footer through the messenger:state
- * event instead (see MESSENGER_STATE_EVENT).
+ * SMALL_MODEL_STATUS_KEY, and GOAL_STATUS_KEY. The messenger's unread count
+ * reaches the footer through the messenger:state event instead (see
+ * MESSENGER_STATE_EVENT).
  */
 export const MISSIONS_STATUS_KEY = "missions";
 
@@ -155,15 +147,6 @@ export const AUTORESEARCH_STATUS_KEY = "autoresearch";
  * contract and emits the same string.
  */
 export const MESSENGER_STATE_EVENT = "messenger:state";
-
-/**
- * Event the gondolin extension emits on pi.events when the sandbox VM state
- * changes (starting / ready / stopping / stopped). The footer renders a
- * workspace segment on line 1 from it. Defined here (not imported) so the
- * status-bar extension stays self-contained; the gondolin extension owns the
- * contract and emits the same string.
- */
-export const GONDOLIN_VM_EVENT = "gondolin:vm-state";
 
 /**
  * Event the Neuralwatt extension emits on pi.events to publish flex state for

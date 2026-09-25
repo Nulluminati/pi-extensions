@@ -44,7 +44,6 @@ import {
   AGENTS_STATE_EVENT,
   FLEX_EVENT,
   GOAL_STATE_EVENT,
-  GONDOLIN_VM_EVENT,
   ICON_COLOR,
   MESSENGER_STATE_EVENT,
   PLAN_MODE_EVENT,
@@ -124,7 +123,6 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     goalRunning: false,
     goalIteration: 0,
     goalCap: null,
-    gondolinVm: null,
     gitBranch: null,
     gitStatus: null,
     tokenUsage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
@@ -482,23 +480,6 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
       state.lastHandle?.requestRender();
       editorRequestRender?.();
     });
-
-    // Track the Gondolin sandbox VM so line 1 can show the workspace segment
-    // ("with WS <id>") after the working directory. The gondolin extension
-    // publishes on the pi.events bus (see gondolin:vm-state).
-    pi.events.on(
-      GONDOLIN_VM_EVENT,
-      (payload: { state: "starting" | "ready" | "stopping" | "stopped"; vmId?: string }) => {
-        state.gondolinVm =
-          payload.state === "stopped"
-            ? null
-            : {
-                state: payload.state,
-                ...(payload.vmId !== undefined ? { vmId: payload.vmId } : {}),
-              };
-        state.lastHandle?.requestRender();
-      },
-    );
 
     // Watch the small-model config so the editor title reflects `/smallmodel`
     // changes immediately rather than on the next turn.

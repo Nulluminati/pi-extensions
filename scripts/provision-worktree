@@ -1,0 +1,5 @@
+#!/bin/sh
+# Worktree setup hook: runs once per new worker worktree, inside the worker
+# sandbox, before the worker spawns. Exit code decides the provision result.
+set -eu
+npm install --no-audit --no-fund

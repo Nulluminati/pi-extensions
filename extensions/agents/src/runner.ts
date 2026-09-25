@@ -28,7 +28,6 @@ import {
   WORKER_STREAM_ENV_VAR,
 } from "../../../lib/worker-blocker.ts";
 import type { ProvisionStatus } from "./provision/types.ts";
-import { PROVISION_CONFIG_FILE, provisionSkillPath } from "./provision/types.ts";
 import { patchesDir, stderrLogPath, streamPath } from "./store.ts";
 import type { WorkerActivity, WorkerEvents, WorkerRecord } from "./types.ts";
 import { captureWorktreePatch } from "./worktree.ts";
@@ -467,9 +466,11 @@ export interface StartWorkerOptions {
   name: string;
   timeoutMs: number;
   workerId: string;
-  /** Extra `-e` extension paths loaded by the worker session. */
+  /** Extra `-e` extension paths loaded by the worker session. Worker tools
+   *  route through worker-sandbox (loaded via extensionPaths); nothing here
+   *  names a runtime. */
   extensionPaths: string[];
-  /** Route the worker's built-in tools through a Gondolin VM (--gondolin). */
+  /** Route the worker's built-in tools through the worker sandbox. */
   sandbox?: boolean;
   /** Headless read-only enforcement (parent session is planning). */
   readOnly?: boolean;
@@ -501,7 +502,6 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
   if (options.model) args.push("--model", options.model);
   args.push("--thinking", options.thinkingLevel);
   for (const ext of options.extensionPaths) args.push("-e", ext);
-  if (options.sandbox) args.push("--gondolin");
   if (options.readOnly) args.push("--worker-readonly");
 
   const spoolFile = streamPath(options.cwd, options.workerId);
@@ -595,7 +595,7 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
         if (ingestStreamEvent(line, record) === "blocker" && !blockerWakeSent) {
           blockerWakeSent = true;
           events.wake(
-            `[worker ${record.name} (${record.id}) reported a blocker]. Use the workers tool (action=status, id=${record.id}) for details. If environmental, read ${provisionSkillPath(options.cwd)} and amend ${projectStateRelative(PROVISION_CONFIG_FILE)}.`,
+            `[worker ${record.name} (${record.id}) reported a blocker]. Use the workers tool (action=status, id=${record.id}) for details. If environmental, fix scripts/provision-worktree or ${projectStateRelative("sandbox.json")} in the parent checkout and re-delegate.`,
           );
         }
       }

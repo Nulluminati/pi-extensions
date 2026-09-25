@@ -42,8 +42,6 @@ import {
   type WorkerSessionState,
 } from "./src/delegate.ts";
 import { AGENTS_STATE_EVENT, createWorkersWidget, WORKERS_WIDGET_KEY } from "./src/format.ts";
-import { ensureProvisionExclusions } from "./src/provision/config.ts";
-import { materializeProvisionSkill } from "./src/provision/skill.ts";
 import { finalizeWorker, killPidTree, type RunningWorker } from "./src/runner.ts";
 import { DELEGATE_PARAMETERS, WORKERS_PARAMETERS } from "./src/schemas.ts";
 import {
@@ -281,7 +279,7 @@ export default async function agentsExtension(pi: ExtensionAPI) {
     name: "delegate",
     label: "Delegate Worker",
     description:
-      "Hand a bounded, self-contained task to a cheap-model worker Pi session with built-in file and shell tools routed through Gondolin. The worker gets its own context and, outside plan mode, its own git worktree by default. Planning workers are read-only and report-only. Use for parallelizable investigation and well-specified implementation work; keep design decisions, integration, and review in this session.",
+      "Hand a bounded, self-contained task to a cheap-model worker Pi session with built-in file and shell tools routed through the OS sandbox (worker-sandbox). The worker gets its own context and, outside plan mode, its own git worktree by default. Planning workers are read-only and report-only. Use for parallelizable investigation and well-specified implementation work; keep design decisions, integration, and review in this session.",
     promptGuidelines: [
       "Use delegate when a task is separable and well-specified: scouting a subsystem, mechanical edits across files, or trying an approach in isolation. Write the task so a fresh session with no conversation history can succeed: goal, files, constraints, verification.",
       "Do not delegate vague or judgment-heavy work; workers use the globally configured worker model. Escalate to the main session when a worker fails twice or the task turns ambiguous.",
@@ -498,22 +496,9 @@ export default async function agentsExtension(pi: ExtensionAPI) {
     // Event contexts carry a usable ui surface: capture it so the widget is
     // restored on session_start (reload) before any tool call has run.
     if (ctx.hasUI) lastUi = ctx.ui;
-    // Provisioning support: materialize the bundled guidance skill into the
-    // project skill dir and keep provision state out of `git status`.
-    // Awaiting keeps ordering: a `git status` (or a delegate's dirty gate)
-    // immediately after session_start must see the finished exclusions.
-    // try/catch keeps the no-throw guarantee: startup logs and continues on
-    // a side-channel fs error, it never fails the handler.
-    try {
-      await materializeProvisionSkill(ctx.cwd);
-    } catch (error) {
-      console.error(`[agents] provision skill materialization failed: ${(error as Error).message}`);
-    }
-    try {
-      await ensureProvisionExclusions(ctx.cwd);
-    } catch (error) {
-      console.error(`[agents] provision git exclusions failed: ${(error as Error).message}`);
-    }
+    // The setup hook (scripts/provision-worktree) and worker sandbox policy
+    // are project files; no bundled materialization or state exclusions are
+    // needed. Provision run logs live in the global cache, outside the repo.
     // One-time migration from the legacy shared registry to per-worker
     // artifact files (old records classify as orphans: no owner is known).
     await migrateLegacyRegistry(ctx.cwd);

@@ -1124,28 +1124,6 @@ describe("status-bar-extension", () => {
     expect(lines[1]).toContain("🎯 active");
   });
 
-  it("does not show the gondolin status on line 2 (it lives on line 1)", async () => {
-    const mockPi = createMockPi();
-    const mockCtx = createMockCommandContext();
-    await enableBar(mockPi, mockCtx);
-
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      plainTheme(),
-      footerData({
-        statuses: new Map([
-          ["gondolin", "cube a1b2c3d4 (/workspace)"],
-          ["neuralwatt", "🎯 active"],
-        ]),
-      }),
-    );
-    const lines = component.render(120);
-
-    expect(lines[1]).not.toContain("gondolin");
-    expect(lines[1]).not.toContain("/workspace");
-    expect(lines[1]).toContain("🎯 active");
-  });
-
   it("footer line 2 suppresses missions, messenger, and autoresearch statuses (widget-first fallbacks)", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
@@ -1174,60 +1152,6 @@ describe("status-bar-extension", () => {
     expect(lines[1]).not.toContain("Messenger");
     expect(lines[1]).not.toContain("✉");
     expect(lines[1]).not.toContain("researching auth flows");
-  });
-
-  it("footer line 1 shows the gondolin workspace segment after the cwd", async () => {
-    const mockPi = createMockPi();
-    const mockCtx = createMockCommandContext();
-    await enableBar(mockPi, mockCtx);
-
-    const handler = getEventsHandler(mockPi, "gondolin:vm-state");
-    handler({ state: "ready", vmId: "abcd1234efgh5678" });
-
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      plainTheme(),
-      footerData({ branch: "main" }),
-    );
-    const line1 = component.render(120)[0] ?? "";
-
-    expect(line1).toContain("with WS abcd1234");
-    // Segment order: cwd, then WS, then git branch.
-    expect(line1.indexOf("with WS")).toBeGreaterThan(line1.indexOf("pi-extensions"));
-    expect(line1.indexOf("main")).toBeGreaterThan(line1.indexOf("with WS"));
-  });
-
-  it("gondolin segment shows starting state before the VM id is known", async () => {
-    const mockPi = createMockPi();
-    const mockCtx = createMockCommandContext();
-    await enableBar(mockPi, mockCtx);
-
-    const handler = getEventsHandler(mockPi, "gondolin:vm-state");
-    handler({ state: "starting" });
-
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      plainTheme(),
-      footerData(),
-    );
-    expect(component.render(120)[0]).toContain("with WS starting");
-  });
-
-  it("gondolin segment disappears once the VM stops", async () => {
-    const mockPi = createMockPi();
-    const mockCtx = createMockCommandContext();
-    await enableBar(mockPi, mockCtx);
-
-    const handler = getEventsHandler(mockPi, "gondolin:vm-state");
-    handler({ state: "ready", vmId: "abcd1234efgh5678" });
-    handler({ state: "stopped" });
-
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      plainTheme(),
-      footerData(),
-    );
-    expect(component.render(120)[0]).not.toContain("with WS");
   });
 
   it("onBranchChange triggers requestRender", async () => {

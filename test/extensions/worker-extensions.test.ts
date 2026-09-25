@@ -51,7 +51,7 @@ describe("worker-extensions", () => {
 
     const names = resolved.map((r) => r.name);
     expect(names[0]).toBe("messenger");
-    expect(names.at(-1)).toBe("gondolin");
+    expect(names.at(-1)).toBe("worker-sandbox");
     for (const name of DEFAULT_WORKER_EXTENSIONS) expect(names).toContain(name);
     for (const r of resolved) expect(existsSync(r.path)).toBe(true);
   });
@@ -69,7 +69,7 @@ describe("worker-extensions", () => {
       "messenger",
       "worker-blocker",
       "context7",
-      "gondolin",
+      "worker-sandbox",
     ]);
   });
 
@@ -85,7 +85,7 @@ describe("worker-extensions", () => {
       "messenger",
       "worker-blocker",
       "web-search",
-      "gondolin",
+      "worker-sandbox",
     ]);
   });
 
@@ -101,17 +101,17 @@ describe("worker-extensions", () => {
       "messenger",
       "worker-blocker",
       "web-search",
-      "gondolin",
+      "worker-sandbox",
     ]);
   });
 
-  it("force-includes messenger and gondolin even when the explicit list is empty", () => {
+  it("force-includes messenger and worker-sandbox even when the explicit list is empty", () => {
     const resolved = resolveWorkerExtensions([], {
       extensionsRoot: root,
       configPath,
     });
 
-    expect(resolved.map((r) => r.name)).toEqual(["messenger", "worker-blocker", "gondolin"]);
+    expect(resolved.map((r) => r.name)).toEqual(["messenger", "worker-blocker", "worker-sandbox"]);
   });
 
   it("always includes the blocker channel (worker-blocker) even when not requested", () => {
@@ -123,7 +123,7 @@ describe("worker-extensions", () => {
     const names = resolved.map((r) => r.name);
     expect(names).toContain("worker-blocker");
     expect(names[0]).toBe("messenger");
-    expect(names.at(-1)).toBe("gondolin");
+    expect(names.at(-1)).toBe("worker-sandbox");
   });
 
   it("dedupes worker-blocker when explicitly requested", () => {
@@ -137,7 +137,7 @@ describe("worker-extensions", () => {
 
   it("dedupes mandatory and requested extensions", () => {
     const resolved = resolveWorkerExtensions(
-      ["messenger", "gondolin", "web-search", "web-search"],
+      ["messenger", "worker-sandbox", "web-search", "web-search"],
       {
         extensionsRoot: root,
         configPath,
@@ -146,7 +146,7 @@ describe("worker-extensions", () => {
 
     const names = resolved.map((r) => r.name);
     expect(names.filter((n) => n === "messenger")).toHaveLength(1);
-    expect(names.filter((n) => n === "gondolin")).toHaveLength(1);
+    expect(names.filter((n) => n === "worker-sandbox")).toHaveLength(1);
     expect(names.filter((n) => n === "web-search")).toHaveLength(1);
   });
 
@@ -202,7 +202,7 @@ describe("worker-extensions", () => {
       "messenger",
       "worker-blocker",
       "web-search",
-      "gondolin",
+      "worker-sandbox",
     ]);
   });
 

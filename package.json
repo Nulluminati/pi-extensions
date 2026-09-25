@@ -26,8 +26,8 @@
     "lint": "biome lint .",
     "check": "biome check . && tsc --noEmit --incremental && tsc --noEmit --incremental -p tsconfig.test.json && npm run validate && npm run test",
     "check:ci": "biome ci . && tsc --noEmit && tsc --noEmit -p tsconfig.test.json && npm run validate && npm run test",
-    "validate": "tsx scripts/validate-all.ts",
-    "validate:one": "tsx scripts/validate-cli.ts",
+    "validate": "node --import tsx scripts/validate-all.ts",
+    "validate:one": "node --import tsx scripts/validate-cli.ts",
     "create": "tsx scripts/create-extension.ts",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
@@ -37,7 +37,7 @@
     "*.{ts,js,mjs,json,jsonc}": "biome check --write --no-errors-on-unmatched"
   },
   "dependencies": {
-    "@earendil-works/gondolin": "^0.12.0",
+    "@anthropic-ai/sandbox-runtime": "^0.0.77",
     "onnxruntime-node": "^1.27.0",
     "sherpa-onnx-node": "^1.13.8"
   },

@@ -174,7 +174,161 @@ re-delegate. Skill guides authoring; git history is the audit.
 
 ## 8. North star (both prior sessions, signed)
 
+## 8a. Migration landed (2026-09-25, third session)
+
+The rewrite is complete. Landing evidence (host check plus live sandbox acceptance):
+
+- **Full removal executed**: `extensions/gondolin/`, `lib/guest-image.ts`,
+  the ambient stubs in `types/pi.d.ts`, the `@earendil-works/gondolin`
+  dependencies (root and `extensions/package.json`), the validator allowlist
+  swap to `@anthropic-ai/sandbox-runtime`, the gondolin suites
+  (gondolin, gondolin-lazy, guest-image, provision-skill, provision-config,
+  provision-executor, provision-primitives), status-bar's VM segment,
+  `.pi/provision.json`, `.pi/provision-state.json`, and the old
+  `provision/{config,executor,primitives,skill}.ts` set are all deleted.
+  `rg gondolin` outside reference/docs now matches only the two negative
+  assertions in agents.test.ts (`expect(args).not.toContain("--gondolin")`).
+- **New architecture**: `extensions/worker-sandbox/` (policy + fail-closed
+  broker + broker.mjs + tool-child.mjs). Workers load it pinned last via
+  `REQUIRED_WORKER_EXTENSIONS`. `runner.ts` no longer knows a sandbox flag;
+  it is extension-driven. `delegate.ts` v2 preflight = hook executability +
+  policy JSON check + path-commit of `scripts/provision-worktree` and
+  `.pi/sandbox.json`; `provisionWorktree` = carry (`.worktreeinclude`,
+  `carry.ts`) then hook (`hook.ts`, inside the sandbox, bounded ten minutes,
+  per-run log in the provision cache). Blocker wakes name the setup files.
+- **Project conversion**: `.pi/provision.json` (share/hardlink/fingerprint)
+  dissolved; replaced by `scripts/provision-worktree` (npm install),
+  `.worktreeinclude` (two tsbuildinfo lines), and `.pi/sandbox.json`
+  (npm/GitHub allowlist, deny `~`/`/tmp`/`/run` reads, worktree-root writes,
+  deny `.env`).
+- **Gates closed**: host `npm run check` = biome + tsc + validate + 56 files
+  / 1348 tests, zero errors, zero warnings. Live acceptance ran the real
+  code paths against a disposable repo: worktree created, include path
+  carried, hook exit 0 with a writable mark inside the sandbox and its log
+  in the cache, and a full `pi --mode json --no-session` worker against the
+  pinned extension set completing with the sandbox armed (7/7 PASS). The
+  earlier srt spike covers the hard network facts (HTTPS 200/403 by
+  allowlist, raw TCP ENETUNREACH, host Unix socket EPERM at `/tmp/claude`,
+  external sockets in `/home` and `/run` hidden). Perf ledger update:
+  full check in the strict sandbox ~19.8 s vs recorded in-guest 342–597 s;
+  stat-tax baseline `find . -type f` 860 ms sandboxed vs 81.3 s in-guest.
+- **Surviving behavior verified**: no-slot burned on refusal
+  (fakeWorktreeGit), failed provision keeps worktree on the record, busy
+  discards it, non-isolated skips, plan-mode read-only,
+  `report_blocker` wake points at the setup files, composeWorkerTask
+  ENVIRONMENT block unchanged, runner no longer names a sandbox runtime.
+
+**Owner-facing operational notes**
+
+1. socat is NOT installed on this host (Fedora 43): `dnf install socat`,
+   alongside the already-present `bwrap` and `rg`. The earlier srt spike
+   extracted the RPM under /tmp for testing; that copy is not referenced by
+   anything tracked here.
+2. macOS main uses `sandbox-exec` (deprecated since 2016; used by Codex
+   and Codex-class tools today). Accepted risk per the brief.
+3. `sandbox-runtime` version: added at 0.0.77. The dynamic
+   `SandboxManager.getLinuxHttpSocketPath()` rebind keeps srt's
+   `/tmp/claude` proxy reachable under the `/tmp` denyRead.
+
+## 8b. North star (archive — Original text preserved below)
+
+
 Project setup = a bounded hook (policy). Capabilities = probed at runtime
 (mechanism). Policy = explicit conventional files. No strategy registry until
 a second real strategy exists. The mechanism speaks verbs — carry, copy, run,
 probe, stamp — and never names a package manager.
+
+## 9. Fedora srt spike (2026-09-25, next session)
+
+Gate 1 cleared: Zero Cool explicitly approved adding
+`@anthropic-ai/sandbox-runtime`. The initial spike installed version 0.0.77
+under `/tmp/pi-srt-spike`; after the proof, the package was added to
+`package.json` and `package-lock.json`. No worker routing has changed yet.
+Fedora 43 already has `bwrap` and
+`rg`; it lacks `socat`. Without `socat`, `SandboxManager.initialize()` refuses
+startup. A Fedora RPM was extracted under the same temporary directory and
+put on `PATH` for the remaining tests. A production setup must check all three
+prerequisites and explain missing packages.
+
+Under a policy that permits writes only in a temporary work directory, denies
+one read path and one protected write path, and allows only `example.com`:
+
+- Sandboxed `cat`, redirection, `sed -i`, `rg`, `find`, and `ls` worked.
+  Reads of the denied file failed with `Permission denied`. Writes to the
+  protected file failed with `Read-only file system`; its host content stayed
+  unchanged. This tests command equivalents, not Pi's seven tool adapters.
+- HTTPS to `example.com` returned 200. HTTPS to `iana.org` returned proxy 403
+  with `X-Proxy-Error: blocked-by-allowlist`. A direct Node TCP connection
+  to `1.1.1.1:443` failed with `ENETUNREACH`; direct curl could not resolve a
+  host. These tests establish network enforcement with the default Unix-socket
+  restriction in place.
+- Initialization took 115–120 ms. A wrapped `find . -type f >/dev/null` in
+  this repository took 860 ms, versus 120 ms on the host and 81.3 s in the
+  VM ledger. Each small wrapped command took 14–23 ms. These are single runs,
+  not a distribution. No cold typecheck comparison was run.
+- The default Unix-socket restriction stops this repository's `tsx` CLI:
+  `npm run check` failed with `listen EPERM` on its local IPC pipe. Setting
+  `network.allowAllUnixSockets: true` let the check finish in 20.1 s, with
+  58 test files and 1461 tests passing, compared with the VM's 342–597 s.
+  But that setting is **not safe by default**: a sandboxed Node process then
+  connected to a host Unix socket outside the worktree and read its response.
+  With the default restriction the same connection failed with `EPERM`.
+  A follow-up policy denied reads of `/tmp`, then allowed only the temporary
+  work directory and srt's installed helper. It blocked the same host socket
+  with `ENOENT` even when Unix sockets were enabled. This is one path test,
+  not proof that every host socket is hidden by a worker policy.
+  With the broker outside the repository, a stricter policy denied reads of
+  `/tmp`, `/run`, and the home directory. It reopened only the worktree,
+  the runtime binaries, and a private temporary directory. The full check
+  passed with clean output in 18.9 s (58 files, 1461 tests). The host socket
+  stayed hidden, but HTTPS to an allowed domain failed with `Proxy CONNECT
+  aborted`: the `/tmp` deny also hid srt's own proxy socket. A wrap-time
+  read exception for exactly the proxy socket paths returned by srt fixed
+  this. HTTPS to `example.com` returned 200, HTTPS to `iana.org` returned
+  proxy 403, and direct TCP failed with `ENETUNREACH`. The host socket stayed
+  hidden. `npm run check` passed with clean output in 22.1 s (58 files,
+  1461 tests). However, this candidate **fails the host-socket gate**:
+  srt always re-binds `/tmp/claude` for writes. A sandboxed process connected
+  to a host Unix socket there and read its response, even with explicit
+  `denyRead: ["/tmp", "/tmp/claude"]`. Equivalent sockets under the home
+  cache and `/run/user/1000` remained hidden. The broad Unix-socket option
+  cannot be the default worker policy on this host.
+- srt injects absent sensitive dotfiles as device nodes beneath its broker's
+  current directory. When the broker ran from the repository, Biome reported
+  `.mcp.json internalError/io Permission denied` while returning exit 0.
+  Running the broker from a temporary directory, while spawning the wrapped
+  command in the repository, made `npm run check` output clean. The worker
+  implementation must keep these mount artifacts outside the worktree.
+- `SandboxManager.wrapWithSandbox()` **does not refuse an uninitialized
+  manager**: it returned a wrapper without `--unshare-net` before
+  `initialize()`. `reset()` also left `isSandboxingEnabled()` true. Do not
+  treat either API as a fail-closed readiness check. Keep an explicit local
+  ready state that becomes true only after successful initialization and
+  becomes false before reset; refuse every tool call otherwise.
+
+Zero Cool chose to continue the strict-policy spike, not to accept broad
+host Unix-socket access. With the default Unix-socket restriction restored,
+`/tmp/claude` host socket access failed with `EPERM`; allowed HTTPS still
+returned 200. `node --import tsx scripts/validate-all.ts` passed in 1.2 s,
+and `npm run test` passed cleanly in 18.2 s (58 files, 1461 tests). The
+`tsx` CLI still needs IPC. The repository's `validate` and `validate:one`
+scripts now use the socket-free loader. Under the same strict policy,
+`npm run validate:one extensions/agents/agents.ts` passed, and the complete
+`npm run check` passed with clean output in 19.8 s (58 files, 1461 tests).
+Allowed HTTPS returned 200, denied HTTPS returned proxy 403, direct TCP
+failed with `ENETUNREACH`, and the `/tmp/claude` host socket failed with
+`EPERM`. A separate temporary probe ran Pi's actual `createReadTool`,
+`createWriteTool`, `createEditTool`, `createLsTool`, `createFindTool`,
+`createGrepTool`, and `createBashTool` inside a sandboxed Node child. All
+seven worked. A denied read returned `ENOENT`, and a denied write returned
+`EROFS`. The broker refused calls before initialization and after reset.
+With `socat` absent, initialization failed and the readiness guard refused
+another call without spawning the command. The bash factory needs `exposeSessionEnvironment: false` without a live Pi
+session manager; the broker must pass approved session metadata explicitly.
+This child-process approach keeps Pi's direct path probes and grep subprocess
+inside the sandbox, unlike host-side operation adapters. It is a spike, not
+production routing: cancellation, streamed output, large binary results,
+and `user_bash` (`!`) still need tests. Gate 2 remains **open** until those
+paths are tested. Do not migrate workers
+before the gate closes. The spike scripts and captured output are temporary
+under `/tmp/pi-srt-spike`.

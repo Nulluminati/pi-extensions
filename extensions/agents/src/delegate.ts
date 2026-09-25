@@ -6,53 +6,38 @@
  * concurrency-safety core of delegation.
  */
 
-import { readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import type { AgentToolResult, ExtensionContext, ThinkingLevel } from "pi";
 import { withFileLock } from "../../../lib/file-lock.ts";
 import { runGit } from "../../../lib/git.ts";
-import { cacheDir, projectStateRelative } from "../../../lib/paths.ts";
+import { projectStateRelative } from "../../../lib/paths.ts";
 import { isPlanModeActive } from "../../../lib/plan-state.ts";
 import { resolveWorkerModelSpec } from "../../../lib/worker-model.ts";
 import { formatWorkerStatus } from "./format.ts";
-import {
-  configApplies,
-  isProvisionStale,
-  loadProvisionConfig,
-  recordProvisionInputs,
-  validateProvisionConfig,
-} from "./provision/config.ts";
-import { runProvisionCommand } from "./provision/executor.ts";
-import { carryPaths, copyTreeShared } from "./provision/primitives.ts";
-import {
-  BUSY_GRACE_MS,
-  DEFAULT_TIMEOUT_SECONDS,
-  type LoadedProvisionConfig,
-  PROVISION_CONFIG_FILE,
-  PROVISION_LOCAL_FILE,
-  type ProvisionStatus,
-  provisionConfigPath,
-  provisionLocalPath,
-  provisionSkillPath,
-  provisionStatePath,
-  type ValidationIssue,
-} from "./provision/types.ts";
+import { carryIncludedPaths } from "./provision/carry.ts";
+import { assertSetupHook, runSetupHook } from "./provision/hook.ts";
+import type { ProvisionStatus } from "./provision/types.ts";
 import { type RunningWorker, startWorker } from "./runner.ts";
 import { generateWorkerId, sweepWorkerArtifacts } from "./store.ts";
 import type { WorkerEvents, WorkerRecord } from "./types.ts";
 import { resolveWorkerExtensions } from "./worker-extensions.ts";
+import { WORKER_SANDBOX_RELATIVE } from "./worker-sandbox-config.ts";
 import { createWorktree, isGitRepo, removeWorktree } from "./worktree.ts";
 
 // --- Constants ---
 
 const DEFAULT_TIMEOUT_MS = 900_000;
 
-/** Fixed message for the path-limited provision config commit (review D2). */
-const PROVISION_COMMIT_MESSAGE = "chore(provision): update worktree provision config";
-/** Parent-checkout file listing extra carry paths (gitignore-style lines). */
-const WORKTREE_INCLUDE_FILE = ".worktreeinclude";
-/** Refusal when the provision config lock stays held past the wait bound. */
+/** Conventional project setup hook (executable, project-owned). */
+const SETUP_HOOK_RELATIVE = "scripts/provision-worktree";
+/** Fixed message for the path-limited setup-file commit (review D2). */
+const SETUP_COMMIT_MESSAGE = "chore(provision): update worktree setup files";
+/** Setup budget for one worktree; secret values stay with the project files. */
+const SETUP_TIMEOUT_MS = 600_000;
+/** Lock waiters return `busy` after the setup budget plus this grace. */
+const BUSY_GRACE_MS = 15_000;
+/** Refusal when the setup lock stays held past the wait bound. */
 const PROVISION_BUSY_MESSAGE = "provisioned: busy (another provision is running); retry shortly.";
 
 function envMaxWorkers(): number {
@@ -69,12 +54,6 @@ function envTimeoutMs(): number {
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-/** ENOENT and ENOTDIR both mean the path cannot exist as a file. */
-function isMissingError(error: unknown): boolean {
-  const code = (error as NodeJS.ErrnoException | null)?.code;
-  return code === "ENOENT" || code === "ENOTDIR";
 }
 
 /** Collapse a detail/error to one line for refusal texts and record fields. */
@@ -97,287 +76,117 @@ class ProvisionRefusal extends Error {
   }
 }
 
-function provisionLockPath(cwd: string): string {
-  return `${provisionConfigPath(cwd)}.lock`;
+/** Repo-root-free relative listing of the setup files being checked. */
+function setupFileList(): string[] {
+  return [SETUP_HOOK_RELATIVE, WORKER_SANDBOX_RELATIVE];
 }
 
-/** Parsed JSON of one policy file; undefined when missing, descriptive
- *  throw when unreadable or not JSON (same contract as config loading).
- *  Validation needs the raw shape, which the merged load does not keep. */
-async function readRawProvisionFile(path: string): Promise<unknown> {
-  let text: string;
-  try {
-    text = await readFile(path, "utf8");
-  } catch (error) {
-    if (isMissingError(error)) return undefined;
-    throw new Error(`Failed to read ${path}: ${messageOf(error)}`);
-  }
-  try {
-    return JSON.parse(text) as unknown;
-  } catch (error) {
-    throw new Error(`${path} is not valid JSON: ${messageOf(error)}`);
-  }
-}
-
-async function hasProvisionFingerprint(cwd: string): Promise<boolean> {
-  try {
-    await stat(provisionStatePath(cwd));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await stat(path);
-    return true;
-  } catch (error) {
-    if (isMissingError(error)) return false;
-    throw error;
-  }
-}
-
-/**
- * Where the provision command's own logs live: npm writes debug logs under
- * its cache, and `npm_config_cache` maps to `<cacheDir>/npm` in the guest,
- * so failed installs leave `<cacheDir("provision")>/npm/_logs` host-side.
- * Falls back to the cache root when npm never got far enough to create it.
- */
-async function provisionLogsDir(): Promise<string> {
-  const root = cacheDir("provision");
-  const npmLogs = join(root, "npm", "_logs");
-  if (await pathExists(npmLogs)) return npmLogs;
-  return root;
+/** Refusal text pointing at the path the model should fix. */
+function setupRefusal(reason: string): Error {
+  return new Error(
+    `provisioned: ${reason}. Fix ${SETUP_HOOK_RELATIVE} and ${WORKER_SANDBOX_RELATIVE} in the parent checkout, then re-delegate.`,
+  );
 }
 
 /**
  * Preflight for isolated delegates (review D1): refuse before the slot
- * reservation when the provision policy cannot produce a working
- * environment — config missing or not applicable, invalid, or stale. The
- * refusal text carries the bundled skill pointer so the delegating model
- * can fix the config and re-delegate (the documented recovery loop).
+ * reservation when the project setup files cannot provision a worktree —
+ * hook missing/not executable, sandbox policy absent/invalid, or a dirty
+ * tracked setup file that must be path-committed first (review D2). Returns
+ * true when preflight committed setup files (rides the provision status).
  */
 export async function assertProvisionReady(
   cwd: string,
   notifyInfo: (message: string) => void,
 ): Promise<boolean> {
-  const skill = provisionSkillPath(cwd);
-  const relConfig = projectStateRelative(PROVISION_CONFIG_FILE);
-  const loaded = await loadProvisionConfig(cwd);
-
-  // Shape validation per file (unknown fields, types, local-only keys).
-  const issues: ValidationIssue[] = [];
-  if (loaded?.hasCommitted) {
-    issues.push(
-      ...validateProvisionConfig(
-        await readRawProvisionFile(provisionConfigPath(cwd)),
-        PROVISION_CONFIG_FILE,
-      ),
-    );
-  }
-  if (loaded?.hasLocal) {
-    issues.push(
-      ...validateProvisionConfig(
-        await readRawProvisionFile(provisionLocalPath(cwd)),
-        PROVISION_LOCAL_FILE,
-      ),
-    );
-  }
-  if (issues.length > 0) {
-    const list = issues.map((issue) => `${issue.file}:${issue.path}: ${issue.message}`).join("; ");
-    throw new Error(
-      `provisioned: invalid config (${list}). Read ${skill}, fix ${relConfig} per the skill, then re-delegate.`,
-    );
-  }
-
-  if (loaded === null || !(await configApplies(cwd))) {
-    throw new Error(
-      `provisioned: none (config missing or not applicable). Read ${skill}, author ${relConfig} per the skill, then re-delegate.`,
-    );
-  }
-
-  // Review D2, pre-gate position: path-commit any untracked or modified
-  // config BEFORE the dirty gate, so the worktree branches from HEAD with
-  // the edit in it and every attempt lands in git history (field feedback:
-  // failed iterations vanished when commits only fired on success). A
-  // commit failure refuses here, before any slot or worktree exists.
-  const committed = await commitProvisionConfig(cwd, skill, relConfig, notifyInfo);
-
-  const { stale, reasons } = await isProvisionStale(cwd);
-  if (!stale) return committed;
-  // "No fingerprint recorded" is the first-run state, not drift: the green
-  // provision below stamps it, so the delegate proceeds.
-  if (!(await hasProvisionFingerprint(cwd))) return committed;
-  // Stale-refresh (design "Loops" section): consume the drift signal so the
-  // recovery loop converges — the model reviews the config, and the next
-  // delegate provisions with the current inputs instead of refusing again.
-  await recordProvisionInputs(cwd);
-  throw new Error(
-    `provisioned: stale (${reasons.join("; ")}). Read ${skill}, refresh ${relConfig} per the skill, then re-delegate.`,
-  );
-}
-
-/**
- * Gitignore-style plain lines of a present `.worktreeinclude`; blanks and
- * comments ignored. Negation lines are skipped: nothing has been carried
- * yet that a `!pattern` could un-carry.
- */
-async function readWorktreeInclude(sourceRoot: string): Promise<string[]> {
-  let text: string;
   try {
-    text = await readFile(join(sourceRoot, WORKTREE_INCLUDE_FILE), "utf8");
+    await assertSetupHook(cwd);
   } catch (error) {
-    if (isMissingError(error)) return [];
-    throw new Error(`Failed to read ${WORKTREE_INCLUDE_FILE}: ${messageOf(error)}`);
+    throw setupRefusal(`none (setup hook missing or not executable: ${oneLine(messageOf(error))})`);
   }
-  return text
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line !== "" && !line.startsWith("#") && !line.startsWith("!"));
-}
-
-/**
- * Review D2: a provisioned delegate branches worktrees from HEAD, so an
- * untracked or modified committed config must be committed (path-limited,
- * fixed message) before the worker runs — an uncommitted config fails the
- * next delegate's dirty gate, so warn-and-continue is impossible. The local
- * override and the state file are git-excluded and never committed. A commit
- * failure refuses the delegate with the named git reason.
- */
-async function commitProvisionConfig(
-  cwd: string,
-  skill: string,
-  relConfig: string,
-  notifyInfo: (message: string) => void,
-): Promise<boolean> {
-  const configPath = provisionConfigPath(cwd);
+  let policyRaw: unknown;
+  const policyText = await readFile(`${cwd}/${WORKER_SANDBOX_RELATIVE}`, "utf8").catch(
+    (error: unknown) => {
+      throw setupRefusal(`none (sandbox policy missing: ${oneLine(messageOf(error))})`);
+    },
+  );
   try {
-    const status = await runGit(cwd, ["status", "--porcelain", "--", configPath]);
-    if (status.trim() === "") return false; // committed and clean
-    await runGit(cwd, ["add", "--", configPath]);
-    // --only: commit the config alone, never unrelated staged work.
-    await runGit(cwd, ["commit", "-m", PROVISION_COMMIT_MESSAGE, "--only", "--", configPath]);
+    policyRaw = JSON.parse(policyText);
+  } catch {
+    throw setupRefusal("invalid (sandbox policy is not JSON)");
+  }
+  if (
+    !policyRaw ||
+    typeof policyRaw !== "object" ||
+    !("network" in policyRaw) ||
+    !("filesystem" in policyRaw)
+  ) {
+    throw setupRefusal("invalid (sandbox policy needs network and filesystem)");
+  }
+
+  // Review D2, pre-gate position: path-commit untracked or modified setup
+  // files BEFORE the dirty gate, so the worktree branches from HEAD with
+  // the edit in it. A commit failure refuses before any slot or worktree.
+  const paths = setupFileList();
+  try {
+    const status = await runGit(cwd, ["status", "--porcelain", "--", ...paths]);
+    if (status.trim() === "") return false;
+    await runGit(cwd, ["add", "--", ...paths]);
+    await runGit(cwd, ["commit", "-m", SETUP_COMMIT_MESSAGE, "--only", "--", ...paths]);
   } catch (error) {
     throw new ProvisionRefusal(
       {
         state: "failed",
-        detail: `config commit failed: ${oneLine(messageOf(error))}`,
+        detail: `setup commit failed: ${oneLine(messageOf(error))}`,
         at: Date.now(),
       },
-      `provisioned: config commit failed (${oneLine(messageOf(error))}). Read ${skill}, commit ${relConfig} host-side, then re-delegate.`,
+      `provisioned: setup commit failed (${oneLine(messageOf(error))}). Commit ${paths.join(" and ")} host-side, then re-delegate.`,
     );
   }
-  notifyInfo(`Provision config committed (${relConfig}) so worker worktrees branch from it.`);
+  notifyInfo(`Worktree setup files committed (${paths.join(", ")}) so workers branch from it.`);
   return true;
 }
 
 /**
- * Populate a fresh worktree under the provision config lock, in primitive
- * order carry → share → provision command, then stamp fingerprints and
- * commit the config. Boots the provision VM only when the config has a
- * command (review N2). Throws ProvisionRefusal on busy and failed; the
- * caller owns worktree cleanup (busy discards, failed keeps it for
- * remove/prune — review B4).
+ * Populate a fresh worktree: carry `.worktreeinclude` paths, then run the
+ * setup hook inside the worker sandbox. Lock-serialized; a lock wait past
+ * the budget refuses busy (no spawn, no orphan). Throws ProvisionRefusal;
+ * the caller owns worktree cleanup (busy discards, failed keeps it).
  */
 async function provisionWorktree(
   cwd: string,
   worktree: { path: string; branch: string },
-  notifyInfo: (message: string) => void,
-  configCommittedAtPreflight: boolean,
+  _notifyInfo: (message: string) => void,
+  setupCommittedAtPreflight: boolean,
 ): Promise<ProvisionStatus> {
-  const loaded: LoadedProvisionConfig | null = await loadProvisionConfig(cwd);
-  if (loaded === null) return { state: "yes", detail: "nothing to do", at: Date.now() };
-  const config = loaded.config;
-  const skill = provisionSkillPath(cwd);
-  const relConfig = projectStateRelative(PROVISION_CONFIG_FILE);
-  const timeoutMs = (config.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS) * 1000;
-
-  const carryList = [...new Set([...(config.carry ?? []), ...(await readWorktreeInclude(cwd))])];
-  const wantsShare = config.share === "hardlink-copy";
-  const command = config.provision?.trim();
-  if (carryList.length === 0 && !wantsShare && command === undefined) {
-    // The config has no work (review N2: no VM boots). Stamp anyway so the
-    // config does not read as stale forever.
-    await recordProvisionInputs(cwd);
-    return {
-      state: "yes",
-      detail: configCommittedAtPreflight ? "nothing to do, config committed" : "nothing to do",
-      at: Date.now(),
-    };
-  }
-
   const detailParts: string[] = [];
   try {
     await withFileLock(
-      provisionLockPath(cwd),
+      `${cwd}/${projectStateRelative("worktree-setup")}.lock`,
       async () => {
-        if (carryList.length > 0) {
-          const carry = await carryPaths({
-            worktree: worktree.path,
-            sourceRoot: cwd,
-            paths: carryList,
-            allowUnsafe: config.carryUnsafe === true,
-          });
-          detailParts.push(`carry ${carry.carried.length}`);
+        const carry = await carryIncludedPaths(cwd, worktree.path);
+        detailParts.push(`carry ${carry.carried.length}`);
+        const run = await runSetupHook(worktree.path, SETUP_TIMEOUT_MS);
+        if (run.exitCode !== 0) {
+          const detail = oneLine(run.detail);
+          throw new ProvisionRefusal(
+            {
+              state: "failed",
+              detail: detail ? `exit ${run.exitCode}: ${detail}` : `exit ${run.exitCode}`,
+              at: Date.now(),
+            },
+            `provisioned: failed (exit ${run.exitCode})${detail ? `: ${detail}` : ""}. Log: ${run.logPath}. Fix ${SETUP_HOOK_RELATIVE} or the environment, then re-delegate.`,
+          );
         }
-        if (wantsShare) {
-          // Documented npm convention: the parent's node_modules reaches the
-          // worktree as a shared copy when it exists.
-          const sourceModules = join(cwd, "node_modules");
-          if (await pathExists(sourceModules)) {
-            const { mode } = await copyTreeShared(
-              sourceModules,
-              join(worktree.path, "node_modules"),
-            );
-            detailParts.push(`share ${mode}`);
-          } else {
-            detailParts.push("share none (no node_modules in parent checkout)");
-          }
-        }
-        if (command !== undefined) {
-          const run = await runProvisionCommand({
-            worktree: worktree.path,
-            command,
-            ...(config.network !== undefined ? { network: config.network } : {}),
-            timeoutMs,
-            cacheDir: cacheDir("provision"),
-          });
-          if (run.exitCode !== 0) {
-            // The pointer line carries the failure evidence and where the
-            // command's own logs landed, so a failed install is diagnosable
-            // without hunting (field feedback: bare `failed (exit 137): .`).
-            const detail = oneLine(run.detail);
-            const logs = await provisionLogsDir();
-            throw new ProvisionRefusal(
-              {
-                state: "failed",
-                detail: detail ? `exit ${run.exitCode}: ${detail}` : `exit ${run.exitCode}`,
-                at: Date.now(),
-              },
-              `provisioned: failed (exit ${run.exitCode})${detail ? `: ${detail}` : ""}. Logs: ${logs}. Read ${skill}, fix ${relConfig} or the environment per the skill, then re-delegate.`,
-            );
-          }
-          detailParts.push(`command exit ${run.exitCode} (${Math.round(run.ms / 1000)}s)`);
-        }
-        await recordProvisionInputs(cwd);
-        if (await commitProvisionConfig(cwd, skill, relConfig, notifyInfo)) {
-          // Durable surface for the commit fact: the transient ui.notify is
-          // easy to miss mid-tool-call, but this detail rides the delegate
-          // response and the worker record (field feedback: notify unseen).
-          detailParts.push("config committed");
-        }
+        detailParts.push(`hook exit ${run.exitCode} (${Math.round(run.ms / 1000)}s)`);
       },
       {
-        // Waiters give up after the provision budget plus a grace period,
-        // then the delegate refuses busy (no spawn, no orphan).
-        timeoutMs: timeoutMs + BUSY_GRACE_MS,
+        timeoutMs: SETUP_TIMEOUT_MS + BUSY_GRACE_MS,
         timeoutMessage: PROVISION_BUSY_MESSAGE,
       },
     );
   } catch (error) {
     if (error instanceof ProvisionRefusal) throw error;
-    // The lock's timeout error carries exactly the busy refusal text.
     if (error instanceof Error && error.message === PROVISION_BUSY_MESSAGE) {
       throw new ProvisionRefusal(
         { state: "busy", detail: "lock wait exhausted", at: Date.now() },
@@ -386,15 +195,10 @@ async function provisionWorktree(
     }
     throw new ProvisionRefusal(
       { state: "failed", detail: oneLine(messageOf(error)), at: Date.now() },
-      `provisioned: failed (${oneLine(messageOf(error))}). Read ${skill}, fix ${relConfig} or the environment per the skill, then re-delegate.`,
+      `provisioned: failed (${oneLine(messageOf(error))}). Fix ${SETUP_HOOK_RELATIVE} or the environment, then re-delegate.`,
     );
   }
-  // The preflight commit happens before the worktree exists, so its fact
-  // rides the status here (last detail part — the response and record read
-  // "carry …, config committed").
-  if (configCommittedAtPreflight && !detailParts.includes("config committed")) {
-    detailParts.push("config committed");
-  }
+  if (setupCommittedAtPreflight) detailParts.push("setup committed");
   return { state: "yes", detail: detailParts.join(", "), at: Date.now() };
 }
 
@@ -468,8 +272,9 @@ export async function planDelegate(
       ? requestedName
       : workerId;
   // Worker extension allowlist: delegate param -> PI_WORKER_EXTENSIONS ->
-  // worker-extensions.json -> default set. Messenger and Gondolin are
-  // mandatory; denylisted workflow extensions are rejected outright.
+  // worker-extensions.json -> default set. Messenger, worker-blocker, and
+  // worker-sandbox are mandatory; denylisted workflow extensions are
+  // rejected outright.
   const requestedExtensions = Array.isArray(params.extensions)
     ? params.extensions.map(String)
     : undefined;
@@ -477,17 +282,17 @@ export async function planDelegate(
     extensionsRoot: fileURLToPath(new URL("../../../extensions/", import.meta.url)),
   });
 
-  // Every worker routes built-in file and shell tools through Gondolin.
-  // Planning workers additionally load the headless plan gate, which
-  // reduces active tools to the research allowlist and enforces read-only Bash.
+  // Every worker routes built-in file and shell tools through the OS
+  // sandbox extension. Planning workers additionally load the headless plan
+  // gate, which reduces active tools to the research allowlist.
   const extensionPaths = resolvedExtensions.map((extension) => extension.path);
   if (parentPlanning) {
     extensionPaths.push(fileURLToPath(new URL("../../plan/plan.ts", import.meta.url)));
   }
 
   // Read-only planning workers inspect the parent's current files through
-  // Gondolin and never need a branch or patch. Avoid changing git metadata
-  // merely to perform research during plan mode.
+  // the sandbox and never need a branch or patch. Avoid changing git
+  // metadata merely to perform research during plan mode.
   const wantIsolate = !parentPlanning && params.isolate !== false;
 
   return {
@@ -713,7 +518,7 @@ export function buildDelegateStartedResponse(
   provision: ProvisionStatus | undefined,
 ): AgentToolResult {
   const isolateNote = plan.parentPlanning
-    ? "Read-only planning worker: Gondolin is enforced and workspace mutation is blocked."
+    ? "Read-only planning worker: the sandbox is enforced and workspace mutation is blocked."
     : worktree
       ? `Isolated in worktree ${worktree.branch}. Its patch is collected with workers (action=collect, id=${plan.workerId}).`
       : "Not isolated: the worker edits this working tree directly.";

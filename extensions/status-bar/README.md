@@ -8,14 +8,13 @@ Replaces Pi's default footer with a denser, more information-rich two-line statu
 
 **Footer line 1** (static session info):
 - Working directory (last path component)
-- Gondolin workspace segment (`with WS <vm id>`) when a sandbox VM exists, between the cwd and the git branch — so line 1 reads like `pi-extensions with WS a1b2c3d4 on main`
 - Git branch and a compact status block (`! ? + ✘ » = $ ↑ ↓ ⇕`) for ahead, behind, conflicted, stashed, deleted, renamed, modified, typechanged, staged, and untracked
 - Right-aligned context usage bar with a token breakdown (`↑in ↓out ↗cache-read ↘cache-write`) and the turn count and cost
 
 **Footer line 2** (transient events):
 - Third-party extension statuses published via `ctx.ui.setStatus()`
 
-Small- and worker-model labels live in the editor title and are omitted from the footer, so they are not shown twice. The Gondolin VM status is excluded too: the VM renders as the line 1 workspace segment, and a running goal is the **Goal** badge in the editor frame. Their `setStatus` entries remain as fallbacks for Pi's default footer.
+Small- and worker-model labels live in the editor title and are omitted from the footer, so they are not shown twice. A running goal is the **Goal** badge in the editor frame; their `setStatus` entries remain as fallbacks for Pi's default footer.
 
 The whole second line is omitted when there's nothing transient to show.
 

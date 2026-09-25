@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -14,16 +14,7 @@ import {
   type WorkerSessionState,
 } from "../../extensions/agents/src/delegate.ts";
 import { createWorkersWidget } from "../../extensions/agents/src/format.ts";
-import {
-  isProvisionStale,
-  recordProvisionInputs,
-} from "../../extensions/agents/src/provision/config.ts";
-import { runProvisionCommand } from "../../extensions/agents/src/provision/executor.ts";
-import { copyTreeShared } from "../../extensions/agents/src/provision/primitives.ts";
-import {
-  provisionConfigPath,
-  provisionSkillPath,
-} from "../../extensions/agents/src/provision/types.ts";
+import { runSetupHook } from "../../extensions/agents/src/provision/hook.ts";
 import {
   extractAssistantText,
   finalizeWorker,
@@ -54,7 +45,7 @@ import {
 } from "../../extensions/agents/src/worktree.ts";
 import { withFileLock } from "../../lib/file-lock.ts";
 import { cleanGitEnv, runGit } from "../../lib/git.ts";
-import { cacheDir, projectStateRelative } from "../../lib/paths.ts";
+import { projectStateRelative } from "../../lib/paths.ts";
 
 // Call-through spy: real cross-process locking behavior stays active for
 // every code path, while tests can assert who took which lock.
@@ -63,22 +54,21 @@ vi.mock("../../lib/file-lock.ts", async (importOriginal) => {
   return { ...actual, withFileLock: vi.fn(actual.withFileLock) };
 });
 
-// Provisioning stack: config and fingerprint logic runs for real against the
-// temp cwd, while the provision VM executor and the shell-out tree copy are
-// faked (tests never boot gondolin or exec `cp`), and git stays a call-through
-// spy so provision tests can fake a repository per test.
-vi.mock("../../extensions/agents/src/provision/executor.ts", async (importOriginal) => {
+// Provisioning stack: the setup hook and sandbox client are faked (tests
+// never boot a sandbox); git stays a call-through spy so provision tests can
+// fake a repository per test.
+vi.mock("../../extensions/agents/src/provision/hook.ts", async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import("../../extensions/agents/src/provision/executor.ts")>();
+    await importOriginal<typeof import("../../extensions/agents/src/provision/hook.ts")>();
   return {
     ...actual,
-    runProvisionCommand: vi.fn(async () => ({ exitCode: 0, detail: "ok", ms: 1_000 })),
+    runSetupHook: vi.fn(async (worktree: string) => ({
+      exitCode: 0,
+      detail: "ok",
+      ms: 1_000,
+      logPath: `${worktree}/.worktreehook.log`,
+    })),
   };
-});
-vi.mock("../../extensions/agents/src/provision/primitives.ts", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("../../extensions/agents/src/provision/primitives.ts")>();
-  return { ...actual, copyTreeShared: vi.fn(async () => ({ mode: "reflink" as const })) };
 });
 vi.mock("../../lib/git.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/git.ts")>();
@@ -174,12 +164,20 @@ async function initGitRepo(cwd: string): Promise<void> {
   await execFileAsync("git", ["commit", "-qm", "init"], gitOpts(cwd));
 }
 
-/** Minimal committed policy so isolated delegates clear provision preflight.
- *  An empty config does no carry/share/provision work; its first provision
- *  stamps the fingerprint the staleness check later reads. */
+/** Setup files so isolated delegates clear the v2 preflight ladder. */
 async function writeProvisionConfig(cwd: string): Promise<void> {
   await mkdir(join(cwd, CONFIG_DIR_NAME), { recursive: true });
-  await writeFile(join(cwd, CONFIG_DIR_NAME, "provision.json"), "{}\n", "utf8");
+  await mkdir(join(cwd, "scripts"), { recursive: true });
+  await writeFile(
+    join(cwd, CONFIG_DIR_NAME, "sandbox.json"),
+    JSON.stringify({
+      network: { allowedDomains: [], deniedDomains: [] },
+      filesystem: { denyRead: [], allowRead: ["."], allowWrite: ["."], denyWrite: [] },
+    }),
+    "utf8",
+  );
+  await writeFile(join(cwd, "scripts", "provision-worktree"), "#!/bin/sh\nexit 0\n", "utf8");
+  await chmod(join(cwd, "scripts", "provision-worktree"), 0o755);
 }
 
 interface WakeMessageShape {
@@ -341,7 +339,7 @@ describe("agents-extension", () => {
     );
   });
 
-  it("delegate from a planning session forces read-only Gondolin workers without worktrees", async () => {
+  it("delegate from a planning session forces read-only sandboxed workers without worktrees", async () => {
     await initGitRepo(cwd);
     const argsFile = join(fixtureDir, "readonly-args.txt");
     const fixture = await writeFixture(
@@ -366,13 +364,11 @@ ${SUCCESS_WORKER}`,
 
     const args = (await readFile(argsFile, "utf8")).split("\n");
     expect(args).toContain("--worker-readonly");
-    expect(args).toContain("--gondolin");
-    expect(args.some((arg) => arg.includes("gondolin.ts"))).toBe(true);
+    expect(args).not.toContain("--gondolin");
+    expect(args.some((arg) => arg.includes("worker-sandbox.ts"))).toBe(true);
     expect(result.details.worker.worktree).toBeUndefined();
-    const planPathIndex = args.indexOf("-e", args.indexOf("-e") + 1);
     const planPaths = args.filter((arg) => arg.includes("plan.ts"));
     expect(planPaths.length).toBeGreaterThanOrEqual(1);
-    void planPathIndex;
   });
 
   it("delegate enforces the environment worker model when a caller supplies another model", async () => {
@@ -441,7 +437,7 @@ ${SUCCESS_WORKER}`,
     expect(result.details.worker.thinkingLevel).toBe("low");
   });
 
-  it("delegate enforces messenger, Gondolin, and --gondolin when extensions are empty", async () => {
+  it("delegate enforces messenger and worker-sandbox when extensions are empty", async () => {
     const argsFile = join(fixtureDir, "mandatory-args.txt");
     const fixture = await writeFixture(
       fixtureDir,
@@ -460,12 +456,11 @@ ${SUCCESS_WORKER}`,
     });
 
     const args = (await readFile(argsFile, "utf8")).split("\n");
-    expect(args).toContain("--gondolin");
     expect(args.some((arg) => arg.includes("messenger.ts"))).toBe(true);
-    expect(args.some((arg) => arg.includes("gondolin.ts"))).toBe(true);
+    expect(args.some((arg) => arg.includes("worker-sandbox.ts"))).toBe(true);
   });
 
-  it("delegate spawns workers with the resolved extension paths and --gondolin", async () => {
+  it("delegate spawns workers with the resolved extension paths and worker-sandbox", async () => {
     const argsFile = join(fixtureDir, "captured-args.txt");
     const fixture = await writeFixture(
       fixtureDir,
@@ -480,10 +475,11 @@ ${SUCCESS_WORKER}`,
     await executeTool("delegate", { task: "say hi", isolate: false, wait: true });
 
     const args = (await readFile(argsFile, "utf8")).split("\n");
-    expect(args).toContain("--gondolin");
+    expect(args).not.toContain("--gondolin");
     const messengerIndex = args.indexOf("-e");
     expect(messengerIndex).toBeGreaterThanOrEqual(0);
     expect(args[messengerIndex + 1]).toContain("messenger.ts");
+    expect(args.some((arg) => arg.includes("worker-sandbox.ts"))).toBe(true);
     expect(args.some((arg) => arg.includes("code-search"))).toBe(true);
   });
 
@@ -1503,8 +1499,7 @@ sleep 30
   describe("provision integration", () => {
     beforeEach(() => {
       vi.mocked(runGit).mockClear();
-      vi.mocked(runProvisionCommand).mockClear();
-      vi.mocked(copyTreeShared).mockClear();
+      vi.mocked(runSetupHook).mockClear();
     });
 
     afterEach(() => {
@@ -1526,7 +1521,7 @@ sleep 30
 
       await expect(
         startDelegatedWorker({ cwd, plan, state, events: testEvents(), persist }),
-      ).rejects.toThrow(/provisioned: none \(config missing or not applicable\)/);
+      ).rejects.toThrow(/provisioned: none \(setup hook missing or not executable/);
 
       expect(state.reserved.size).toBe(0);
       expect(state.running.size).toBe(0);
@@ -1534,7 +1529,7 @@ sleep 30
       expect(vi.mocked(runGit).mock.calls.some((call) => call[1][0] === "worktree")).toBe(false);
     });
 
-    it("an isolated delegate without a provision config refuses with the skill pointer and burns nothing", async () => {
+    it("an isolated delegate without a setup hook refuses and burns nothing", async () => {
       fakeWorktreeGit();
 
       const error = await executeTool("delegate", { task: "isolated task" }).then(
@@ -1542,59 +1537,60 @@ sleep 30
         (e: Error) => e,
       );
 
-      expect(error?.message).toContain("provisioned: none (config missing or not applicable)");
-      expect(error?.message).toContain(
-        `Read ${provisionSkillPath(cwd)}, author ${projectStateRelative("provision.json")} per the skill, then re-delegate.`,
-      );
+      expect(error?.message).toContain("provisioned: none (setup hook missing or not executable");
+      expect(error?.message).toContain("scripts/provision-worktree");
+      expect(error?.message).toContain(".pi/sandbox.json");
       expect((await listRecordFiles(cwd)).length).toBe(0);
       expect(existsSync(join(cwd, CONFIG_DIR_NAME, "worktrees"))).toBe(false);
     });
 
-    it("an invalid committed config refuses with the validation issues", async () => {
+    it("a missing sandbox policy refuses before any slot, worktree, or record exists", async () => {
       vi.mocked(runGit).mockImplementation(async (_repoCwd, args) =>
         args[0] === "rev-parse" && args[1] === "--is-inside-work-tree" ? "true\n" : "",
       );
-      await writeJsonFile(provisionConfigPath(cwd), { carryUnsafe: true });
+      await mkdir(join(cwd, "scripts"), { recursive: true });
+      await writeFile(join(cwd, "scripts", "provision-worktree"), "#!/bin/sh\nexit 0\n", "utf8");
+      await chmod(join(cwd, "scripts", "provision-worktree"), 0o755);
 
       await expect(executeTool("delegate", { task: "isolated task" })).rejects.toThrow(
-        /provisioned: invalid config \(provision\.json:carryUnsafe: carryUnsafe is local-only/,
+        /provisioned: none \(sandbox policy missing/,
       );
       expect((await listRecordFiles(cwd)).length).toBe(0);
     });
 
-    it("a stale fingerprint refuses the delegate and names the changed input", async () => {
-      vi.mocked(runGit).mockImplementation(async (_repoCwd, args) =>
-        args[0] === "rev-parse" && args[1] === "--is-inside-work-tree" ? "true\n" : "",
-      );
-      await writeFile(join(cwd, "package-lock.json"), "{}\n");
-      await writeJsonFile(provisionConfigPath(cwd), {
-        detect: { any: ["package-lock.json"] },
-        provision: "npm ci",
-      });
-      await recordProvisionInputs(cwd);
-      await writeFile(join(cwd, "package-lock.json"), '{"changed":true}\n');
+    it("a modified tracked setup file is path-committed and removed from the dirty gate", async () => {
+      await writeProvisionConfig(cwd);
+      await initGitRepo(cwd);
+      await writeFile(join(cwd, "scripts", "provision-worktree"), "#!/bin/sh\necho v2\n", "utf8");
+      await chmod(join(cwd, "scripts", "provision-worktree"), 0o755);
+      const fixture = await writeFixture(fixtureDir, "v2-worker.sh", SUCCESS_WORKER);
+      setEnv("PI_WORKER_COMMAND", fixture);
 
-      const error = await executeTool("delegate", { task: "isolated task" }).then(
-        () => null,
-        (e: Error) => e,
-      );
+      const started = await executeTool("delegate", { task: "t", isolate: true, wait: true });
+      expect(started.details.worker.status).toBe("completed");
 
-      expect(error?.message).toContain("provisioned: stale (");
-      expect(error?.message).toContain("package-lock.json changed since the last provision");
-      expect(error?.message).toContain(provisionSkillPath(cwd));
-      // The refusal doubles as the stale-refresh: the drift signal is
-      // consumed, so the recovery loop's re-delegate provisions.
-      expect((await isProvisionStale(cwd)).stale).toBe(false);
-      expect((await listRecordFiles(cwd)).length).toBe(0);
+      const status = await execFileAsync(
+        "git",
+        ["status", "--porcelain", "--", "scripts/provision-worktree"],
+        gitOpts(cwd),
+      );
+      expect(status.stdout.trim()).toBe("");
+      const head = await execFileAsync(
+        "git",
+        ["show", "HEAD:scripts/provision-worktree"],
+        gitOpts(cwd),
+      );
+      expect(head.stdout).toContain("v2");
     });
 
     it("a failed provision persists the record with its worktree and spawns nothing", async () => {
       fakeWorktreeGit();
-      await writeJsonFile(provisionConfigPath(cwd), { provision: "npm ci" });
-      vi.mocked(runProvisionCommand).mockResolvedValueOnce({
+      await writeProvisionConfig(cwd);
+      vi.mocked(runSetupHook).mockResolvedValueOnce({
         exitCode: 1,
-        detail: "npm ERR! missing script: ci\nnpm ERR! A complete log",
+        detail: "setup failed",
         ms: 2_000,
+        logPath: join(cwd, ".hook.log"),
       });
       const spawnMarker = join(fixtureDir, "spawn-marker");
       setEnv(
@@ -1607,7 +1603,7 @@ sleep 30
       );
 
       await expect(executeTool("delegate", { task: "isolated task" })).rejects.toThrow(
-        /provisioned: failed \(exit 1\): npm ERR! missing script: ci npm ERR! A complete log\. Logs: .+pi-provision.+ Read .+ fix .+ or the environment per the skill, then re-delegate\./,
+        /provisioned: failed \(exit 1\): setup failed\. Log: .+\. Fix scripts\/provision-worktree or the environment, then re-delegate\./,
       );
 
       const records = await listRecordFiles(cwd);
@@ -1627,18 +1623,14 @@ sleep 30
       expect(await loadWorker(cwd, record.id)).toBeUndefined();
     });
 
-    it("an empty-output provision failure names the sandbox-OOM hint and the npm log dir", async () => {
+    it("an empty-output hook failure points at the setup hook and log", async () => {
       fakeWorktreeGit();
-      const cacheRoot = join(fixtureDir, "xdg-cache");
-      const npmLogs = join(cacheRoot, "pi-provision", "npm", "_logs");
-      await mkdir(npmLogs, { recursive: true });
-      setEnv("XDG_CACHE_HOME", cacheRoot);
-      await writeJsonFile(provisionConfigPath(cwd), { provision: "npm ci" });
-      // The live failure shape: SIGKILLed extraction, zero flushed output.
-      vi.mocked(runProvisionCommand).mockResolvedValueOnce({
+      await writeProvisionConfig(cwd);
+      vi.mocked(runSetupHook).mockResolvedValueOnce({
         exitCode: 137,
-        detail: "exit 137 with no output (killed before flush? exit 137 is typically sandbox OOM)",
+        detail: "",
         ms: 90_000,
+        logPath: join(fixtureDir, "hook.log"),
       });
 
       const error = await executeTool("delegate", { task: "isolated task" }).then(
@@ -1646,36 +1638,33 @@ sleep 30
         (e: Error) => e,
       );
 
-      expect(error?.message).toBe(
-        `provisioned: failed (exit 137): exit 137 with no output (killed before flush? exit 137 is typically sandbox OOM). Logs: ${npmLogs}. Read ${provisionSkillPath(cwd)}, fix ${projectStateRelative("provision.json")} or the environment per the skill, then re-delegate.`,
+      expect(error?.message).toEqual(
+        expect.stringContaining("provisioned: failed (exit 137). Log: "),
       );
+      expect(error?.message).toEqual(expect.stringContaining("scripts/provision-worktree"));
     });
 
     it("an empty detail never leaves a stray colon in the failure pointer", async () => {
       fakeWorktreeGit();
-      const cacheRoot = join(fixtureDir, "xdg-cache-empty");
-      setEnv("XDG_CACHE_HOME", cacheRoot);
-      await writeJsonFile(provisionConfigPath(cwd), { provision: "npm ci" });
-      vi.mocked(runProvisionCommand).mockResolvedValueOnce({
+      await writeProvisionConfig(cwd);
+      vi.mocked(runSetupHook).mockResolvedValueOnce({
         exitCode: 9,
         detail: "",
         ms: 1_000,
+        logPath: join(fixtureDir, "hook.log"),
       });
 
       await expect(executeTool("delegate", { task: "isolated task" })).rejects.toThrow(
-        /provisioned: failed \(exit 9\)\. Logs: .+pi-provision\. Read /,
+        /provisioned: failed \(exit 9\)\. Log: .+\. Fix /,
       );
     });
 
-    it("preflight commits a modified tracked config before the worktree is created", async () => {
-      // Track the config first so the authoring edit below shows as a
-      // tracked modification — the shape that used to die at the dirty gate
-      // with a generic refusal and never reached the provision-commit path.
+    it("preflight commits a modified tracked setup file before the worktree is created", async () => {
       await writeProvisionConfig(cwd);
       await initGitRepo(cwd);
       await writeFile(
-        join(cwd, CONFIG_DIR_NAME, "provision.json"),
-        `${JSON.stringify({ timeoutSeconds: 240 }, null, 2)}\n`,
+        join(cwd, CONFIG_DIR_NAME, "sandbox.json"),
+        `${JSON.stringify({ network: { allowedDomains: ["example.com"], deniedDomains: [] }, filesystem: { denyRead: [], allowRead: ["."], allowWrite: ["."], denyWrite: [] } }, null, 2)}\n`,
       );
       const fixture = await writeFixture(fixtureDir, "ok-worker.sh", SUCCESS_WORKER);
       setEnv("PI_WORKER_COMMAND", fixture);
@@ -1685,25 +1674,26 @@ sleep 30
 
       const status = await execFileAsync(
         "git",
-        ["status", "--porcelain", "--", join(CONFIG_DIR_NAME, "provision.json")],
+        ["status", "--porcelain", "--", join(CONFIG_DIR_NAME, "sandbox.json")],
         gitOpts(cwd),
       );
       expect(status.stdout.trim()).toBe("");
       const head = await execFileAsync(
         "git",
-        ["show", `HEAD:${join(CONFIG_DIR_NAME, "provision.json")}`],
+        ["show", `HEAD:${join(CONFIG_DIR_NAME, "sandbox.json")}`],
         gitOpts(cwd),
       );
-      expect(head.stdout).toContain("240");
+      expect(head.stdout).toContain("example.com");
     });
 
     it("prune discards a failed provision record's worktree past retention", async () => {
       fakeWorktreeGit();
-      await writeJsonFile(provisionConfigPath(cwd), { provision: "npm ci" });
-      vi.mocked(runProvisionCommand).mockResolvedValueOnce({
+      await writeProvisionConfig(cwd);
+      vi.mocked(runSetupHook).mockResolvedValueOnce({
         exitCode: 1,
         detail: "boom",
         ms: 1_000,
+        logPath: join(fixtureDir, "hook.log"),
       });
 
       await expect(executeTool("delegate", { task: "isolated task" })).rejects.toThrow(
@@ -1722,7 +1712,7 @@ sleep 30
 
     it("an exhausted provision lock refuses busy and discards the fresh worktree", async () => {
       fakeWorktreeGit();
-      await writeJsonFile(provisionConfigPath(cwd), { provision: "npm ci", timeoutSeconds: 5 });
+      await writeProvisionConfig(cwd);
       // Simulate the lock wait running out (real bound: budget + grace).
       vi.mocked(withFileLock).mockImplementationOnce(
         async (
@@ -1742,16 +1732,16 @@ sleep 30
       expect(records).toHaveLength(1);
       expect(records[0].status).toBe("failed");
       expect(records[0].worktree).toBeUndefined(); // discarded: no orphan
-      expect(vi.mocked(runProvisionCommand)).not.toHaveBeenCalled();
+      expect(vi.mocked(runSetupHook)).not.toHaveBeenCalled();
       expect(existsSync(join(cwd, CONFIG_DIR_NAME, "worktrees", records[0].id))).toBe(false);
     });
 
-    it("a failed config commit refuses the delegate before any slot, worktree, or record exists", async () => {
+    it("a failed setup commit refuses the delegate before any slot, worktree, or record exists", async () => {
       fakeWorktreeGit({ commitError: "pre-commit hook declined" });
-      await writeJsonFile(provisionConfigPath(cwd), { provision: "echo hi" });
+      await writeProvisionConfig(cwd);
 
       await expect(executeTool("delegate", { task: "isolated task" })).rejects.toThrow(
-        /provisioned: config commit failed \(pre-commit hook declined\)\. Read .+ commit .+ host-side, then re-delegate\./,
+        /provisioned: setup commit failed \(pre-commit hook declined\)\. Commit /,
       );
 
       // Review D2 pre-gate position: the commit runs in preflight, before
@@ -1760,8 +1750,8 @@ sleep 30
       expect(existsSync(join(cwd, CONFIG_DIR_NAME, "worktrees"))).toBe(false);
     });
 
-    it("a non-isolated delegate skips provisioning and never boots the executor", async () => {
-      await writeJsonFile(provisionConfigPath(cwd), { provision: "npm ci" });
+    it("a non-isolated delegate skips provisioning and never runs the hook", async () => {
+      await writeProvisionConfig(cwd);
       const argsFile = join(fixtureDir, "skipped-args.txt");
       const fixture = await writeFixture(
         fixtureDir,
@@ -1772,8 +1762,7 @@ sleep 30
 
       const result = await executeTool("delegate", { task: "say hi", isolate: false, wait: true });
 
-      expect(vi.mocked(runProvisionCommand)).not.toHaveBeenCalled();
-      expect(vi.mocked(copyTreeShared)).not.toHaveBeenCalled();
+      expect(vi.mocked(runSetupHook)).not.toHaveBeenCalled();
       const worker = result.details.worker as WorkerRecord;
       expect(worker.status).toBe("completed");
       expect(worker.provision).toMatchObject({ state: "skipped", detail: "no worktree" });
@@ -1784,19 +1773,12 @@ sleep 30
       expect(environment).toContain("call report_blocker with the exact missing tool");
     });
 
-    it("an isolated delegate carries, shares, provisions, stamps, and commits the config", async () => {
+    it("an isolated delegate carries the include paths, runs the setup hook, and commits setup files", async () => {
       fakeWorktreeGit();
+      await writeProvisionConfig(cwd);
       await mkdir(join(cwd, "data"), { recursive: true });
       await writeFile(join(cwd, "data", "config.json"), "{}\n");
-      await mkdir(join(cwd, "node_modules", ".bin"), { recursive: true });
-      await writeFile(join(cwd, "node_modules", ".bin", "tool"), "#!/bin/sh\n");
-      await writeJsonFile(provisionConfigPath(cwd), {
-        carry: ["data/config.json"],
-        share: "hardlink-copy",
-        provision: "npm ci",
-        network: ["registry.npmjs.org"],
-        timeoutSeconds: 30,
-      });
+      await writeFile(join(cwd, ".worktreeinclude"), "data/\n");
       const argsFile = join(fixtureDir, "happy-args.txt");
       const fixture = await writeFixture(
         fixtureDir,
@@ -1804,10 +1786,11 @@ sleep 30
         `#!/bin/sh\nprintf '%s\\n' "$@" > '${argsFile}'\n${SUCCESS_WORKER}`,
       );
       setEnv("PI_WORKER_COMMAND", fixture);
-      vi.mocked(runProvisionCommand).mockResolvedValueOnce({
+      vi.mocked(runSetupHook).mockResolvedValueOnce({
         exitCode: 0,
-        detail: "added 12 packages",
+        detail: "setup done",
         ms: 16_000,
+        logPath: join(fixtureDir, "hook.log"),
       });
 
       const started = await executeTool("delegate", { task: "build the widget" });
@@ -1815,49 +1798,23 @@ sleep 30
       const id = started.details.workerId as string;
       const wt = join(cwd, CONFIG_DIR_NAME, "worktrees", id);
       expect(await readFile(join(wt, "data", "config.json"), "utf8")).toBe("{}\n");
-      expect(vi.mocked(copyTreeShared)).toHaveBeenCalledWith(
-        join(cwd, "node_modules"),
-        join(wt, "node_modules"),
-      );
-      expect(vi.mocked(runProvisionCommand)).toHaveBeenCalledWith({
-        worktree: wt,
-        command: "npm ci",
-        network: ["registry.npmjs.org"],
-        timeoutMs: 30_000,
-        cacheDir: cacheDir("provision"),
-      });
-      expect((await isProvisionStale(cwd)).stale).toBe(false);
+      expect(vi.mocked(runSetupHook)).toHaveBeenCalledWith(wt, 600_000);
       const gitCalls = vi.mocked(runGit).mock.calls.map((call) => call[1].join(" "));
-      expect(gitCalls).toContain(`add -- ${provisionConfigPath(cwd)}`);
-      expect(gitCalls).toContain(
-        `commit -m chore(provision): update worktree provision config --only -- ${provisionConfigPath(cwd)}`,
+      expect(gitCalls.some((entry) => entry.includes("add -- scripts/provision-worktree"))).toBe(
+        true,
       );
       expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("committed"), "info");
       expect(started.details.provision).toMatchObject({
         state: "yes",
-        detail: "carry 1, share reflink, command exit 0 (16s), config committed",
+        detail: "carry 1, hook exit 0 (16s), setup committed",
       });
-      expect(started.content[0].text).toContain(
-        "Provision: yes — carry 1, share reflink, command exit 0 (16s), config committed",
-      );
+      expect(started.content[0].text).toContain("Provision: yes — carry 1, hook exit 0 (16s)");
       const args = (await readFile(argsFile, "utf8")).split("\n");
       const environment = args.find((line) => line.startsWith("ENVIRONMENT:"));
-      expect(environment).toContain(
-        "Provision: yes — carry 1, share reflink, command exit 0 (16s)",
-      );
+      expect(environment).toContain("Provision: yes — carry 1, hook exit 0 (16s)");
 
       const record = await waitForRecord(cwd, id, "completed");
       expect(record.provision).toMatchObject({ state: "yes" });
-    });
-
-    it("session_start materializes the bundled provision skill into the project", async () => {
-      const skillPath = provisionSkillPath(cwd);
-      expect(existsSync(skillPath)).toBe(false);
-
-      await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
-
-      // Fire-and-forget: poll instead of awaiting the handler's promise.
-      await vi.waitFor(() => expect(existsSync(skillPath)).toBe(true));
     });
   });
 });
@@ -2793,11 +2750,6 @@ function makeWorkerRecord(overrides: Partial<WorkerRecord> = {}): WorkerRecord {
   };
 }
 
-async function writeJsonFile(path: string, data: unknown): Promise<void> {
-  await mkdir(join(path, ".."), { recursive: true });
-  await writeFile(path, `${JSON.stringify(data, null, 2)}\n`, "utf8");
-}
-
 /** The record's worktree path, failing loudly when the record has none. */
 function recordWorktree(record: WorkerRecord): string {
   if (record.worktree === undefined) throw new Error(`record ${record.id} has no worktree`);
@@ -2826,7 +2778,11 @@ function fakeWorktreeGit(opts: { configStatus?: string; commitError?: string } =
       throw new Error(`fake git: unexpected rev-parse ${String(sub)}`);
     }
     if (cmd === "status" && sub === "--porcelain") {
-      if (args[2] === "--") return opts.configStatus ?? `?? ${CONFIG_DIR_NAME}/provision.json\n`;
+      if (args[2] === "--") {
+        return (
+          opts.configStatus ?? `?? scripts/provision-worktree\n?? ${CONFIG_DIR_NAME}/sandbox.json\n`
+        );
+      }
       return ""; // clean tree
     }
     if (cmd === "worktree" && sub === "add") {
@@ -2841,6 +2797,62 @@ function fakeWorktreeGit(opts: { configStatus?: string; commitError?: string } =
     if (cmd === "commit") {
       if (opts.commitError !== undefined) throw new Error(opts.commitError);
       return "";
+    }
+    if (cmd === "ls-files" && sub === "--others") {
+      // Minimal fake ignore engine: enumerate files under source (absolute
+      // root path = repoCwd), filter by the include file, return -z form.
+      const includeFlag = args.find((arg) => arg.startsWith("--exclude-from="));
+      const includeFile = includeFlag?.slice("--exclude-from=".length) ?? "";
+      let includeText = "";
+      try {
+        includeText = await readFile(includeFile, "utf8");
+      } catch {
+        return "";
+      }
+      const patterns = includeText
+        .split("\n")
+        .map((line) => line.trimEnd())
+        .filter((line) => line !== "" && !line.startsWith("#"));
+      const results: string[] = [];
+      async function scan(dir: string, prefix: string): Promise<void> {
+        for (const [type, entries] of [
+          ["dir", await readdir(dir).catch(() => [] as string[])],
+        ] as const) {
+          void type;
+          for (const entry of entries) {
+            const full = join(dir, entry);
+            const rel = prefix ? `${prefix}/${entry}` : entry;
+            const info = await stat(full).catch(() => null);
+            if (info?.isDirectory()) {
+              if (entry === ".git" || entry === "node_modules") continue;
+              await scan(full, rel);
+            } else if (info?.isFile()) {
+              if (matchesInclude(rel, patterns)) results.push(rel);
+            }
+          }
+        }
+      }
+      function matchesInclude(rel: string, pats: string[]): boolean {
+        let best = false;
+        for (const raw of pats) {
+          if (!raw) continue;
+          const negative = raw.startsWith("!");
+          const body = (negative ? raw.slice(1) : raw).replace(/^\//, "").replace(/\/$/, "");
+          if (!body) continue;
+          const regex = new RegExp(
+            `^${body
+              .split("/")
+              .map((part) =>
+                part.replace(/[.*+?^${}()|[\]\\]/g, (ch) => (ch === "*" ? ".*" : `\\${ch}`)),
+              )
+              .join("/")}(?=/|$)`,
+          );
+          if (regex.test(rel)) best = !negative;
+        }
+        return best;
+      }
+      await scan(repoCwd, "");
+      return results.map((rel) => `${rel}\0`).join("");
     }
     throw new Error(`fake git: unexpected command: ${args.join(" ")}`);
   });

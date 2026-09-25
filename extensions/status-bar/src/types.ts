@@ -50,10 +50,6 @@ export interface State {
   // is active; goalCap is null when unset and 0 means unlimited.
   goalIteration: number;
   goalCap: number | null;
-  // Gondolin sandbox VM state, published by the gondolin extension on the
-  // pi.events bus (see gondolin:vm-state). Shown as a "with WS <id>" segment
-  // on footer line 1 after the working directory; null when no VM exists.
-  gondolinVm: { state: "starting" | "ready" | "stopping"; vmId?: string } | null;
   gitBranch: string | null;
   gitStatus: GitStatus | null;
   tokenUsage: TokenUsage;

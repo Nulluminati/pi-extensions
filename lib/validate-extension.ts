@@ -124,7 +124,7 @@ export function validateFile(filePath: string): { passed: boolean; messages: str
       "@earendil-works/pi-ai",
       "@earendil-works/pi-tui",
       "@earendil-works/pi-coding-agent",
-      "@earendil-works/gondolin",
+      "@anthropic-ai/sandbox-runtime",
     ];
 
     function isNodeBuiltin(mod: string): boolean {

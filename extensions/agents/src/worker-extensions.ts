@@ -9,10 +9,10 @@
  *
  * Resolution order: the delegate call's explicit list, then
  * PI_WORKER_EXTENSIONS (comma-separated names), then the config file, then
- * the default set. `messenger`, `worker-blocker`, and `gondolin` are always
- * included: messenger is the coordination channel to the parent,
+ * the default set. `messenger`, `worker-blocker`, and `worker-sandbox` are
+ * always included: messenger is the coordination channel to the parent,
  * worker-blocker is the blocker-reporting channel to the parent, and
- * Gondolin is the mandatory worker sandbox. A hard denylist rejects
+ * worker-sandbox is the mandatory worker sandbox. A hard denylist rejects
  * workflow extensions that would break the one-level delegation model, even
  * when explicitly requested.
  */
@@ -35,7 +35,7 @@ export const DEFAULT_WORKER_EXTENSIONS = [
   "web-search",
   "synthetic",
   "neuralwatt",
-  "gondolin",
+  "worker-sandbox",
 ] as const;
 
 /**
@@ -54,9 +54,13 @@ export const FORBIDDEN_WORKER_EXTENSIONS = [
 ] as const;
 
 /** Coordination, blocker reporting, and sandbox extensions loaded by every
- *  worker. Gondolin stays last so its built-in tool overrides cannot be
+ *  worker. worker-sandbox pins last so its built-in tool overrides cannot be
  *  shadowed by an extension loaded afterward. */
-export const REQUIRED_WORKER_EXTENSIONS = ["messenger", "worker-blocker", "gondolin"] as const;
+export const REQUIRED_WORKER_EXTENSIONS = [
+  "messenger",
+  "worker-blocker",
+  "worker-sandbox",
+] as const;
 
 /**
  * Extension names map to extensions/<name>/<name>.ts; names outside the
@@ -115,12 +119,12 @@ export function resolveWorkerExtensions(
   const forbidden = new Set<string>(FORBIDDEN_WORKER_EXTENSIONS);
   const requestedNames = names.map((name) => name.trim());
   // Mandatory extensions pin the ends of the load order: boundary machinery
-  // first, Gondolin's built-in tool overrides last. Requested duplicates of
-  // either fall out via the Set.
+  // first, the worker sandbox's built-in tool overrides last. Requested
+  // duplicates of either fall out via the Set.
   const unique = new Set<string>([
-    ...REQUIRED_WORKER_EXTENSIONS.filter((name) => name !== "gondolin"),
-    ...requestedNames.filter((name) => name !== "gondolin"),
-    "gondolin",
+    ...REQUIRED_WORKER_EXTENSIONS.filter((name) => name !== "worker-sandbox"),
+    ...requestedNames.filter((name) => name !== "worker-sandbox"),
+    "worker-sandbox",
   ]);
   const resolved: ResolvedWorkerExtension[] = [];
   for (const name of unique) {

@@ -6,7 +6,7 @@ Strict read-only planning with an approval gate — Claude-Code-style. `/plan` p
 
 Plan mode has three phases:
 
-1. **Plan** (`/plan`, `Ctrl+Alt+P`, or `--plan`) — the `edit` and `write` tools are removed from the active tool set *and* hard-blocked at the `tool_call` gate. Bash is restricted to a read-only allowlist (`cat`, `grep`, `git status/log/diff`, `npm view`, `ps`, `jq`, ...); anything mutating or composing (`rm`, `mv`, `>`, `git checkout`, `npm install`, `sed -i`, `curl | sh`, `$(...)`, `<(...)`, ...) is blocked with an explanation. The model can delegate bounded research to read-only workers running in Gondolin, then calls `plan_submit` when it has a complete plan.
+1. **Plan** (`/plan`, `Ctrl+Alt+P`, or `--plan`) — the `edit` and `write` tools are removed from the active tool set *and* hard-blocked at the `tool_call` gate. Bash is restricted to a read-only allowlist (`cat`, `grep`, `git status/log/diff`, `npm view`, `ps`, `jq`, ...); anything mutating or composing (`rm`, `mv`, `>`, `git checkout`, `npm install`, `sed -i`, `curl | sh`, `$(...)`, `<(...)`, ...) is blocked with an explanation. The model can delegate bounded research to read-only workers running in the OS sandbox, then calls `plan_submit` when it has a complete plan.
 2. **Approval** — `plan_submit` (a tool that is only active in plan mode) shows the proposed plan in a framed overlay:
 
    - `Enter` — **approve & execute**: full tool access is restored, execution context with the numbered steps is injected, and the plan runs.
@@ -56,7 +56,7 @@ Plan mode is **default-deny**: while planning, the active tool set is the inters
 |---|---|
 | Built-in `edit` / `write` | Excluded by the allowlist and blocked at `tool_call` |
 | `bash` | Tool stays active, but every pipeline stage must be an allowlisted read-only command; command/process substitution, compound commands, redirection, destructive patterns, and interpreter-powered writes are blocked |
-| `delegate` (agents) | Parent plan state forces `--worker-readonly`, mandatory Gondolin, the default-deny research tool set, and no worktree |
+| `delegate` (agents) | Parent plan state forces `--worker-readonly`, mandatory worker sandbox isolation, the default-deny research tool set, and no worktree |
 | `workers` | `list`, `status`, and `cancel` remain available; `collect` is blocked because applying a patch changes the workspace |
 | `messenger` | Allowlisted coordination state (mail and reservations), not project files |
 | Unknown / future extension tools | Default-deny in both the parent and planning workers |
@@ -64,7 +64,7 @@ Plan mode is **default-deny**: while planning, the active tool set is the inters
 ## Limitations
 
 - Read-only extension tools must be added to `PLAN_ALLOWED_TOOLS` before they can run in plan mode. This is a deliberate review point for each tool.
-- Gondolin isolates worker tool operations, but loaded extension code still runs in the worker process. Only trusted worker extensions should be configured.
+- The OS sandbox isolates worker tool operations, but loaded extension code still runs in the worker process. Only trusted worker extensions should be configured.
 - The bash allowlist sometimes blocks unusual read-only commands such as `git stash show`. Exit plan mode to run one.
 - Approval needs an interactive session. In headless modes, `plan_submit` saves the plan and asks the agent to retry when a user can review it.
 - Completion depends on the agent checking steps off with the `todo` tool. If it does not, execution stays active; toggle `/plan` to abort back into plan mode. Extra agent-added items do not block completion.

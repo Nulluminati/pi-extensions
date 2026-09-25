@@ -1,0 +1,19 @@
+{
+  "network": {
+    "allowedDomains": [
+      "registry.npmjs.org",
+      "*.npmjs.org",
+      "*.npmjs.com",
+      "github.com",
+      "objects.githubusercontent.com",
+      "*.githubusercontent.com"
+    ],
+    "deniedDomains": []
+  },
+  "filesystem": {
+    "denyRead": ["~", "/tmp", "/run"],
+    "allowRead": ["."],
+    "allowWrite": ["."],
+    "denyWrite": [".env"]
+  }
+}
