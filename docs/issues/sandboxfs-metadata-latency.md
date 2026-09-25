@@ -86,3 +86,10 @@ branched from HEAD, parent touches the tree only at patch collection), and
 the host-side rpc-service already carries a readdir cache whose invalidation
 pattern could be mirrored guest-side. Evidence table: see section
 "Evidence" above.
+
+- [x] Policy 3 reflected in worker brief practice: targeted in-guest vitest,
+      full check is a host-side integration gate — DOWNGRADED 2026-09-25:
+      swift-otter proved full `npm run check` passes in-guest (EXIT 0,
+      1460/1460), so the gate may run either side; briefs still prefer
+      targeted runs for speed. Bare-shell chaining needs node_modules/.bin
+      on PATH (npm run injects it) — see sandboxed-worktree-git-lookup-fails.md.

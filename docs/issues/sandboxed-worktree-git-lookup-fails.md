@@ -123,3 +123,18 @@ Full test suite in a provisioned worktree worker: **101 failures -> 5**.
   stat latency, cross-ref sandboxfs-metadata-latency.md).
 - Whole-run time dropped 482s -> 342s once failures stopped burning
   retries/timeouts. Provision steady at 39s.
+
+### Milestone: full `npm run check` EXIT 0 in-guest (session swift-otter-4, check-test-8)
+
+Arc closed: **101 -> 5 -> 0 failures** in a provisioned worktree worker.
+All five check steps pass, 1460/1460 tests, exit 0. Contributors: git mounts
++ safe.directory env + excludeFromGit hardening (this issue), the
+worker-env strip (0273a49), and the 60s conventions bump (77856b1).
+
+Chain wall this run: 597s (host-loaded; tsc 100+85s cold, tests 314s,
+provision 65s vs 39s warm).
+
+**PATH wrinkle for brief authoring:** a bare guest shell lacks npm's PATH
+injection for `node_modules/.bin` — chaining check steps raw exits 127.
+Worker briefs must either use `npm run check` (npm injects the bin dir) or
+prepend `node_modules/.bin` to PATH explicitly.
