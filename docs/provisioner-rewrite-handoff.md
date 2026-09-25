@@ -199,8 +199,8 @@ The rewrite is complete. Landing evidence (host check plus live sandbox acceptan
 - **Project conversion**: `.pi/provision.json` (share/hardlink/fingerprint)
   dissolved; replaced by `scripts/provision-worktree` (npm install),
   `.worktreeinclude` (two tsbuildinfo lines), and `.pi/sandbox.json`
-  (npm/GitHub allowlist, deny `~`/`/tmp`/`/run` reads, worktree-root writes,
-  deny `.env`).
+  (npm/GitHub/NuGet allowlist, deny `~`/`/tmp`/`/run` reads,
+  worktree-root writes, deny `.env`).
 - **Gates closed**: host `npm run check` = biome + tsc + validate + 56 files
   / 1348 tests, zero errors, zero warnings. Live acceptance ran the real
   code paths against a disposable repo: worktree created, include path
@@ -218,12 +218,32 @@ The rewrite is complete. Landing evidence (host check plus live sandbox acceptan
   `report_blocker` wake points at the setup files, composeWorkerTask
   ENVIRONMENT block unchanged, runner no longer names a sandbox runtime.
 
+The repository's own isolated delegate also passed on 2026-09-25, after the
+fixture run. Worker `w-muhgs7h0-dcdb7b153aad01df` carried four files and
+completed the setup hook in 32 seconds. It created a marker only in its
+worktree. Its sandboxed `git status` reported that file, and patch capture
+recorded the exact addition. Direct TCP failed; the HTTP proxy rejected a
+connection to `1.1.1.1` with 403. The test patch stayed unapplied, and the
+parent checkout remained clean.
+
+This run found three setup problems that the fixture did not cover. The
+`socat` binary must be readable inside the sandbox. Linked worktrees need
+read-only access to their parent's Git metadata. Finally, native package
+scripts need Node's proxy option, while npm needs temporary storage outside
+this host's nearly full `/tmp` quota. Commits `2bcbbea` and `b749625`
+address the latter two problems; the hook also skips Husky installation
+because the parent's Git configuration is read-only. The current full check
+passes 58 files and 1353 tests.
+
 **Owner-facing operational notes**
 
 1. socat is NOT installed on this host (Fedora 43): `dnf install socat`,
    alongside the already-present `bwrap` and `rg`. The earlier srt spike
    extracted the RPM under /tmp for testing; that copy is not referenced by
-   anything tracked here.
+   anything tracked here. For the live delegate, a temporary local copy was
+   placed in the active Node installation's `bin` directory, which the
+   sandbox already permits reading. Install the system package before
+   removing that copy or changing Node versions.
 2. macOS main uses `sandbox-exec` (deprecated since 2016; used by Codex
    and Codex-class tools today). Accepted risk per the brief.
 3. `sandbox-runtime` version: added at 0.0.77. The dynamic
