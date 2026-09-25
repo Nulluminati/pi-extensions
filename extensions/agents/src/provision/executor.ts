@@ -12,6 +12,7 @@
 // --- Imports ---
 import { mkdir } from "node:fs/promises";
 import type { ExecOptions, RealFSProvider, VM } from "@earendil-works/gondolin";
+import { resolveGuestImagePath } from "../../../../lib/guest-image.ts";
 import type { ProvisionRunOptions, ProvisionRunResult } from "./types.ts";
 
 // --- Constants ---
@@ -69,6 +70,9 @@ async function defaultCreateVm(opts: ProvisionRunOptions): Promise<VmLike> {
   const hooksOptions: ProvisionHooksOptions = {};
   if (opts.network !== undefined) hooksOptions.allowedHosts = opts.network;
   const hooks = createHttpHooks(hooksOptions);
+  // Custom guest image is optional; without one the SDK boots its default
+  // registry image (alpine-base, no git).
+  const imagePath = resolveGuestImagePath();
   const vm: VM = await VM.create({
     httpHooks: hooks.httpHooks,
     env: {
@@ -83,6 +87,7 @@ async function defaultCreateVm(opts: ProvisionRunOptions): Promise<VmLike> {
         [GUEST_CACHE]: new RealFSProvider(opts.cacheDir),
       },
     },
+    ...(imagePath && { sandbox: { imagePath } }),
   });
   return {
     exec: async (command, options) => {

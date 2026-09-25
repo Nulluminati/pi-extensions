@@ -23,8 +23,13 @@ vi.mock("@earendil-works/gondolin", () => ({
   createHttpHooks: vi.fn(),
 }));
 
+vi.mock("../../lib/guest-image.ts", () => ({
+  resolveGuestImagePath: vi.fn(),
+}));
+
 import type { VM as GuestVm } from "@earendil-works/gondolin";
 import { createHttpHooks, RealFSProvider, VM } from "@earendil-works/gondolin";
+import { resolveGuestImagePath } from "../../lib/guest-image.ts";
 
 describe("provision-executor", () => {
   beforeEach(() => {
@@ -128,6 +133,31 @@ describe("provision-executor", () => {
       await runProvisionCommand(runOptions({ cacheDir }));
 
       expect(statSync(cacheDir).isDirectory()).toBe(true);
+    });
+  });
+
+  describe("guest image", () => {
+    it("passes the built custom image as sandbox.imagePath into VM.create", async () => {
+      mockGuestVm();
+      vi.mocked(createHttpHooks).mockReturnValue(createHooksResult({}));
+      vi.mocked(resolveGuestImagePath).mockReturnValue("/cache/pi-gondolin/guest");
+
+      await runProvisionCommand(runOptions());
+
+      const createCall = vi.mocked(VM.create).mock.calls[0]?.[0];
+      expect(createCall?.sandbox).toEqual({ imagePath: "/cache/pi-gondolin/guest" });
+    });
+
+    it("omits the sandbox key when no custom image is built (SDK default registry image)", async () => {
+      mockGuestVm();
+      vi.mocked(createHttpHooks).mockReturnValue(createHooksResult({}));
+      vi.mocked(resolveGuestImagePath).mockReturnValue(undefined);
+
+      await runProvisionCommand(runOptions());
+
+      const createCall = vi.mocked(VM.create).mock.calls[0]?.[0];
+      expect(createCall).toBeDefined();
+      expect(createCall).not.toHaveProperty("sandbox");
     });
   });
 

@@ -97,3 +97,10 @@ These tools walk the guest filesystem via `walkGuestFiles()`, which mirrors the 
 - Headless-safe: JSON/RPC sessions have no UI surface, so status updates and notifications are skipped. The VM still starts, and tool calls stay routed through it.
 
 When the flag is not set, this extension is a no-op: it registers the same tool definitions as the built-ins, the flag-gated VM is never created, and tool calls run against the host filesystem exactly as they would without the extension loaded.
+
+## Custom Guest Image
+
+The sandbox optionally boots a custom guest image (alpine + git, built from `extensions/gondolin/guest-image.json`) instead of the SDK's default registry image (alpine-base, no git). The image is optional: when it is absent, `VM.create` receives no `sandbox` option and the SDK default is used.
+
+- **Location** — `~/.cache/pi-gondolin/guest/` (assets plus `manifest.json`). The image counts as present only when `manifest.json` exists there; both this extension's `startVm` and the agents extension's provision executor detect it through `lib/guest-image.ts` and pick it up automatically.
+- **Rebuilding** — see the "V3 custom guest image" section of `docs/issues/worktree-isolation-lacks-node-modules.md` for the recipe. Do not build through the CLI's default workDir: `/tmp` is mounted `usrquota` here and a build hits the quota (EDQUOT). Build through the SDK with `workDir` on `/home` (e.g. the cache dir), and clean leftover workdirs before retrying.

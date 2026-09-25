@@ -23,6 +23,7 @@ import {
   createWriteTool,
 } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext } from "pi";
+import { resolveGuestImagePath } from "../../lib/guest-image.ts";
 import { formatStatusLine } from "../../lib/ui-format.ts";
 import { createGondolinBashOps } from "./src/bash.ts";
 import {
@@ -104,6 +105,9 @@ export default async function gondolinExtension(pi: ExtensionAPI) {
     setVmStatus(ctx, `starting ${GUEST_WORKSPACE}`);
     let created: VM;
     try {
+      // Custom guest image is optional; without one the SDK boots its default
+      // registry image (alpine-base, no git).
+      const imagePath = resolveGuestImagePath();
       created = await VM.create({
         sessionLabel: `pi ${path.basename(localCwd)}`,
         vfs: {
@@ -111,6 +115,7 @@ export default async function gondolinExtension(pi: ExtensionAPI) {
             [GUEST_WORKSPACE]: new RealFSProvider(localCwd),
           },
         },
+        ...(imagePath && { sandbox: { imagePath } }),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

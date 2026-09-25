@@ -50,6 +50,12 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
   truncateLine: vi.fn((line: string) => ({ text: line, wasTruncated: false })),
 }));
 
+vi.mock("../../lib/guest-image.ts", () => ({
+  resolveGuestImagePath: vi.fn(),
+}));
+
+import { resolveGuestImagePath } from "../../lib/guest-image.ts";
+
 describe("gondolin-extension", () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -423,6 +429,41 @@ describe("gondolin-extension", () => {
         }),
       }),
     );
+  });
+
+  describe("custom guest image", () => {
+    it("passes the built custom image as sandbox.imagePath into VM.create", async () => {
+      vi.mocked(resolveGuestImagePath).mockReturnValue("/cache/pi-gondolin/guest");
+      const mockPi = createMockPi();
+      await gondolinExtension(mockPi);
+      mockPi.getFlag = vi.fn(() => true);
+      const { VM } = (await import("@earendil-works/gondolin")) as unknown as {
+        VM: { create: ReturnType<typeof vi.fn> };
+      };
+
+      const sessionStart = getEventHandler(mockPi, "session_start");
+      await sessionStart({ type: "session_start", reason: "startup" }, createMockCommandContext());
+
+      expect(VM.create).toHaveBeenCalledWith(
+        expect.objectContaining({ sandbox: { imagePath: "/cache/pi-gondolin/guest" } }),
+      );
+    });
+
+    it("omits the sandbox key when no custom image is built (SDK default registry image)", async () => {
+      const mockPi = createMockPi();
+      await gondolinExtension(mockPi);
+      mockPi.getFlag = vi.fn(() => true);
+      const { VM } = (await import("@earendil-works/gondolin")) as unknown as {
+        VM: { create: ReturnType<typeof vi.fn> };
+      };
+
+      const sessionStart = getEventHandler(mockPi, "session_start");
+      await sessionStart({ type: "session_start", reason: "startup" }, createMockCommandContext());
+
+      const createCall = VM.create.mock.calls[0]?.[0];
+      expect(createCall).toBeDefined();
+      expect(createCall).not.toHaveProperty("sandbox");
+    });
   });
 });
 
