@@ -93,3 +93,20 @@ pattern could be mirrored guest-side. Evidence table: see section
       1460/1460), so the gate may run either side; briefs still prefer
       targeted runs for speed. Bare-shell chaining needs node_modules/.bin
       on PATH (npm run injects it) — see sandboxed-worktree-git-lookup-fails.md.
+
+## Lever result: tsbuildinfo carry (implemented, c1d6e15, 2026-09-25)
+
+Config now carries `tsconfig.tsbuildinfo` + `tsconfig.test.tsbuildinfo`
+into each worktree. Portability verified in-guest: BuildInfo read 0.085s,
+incremental check 0.001s, 340 types, cache mtimes untouched, zero host
+paths embedded — safe to reuse across worktrees.
+
+Measured value, with a correction to the original estimate: warm wall time
+in the sandbox is **28-44s per config, not 1-3s** — tsc still stats/reads
+~1700 sources through sandboxfs (33.9-50.9s parse at ~4s CPU), so the cache
+skips the type-build, not the file walk. Net: **typecheck 185s -> ~60s**
+for both configs, ~125s saved per worker check. The 1-3s band is local-disk
+only; the remaining floor is the same stat tax recorded above (won't-fix
+upstream per owner decision).
+
+Framing rule: call it "~60s typecheck", not "warm".
