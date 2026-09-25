@@ -1034,6 +1034,21 @@ declare module "@earendil-works/pi-coding-agent" {
 declare module "@earendil-works/gondolin" {
   export type VirtualProvider = any;
 
+  export type CreateHttpHooksResult = {
+    httpHooks: any;
+    env: Record<string, string>;
+    allowedHosts: string[];
+    secretManager: any;
+    [key: string]: any;
+  };
+
+  export function createHttpHooks(options?: {
+    allowedHosts?: string[];
+    allowedInternalHosts?: string[];
+    secrets?: Record<string, any>;
+    [key: string]: any;
+  }): CreateHttpHooksResult;
+
   export class RealFSProvider implements VirtualProvider {
     readonly rootPath: string;
     constructor(rootPath: string);
