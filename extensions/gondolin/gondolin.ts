@@ -12,7 +12,7 @@
  */
 
 import path from "node:path";
-import type { VM } from "@earendil-works/gondolin";
+import type { VirtualProvider, VM } from "@earendil-works/gondolin";
 import {
   createBashTool,
   createEditTool,
@@ -40,6 +40,7 @@ import {
   createGondolinReadOps,
   createGondolinWriteOps,
 } from "./src/file-operations.ts";
+import { resolveWorktreeGitDirs } from "./src/git-metadata.ts";
 import { executeGondolinGrep } from "./src/grep.ts";
 import { createGondolinFindOps } from "./src/traversal.ts";
 
@@ -55,6 +56,46 @@ export function assertGondolinPrereqs(nodeVersion = process.versions.node): void
     throw new Error(
       `Gondolin requires Node.js >= 23.6.0 (found ${nodeVersion}). Upgrade Node or unset --gondolin.`,
     );
+  }
+}
+
+// --- Worktree git mounts ---
+
+interface ProviderFactories {
+  RealFSProvider: new (rootPath: string) => VirtualProvider;
+  ReadonlyProvider: new (backend: VirtualProvider) => VirtualProvider;
+}
+
+/**
+ * Worker-only (PI_WORKER=1): a sandboxed worker runs in a git worktree whose
+ * `.git` is a pointer file to an absolute gitdir outside /workspace, so git
+ * inside the guest cannot resolve the repository without extra mounts. Mount
+ * the worktree gitdir read/write (per-worktree index and logs) and the main
+ * checkout `.git` read-only (HEAD, config, refs, objects), each at its
+ * absolute host path — the pointer targets absolute paths, so the guest path
+ * must equal the host path.
+ *
+ * Failure-mode honesty: with these mounts `git status/log/diff/blame` work
+ * in-guest, but `git commit` and other object writes fail read-only. That is
+ * intended: workers never commit — their changes travel as captured patches —
+ * and untrusted guest code must not rewrite HEAD, refs, or history.
+ */
+async function appendWorktreeGitMounts(
+  mounts: Record<string, VirtualProvider>,
+  localCwd: string,
+  providers: ProviderFactories,
+): Promise<void> {
+  if (process.env.PI_WORKER !== "1") return;
+  try {
+    const gitDirs = await resolveWorktreeGitDirs(localCwd);
+    if (!gitDirs) return;
+    mounts[gitDirs.gitdir] = new providers.RealFSProvider(gitDirs.gitdir);
+    mounts[gitDirs.mainGitDir] = new providers.ReadonlyProvider(
+      new providers.RealFSProvider(gitDirs.mainGitDir),
+    );
+  } catch {
+    // Metadata resolution must never break VM startup: on any failure the VM
+    // starts with its base mount set instead.
   }
 }
 
@@ -100,7 +141,7 @@ export default async function gondolinExtension(pi: ExtensionAPI) {
     assertGondolinPrereqs();
     // Lazy-load the native addon so the ~36 MB krun runner only maps into the
     // process when a VM is actually started, not at extension import.
-    const { VM, RealFSProvider } = await import("@earendil-works/gondolin");
+    const { VM, RealFSProvider, ReadonlyProvider } = await import("@earendil-works/gondolin");
     pi.events.emit(VM_EVENT, { state: "starting" });
     setVmStatus(ctx, `starting ${GUEST_WORKSPACE}`);
     let created: VM;
@@ -108,12 +149,14 @@ export default async function gondolinExtension(pi: ExtensionAPI) {
       // Custom guest image is optional; without one the SDK boots its default
       // registry image (alpine-base, no git).
       const imagePath = resolveGuestImagePath();
+      const mounts: Record<string, VirtualProvider> = {
+        [GUEST_WORKSPACE]: new RealFSProvider(localCwd),
+      };
+      await appendWorktreeGitMounts(mounts, localCwd, { RealFSProvider, ReadonlyProvider });
       created = await VM.create({
         sessionLabel: `pi ${path.basename(localCwd)}`,
         vfs: {
-          mounts: {
-            [GUEST_WORKSPACE]: new RealFSProvider(localCwd),
-          },
+          mounts,
         },
         ...(imagePath && { sandbox: { imagePath } }),
       });

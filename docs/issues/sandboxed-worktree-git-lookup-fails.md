@@ -3,7 +3,27 @@
 - Category: bug (integration / sandbox mounts)
 - Severity: important (blocks in-guest repo-aware verification for isolated workers)
 - Found during: V3 wiring field probe (session swift-otter-4), 2026-09-25
-- Status: open
+- Status: resolved (implemented in `extensions/gondolin`; unit-tested in-guest;
+  host-side `npm run check` and commit pending)
+
+## Implementation note
+
+`extensions/gondolin/src/git-metadata.ts` resolves the two metadata directories
+by plain-text parsing (no git binary): the worktree `.git` file's `gitdir:`
+line, then the gitdir's `commondir` file, resolved against the gitdir and
+validated with a directory stat. `appendWorktreeGitMounts` in
+`extensions/gondolin/gondolin.ts` adds the mounts only when `PI_WORKER=1`:
+the gitdir gets a writable `RealFSProvider`, the main `.git` gets
+`new ReadonlyProvider(new RealFSProvider(...))`, both keyed at their absolute
+host paths (guest path equals host path). Any resolution failure (missing
+`.git`, normal checkout, unparseable pointer, missing main `.git`) or
+constructor error keeps the base mount set — `startVm` never throws for this.
+
+Unit tests in `test/extensions/gondolin.test.ts` ("sandboxed worktree git
+mounts") mock `node:fs/promises` and the `@earendil-works/gondolin` module;
+they prove mount-set construction, provider writability split, absolute-path
+keying, commondir resolution, and every silent-skip path, plus mount absence
+for non-worker sessions.
 
 ## Evidence
 
@@ -64,7 +84,35 @@ read-only wrapper for the main `.git`. Parent sessions unchanged.
 ## Verification checklist
 
 - [ ] `git status` clean in an isolated worker against its worktree
+      (host/guest-verify; unit tests prove mount construction only — an
+      in-guest worker booted with the fixed extension must confirm end to end)
 - [ ] `git log --oneline -3` shows main-checkout history in-guest
+      (host/guest-verify, same caveat)
 - [ ] `git status` test cases (messenger/missions) pass in-guest
+      (host-verify; see environment note below — these in-guest cases currently
+      fail for a second, unrelated reason: the guest rootfs `git` ships no
+      `/usr/share/git-core/templates`, so `git init` produces no
+      `.git/info/exclude` and the messenger/missions/agents temp-repo tests
+      fail on the exclude file regardless of mounts)
 - [ ] A `git commit` attempt in-guest fails read-only (history intact)
-- [ ] Mounts absent for non-worker sessions; no extra mounts outside workers
+      (host/guest-verify)
+- [x] Mounts absent for non-worker sessions; no extra mounts outside workers
+      (unit test: "non-worker does not mount git metadata even when a .git
+      pointer file exists")
+
+## Host-verify items for the integrator
+
+- `test/extensions/gondolin.test.ts` — full suite green in-guest including the
+  new "sandboxed worktree git mounts" block (7 tests).
+- Expected to flip green host-side once the above lands (they were already
+  green on the host; in-guest they need the git-templates gap fixed too):
+  - `test/extensions/messenger.test.ts` — "session_start keeps messenger state
+    out of git status" (+ the four messenger tests sharing its `git init`
+    fixture)
+  - `test/extensions/missions.test.ts` — "session_start keeps mission state out
+    of git status"
+  - `test/extensions/agents.test.ts` — "session_start keeps worker state out of
+    git status and migrates the legacy registry"
+- Note: these tests shell out to `git init` in temp dirs; in this guest they
+  fail with ENOENT on `.git/info/exclude` because the rootfs git package has
+  no default templates — a separate image-packages issue, not the mount bug.

@@ -1,7 +1,8 @@
 import { readdir } from "node:fs/promises";
 import { resolve } from "node:path";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import gondolinExtension from "../../extensions/gondolin/gondolin.ts";
+import { GUEST_WORKSPACE } from "../../extensions/gondolin/src/constants.ts";
 import { createMockCommandContext } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
 import { getCommandHandler, getEventHandler } from "../mocks/test-helpers.ts";
@@ -31,9 +32,32 @@ vi.mock("@earendil-works/gondolin", () => ({
   VM: {
     create: vi.fn(() => Promise.resolve(mockVm)),
   },
-  RealFSProvider: vi.fn(),
-  ReadonlyProvider: vi.fn(),
+  // Tagged fake providers so tests can tell the writable provider from the
+  // read-only wrapper (and see which host path each was built for) without
+  // loading the real native addon.
+  RealFSProvider: vi.fn(function fakeRealFsProvider(
+    this: Record<string, unknown>,
+    mountedPath?: string,
+  ) {
+    this.mountedPath = mountedPath;
+    this.writable = true;
+  }),
+  ReadonlyProvider: vi.fn(function fakeReadonlyProvider(
+    this: Record<string, unknown>,
+    backend?: unknown,
+  ) {
+    this.backend = backend;
+    this.readonly = true;
+  }),
   MemoryProvider: vi.fn(),
+}));
+
+// The extension reads git metadata (`.git` pointer file, `commondir`) from the
+// host filesystem; keep every other fs/promises export (readdir, etc.) real.
+vi.mock("node:fs/promises", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:fs/promises")>()),
+  readFile: vi.fn(),
+  stat: vi.fn(),
 }));
 
 vi.mock("@earendil-works/pi-coding-agent", () => ({
@@ -71,7 +95,7 @@ describe("gondolin-extension", () => {
       const sourceFiles = await readdir(resolve(extensionDir, "src"));
 
       expect(rootTypeScriptFiles).toEqual(["gondolin.ts"]);
-      expect(sourceFiles.filter((file) => file.endsWith(".ts"))).toHaveLength(6);
+      expect(sourceFiles.filter((file) => file.endsWith(".ts"))).toHaveLength(7);
     });
   });
 
@@ -431,6 +455,166 @@ describe("gondolin-extension", () => {
     );
   });
 
+  describe("sandboxed worktree git mounts", () => {
+    const GITDIR_PATH = "/host/main-checkout/.git/worktrees/w-test";
+    const MAIN_GIT_PATH = "/host/main-checkout/.git";
+
+    beforeEach(() => {
+      process.env.PI_WORKER = "1";
+    });
+
+    afterEach(() => {
+      delete process.env.PI_WORKER;
+    });
+
+    it("worker with a .git pointer file mounts the worktree gitdir writable and the main .git read-only at their absolute host paths", async () => {
+      const gondolin = await getGondolinMocks();
+      const fs = await getFsMocks();
+      mockWorktreeFs(fs, {
+        gitdirPath: GITDIR_PATH,
+        mainGitPath: MAIN_GIT_PATH,
+      });
+
+      const mockPi = createMockPi();
+      mockPi.getFlag = vi.fn(() => true);
+      await gondolinExtension(mockPi);
+      const sessionStart = getEventHandler(mockPi, "session_start");
+      await expect(
+        sessionStart({ type: "session_start", reason: "startup" }, createMockCommandContext()),
+      ).resolves.toBeUndefined();
+
+      // The pointer file's gitdir target is an absolute host path, so the
+      // mounts must be keyed at the same absolute paths: the guest path equals
+      // the host path for git's resolution chain to work in-guest.
+      const mounts = getCreatedMounts(gondolin.VM.create);
+      expect(Object.keys(mounts)).toContain(GITDIR_PATH);
+      expect(Object.keys(mounts)).toContain(MAIN_GIT_PATH);
+
+      // The gitdir mount is the writable provider itself (per-worktree index
+      // and logs); the main .git mount is the read-only wrapper around its own
+      // writable provider.
+      expect(mounts[GITDIR_PATH]).toMatchObject({ writable: true, mountedPath: GITDIR_PATH });
+      expect(mounts[MAIN_GIT_PATH]).toMatchObject({ readonly: true });
+      expect(mounts[MAIN_GIT_PATH]?.backend).toMatchObject({ mountedPath: MAIN_GIT_PATH });
+      expect(gondolin.ReadonlyProvider).toHaveBeenCalledTimes(1);
+    });
+
+    it("worker with a real .git directory (normal checkout) adds no extra mounts", async () => {
+      const gondolin = await getGondolinMocks();
+      const fs = await getFsMocks();
+      mockWorktreeFs(fs, { gitdirPath: GITDIR_PATH, dotGit: "directory" });
+
+      const mockPi = createMockPi();
+      mockPi.getFlag = vi.fn(() => true);
+      await gondolinExtension(mockPi);
+      const sessionStart = getEventHandler(mockPi, "session_start");
+      await expect(
+        sessionStart({ type: "session_start", reason: "startup" }, createMockCommandContext()),
+      ).resolves.toBeUndefined();
+
+      expect(Object.keys(getCreatedMounts(gondolin.VM.create))).toEqual([GUEST_WORKSPACE]);
+      expect(gondolin.ReadonlyProvider).not.toHaveBeenCalled();
+    });
+
+    it("worker with a missing .git adds no extra mounts", async () => {
+      const gondolin = await getGondolinMocks();
+      const fs = await getFsMocks();
+      mockWorktreeFs(fs, { gitdirPath: GITDIR_PATH, dotGit: "absent" });
+
+      const mockPi = createMockPi();
+      mockPi.getFlag = vi.fn(() => true);
+      await gondolinExtension(mockPi);
+      const sessionStart = getEventHandler(mockPi, "session_start");
+      await expect(
+        sessionStart({ type: "session_start", reason: "startup" }, createMockCommandContext()),
+      ).resolves.toBeUndefined();
+
+      expect(Object.keys(getCreatedMounts(gondolin.VM.create))).toEqual([GUEST_WORKSPACE]);
+    });
+
+    it("non-worker does not mount git metadata even when a .git pointer file exists", async () => {
+      const gondolin = await getGondolinMocks();
+      const fs = await getFsMocks();
+      mockWorktreeFs(fs, { gitdirPath: GITDIR_PATH, mainGitPath: MAIN_GIT_PATH });
+      delete process.env.PI_WORKER;
+
+      const mockPi = createMockPi();
+      mockPi.getFlag = vi.fn(() => true);
+      await gondolinExtension(mockPi);
+      const sessionStart = getEventHandler(mockPi, "session_start");
+      await expect(
+        sessionStart({ type: "session_start", reason: "startup" }, createMockCommandContext()),
+      ).resolves.toBeUndefined();
+
+      expect(Object.keys(getCreatedMounts(gondolin.VM.create))).toEqual([GUEST_WORKSPACE]);
+      expect(gondolin.ReadonlyProvider).not.toHaveBeenCalled();
+    });
+
+    it("worker resolves an unusual commondir relative path to the main .git", async () => {
+      const gondolin = await getGondolinMocks();
+      const fs = await getFsMocks();
+      const gitdirPath = "/srv/git/worktrees/w-custom";
+      const mainGitPath = "/srv/main/.git";
+      mockWorktreeFs(fs, {
+        gitdirPath,
+        mainGitPath,
+        pointerContent: `gitdir: ${gitdirPath}\n`,
+        commondirContent: "../../../main/.git\n",
+      });
+
+      const mockPi = createMockPi();
+      mockPi.getFlag = vi.fn(() => true);
+      await gondolinExtension(mockPi);
+      const sessionStart = getEventHandler(mockPi, "session_start");
+      await sessionStart({ type: "session_start", reason: "startup" }, createMockCommandContext());
+
+      const mounts = getCreatedMounts(gondolin.VM.create);
+      expect(mounts[gitdirPath]).toMatchObject({ writable: true, mountedPath: gitdirPath });
+      expect(mounts[mainGitPath]).toMatchObject({ readonly: true });
+      expect(mounts[mainGitPath]?.backend).toMatchObject({ mountedPath: mainGitPath });
+    });
+
+    it("worker skips the git mounts silently when the pointer file has no gitdir: line", async () => {
+      const gondolin = await getGondolinMocks();
+      const fs = await getFsMocks();
+      mockWorktreeFs(fs, {
+        gitdirPath: GITDIR_PATH,
+        mainGitPath: MAIN_GIT_PATH,
+        pointerContent: "ref: refs/heads/main\n",
+      });
+
+      const mockPi = createMockPi();
+      mockPi.getFlag = vi.fn(() => true);
+      await gondolinExtension(mockPi);
+      const sessionStart = getEventHandler(mockPi, "session_start");
+      await expect(
+        sessionStart({ type: "session_start", reason: "startup" }, createMockCommandContext()),
+      ).resolves.toBeUndefined();
+
+      expect(Object.keys(getCreatedMounts(gondolin.VM.create))).toEqual([GUEST_WORKSPACE]);
+    });
+
+    it("worker skips the git mounts when the resolved main .git directory does not exist", async () => {
+      const gondolin = await getGondolinMocks();
+      const fs = await getFsMocks();
+      mockWorktreeFs(fs, {
+        gitdirPath: GITDIR_PATH,
+        mainGitPath: MAIN_GIT_PATH,
+        mainGitDirExists: false,
+      });
+
+      const mockPi = createMockPi();
+      mockPi.getFlag = vi.fn(() => true);
+      await gondolinExtension(mockPi);
+      const sessionStart = getEventHandler(mockPi, "session_start");
+      await expect(
+        sessionStart({ type: "session_start", reason: "startup" }, createMockCommandContext()),
+      ).resolves.toBeUndefined();
+
+      expect(Object.keys(getCreatedMounts(gondolin.VM.create))).toEqual([GUEST_WORKSPACE]);
+    });
+  });
+
   describe("custom guest image", () => {
     it("passes the built custom image as sandbox.imagePath into VM.create", async () => {
       vi.mocked(resolveGuestImagePath).mockReturnValue("/cache/pi-gondolin/guest");
@@ -474,4 +658,83 @@ function getToolByName(mockPi: any, toolName: string): any {
     if (call[0].name === toolName) return call[0];
   }
   return undefined;
+}
+
+// biome-ignore lint/suspicious/noExplicitAny: untyped mock handle, see comment
+type UntypedMock = any;
+
+async function getGondolinMocks(): Promise<{
+  VM: { create: UntypedMock };
+  RealFSProvider: UntypedMock;
+  ReadonlyProvider: UntypedMock;
+}> {
+  return (await import("@earendil-works/gondolin")) as unknown as {
+    VM: { create: UntypedMock };
+    RealFSProvider: UntypedMock;
+    ReadonlyProvider: UntypedMock;
+  };
+}
+
+async function getFsMocks(): Promise<{ readFile: UntypedMock; stat: UntypedMock }> {
+  return (await import("node:fs/promises")) as unknown as {
+    readFile: UntypedMock;
+    stat: UntypedMock;
+  };
+}
+
+interface WorktreeFsOptions {
+  gitdirPath: string;
+  /** Absolute path of the resolved main .git; stat succeeds for it when mainGitDirExists. */
+  mainGitPath?: string | undefined;
+  /** Shape of the worktree's .git entry. Default "pointer". */
+  dotGit?: "pointer" | "directory" | "absent" | undefined;
+  /** Content of the .git pointer file. Default `gitdir: <gitdirPath>`. */
+  pointerContent?: string | undefined;
+  /** Content of the gitdir's commondir file. Default "../..". */
+  commondirContent?: string | undefined;
+  /** Whether the resolved main .git directory exists. Default true. */
+  mainGitDirExists?: boolean | undefined;
+}
+
+/** Simulates the host-side git metadata a linked worktree worker would read. */
+function mockWorktreeFs(
+  fs: { readFile: UntypedMock; stat: UntypedMock },
+  options: WorktreeFsOptions,
+): void {
+  const dotGitPath = resolve(process.cwd(), ".git");
+  const dotGit = options.dotGit ?? "pointer";
+  const enoent = (target: unknown) =>
+    Object.assign(new Error(`ENOENT: no such file or directory, ${String(target)}`), {
+      code: "ENOENT",
+    });
+
+  fs.readFile.mockImplementation(async (target: unknown) => {
+    if (target === dotGitPath) {
+      if (dotGit === "pointer") return options.pointerContent ?? `gitdir: ${options.gitdirPath}\n`;
+      if (dotGit === "directory") {
+        throw Object.assign(new Error("EISDIR: illegal operation on a directory, read"), {
+          code: "EISDIR",
+        });
+      }
+      throw enoent(target);
+    }
+    if (target === `${options.gitdirPath}/commondir`) {
+      return options.commondirContent ?? "../..\n";
+    }
+    throw enoent(target);
+  });
+
+  fs.stat.mockImplementation(async (target: unknown) => {
+    if (target === options.mainGitPath && options.mainGitDirExists !== false) {
+      return { isFile: () => false, isDirectory: () => true };
+    }
+    throw enoent(target);
+  });
+}
+
+function getCreatedMounts(vmCreate: UntypedMock): Record<string, Record<string, unknown>> {
+  const createArg = vmCreate.mock.calls[0]?.[0] as
+    | { vfs?: { mounts?: Record<string, Record<string, unknown>> } }
+    | undefined;
+  return createArg?.vfs?.mounts ?? {};
 }

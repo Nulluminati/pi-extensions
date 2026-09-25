@@ -16,6 +16,7 @@ vi.mock("@earendil-works/gondolin", () => {
       })),
     },
     RealFSProvider: vi.fn(),
+    ReadonlyProvider: vi.fn(),
   };
 });
 
