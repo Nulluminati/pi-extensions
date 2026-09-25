@@ -224,7 +224,11 @@ completed the setup hook in 32 seconds. It created a marker only in its
 worktree. Its sandboxed `git status` reported that file, and patch capture
 recorded the exact addition. Direct TCP failed; the HTTP proxy rejected a
 connection to `1.1.1.1` with 403. The test patch stayed unapplied, and the
-parent checkout remained clean.
+parent checkout remained clean. After Fedora's `socat` package was installed,
+a second isolated delegate used `/usr/bin/socat` with no local copy on `PATH`.
+Its setup hook exited 0 in 34 seconds. The worker read the repository, found
+a clean worktree, and saw `Network is unreachable` on a direct TCP attempt.
+Its patch was empty; the worktree was removed.
 
 This run found three setup problems that the fixture did not cover. The
 `socat` binary must be readable inside the sandbox. Linked worktrees need
@@ -237,13 +241,11 @@ passes 58 files and 1353 tests.
 
 **Owner-facing operational notes**
 
-1. socat is NOT installed on this host (Fedora 43): `dnf install socat`,
-   alongside the already-present `bwrap` and `rg`. The earlier srt spike
-   extracted the RPM under /tmp for testing; that copy is not referenced by
-   anything tracked here. For the live delegate, a temporary local copy was
-   placed in the active Node installation's `bin` directory, which the
-   sandbox already permits reading. Install the system package before
-   removing that copy or changing Node versions.
+1. Fedora 43 has `socat`, `bwrap`, and `rg` installed. The initial spike used
+   an extracted RPM under `/tmp`; the first live delegate used a temporary
+   local copy in the active Node installation. That copy was removed after
+   the system package passed the second isolated delegate test. No tracked
+   file refers to either temporary copy.
 2. macOS main uses `sandbox-exec` (deprecated since 2016; used by Codex
    and Codex-class tools today). Accepted risk per the brief.
 3. `sandbox-runtime` version: added at 0.0.77. The dynamic
