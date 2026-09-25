@@ -5,16 +5,27 @@
 - Inputs: 11-finding code review (read-only, independently verified), stock-image empirical probe, Pi official examples/docs, community extension research
 - Constraint: no shared-tree edits until an option is chosen
 
-## The two decisions (everything else follows)
+## The two decisions
 
-1. **Toolchain scope** — "the full toolchain Gondolin ships without a custom image":
+1. **Toolchain scope** — **RESOLVED (owner, 2026-09-25): image parity.** The
+   requirement is that our custom image is a superset of the default image —
+   nothing the stock ships may be lost. **Verified empirically** by inventory
+   diff of both booted images: stock 294 binaries, ours 299; in-stock-but-
+   missing-from-ours = EMPTY; ours-extra = exactly the five git binaries
+   (git, git-receive-pack, git-shell, git-upload-archive, git-upload-pack).
+   Parity holds: our image = stock + git. Scope note below preserved for
+   context: — "the full toolchain Gondolin ships without a custom image":
    - (a) *stock-shipped tools*: node, npm, npx, uv, python3, bash, curl — measured from the default registry image, zero custom bits.
    - (b) *arbitrary ecosystem toolchains* (git, cargo, go, javac, gcc, …) with no image maintained by us.
    Scope (a) is achievable inside the current VM architecture. Scope (b) is not —
    not without mounting host toolchains into the guest or installing per worker
    VM, and the provision VM and worker VM are separate boots, so anything
    installed during provision never reaches the worker.
-2. **Security boundary** — which isolation class is mandatory: micro-VM (Gondolin),
+2. **Security boundary** — **OPEN; owner requested a conversation, not a
+   pick.** Chat opened with the plain-terms comparison and a threat-model
+   question (hostile code/secrets vs daily toolchain-speed pain). Staged
+   path proposed: universal findings now -> B as a measured spike ->
+   decide with evidence. Original framing:: micro-VM (Gondolin),
    OS-level sandbox (sandbox-runtime), or whole-process container. Official
    doctrine (`docs/security.md` upstream) calls whole-process "usually the
    strongest practical option" and tool-only isolation "narrower".
