@@ -2,4 +2,6 @@
 # Worktree setup hook: runs once per new worker worktree, inside the worker
 # sandbox, before the worker spawns. Exit code decides the provision result.
 set -eu
-npm install --no-audit --no-fund
+# Native install scripts use Node's HTTPS client, which needs the sandbox
+# proxy enabled explicitly. Keep existing Node options for package scripts.
+NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--use-env-proxy" npm install --no-audit --no-fund

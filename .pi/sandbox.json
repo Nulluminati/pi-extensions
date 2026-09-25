@@ -6,7 +6,9 @@
       "*.npmjs.com",
       "github.com",
       "objects.githubusercontent.com",
-      "*.githubusercontent.com"
+      "*.githubusercontent.com",
+      "api.nuget.org",
+      "*.nuget.org"
     ],
     "deniedDomains": []
   },

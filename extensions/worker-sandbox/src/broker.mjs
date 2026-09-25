@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { SandboxManager } from "@anthropic-ai/sandbox-runtime";
+import { worktreeGitCommonDir } from "./git-metadata.mjs";
 
 const helper = fileURLToPath(new URL("./tool-child.mjs", import.meta.url));
 const running = new Map();
@@ -60,6 +61,7 @@ async function initialize(request) {
   const executableDir = dirname(process.execPath);
   const executablePrefix = dirname(executableDir);
   const toolchain = executablePrefix === "/usr" ? executableDir : executablePrefix;
+  const gitMetadata = worktreeGitCommonDir(cwd);
   policy = {
     ...request.policy,
     network: { ...request.policy.network, allowAllUnixSockets: false, allowLocalBinding: false },
@@ -72,6 +74,7 @@ async function initialize(request) {
         readGrantForPackage("@anthropic-ai/sandbox-runtime"),
         readGrantForPackage("@earendil-works/pi-coding-agent"),
         toolchain,
+        ...(gitMetadata ? [gitMetadata] : []),
       ],
       allowWrite: [...request.policy.filesystem.allowWrite, scratch],
     },
