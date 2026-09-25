@@ -110,3 +110,16 @@ working). Run in-guest suites as:
 
 This bit the same suite in the provisioning mission (prov-executor era) and
 here; treat the stripped-env form as the standard worker-brief command.
+
+### Full-suite confirmation (session swift-otter-4, after 4399372 + ae9ce96)
+
+Full test suite in a provisioned worktree worker: **101 failures -> 5**.
+
+- All 95 git-ENOENT failures gone, including messenger/missions "keeps state
+  out of git status" and the autoresearch/agents/lib-git group.
+- Remaining 5: 4 x messenger from `PI_WORKER=1` leaking into the test shell
+  (re-run stripped: 79/79 pass — the stripped-env policy), 1 x
+  conventions.test.ts timeout (repo walk 37s vs 10s limit — pure sandboxfs
+  stat latency, cross-ref sandboxfs-metadata-latency.md).
+- Whole-run time dropped 482s -> 342s once failures stopped burning
+  retries/timeouts. Provision steady at 39s.
