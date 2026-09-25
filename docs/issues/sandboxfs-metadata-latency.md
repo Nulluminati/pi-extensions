@@ -110,3 +110,11 @@ only; the remaining floor is the same stat tax recorded above (won't-fix
 upstream per owner decision).
 
 Framing rule: call it "~60s typecheck", not "warm".
+
+## Lever result: CPU count (closed, owner decision 2026-09-25)
+
+Keep the VM default as is (2 vCPUs). The 1.56x measured on 8-way parallel
+jobs is real but not worth the host contention with up to four concurrent
+workers on an 8-core machine. No code change. The remaining performance
+posture: provision 39-44s, typecheck ~60s (carry), targeted tests 2-14s,
+stat-tax floor won't-fix upstream. No open levers left in this document.
