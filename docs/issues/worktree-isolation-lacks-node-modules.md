@@ -190,3 +190,34 @@ worked. Surface the commit fact in BOTH delegate outcomes — "config committed"
 on success and "config NOT committed (edits remain local until a provision
 succeeds)" on failure — so intermediate uncommitted states are visible in the
 conversation, not just in hindsight.
+
+## Share-only provision experiment (2026-09-25)
+
+Question: can this repo drop the `provision` command and rely on the
+share-copy alone? Config edited to share-only; the preflight committed the
+edit path-limited (`89e3b1a` — D2 working as designed); probe worker ran
+the battery in-guest:
+
+- Spawn: `Provision: yes — share reflink, config committed.` — no command
+  ran; delegate blocked on the copy only.
+- `node_modules`: 139 packages; BOTH `binding-linux-x64-gnu` and
+  `binding-linux-x64-musl` present in the copy.
+- `require("rolldown")`: 0.58s.
+- provision-skill suite: 15/15 (6.3s wall). messenger suite: 79/79 (11.6s
+  wall). **94/94 green from the copy alone.**
+
+Verdict: functionally YES for a warmed tree — but the command was restored
+the same day, because the result depends on accumulated local state: the
+musl binding sits in this machine's `node_modules` only because mission 1
+npm-packed it in by hand (host npm refuses it via `EBADPLATFORM`; only an
+in-guest install produces it). A fresh clone, CI, or a collaborator's
+machine would get a gnu-only tree, share-only would then break at test
+time, and the blocker loop would have to re-add the command anyway — the
+skill already teaches "native deps use provision".
+
+Follow-ups if the 39s warm install cost ever matters more:
+1. Try `--offline` on the command (kills registry metadata round trips;
+   warm-floor estimate 8-15s instead of 39s).
+2. Schema idea: conditional provisioning ("run only when binding X is
+   absent") — rejected for now as mechanism complexity.
+3. pnpm migration (V2) remains the structural answer.
