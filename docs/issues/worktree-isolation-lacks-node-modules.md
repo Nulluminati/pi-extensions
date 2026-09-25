@@ -103,13 +103,35 @@ mount:
 Refinement: deny manifests as an HTTP 403 response, not a connection error;
 probes must assert on status, not on fetch rejection.
 
+## V3 custom guest image — built and boot-tested (2026-09-25)
+
+Config: `extensions/gondolin/guest-image.json` (alpine-base defaults + `git`).
+Output: `~/.cache/pi-gondolin/guest/` (verify: `gondolin build --verify`, all
+checksums pass). Boot test via `VM.create({ sandbox: { imagePath } })`:
+
+    git version 2.52.0
+    node v24.18.1 / npm 11.11.0 / musl libc (x86_64)
+
+This removes the "never run git" caveat from worker briefs once wired into
+both VM.create call sites (gondolin.ts startVm, provision executor) with a
+graceful fallback to the default registry image when the local build is absent.
+
+Build recipe — IMPORTANT: do not use the CLI's default workDir. `/tmp` on this
+host is mounted `usrquota` with a 3066M per-user limit and ~2.6G baseline
+usage; a build spikes +407MB (rootfs.ext4 + extracted tree), so the kernel
+write hits EDQUOT every time, surfacing as `UNKNOWN: unknown error, write`.
+Build through the SDK instead with workDir on /home:
+
+    buildAssets(parseBuildConfig(config), { outputDir, workDir: cacheDir/build-work })
+
+Retried builds must clean leftover workdirs first or the quota re-triggers.
+
 ## Remaining decisions (separate from this issue)
 
 1. pnpm migration for this repo (optional; per-worktree installs become
    near-free natively). Not required by this design.
-2. Custom Gondolin image (V3): `gondolin build` with `rootfsPackages`
-   (git, toolchains) or a Debian OCI rootfs for glibc parity. Improves
-   in-guest verification (`biome`, `git`); not required by bundle A.
+2. glibc (Debian OCI) image variant for biome/host-binary parity — bigger
+   lift than alpine+git; not required by bundle A.
 
 ## Implementation checklist
 
