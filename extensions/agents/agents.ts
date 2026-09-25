@@ -500,14 +500,20 @@ export default async function agentsExtension(pi: ExtensionAPI) {
     if (ctx.hasUI) lastUi = ctx.ui;
     // Provisioning support: materialize the bundled guidance skill into the
     // project skill dir and keep provision state out of `git status`.
-    // Fire-and-forget: session start never blocks on either, and a failure
-    // logs without throwing into the handler.
-    materializeProvisionSkill(ctx.cwd).catch((error) => {
+    // Awaiting keeps ordering: a `git status` (or a delegate's dirty gate)
+    // immediately after session_start must see the finished exclusions.
+    // try/catch keeps the no-throw guarantee: startup logs and continues on
+    // a side-channel fs error, it never fails the handler.
+    try {
+      await materializeProvisionSkill(ctx.cwd);
+    } catch (error) {
       console.error(`[agents] provision skill materialization failed: ${(error as Error).message}`);
-    });
-    ensureProvisionExclusions(ctx.cwd).catch((error) => {
+    }
+    try {
+      await ensureProvisionExclusions(ctx.cwd);
+    } catch (error) {
       console.error(`[agents] provision git exclusions failed: ${(error as Error).message}`);
-    });
+    }
     // One-time migration from the legacy shared registry to per-worker
     // artifact files (old records classify as orphans: no owner is known).
     await migrateLegacyRegistry(ctx.cwd);

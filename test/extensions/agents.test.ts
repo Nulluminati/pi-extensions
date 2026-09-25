@@ -1158,6 +1158,25 @@ sleep 30
       const stripCalls = mockCtx.ui.setWidget.mock.calls.filter(([key]) => key === STRIP_KEY_ABOVE);
       expect(stripCalls.every(([, content]) => content === undefined)).toBe(true);
     });
+
+    it("clears the widget when a fire-and-forget worker completes, without shutdown", async () => {
+      const fixture = await writeFixture(fixtureDir, "ok-worker.sh", SUCCESS_WORKER);
+      setEnv("PI_WORKER_COMMAND", fixture);
+
+      const started = await executeTool("delegate", { task: "t", isolate: false, name: "quick" });
+      const id = started.details.workerId as string;
+      // The widget is up while the worker runs (frozen-snapshot risk: rows
+      // mutate in place, so a stale entry would show "completed" under a
+      // "1 running" header).
+      expect(renderLastWidget().join("\n")).toContain('"quick" running');
+
+      await waitForRecord(cwd, id, "completed");
+      // The fire-and-forget done handler must republish: last strip call is
+      // the clear, with no session_shutdown in between.
+      await vi.waitFor(() => {
+        expect(mockCtx.ui.setWidget).toHaveBeenLastCalledWith(STRIP_KEY_ABOVE, undefined);
+      });
+    });
   });
 
   // --- Live worker activity ---

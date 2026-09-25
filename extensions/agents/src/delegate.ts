@@ -643,9 +643,13 @@ export async function startDelegatedWorker(
     state.running.set(workerId, runningWorker);
     // Finished fire-and-forget workers leave the map so it tracks only live
     // children. done never rejects; the rejection branch is a no-op guard.
+    // The republish is load-bearing: without it the workers widget stays
+    // frozen on its last "running" snapshot — header says "N running" over
+    // rows whose records have since mutated to "completed".
     runningWorker.done.then(
       () => {
         state.running.delete(workerId);
+        events.onChange();
       },
       () => {},
     );
