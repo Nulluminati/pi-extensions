@@ -1,6 +1,9 @@
 # Provisioner redesign — decision brief
 
-- Status: **awaiting owner decisions** (two questions below)
+- Status: **direction decided — full B migration/rewrite; owner approved no-patch path.**
+  Toolchain scope RESOLVED (image parity, proven). Boundary: B chosen in conversation;
+  gates: srt dependency approval + pre-build spike. **Canonical document for
+  implementation: `docs/provisioner-rewrite-handoff.md`.** Questions below kept for context.
 - Author: amber-badger-28 + solar-heron-80 (paired sessions), 2026-09-25
 - Inputs: 11-finding code review (read-only, independently verified), stock-image empirical probe, Pi official examples/docs, community extension research
 - Constraint: no shared-tree edits until an option is chosen
