@@ -81,38 +81,32 @@ running as a worker (`PI_WORKER=1`), parse the `.git` file (plain text, no
 git binary needed), mount the two directories at their absolute host paths,
 read-only wrapper for the main `.git`. Parent sessions unchanged.
 
-## Verification checklist
+## Verification checklist (all proven by two live probes, 2026-09-25)
 
-- [ ] `git status` clean in an isolated worker against its worktree
-      (host/guest-verify; unit tests prove mount construction only — an
-      in-guest worker booted with the fixed extension must confirm end to end)
-- [ ] `git log --oneline -3` shows main-checkout history in-guest
-      (host/guest-verify, same caveat)
-- [ ] `git status` test cases (messenger/missions) pass in-guest
-      (host-verify; see environment note below — these in-guest cases currently
-      fail for a second, unrelated reason: the guest rootfs `git` ships no
-      `/usr/share/git-core/templates`, so `git init` produces no
-      `.git/info/exclude` and the messenger/missions/agents temp-repo tests
-      fail on the exclude file regardless of mounts)
-- [ ] A `git commit` attempt in-guest fails read-only (history intact)
-      (host/guest-verify)
-- [x] Mounts absent for non-worker sessions; no extra mounts outside workers
-      (unit test: "non-worker does not mount git metadata even when a .git
-      pointer file exists")
+- [x] `git status` clean in an isolated worker against its worktree — probe
+      `git-accept-2`: "On branch agents/...; nothing to commit, working tree
+      clean", with NO manual `git config` (safe.directory rides VM env,
+      commit ae9ce96).
+- [x] `git log --oneline` shows main-checkout history in-guest — probe
+      returned `4399372` then `ae9ce96` from inside workers.
+- [x] `git status` test cases (messenger/missions) pass in-guest — probe 2
+      ran both files green in-guest: missions fully passing with
+      `PI_WORKER` inherited; the template-less-init gap that failed them was
+      fixed in ae9ce96 (`excludeFromGit` creates `.git/info` itself).
+- [x] A `git commit` attempt in-guest fails read-only — probe 1:
+      "unable to create temporary file: Read-only file system", HEAD
+      unchanged at `4399372`.
+- [x] Mounts absent for non-worker sessions — unit test: "non-worker does
+      not mount git metadata even when a .git pointer file exists".
 
-## Host-verify items for the integrator
+## Probe protocol note (recurring trap)
 
-- `test/extensions/gondolin.test.ts` — full suite green in-guest including the
-  new "sandboxed worktree git mounts" block (7 tests).
-- Expected to flip green host-side once the above lands (they were already
-  green on the host; in-guest they need the git-templates gap fixed too):
-  - `test/extensions/messenger.test.ts` — "session_start keeps messenger state
-    out of git status" (+ the four messenger tests sharing its `git init`
-    fixture)
-  - `test/extensions/missions.test.ts` — "session_start keeps mission state out
-    of git status"
-  - `test/extensions/agents.test.ts` — "session_start keeps worker state out of
-    git status and migrates the legacy registry"
-- Note: these tests shell out to `git init` in temp dirs; in this guest they
-  fail with ENOENT on `.git/info/exclude` because the rootfs git package has
-  no default templates — a separate image-packages issue, not the mount bug.
+In-guest test runs from worker sessions inherit `PI_WORKER=1`, so the
+messenger extension's real worker guards reject `send` and free-text
+`status` tests (4 failures that look like regressions but are the features
+working). Run in-guest suites as:
+
+    env -u PI_WORKER -u PI_MESSENGER_NAME npx vitest run <files>
+
+This bit the same suite in the provisioning mission (prov-executor era) and
+here; treat the stripped-env form as the standard worker-brief command.
