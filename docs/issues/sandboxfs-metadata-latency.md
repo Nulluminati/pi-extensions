@@ -57,12 +57,32 @@ inside sandboxfs (the fuse daemon).
 
 ## Decision
 
-Worth it upstream (the win covers every sandboxed build, not just this
-repo); not worth building a fork here. File the upstream issue with the
-evidence table; adopt policy 3 locally today.
+NOT worth filing upstream: owner decision (2026-09-25) is that nobody opens
+an issue on earendil-works/gondolin — this document is the internal record
+only. The bench and the draft below stay ready; revisit if the metadata cost
+ever justifies either (a) filing with the same table, or (b) carrying a
+custom sandboxfs via `sandboxfsPath`. Policy 3 is the operative answer today.
 
 ## Verification checklist
 
-- [ ] Upstream issue filed (draft below) — pending owner review
-- [ ] Policy 3 reflected in worker brief templates (prose, integrator-side)
-- [ ] Re-bench `find`/`npm run check` in-guest after any upstream cache ships
+- [ ] Upstream issue filed — **owner decision: do not file**; draft below is
+      an internal record, not a queued action
+- [x] Policy 3 reflected in worker brief practice (targeted in-guest vitest;
+      full check is a host-side integration gate)
+- [ ] Re-bench `find`/`npm run check` in-guest after any sandboxfs metadata
+      cache ships (ours or upstream's)
+
+## Upstream draft (INTERNAL — do not file without a new owner decision)
+
+Title: sandboxfs: guest-side metadata cache for stat/lstat/readdir
+
+Body sketch: every metadata op on a mounted worktree costs a guest→host RPC
+(~2.9ms vs ~4us host-side). A `find` over 28,202 files takes 81.3s in-guest
+vs 0.124s host (655x); a full project check takes 482s vs 25s (19x). CPU
+loops and process startup stay near-normal, isolating the cost to per-op
+latency. Ask: a short-TTL metadata cache inside the guest fuse daemon.
+Staleness risk is low for the dominant use case (isolated agent worktrees:
+branched from HEAD, parent touches the tree only at patch collection), and
+the host-side rpc-service already carries a readdir cache whose invalidation
+pattern could be mirrored guest-side. Evidence table: see section
+"Evidence" above.
