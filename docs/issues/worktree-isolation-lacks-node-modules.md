@@ -161,3 +161,10 @@ Gaps to fix:
    Default must tolerate an empty patch.
 5. Minor: `isolate: false` currently dodges provisioning entirely (hits the musl wall
    instead) — provision is easier to dodge than to debug. Document or close later.
+
+Follow-up nuance (swift-otter-4, same run): failed-attempt config edits were
+overwritten before any commit, so git history shows only the config that finally
+worked. Surface the commit fact in BOTH delegate outcomes — "config committed"
+on success and "config NOT committed (edits remain local until a provision
+succeeds)" on failure — so intermediate uncommitted states are visible in the
+conversation, not just in hindsight.
