@@ -1,7 +1,6 @@
 {
   "detect": { "any": ["package.json"] },
   "share": "hardlink-copy",
-  "provision": "npm install --no-audit --no-fund",
   "network": [
     "registry.npmjs.org",
     "*.npmjs.org",
