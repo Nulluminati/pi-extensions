@@ -241,9 +241,9 @@ passes 58 files and 1356 tests.
 
 A peer review found that forced setup termination could leave npm cache under
 `.pi/provision-*`. Patch capture previously staged that cache. The agents
-extension now excludes those directories from Git status and removes orphaned
-scratch before patch capture. Tests cover both paths, including a linked
-worktree and a sandbox-startup refusal that spawns no worker.
+extension now excludes those paths from Git status and removes orphaned files,
+directories, and symlinks before patch capture. Tests cover both protections
+in a linked worktree and a sandbox-startup refusal that spawns no worker.
 
 NuGet remains on the network allowlist because `onnxruntime-node` downloads
 optional CUDA libraries from `api.nuget.org` during installation. The first
@@ -257,7 +257,18 @@ The measured worker runs used system `socat`: `npm run check` took 23.34
 seconds after 31 seconds of setup; `npm ci` took 36.34 seconds after 34
 seconds of setup. The npm install run needed worktree-local temporary storage
 and the proxy option. `npm ci` exited 0 but reported two audit vulnerabilities
-(one moderate, one high); this review did not change dependencies.
+(one moderate, one high); recorded in `docs/issues/npm-ci-adm-zip-audit.md`.
+
+Egress allow proof: `npm ci` reached `registry.npmjs.org` through the sandbox
+proxy under the project allowlist (36.34 s, exit 0, 357 packages). The NuGet
+route has a before/after pair: without `api.nuget.org` allowed, the
+`onnxruntime-node` postinstall failed with `getaddrinfo EAI_AGAIN
+api.nuget.org`; with it allowed and `NODE_OPTIONS=--use-env-proxy`, the same
+install fetched the CUDA libraries and exited 0. Deny-side evidence stands:
+direct TCP fails with `Network is unreachable`, and a non-allowed HTTPS
+CONNECT returns proxy 403. macOS remains accepted but untested here; the
+peer-review closure reproduced the setup-scratch exclusion for directories,
+files, and symlinks in a fresh repository.
 
 **Owner-facing operational notes**
 

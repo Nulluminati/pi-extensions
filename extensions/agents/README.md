@@ -65,4 +65,6 @@ Workers should use a cheap model; keep design decisions, integration, and review
 
 **Worker sandbox**: every isolated worker is provisioned by the project-owned setup files — the executable hook `scripts/provision-worktree`, the carry file `.worktreeinclude`, and the sandbox policy `.pi/sandbox.json`. The hook runs once per worktree inside the sandbox; its log lands in the provision cache with the failure pointer. The sandbox (`@anthropic-ai/sandbox-runtime`; preflight requires `bwrap` and `socat` plus `rg` on Linux) enforces the policy's read/write/network rules for every built-in tool and `!`. A worker without a working sandbox fails loudly rather than falling back to the host: initialization failure kills all tool calls.
 
+Use `mktemp -d "$PWD/.pi/provision-XXXXXXXX"` for hook scratch directories. Omit `-d` for scratch files. The eight-character `provision-` name is required: Git exclusion and patch capture discard these paths after a hook dies. Other temporary names can enter a worker patch.
+
 State lives in `<cwd>/.pi/workers/` and `<cwd>/.pi/worktrees/` (gitignored runtime state).

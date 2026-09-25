@@ -95,8 +95,8 @@ export async function createWorktree(
  * relative to the worktree's fork point as a patch.
  */
 export async function captureWorktreePatch(worktreePath: string, outFile: string): Promise<void> {
-  // A killed setup hook cannot run its EXIT trap. Remove only its temporary
-  // directories before Git stages worker changes, even if no session-start
+  // A killed setup hook cannot run its EXIT trap. Remove its temporary
+  // paths before Git stages worker changes, even if no session-start
   // exclude was installed in this repository.
   const stateRoot = projectStateDir(worktreePath, "");
   const entries = await readdir(stateRoot, { withFileTypes: true }).catch((error: unknown) => {
@@ -104,7 +104,7 @@ export async function captureWorktreePatch(worktreePath: string, outFile: string
     throw error;
   });
   for (const entry of entries) {
-    if (entry.isDirectory() && PROVISION_SCRATCH.test(entry.name)) {
+    if (PROVISION_SCRATCH.test(entry.name)) {
       await rm(join(stateRoot, entry.name), { recursive: true, force: true });
     }
   }

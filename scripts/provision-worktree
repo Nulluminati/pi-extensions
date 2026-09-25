@@ -1,6 +1,8 @@
 #!/bin/sh
 # Worktree setup hook: runs once per new worker worktree, inside the worker
 # sandbox, before the worker spawns. Exit code decides the provision result.
+# Setup scratch must use .pi/provision-XXXXXXXX (eight mktemp characters):
+# Git exclusion and patch capture both discard paths with that name.
 set -eu
 # Keep package downloads in the worktree, not the sandbox's size-limited /tmp.
 setup_dir=$(mktemp -d "$PWD/.pi/provision-XXXXXXXX")

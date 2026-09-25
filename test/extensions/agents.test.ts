@@ -1,6 +1,16 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -874,23 +884,28 @@ sleep 30
     await mkdir(join(cwd, CONFIG_DIR_NAME, "workers"), { recursive: true });
     await writeFile(join(cwd, CONFIG_DIR_NAME, "workers", "registry.json"), "{}\n");
     const scratch = `${CONFIG_DIR_NAME}/provision-Ab12Cd34/npm-cache/blob`;
+    const scratchFile = `${CONFIG_DIR_NAME}/provision-Ef56Gh78`;
     await mkdir(join(cwd, CONFIG_DIR_NAME, "provision-Ab12Cd34", "npm-cache"), { recursive: true });
     await writeFile(join(cwd, scratch), "cached package\n");
+    await writeFile(join(cwd, scratchFile), "temporary credentials\n");
 
     await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
 
     const exclude = await readFile(join(cwd, ".git", "info", "exclude"), "utf8");
     expect(exclude.split("\n")).toContain(`${projectStateRelative("workers")}/`);
     expect(exclude.split("\n")).toContain(`${projectStateRelative("worktrees")}/`);
-    expect(exclude.split("\n")).toContain(`${projectStateRelative("provision-*")}/`);
-    expect(await runGit(cwd, ["check-ignore", "-v", scratch])).toContain("provision-*/");
+    expect(exclude.split("\n")).toContain(projectStateRelative("provision-*"));
+    expect(await runGit(cwd, ["check-ignore", "-v", scratch])).toContain("provision-*");
+    expect(await runGit(cwd, ["check-ignore", "-v", scratchFile])).toContain("provision-*");
     expect(await runGit(cwd, ["status", "--porcelain"])).toBe("");
     const wt = await createWorktree(cwd, "w-exclude-scratch");
     await mkdir(join(wt.path, CONFIG_DIR_NAME, "provision-Ab12Cd34", "npm-cache"), {
       recursive: true,
     });
     await writeFile(join(wt.path, scratch), "cached package\n");
-    expect(await runGit(wt.path, ["check-ignore", "-v", scratch])).toContain("provision-*/");
+    await writeFile(join(wt.path, scratchFile), "temporary credentials\n");
+    expect(await runGit(wt.path, ["check-ignore", "-v", scratch])).toContain("provision-*");
+    expect(await runGit(wt.path, ["check-ignore", "-v", scratchFile])).toContain("provision-*");
     expect(await runGit(wt.path, ["status", "--porcelain"])).toBe("");
     // The shared registry is gone after the one-time migration.
     await expect(
@@ -1963,6 +1978,12 @@ describe("agents-units", () => {
       const scratch = join(wt.path, CONFIG_DIR_NAME, "provision-Ab12Cd34");
       await mkdir(join(scratch, "npm-cache"), { recursive: true });
       await writeFile(join(scratch, "npm-cache", "blob"), "cached package\n");
+      const scratchFile = join(wt.path, CONFIG_DIR_NAME, "provision-Ef56Gh78");
+      await writeFile(scratchFile, "temporary credentials\n");
+      const outside = join(repo, "outside.txt");
+      await writeFile(outside, "outside content\n");
+      const scratchLink = join(wt.path, CONFIG_DIR_NAME, "provision-Ij90Kl12");
+      await symlink(outside, scratchLink);
       await writeFile(join(wt.path, "result.txt"), "worker output\n");
 
       const patchPath = join(repo, "orphan.patch.diff");
@@ -1970,7 +1991,13 @@ describe("agents-units", () => {
       const patch = await readFile(patchPath, "utf8");
       expect(patch).toContain("result.txt");
       expect(patch).not.toContain("provision-Ab12Cd34");
+      expect(patch).not.toContain("provision-Ef56Gh78");
+      expect(patch).not.toContain("provision-Ij90Kl12");
+      expect(patch).not.toContain("temporary credentials");
       await expect(stat(scratch)).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(stat(scratchFile)).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(stat(scratchLink)).rejects.toMatchObject({ code: "ENOENT" });
+      expect(await readFile(outside, "utf8")).toBe("outside content\n");
     } finally {
       await rm(repo, { recursive: true, force: true });
     }
