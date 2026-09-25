@@ -1,6 +1,7 @@
 {
   "detect": { "any": ["package.json"] },
   "share": "hardlink-copy",
+  "carry": ["tsconfig.tsbuildinfo", "tsconfig.test.tsbuildinfo"],
   "provision": "npm install --no-audit --no-fund",
   "network": [
     "registry.npmjs.org",
