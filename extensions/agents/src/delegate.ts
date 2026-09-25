@@ -158,7 +158,10 @@ async function provisionLogsDir(): Promise<string> {
  * refusal text carries the bundled skill pointer so the delegating model
  * can fix the config and re-delegate (the documented recovery loop).
  */
-export async function assertProvisionReady(cwd: string): Promise<void> {
+export async function assertProvisionReady(
+  cwd: string,
+  notifyInfo: (message: string) => void,
+): Promise<boolean> {
   const skill = provisionSkillPath(cwd);
   const relConfig = projectStateRelative(PROVISION_CONFIG_FILE);
   const loaded = await loadProvisionConfig(cwd);
@@ -194,11 +197,18 @@ export async function assertProvisionReady(cwd: string): Promise<void> {
     );
   }
 
+  // Review D2, pre-gate position: path-commit any untracked or modified
+  // config BEFORE the dirty gate, so the worktree branches from HEAD with
+  // the edit in it and every attempt lands in git history (field feedback:
+  // failed iterations vanished when commits only fired on success). A
+  // commit failure refuses here, before any slot or worktree exists.
+  const committed = await commitProvisionConfig(cwd, skill, relConfig, notifyInfo);
+
   const { stale, reasons } = await isProvisionStale(cwd);
-  if (!stale) return;
+  if (!stale) return committed;
   // "No fingerprint recorded" is the first-run state, not drift: the green
   // provision below stamps it, so the delegate proceeds.
-  if (!(await hasProvisionFingerprint(cwd))) return;
+  if (!(await hasProvisionFingerprint(cwd))) return committed;
   // Stale-refresh (design "Loops" section): consume the drift signal so the
   // recovery loop converges — the model reviews the config, and the next
   // delegate provisions with the current inputs instead of refusing again.
@@ -274,6 +284,7 @@ async function provisionWorktree(
   cwd: string,
   worktree: { path: string; branch: string },
   notifyInfo: (message: string) => void,
+  configCommittedAtPreflight: boolean,
 ): Promise<ProvisionStatus> {
   const loaded: LoadedProvisionConfig | null = await loadProvisionConfig(cwd);
   if (loaded === null) return { state: "yes", detail: "nothing to do", at: Date.now() };
@@ -289,7 +300,11 @@ async function provisionWorktree(
     // The config has no work (review N2: no VM boots). Stamp anyway so the
     // config does not read as stale forever.
     await recordProvisionInputs(cwd);
-    return { state: "yes", detail: "nothing to do", at: Date.now() };
+    return {
+      state: "yes",
+      detail: configCommittedAtPreflight ? "nothing to do, config committed" : "nothing to do",
+      at: Date.now(),
+    };
   }
 
   const detailParts: string[] = [];
@@ -340,7 +355,7 @@ async function provisionWorktree(
                 detail: detail ? `exit ${run.exitCode}: ${detail}` : `exit ${run.exitCode}`,
                 at: Date.now(),
               },
-              `provisioned: failed (exit ${run.exitCode})${detail ? `: ${detail}` : ""}. Logs: ${logs}. Read ${skill}, fix ${relConfig} or the environment per the skill, then re-delegate. Config edits remain uncommitted until a provision succeeds.`,
+              `provisioned: failed (exit ${run.exitCode})${detail ? `: ${detail}` : ""}. Logs: ${logs}. Read ${skill}, fix ${relConfig} or the environment per the skill, then re-delegate.`,
             );
           }
           detailParts.push(`command exit ${run.exitCode} (${Math.round(run.ms / 1000)}s)`);
@@ -371,8 +386,14 @@ async function provisionWorktree(
     }
     throw new ProvisionRefusal(
       { state: "failed", detail: oneLine(messageOf(error)), at: Date.now() },
-      `provisioned: failed (${oneLine(messageOf(error))}). Read ${skill}, fix ${relConfig} or the environment per the skill, then re-delegate. Config edits remain uncommitted until a provision succeeds.`,
+      `provisioned: failed (${oneLine(messageOf(error))}). Read ${skill}, fix ${relConfig} or the environment per the skill, then re-delegate.`,
     );
+  }
+  // The preflight commit happens before the worktree exists, so its fact
+  // rides the status here (last detail part — the response and record read
+  // "carry …, config committed").
+  if (configCommittedAtPreflight && !detailParts.includes("config committed")) {
+    detailParts.push("config committed");
   }
   return { state: "yes", detail: detailParts.join(", "), at: Date.now() };
 }
@@ -526,6 +547,9 @@ export async function startDelegatedWorker(
   options: StartDelegatedWorkerOptions,
 ): Promise<{ runningWorker: RunningWorker; worktree?: { path: string; branch: string } }> {
   const { cwd, plan, state, events, persist } = options;
+  // Whether preflight path-committed the config; rides the provision status
+  // so the durable response shows the commit fact (field feedback: notify unseen).
+  let configCommittedAtPreflight = false;
   const { workerId, name, task, model, thinkingLevel, timeoutMs, parentPlanning, extensionPaths } =
     plan;
 
@@ -534,7 +558,9 @@ export async function startDelegatedWorker(
   // It only applies when a worktree would be created; plan-mode and
   // non-isolated workers never provision (review I10).
   if (plan.wantIsolate && (await isGitRepo(cwd))) {
-    await assertProvisionReady(cwd);
+    configCommittedAtPreflight = await assertProvisionReady(cwd, (message) =>
+      events.notify("info", message),
+    );
   }
 
   // Foreign-live names (workers of other live sessions) keep messenger-name
@@ -583,8 +609,11 @@ export async function startDelegatedWorker(
     // config lock). A refusal throws after recording the failure below; a
     // non-isolated or planning worker is skipped, never provisioned.
     if (worktree !== undefined) {
-      provisionStatus = await provisionWorktree(cwd, worktree, (message) =>
-        events.notify("info", message),
+      provisionStatus = await provisionWorktree(
+        cwd,
+        worktree,
+        (message) => events.notify("info", message),
+        configCommittedAtPreflight,
       );
     } else {
       provisionStatus = { state: "skipped", detail: "no worktree", at: Date.now() };

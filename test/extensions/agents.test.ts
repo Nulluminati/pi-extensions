@@ -1628,7 +1628,7 @@ sleep 30
       );
 
       expect(error?.message).toBe(
-        `provisioned: failed (exit 137): exit 137 with no output (killed before flush? exit 137 is typically sandbox OOM). Logs: ${npmLogs}. Read ${provisionSkillPath(cwd)}, fix ${projectStateRelative("provision.json")} or the environment per the skill, then re-delegate. Config edits remain uncommitted until a provision succeeds.`,
+        `provisioned: failed (exit 137): exit 137 with no output (killed before flush? exit 137 is typically sandbox OOM). Logs: ${npmLogs}. Read ${provisionSkillPath(cwd)}, fix ${projectStateRelative("provision.json")} or the environment per the skill, then re-delegate.`,
       );
     });
 
@@ -1646,6 +1646,36 @@ sleep 30
       await expect(executeTool("delegate", { task: "isolated task" })).rejects.toThrow(
         /provisioned: failed \(exit 9\)\. Logs: .+pi-provision\. Read /,
       );
+    });
+
+    it("preflight commits a modified tracked config before the worktree is created", async () => {
+      // Track the config first so the authoring edit below shows as a
+      // tracked modification — the shape that used to die at the dirty gate
+      // with a generic refusal and never reached the provision-commit path.
+      await writeProvisionConfig(cwd);
+      await initGitRepo(cwd);
+      await writeFile(
+        join(cwd, CONFIG_DIR_NAME, "provision.json"),
+        `${JSON.stringify({ timeoutSeconds: 240 }, null, 2)}\n`,
+      );
+      const fixture = await writeFixture(fixtureDir, "ok-worker.sh", SUCCESS_WORKER);
+      setEnv("PI_WORKER_COMMAND", fixture);
+
+      const started = await executeTool("delegate", { task: "t", isolate: true, wait: true });
+      expect(started.details.worker.status).toBe("completed");
+
+      const status = await execFileAsync(
+        "git",
+        ["status", "--porcelain", "--", join(CONFIG_DIR_NAME, "provision.json")],
+        gitOpts(cwd),
+      );
+      expect(status.stdout.trim()).toBe("");
+      const head = await execFileAsync(
+        "git",
+        ["show", `HEAD:${join(CONFIG_DIR_NAME, "provision.json")}`],
+        gitOpts(cwd),
+      );
+      expect(head.stdout).toContain("240");
     });
 
     it("prune discards a failed provision record's worktree past retention", async () => {
@@ -1697,27 +1727,18 @@ sleep 30
       expect(existsSync(join(cwd, CONFIG_DIR_NAME, "worktrees", records[0].id))).toBe(false);
     });
 
-    it("a failed config commit refuses the delegate and keeps the worktree on the record", async () => {
+    it("a failed config commit refuses the delegate before any slot, worktree, or record exists", async () => {
       fakeWorktreeGit({ commitError: "pre-commit hook declined" });
       await writeJsonFile(provisionConfigPath(cwd), { provision: "echo hi" });
-      vi.mocked(runProvisionCommand).mockResolvedValueOnce({
-        exitCode: 0,
-        detail: "ok",
-        ms: 1_000,
-      });
 
       await expect(executeTool("delegate", { task: "isolated task" })).rejects.toThrow(
         /provisioned: config commit failed \(pre-commit hook declined\)\. Read .+ commit .+ host-side, then re-delegate\./,
       );
 
-      const records = await listRecordFiles(cwd);
-      expect(records).toHaveLength(1);
-      expect(records[0].status).toBe("failed");
-      expect(existsSync(recordWorktree(records[0]))).toBe(true); // remove/prune owns it
-      expect(records[0].provision).toMatchObject({
-        state: "failed",
-        detail: expect.stringContaining("config commit failed"),
-      });
+      // Review D2 pre-gate position: the commit runs in preflight, before
+      // the reservation — a refusal here creates nothing at all.
+      expect(await listRecordFiles(cwd)).toHaveLength(0);
+      expect(existsSync(join(cwd, CONFIG_DIR_NAME, "worktrees"))).toBe(false);
     });
 
     it("a non-isolated delegate skips provisioning and never boots the executor", async () => {
