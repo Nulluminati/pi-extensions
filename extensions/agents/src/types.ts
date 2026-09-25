@@ -2,6 +2,7 @@
 
 import type { ThinkingLevel } from "pi";
 import type { WorkerBlocker } from "../../../lib/worker-blocker.ts";
+import type { ProvisionStatus } from "./provision/types.ts";
 
 // --- Types ---
 
@@ -24,6 +25,9 @@ export interface WorkerRecord {
   cwd: string;
   worktree?: string;
   branch?: string;
+  /** Worktree provisioning outcome (carry → share → provision), stamped at
+   *  spawn and kept on failed records so remove/prune can render it. */
+  provision?: ProvisionStatus;
   status: WorkerStatus;
   startedAt: number;
   endedAt?: number;

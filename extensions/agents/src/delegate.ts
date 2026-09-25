@@ -6,20 +6,54 @@
  * concurrency-safety core of delegation.
  */
 
+import { readFile, stat } from "node:fs/promises";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AgentToolResult, ExtensionContext, ThinkingLevel } from "pi";
+import { withFileLock } from "../../../lib/file-lock.ts";
+import { runGit } from "../../../lib/git.ts";
+import { cacheDir, projectStateRelative } from "../../../lib/paths.ts";
 import { isPlanModeActive } from "../../../lib/plan-state.ts";
 import { resolveWorkerModelSpec } from "../../../lib/worker-model.ts";
 import { formatWorkerStatus } from "./format.ts";
+import {
+  configApplies,
+  isProvisionStale,
+  loadProvisionConfig,
+  recordProvisionInputs,
+  validateProvisionConfig,
+} from "./provision/config.ts";
+import { runProvisionCommand } from "./provision/executor.ts";
+import { carryPaths, copyTreeShared } from "./provision/primitives.ts";
+import {
+  BUSY_GRACE_MS,
+  DEFAULT_TIMEOUT_SECONDS,
+  type LoadedProvisionConfig,
+  PROVISION_CONFIG_FILE,
+  PROVISION_LOCAL_FILE,
+  type ProvisionStatus,
+  provisionConfigPath,
+  provisionLocalPath,
+  provisionSkillPath,
+  provisionStatePath,
+  type ValidationIssue,
+} from "./provision/types.ts";
 import { type RunningWorker, startWorker } from "./runner.ts";
 import { generateWorkerId, sweepWorkerArtifacts } from "./store.ts";
 import type { WorkerEvents, WorkerRecord } from "./types.ts";
 import { resolveWorkerExtensions } from "./worker-extensions.ts";
-import { createWorktree, isGitRepo } from "./worktree.ts";
+import { createWorktree, isGitRepo, removeWorktree } from "./worktree.ts";
 
 // --- Constants ---
 
 const DEFAULT_TIMEOUT_MS = 900_000;
+
+/** Fixed message for the path-limited provision config commit (review D2). */
+const PROVISION_COMMIT_MESSAGE = "chore(provision): update worktree provision config";
+/** Parent-checkout file listing extra carry paths (gitignore-style lines). */
+const WORKTREE_INCLUDE_FILE = ".worktreeinclude";
+/** Refusal when the provision config lock stays held past the wait bound. */
+const PROVISION_BUSY_MESSAGE = "provisioned: busy (another provision is running); retry shortly.";
 
 function envMaxWorkers(): number {
   const parsed = Number.parseInt(process.env.PI_MAX_WORKERS ?? "", 10);
@@ -29,6 +63,294 @@ function envMaxWorkers(): number {
 function envTimeoutMs(): number {
   const parsed = Number.parseInt(process.env.PI_WORKER_TIMEOUT_S ?? "", 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed * 1000 : DEFAULT_TIMEOUT_MS;
+}
+
+// --- Provisioning (worktree environment) ---
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** ENOENT and ENOTDIR both mean the path cannot exist as a file. */
+function isMissingError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  return code === "ENOENT" || code === "ENOTDIR";
+}
+
+/** Collapse a detail/error to one line for refusal texts and record fields. */
+function oneLine(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * A refusal raised by the provisioning flow. It carries the ProvisionStatus
+ * recorded on the failed worker record, and the message is the refusal text
+ * returned to the delegating model.
+ */
+class ProvisionRefusal extends Error {
+  readonly provision: ProvisionStatus;
+
+  constructor(provision: ProvisionStatus, message: string) {
+    super(message);
+    this.name = "ProvisionRefusal";
+    this.provision = provision;
+  }
+}
+
+function provisionLockPath(cwd: string): string {
+  return `${provisionConfigPath(cwd)}.lock`;
+}
+
+/** Parsed JSON of one policy file; undefined when missing, descriptive
+ *  throw when unreadable or not JSON (same contract as config loading).
+ *  Validation needs the raw shape, which the merged load does not keep. */
+async function readRawProvisionFile(path: string): Promise<unknown> {
+  let text: string;
+  try {
+    text = await readFile(path, "utf8");
+  } catch (error) {
+    if (isMissingError(error)) return undefined;
+    throw new Error(`Failed to read ${path}: ${messageOf(error)}`);
+  }
+  try {
+    return JSON.parse(text) as unknown;
+  } catch (error) {
+    throw new Error(`${path} is not valid JSON: ${messageOf(error)}`);
+  }
+}
+
+async function hasProvisionFingerprint(cwd: string): Promise<boolean> {
+  try {
+    await stat(provisionStatePath(cwd));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch (error) {
+    if (isMissingError(error)) return false;
+    throw error;
+  }
+}
+
+/**
+ * Preflight for isolated delegates (review D1): refuse before the slot
+ * reservation when the provision policy cannot produce a working
+ * environment — config missing or not applicable, invalid, or stale. The
+ * refusal text carries the bundled skill pointer so the delegating model
+ * can fix the config and re-delegate (the documented recovery loop).
+ */
+export async function assertProvisionReady(cwd: string): Promise<void> {
+  const skill = provisionSkillPath(cwd);
+  const relConfig = projectStateRelative(PROVISION_CONFIG_FILE);
+  const loaded = await loadProvisionConfig(cwd);
+
+  // Shape validation per file (unknown fields, types, local-only keys).
+  const issues: ValidationIssue[] = [];
+  if (loaded?.hasCommitted) {
+    issues.push(
+      ...validateProvisionConfig(
+        await readRawProvisionFile(provisionConfigPath(cwd)),
+        PROVISION_CONFIG_FILE,
+      ),
+    );
+  }
+  if (loaded?.hasLocal) {
+    issues.push(
+      ...validateProvisionConfig(
+        await readRawProvisionFile(provisionLocalPath(cwd)),
+        PROVISION_LOCAL_FILE,
+      ),
+    );
+  }
+  if (issues.length > 0) {
+    const list = issues.map((issue) => `${issue.file}:${issue.path}: ${issue.message}`).join("; ");
+    throw new Error(
+      `provisioned: invalid config (${list}). Read ${skill}, fix ${relConfig} per the skill, then re-delegate.`,
+    );
+  }
+
+  if (loaded === null || !(await configApplies(cwd))) {
+    throw new Error(
+      `provisioned: none (config missing or not applicable). Read ${skill}, author ${relConfig} per the skill, then re-delegate.`,
+    );
+  }
+
+  const { stale, reasons } = await isProvisionStale(cwd);
+  if (!stale) return;
+  // "No fingerprint recorded" is the first-run state, not drift: the green
+  // provision below stamps it, so the delegate proceeds.
+  if (!(await hasProvisionFingerprint(cwd))) return;
+  // Stale-refresh (design "Loops" section): consume the drift signal so the
+  // recovery loop converges — the model reviews the config, and the next
+  // delegate provisions with the current inputs instead of refusing again.
+  await recordProvisionInputs(cwd);
+  throw new Error(
+    `provisioned: stale (${reasons.join("; ")}). Read ${skill}, refresh ${relConfig} per the skill, then re-delegate.`,
+  );
+}
+
+/**
+ * Gitignore-style plain lines of a present `.worktreeinclude`; blanks and
+ * comments ignored. Negation lines are skipped: nothing has been carried
+ * yet that a `!pattern` could un-carry.
+ */
+async function readWorktreeInclude(sourceRoot: string): Promise<string[]> {
+  let text: string;
+  try {
+    text = await readFile(join(sourceRoot, WORKTREE_INCLUDE_FILE), "utf8");
+  } catch (error) {
+    if (isMissingError(error)) return [];
+    throw new Error(`Failed to read ${WORKTREE_INCLUDE_FILE}: ${messageOf(error)}`);
+  }
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "" && !line.startsWith("#") && !line.startsWith("!"));
+}
+
+/**
+ * Review D2: a provisioned delegate branches worktrees from HEAD, so an
+ * untracked or modified committed config must be committed (path-limited,
+ * fixed message) before the worker runs — an uncommitted config fails the
+ * next delegate's dirty gate, so warn-and-continue is impossible. The local
+ * override and the state file are git-excluded and never committed. A commit
+ * failure refuses the delegate with the named git reason.
+ */
+async function commitProvisionConfig(
+  cwd: string,
+  skill: string,
+  relConfig: string,
+  notifyInfo: (message: string) => void,
+): Promise<void> {
+  const configPath = provisionConfigPath(cwd);
+  try {
+    const status = await runGit(cwd, ["status", "--porcelain", "--", configPath]);
+    if (status.trim() === "") return; // committed and clean
+    await runGit(cwd, ["add", "--", configPath]);
+    // --only: commit the config alone, never unrelated staged work.
+    await runGit(cwd, ["commit", "-m", PROVISION_COMMIT_MESSAGE, "--only", "--", configPath]);
+  } catch (error) {
+    throw new ProvisionRefusal(
+      {
+        state: "failed",
+        detail: `config commit failed: ${oneLine(messageOf(error))}`,
+        at: Date.now(),
+      },
+      `provisioned: config commit failed (${oneLine(messageOf(error))}). Read ${skill}, commit ${relConfig} host-side, then re-delegate.`,
+    );
+  }
+  notifyInfo(`Provision config committed (${relConfig}) so worker worktrees branch from it.`);
+}
+
+/**
+ * Populate a fresh worktree under the provision config lock, in primitive
+ * order carry → share → provision command, then stamp fingerprints and
+ * commit the config. Boots the provision VM only when the config has a
+ * command (review N2). Throws ProvisionRefusal on busy and failed; the
+ * caller owns worktree cleanup (busy discards, failed keeps it for
+ * remove/prune — review B4).
+ */
+async function provisionWorktree(
+  cwd: string,
+  worktree: { path: string; branch: string },
+  notifyInfo: (message: string) => void,
+): Promise<ProvisionStatus> {
+  const loaded: LoadedProvisionConfig | null = await loadProvisionConfig(cwd);
+  if (loaded === null) return { state: "yes", detail: "nothing to do", at: Date.now() };
+  const config = loaded.config;
+  const skill = provisionSkillPath(cwd);
+  const relConfig = projectStateRelative(PROVISION_CONFIG_FILE);
+  const timeoutMs = (config.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS) * 1000;
+
+  const carryList = [...new Set([...(config.carry ?? []), ...(await readWorktreeInclude(cwd))])];
+  const wantsShare = config.share === "hardlink-copy";
+  const command = config.provision?.trim();
+  if (carryList.length === 0 && !wantsShare && command === undefined) {
+    // The config has no work (review N2: no VM boots). Stamp anyway so the
+    // config does not read as stale forever.
+    await recordProvisionInputs(cwd);
+    return { state: "yes", detail: "nothing to do", at: Date.now() };
+  }
+
+  const detailParts: string[] = [];
+  try {
+    await withFileLock(
+      provisionLockPath(cwd),
+      async () => {
+        if (carryList.length > 0) {
+          const carry = await carryPaths({
+            worktree: worktree.path,
+            sourceRoot: cwd,
+            paths: carryList,
+            allowUnsafe: config.carryUnsafe === true,
+          });
+          detailParts.push(`carry ${carry.carried.length}`);
+        }
+        if (wantsShare) {
+          // Documented npm convention: the parent's node_modules reaches the
+          // worktree as a shared copy when it exists.
+          const sourceModules = join(cwd, "node_modules");
+          if (await pathExists(sourceModules)) {
+            const { mode } = await copyTreeShared(
+              sourceModules,
+              join(worktree.path, "node_modules"),
+            );
+            detailParts.push(`share ${mode}`);
+          } else {
+            detailParts.push("share none (no node_modules in parent checkout)");
+          }
+        }
+        if (command !== undefined) {
+          const run = await runProvisionCommand({
+            worktree: worktree.path,
+            command,
+            ...(config.network !== undefined ? { network: config.network } : {}),
+            timeoutMs,
+            cacheDir: cacheDir("provision"),
+          });
+          if (run.exitCode !== 0) {
+            throw new ProvisionRefusal(
+              {
+                state: "failed",
+                detail: `exit ${run.exitCode}: ${oneLine(run.detail)}`,
+                at: Date.now(),
+              },
+              `provisioned: failed (exit ${run.exitCode}): ${oneLine(run.detail)}. Read ${skill}, fix ${relConfig} or the environment per the skill, then re-delegate.`,
+            );
+          }
+          detailParts.push(`command exit ${run.exitCode} (${Math.round(run.ms / 1000)}s)`);
+        }
+        await recordProvisionInputs(cwd);
+        await commitProvisionConfig(cwd, skill, relConfig, notifyInfo);
+      },
+      {
+        // Waiters give up after the provision budget plus a grace period,
+        // then the delegate refuses busy (no spawn, no orphan).
+        timeoutMs: timeoutMs + BUSY_GRACE_MS,
+        timeoutMessage: PROVISION_BUSY_MESSAGE,
+      },
+    );
+  } catch (error) {
+    if (error instanceof ProvisionRefusal) throw error;
+    // The lock's timeout error carries exactly the busy refusal text.
+    if (error instanceof Error && error.message === PROVISION_BUSY_MESSAGE) {
+      throw new ProvisionRefusal(
+        { state: "busy", detail: "lock wait exhausted", at: Date.now() },
+        PROVISION_BUSY_MESSAGE,
+      );
+    }
+    throw new ProvisionRefusal(
+      { state: "failed", detail: oneLine(messageOf(error)), at: Date.now() },
+      `provisioned: failed (${oneLine(messageOf(error))}). Read ${skill}, fix ${relConfig} or the environment per the skill, then re-delegate.`,
+    );
+  }
+  return { state: "yes", detail: detailParts.join(", "), at: Date.now() };
 }
 
 // --- Types ---
@@ -183,6 +505,14 @@ export async function startDelegatedWorker(
   const { workerId, name, task, model, thinkingLevel, timeoutMs, parentPlanning, extensionPaths } =
     plan;
 
+  // Provision preflight first (review D1): a refusal here must burn no slot
+  // and create nothing, so it runs before the reservation and the worktree.
+  // It only applies when a worktree would be created; plan-mode and
+  // non-isolated workers never provision (review I10).
+  if (plan.wantIsolate && (await isGitRepo(cwd))) {
+    await assertProvisionReady(cwd);
+  }
+
   // Foreign-live names (workers of other live sessions) keep messenger-name
   // collisions unlikely; the check is best-effort (no lock, small race
   // window) because names route mail, not correctness.
@@ -213,6 +543,7 @@ export async function startDelegatedWorker(
 
   let worktree: { path: string; branch: string } | undefined;
   let runningWorker: RunningWorker | undefined;
+  let provisionStatus: ProvisionStatus | undefined;
   try {
     if (plan.wantIsolate) {
       if (!(await isGitRepo(cwd))) {
@@ -222,6 +553,17 @@ export async function startDelegatedWorker(
       } else {
         worktree = await createWorktree(cwd, workerId);
       }
+    }
+
+    // Provision the fresh worktree (carry → share → provision under the
+    // config lock). A refusal throws after recording the failure below; a
+    // non-isolated or planning worker is skipped, never provisioned.
+    if (worktree !== undefined) {
+      provisionStatus = await provisionWorktree(cwd, worktree, (message) =>
+        events.notify("info", message),
+      );
+    } else {
+      provisionStatus = { state: "skipped", detail: "no worktree", at: Date.now() };
     }
 
     const sandbox = true;
@@ -241,6 +583,7 @@ export async function startDelegatedWorker(
       parentPid: process.pid,
       parentSessionId: plan.parentSessionId,
       ...(worktree !== undefined ? { worktree } : {}),
+      ...(provisionStatus !== undefined ? { provision: provisionStatus } : {}),
       events,
       onRecord: (worker) => persist(worker).then(() => undefined),
     });
@@ -254,6 +597,18 @@ export async function startDelegatedWorker(
       () => {},
     );
   } catch (error) {
+    // Busy: nothing was provisioned into the fresh worktree, so it is
+    // discarded here and the failed record carries no worktree (no orphan).
+    // Every other failure keeps the worktree ON the record (review B4):
+    // remove/prune owns discarding it, together with any partial state.
+    if (
+      error instanceof ProvisionRefusal &&
+      error.provision.state === "busy" &&
+      worktree !== undefined
+    ) {
+      await removeWorktree(cwd, workerId).catch(() => {});
+      worktree = undefined;
+    }
     // Record the failure so history keeps it; a failed record frees its slot
     // immediately (nothing to reconcile later). A persist failure here must
     // not mask the original spawn error.
@@ -266,6 +621,8 @@ export async function startDelegatedWorker(
         thinkingLevel,
         cwd,
         status: "failed",
+        ...(worktree !== undefined ? { worktree: worktree.path, branch: worktree.branch } : {}),
+        ...(error instanceof ProvisionRefusal ? { provision: error.provision } : {}),
         parentPid: process.pid,
         parentSessionId: plan.parentSessionId,
         error: error instanceof Error ? error.message : String(error),
@@ -296,6 +653,7 @@ export function buildDelegateStartedResponse(
   plan: Pick<DelegatePlan, "workerId" | "name" | "model" | "parentPlanning">,
   worktree: { path: string; branch: string } | undefined,
   wait: boolean | undefined,
+  provision: ProvisionStatus | undefined,
 ): AgentToolResult {
   const isolateNote = plan.parentPlanning
     ? "Read-only planning worker: Gondolin is enforced and workspace mutation is blocked."
@@ -303,12 +661,16 @@ export function buildDelegateStartedResponse(
       ? `Isolated in worktree ${worktree.branch}. Its patch is collected with workers (action=collect, id=${plan.workerId}).`
       : "Not isolated: the worker edits this working tree directly.";
   const waitNote = wait === true ? "" : " You will be woken when it exits.";
+  const provisionNote =
+    provision === undefined
+      ? ""
+      : ` Provision: ${provision.state}${provision.detail !== undefined ? ` — ${provision.detail}` : ""}.`;
 
   return {
     content: [
       {
         type: "text",
-        text: `Worker ${plan.name} (${plan.workerId}) started on ${plan.model}. ${isolateNote}${waitNote}`,
+        text: `Worker ${plan.name} (${plan.workerId}) started on ${plan.model}. ${isolateNote}${waitNote}${provisionNote}`,
       },
     ],
     details: {
@@ -316,6 +678,7 @@ export function buildDelegateStartedResponse(
       name: plan.name,
       model: plan.model,
       worktree: worktree?.path,
+      ...(provision !== undefined ? { provision } : {}),
     },
   };
 }

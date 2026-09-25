@@ -39,6 +39,10 @@ export function formatWorkerLine(worker: WorkerRecord, tag?: "orphan" | "other s
 
 export function formatWorkerStatus(worker: WorkerRecord): string {
   const lines = [formatWorkerLine(worker), `Task: ${worker.task}`, `cwd: ${worker.cwd}`];
+  if (worker.provision !== undefined) {
+    const detail = worker.provision.detail !== undefined ? ` — ${worker.provision.detail}` : "";
+    lines.push(`Provision: ${worker.provision.state}${detail}`);
+  }
   if (worker.blocker !== undefined) lines.push(`Blocker: ${worker.blocker.reason}`);
   if (worker.usage !== undefined) {
     const tokens =

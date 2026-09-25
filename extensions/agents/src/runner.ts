@@ -20,12 +20,15 @@ import { appendFile, mkdir, open, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { ThinkingLevel } from "pi";
 import { cleanGitEnv } from "../../../lib/git.ts";
+import { projectStateRelative } from "../../../lib/paths.ts";
 import { isProcessAlive } from "../../../lib/presence-shards.ts";
 import {
   BLOCKER_MARKER_TYPE,
   parseBlockerMarker,
   WORKER_STREAM_ENV_VAR,
 } from "../../../lib/worker-blocker.ts";
+import type { ProvisionStatus } from "./provision/types.ts";
+import { PROVISION_CONFIG_FILE, provisionSkillPath } from "./provision/types.ts";
 import { patchesDir, stderrLogPath, streamPath } from "./store.ts";
 import type { WorkerActivity, WorkerEvents, WorkerRecord } from "./types.ts";
 import { captureWorktreePatch } from "./worktree.ts";
@@ -438,6 +441,22 @@ export async function killPidTree(pid: number): Promise<void> {
   }
 }
 
+// --- Task composition ---
+
+/**
+ * Spawn-time ENVIRONMENT block appended to the task prompt: the provision
+ * status plus the report_blocker instruction, so a worker blocked by a
+ * missing environment tool reports the exact gap instead of trying to
+ * install anything. The record's `task` keeps the original text; only the
+ * spawned `-p` argument carries the block.
+ */
+export function composeWorkerTask(task: string, provision: ProvisionStatus | undefined): string {
+  if (provision === undefined) return task;
+  const status =
+    provision.detail !== undefined ? `${provision.state} — ${provision.detail}` : provision.state;
+  return `${task}\n\nENVIRONMENT: Provision: ${status}. If your task cannot proceed because something in this environment is missing, call report_blocker with the exact missing tool instead of trying to install anything.`;
+}
+
 // --- Runner ---
 
 export interface StartWorkerOptions {
@@ -460,6 +479,9 @@ export interface StartWorkerOptions {
    *  be classified after the session ends. */
   parentPid?: number;
   parentSessionId?: string;
+  /** Provisioning outcome for this worker; appended to the task prompt as
+   *  the ENVIRONMENT block and stamped on the record. */
+  provision?: ProvisionStatus;
   events: WorkerEvents;
   /** Terminal persistence callback (transcript entry + record file). */
   onRecord(worker: WorkerRecord): Promise<unknown>;
@@ -474,7 +496,8 @@ export interface RunningWorker {
 
 export async function startWorker(options: StartWorkerOptions): Promise<RunningWorker> {
   const { events } = options;
-  const args = ["--mode", "json", "--no-session", "--no-extensions", "-p", options.task];
+  const task = composeWorkerTask(options.task, options.provision);
+  const args = ["--mode", "json", "--no-session", "--no-extensions", "-p", task];
   if (options.model) args.push("--model", options.model);
   args.push("--thinking", options.thinkingLevel);
   for (const ext of options.extensionPaths) args.push("-e", ext);
@@ -496,6 +519,7 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
     ...(options.worktree !== undefined
       ? { worktree: options.worktree.path, branch: options.worktree.branch }
       : {}),
+    ...(options.provision !== undefined ? { provision: options.provision } : {}),
     status: "running",
     startedAt: Date.now(),
     streamFormat: "raw",
@@ -571,7 +595,7 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
         if (ingestStreamEvent(line, record) === "blocker" && !blockerWakeSent) {
           blockerWakeSent = true;
           events.wake(
-            `[worker ${record.name} (${record.id}) reported a blocker]. Use the workers tool (action=status, id=${record.id}) for details.`,
+            `[worker ${record.name} (${record.id}) reported a blocker]. Use the workers tool (action=status, id=${record.id}) for details. If environmental, read ${provisionSkillPath(options.cwd)} and amend ${projectStateRelative(PROVISION_CONFIG_FILE)}.`,
           );
         }
       }

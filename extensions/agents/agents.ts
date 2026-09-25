@@ -42,6 +42,8 @@ import {
   type WorkerSessionState,
 } from "./src/delegate.ts";
 import { AGENTS_STATE_EVENT, createWorkersWidget, WORKERS_WIDGET_KEY } from "./src/format.ts";
+import { ensureProvisionExclusions } from "./src/provision/config.ts";
+import { materializeProvisionSkill } from "./src/provision/skill.ts";
 import { finalizeWorker, killPidTree, type RunningWorker } from "./src/runner.ts";
 import { DELEGATE_PARAMETERS, WORKERS_PARAMETERS } from "./src/schemas.ts";
 import {
@@ -317,7 +319,12 @@ export default async function agentsExtension(pi: ExtensionAPI) {
         return buildDelegateWaitedResponse(record);
       }
 
-      return buildDelegateStartedResponse(plan, worktree, params.wait);
+      return buildDelegateStartedResponse(
+        plan,
+        worktree,
+        params.wait,
+        runningWorker.record.provision,
+      );
     },
   });
 
@@ -491,6 +498,16 @@ export default async function agentsExtension(pi: ExtensionAPI) {
     // Event contexts carry a usable ui surface: capture it so the widget is
     // restored on session_start (reload) before any tool call has run.
     if (ctx.hasUI) lastUi = ctx.ui;
+    // Provisioning support: materialize the bundled guidance skill into the
+    // project skill dir and keep provision state out of `git status`.
+    // Fire-and-forget: session start never blocks on either, and a failure
+    // logs without throwing into the handler.
+    materializeProvisionSkill(ctx.cwd).catch((error) => {
+      console.error(`[agents] provision skill materialization failed: ${(error as Error).message}`);
+    });
+    ensureProvisionExclusions(ctx.cwd).catch((error) => {
+      console.error(`[agents] provision git exclusions failed: ${(error as Error).message}`);
+    });
     // One-time migration from the legacy shared registry to per-worker
     // artifact files (old records classify as orphans: no owner is known).
     await migrateLegacyRegistry(ctx.cwd);
