@@ -1078,6 +1078,47 @@ sleep 30
     expect((error as Error).message).toContain(patchPath);
   });
 
+  it("workers collect skips git apply on an empty patch and reports nothing to apply", async () => {
+    // The read-only-worker case: a captured patch with zero bytes. `git apply`
+    // rejects it ("No valid patches in input"), so the skip must happen before
+    // any git invocation. Seeded record without a worktree keeps git out.
+    vi.mocked(runGit).mockClear();
+    const patchPath = join(cwd, "w-empty.patch");
+    await writeFile(patchPath, "");
+    await seedRecord(
+      cwd,
+      makeWorkerRecord({ id: "w-empty", name: "reader", status: "completed", patchPath }),
+    );
+
+    const collected = await executeTool("workers", { action: "collect", id: "w-empty" });
+
+    expect(collected.content[0].text).toBe(
+      "No changes in worker reader's patch; nothing to apply.",
+    );
+    expect(vi.mocked(runGit).mock.calls.some((call) => call[1][0] === "apply")).toBe(false);
+    const record = await loadWorker(cwd, "w-empty");
+    expect(record?.collectedAt).toBeDefined();
+  });
+
+  it("workers collect on a whitespace-only patch applies nothing and cleans up", async () => {
+    vi.mocked(runGit).mockClear();
+    const patchPath = join(cwd, "w-blank.patch");
+    await writeFile(patchPath, "\n\n");
+    await seedRecord(
+      cwd,
+      makeWorkerRecord({ id: "w-blank", name: "blank", status: "completed", patchPath }),
+    );
+
+    const collected = await executeTool("workers", {
+      action: "collect",
+      id: "w-blank",
+      cleanup: false,
+    });
+
+    expect(collected.content[0].text).toBe("No changes in worker blank's patch; nothing to apply.");
+    expect(vi.mocked(runGit).mock.calls.some((call) => call[1][0] === "apply")).toBe(false);
+  });
+
   describe("widget", () => {
     function renderLastWidget(width = 80): string[] {
       const lastCall = mockCtx.ui.setWidget.mock.calls.at(-1) as unknown[];
@@ -1547,7 +1588,7 @@ sleep 30
       );
 
       await expect(executeTool("delegate", { task: "isolated task" })).rejects.toThrow(
-        /provisioned: failed \(exit 1\): npm ERR! missing script: ci npm ERR! A complete log\. Read .+ fix .+ or the environment per the skill, then re-delegate\./,
+        /provisioned: failed \(exit 1\): npm ERR! missing script: ci npm ERR! A complete log\. Logs: .+pi-provision.+ Read .+ fix .+ or the environment per the skill, then re-delegate\./,
       );
 
       const records = await listRecordFiles(cwd);
@@ -1565,6 +1606,46 @@ sleep 30
       expect(removed.content[0].text).toContain("Worktree and branch discarded");
       expect(existsSync(wt)).toBe(false);
       expect(await loadWorker(cwd, record.id)).toBeUndefined();
+    });
+
+    it("an empty-output provision failure names the sandbox-OOM hint and the npm log dir", async () => {
+      fakeWorktreeGit();
+      const cacheRoot = join(fixtureDir, "xdg-cache");
+      const npmLogs = join(cacheRoot, "pi-provision", "npm", "_logs");
+      await mkdir(npmLogs, { recursive: true });
+      setEnv("XDG_CACHE_HOME", cacheRoot);
+      await writeJsonFile(provisionConfigPath(cwd), { provision: "npm ci" });
+      // The live failure shape: SIGKILLed extraction, zero flushed output.
+      vi.mocked(runProvisionCommand).mockResolvedValueOnce({
+        exitCode: 137,
+        detail: "exit 137 with no output (killed before flush? exit 137 is typically sandbox OOM)",
+        ms: 90_000,
+      });
+
+      const error = await executeTool("delegate", { task: "isolated task" }).then(
+        () => null,
+        (e: Error) => e,
+      );
+
+      expect(error?.message).toBe(
+        `provisioned: failed (exit 137): exit 137 with no output (killed before flush? exit 137 is typically sandbox OOM). Logs: ${npmLogs}. Read ${provisionSkillPath(cwd)}, fix ${projectStateRelative("provision.json")} or the environment per the skill, then re-delegate. Config edits remain uncommitted until a provision succeeds.`,
+      );
+    });
+
+    it("an empty detail never leaves a stray colon in the failure pointer", async () => {
+      fakeWorktreeGit();
+      const cacheRoot = join(fixtureDir, "xdg-cache-empty");
+      setEnv("XDG_CACHE_HOME", cacheRoot);
+      await writeJsonFile(provisionConfigPath(cwd), { provision: "npm ci" });
+      vi.mocked(runProvisionCommand).mockResolvedValueOnce({
+        exitCode: 9,
+        detail: "",
+        ms: 1_000,
+      });
+
+      await expect(executeTool("delegate", { task: "isolated task" })).rejects.toThrow(
+        /provisioned: failed \(exit 9\)\. Logs: .+pi-provision\. Read /,
+      );
     });
 
     it("prune discards a failed provision record's worktree past retention", async () => {
@@ -1714,10 +1795,10 @@ sleep 30
       expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("committed"), "info");
       expect(started.details.provision).toMatchObject({
         state: "yes",
-        detail: "carry 1, share reflink, command exit 0 (16s)",
+        detail: "carry 1, share reflink, command exit 0 (16s), config committed",
       });
       expect(started.content[0].text).toContain(
-        "Provision: yes — carry 1, share reflink, command exit 0 (16s)",
+        "Provision: yes — carry 1, share reflink, command exit 0 (16s), config committed",
       );
       const args = (await readFile(argsFile, "utf8")).split("\n");
       const environment = args.find((line) => line.startsWith("ENVIRONMENT:"));

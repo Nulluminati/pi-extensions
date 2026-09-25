@@ -50,7 +50,7 @@ describe("provision-skill-extension", () => {
     const frontmatter = frontmatterOf(text);
     expect(frontmatter).toMatch(/^name: provision$/m);
     expect(frontmatter).toMatch(/^description: .+/m);
-    expect(frontmatter).toMatch(/provision-skill-version:\s*1\b/);
+    expect(frontmatter).toMatch(/provision-skill-version:\s*2\b/);
   });
 
   it("materializeProvisionSkill leaves an equal-version copy untouched", async () => {
@@ -99,7 +99,7 @@ describe("provision-skill-extension", () => {
   it("bundled body keeps all five ecosystem examples", async () => {
     const text = await readFile(BUNDLED_SKILL, "utf8");
     for (const heading of [
-      "npm",
+      "npm (worked example)",
       "python (uv)",
       "rust (cargo)",
       "elixir (mix)",
@@ -109,6 +109,65 @@ describe("provision-skill-extension", () => {
         new RegExp(`^### ${escapeRegExp(heading)}$`, "m"),
       );
     }
+  });
+
+  it("bundled npm example is the live-proven combination", async () => {
+    const text = await readFile(BUNDLED_SKILL, "utf8");
+    const npm = /^### npm \(worked example\)\n[\s\S]*?(?=^### )/m.exec(text)?.[0];
+
+    expect(npm).toBeTruthy();
+    expect(npm).toContain('"share": "hardlink-copy"');
+    expect(npm).toContain('"provision": "npm install --no-audit --no-fund"');
+    expect(npm).toContain('"github.com"');
+    // The npm ci caution from the field: extraction was SIGKILLed.
+    expect(npm).toContain("137");
+  });
+
+  it("bundled share-default wording names only the real enum values", async () => {
+    const text = await readFile(BUNDLED_SKILL, "utf8");
+    const shareLine = /^- `share` — .+$/m.exec(text)?.[0];
+
+    expect(shareLine).toBeTruthy();
+    for (const value of ["hardlink-copy", "install", "none"]) {
+      expect(shareLine).toContain(`\`${value}\``);
+    }
+    // No phantom enum: the default is described as behavior, not a value.
+    expect(shareLine).not.toContain("Default: `provision`");
+    expect(shareLine).toContain("Omitted");
+  });
+
+  it("bundled timeout guidance covers cold installs on slow links", async () => {
+    const text = await readFile(BUNDLED_SKILL, "utf8");
+    const timeoutLine = /^- `timeoutSeconds` — .+$/m.exec(text)?.[0];
+
+    expect(timeoutLine).toBeTruthy();
+    expect(timeoutLine).toContain("120");
+    expect(timeoutLine).toContain("600–3600");
+  });
+
+  it("bundled mechanism section explains the musl guest versus glibc host", async () => {
+    const text = await readFile(BUNDLED_SKILL, "utf8");
+    const section = /^## Mechanism[^\n]*\n[\s\S]*?(?=^## )/m.exec(text)?.[0];
+
+    expect(section).toContain("musl");
+    expect(section).toContain("glibc");
+    expect(section).toContain("esbuild");
+  });
+
+  it("bundled failure section names the provision log location", async () => {
+    const text = await readFile(BUNDLED_SKILL, "utf8");
+
+    expect(text).toContain("~/.cache/pi-provision/npm/_logs");
+    expect(text).toContain("log path");
+  });
+
+  it("bundled rules document the commit cadence and the isolate dodge", async () => {
+    const text = await readFile(BUNDLED_SKILL, "utf8");
+
+    expect(text).toContain("only after a successful provision");
+    expect(text).toContain("interim edits stay uncommitted");
+    expect(text).toContain("isolate: false");
+    expect(text).toContain("skip provisioning");
   });
 
   it("bundled mechanism-order section names carry, share, and provision", async () => {

@@ -139,6 +139,19 @@ async function pathExists(path: string): Promise<boolean> {
 }
 
 /**
+ * Where the provision command's own logs live: npm writes debug logs under
+ * its cache, and `npm_config_cache` maps to `<cacheDir>/npm` in the guest,
+ * so failed installs leave `<cacheDir("provision")>/npm/_logs` host-side.
+ * Falls back to the cache root when npm never got far enough to create it.
+ */
+async function provisionLogsDir(): Promise<string> {
+  const root = cacheDir("provision");
+  const npmLogs = join(root, "npm", "_logs");
+  if (await pathExists(npmLogs)) return npmLogs;
+  return root;
+}
+
+/**
  * Preflight for isolated delegates (review D1): refuse before the slot
  * reservation when the provision policy cannot produce a working
  * environment — config missing or not applicable, invalid, or stale. The
@@ -227,11 +240,11 @@ async function commitProvisionConfig(
   skill: string,
   relConfig: string,
   notifyInfo: (message: string) => void,
-): Promise<void> {
+): Promise<boolean> {
   const configPath = provisionConfigPath(cwd);
   try {
     const status = await runGit(cwd, ["status", "--porcelain", "--", configPath]);
-    if (status.trim() === "") return; // committed and clean
+    if (status.trim() === "") return false; // committed and clean
     await runGit(cwd, ["add", "--", configPath]);
     // --only: commit the config alone, never unrelated staged work.
     await runGit(cwd, ["commit", "-m", PROVISION_COMMIT_MESSAGE, "--only", "--", configPath]);
@@ -246,6 +259,7 @@ async function commitProvisionConfig(
     );
   }
   notifyInfo(`Provision config committed (${relConfig}) so worker worktrees branch from it.`);
+  return true;
 }
 
 /**
@@ -315,19 +329,29 @@ async function provisionWorktree(
             cacheDir: cacheDir("provision"),
           });
           if (run.exitCode !== 0) {
+            // The pointer line carries the failure evidence and where the
+            // command's own logs landed, so a failed install is diagnosable
+            // without hunting (field feedback: bare `failed (exit 137): .`).
+            const detail = oneLine(run.detail);
+            const logs = await provisionLogsDir();
             throw new ProvisionRefusal(
               {
                 state: "failed",
-                detail: `exit ${run.exitCode}: ${oneLine(run.detail)}`,
+                detail: detail ? `exit ${run.exitCode}: ${detail}` : `exit ${run.exitCode}`,
                 at: Date.now(),
               },
-              `provisioned: failed (exit ${run.exitCode}): ${oneLine(run.detail)}. Read ${skill}, fix ${relConfig} or the environment per the skill, then re-delegate.`,
+              `provisioned: failed (exit ${run.exitCode})${detail ? `: ${detail}` : ""}. Logs: ${logs}. Read ${skill}, fix ${relConfig} or the environment per the skill, then re-delegate. Config edits remain uncommitted until a provision succeeds.`,
             );
           }
           detailParts.push(`command exit ${run.exitCode} (${Math.round(run.ms / 1000)}s)`);
         }
         await recordProvisionInputs(cwd);
-        await commitProvisionConfig(cwd, skill, relConfig, notifyInfo);
+        if (await commitProvisionConfig(cwd, skill, relConfig, notifyInfo)) {
+          // Durable surface for the commit fact: the transient ui.notify is
+          // easy to miss mid-tool-call, but this detail rides the delegate
+          // response and the worker record (field feedback: notify unseen).
+          detailParts.push("config committed");
+        }
       },
       {
         // Waiters give up after the provision budget plus a grace period,
@@ -347,7 +371,7 @@ async function provisionWorktree(
     }
     throw new ProvisionRefusal(
       { state: "failed", detail: oneLine(messageOf(error)), at: Date.now() },
-      `provisioned: failed (${oneLine(messageOf(error))}). Read ${skill}, fix ${relConfig} or the environment per the skill, then re-delegate.`,
+      `provisioned: failed (${oneLine(messageOf(error))}). Read ${skill}, fix ${relConfig} or the environment per the skill, then re-delegate. Config edits remain uncommitted until a provision succeeds.`,
     );
   }
   return { state: "yes", detail: detailParts.join(", "), at: Date.now() };

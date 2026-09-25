@@ -93,9 +93,28 @@ async function defaultCreateVm(opts: ProvisionRunOptions): Promise<VmLike> {
   };
 }
 
-/** Last ~400 chars of combined output, trimmed: keeps the failing line visible. */
-function buildDetail(stdout: string, stderr: string): string {
-  return `${stdout}\n${stderr}`.slice(-DETAIL_TAIL_CHARS).trim();
+/** Last ~400 chars of combined output, trimmed: keeps the failing line visible.
+ *  A failed command with empty output gets synthesized evidence instead: a
+ *  bare tail of "" hides the failure mode (the exit-137 sandbox-OOM case
+ *  shipped empty pointer lines in the field). */
+function buildDetail(stdout: string, stderr: string, exitCode: number): string {
+  const tail = `${stdout}\n${stderr}`.slice(-DETAIL_TAIL_CHARS).trim();
+  if (tail !== "") return tail;
+  if (exitCode === 137) {
+    return "exit 137 with no output (killed before flush? exit 137 is typically sandbox OOM)";
+  }
+  if (exitCode !== 0) return `exit ${exitCode} with no output (killed before flush?)`;
+  return "";
+}
+
+/** AbortSignal.timeout surfaces as AbortError/TimeoutError; gondolin may wrap
+ *  it with an abort-worded message. Only a timeout aborts this signal, so any
+ *  of these means the command hit the provision budget. */
+function isAbortError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return (
+    error.name === "AbortError" || error.name === "TimeoutError" || /abort/i.test(error.message)
+  );
 }
 
 // --- Extension ---
@@ -121,14 +140,25 @@ export async function runProvisionCommand(
   const vm = await createVm(opts);
   const startedAt = Date.now();
   try {
-    const result = await vm.exec(`cd ${GUEST_WORKSPACE} && ${command}`, {
-      signal: AbortSignal.timeout(opts.timeoutMs),
-    });
-    return {
-      exitCode: result.exitCode,
-      detail: buildDetail(result.stdout, result.stderr),
-      ms: Date.now() - startedAt,
-    };
+    try {
+      const result = await vm.exec(`cd ${GUEST_WORKSPACE} && ${command}`, {
+        signal: AbortSignal.timeout(opts.timeoutMs),
+      });
+      return {
+        exitCode: result.exitCode,
+        detail: buildDetail(result.stdout, result.stderr, result.exitCode),
+        ms: Date.now() - startedAt,
+      };
+    } catch (error) {
+      // A timed-out exec throws instead of returning; map it onto the same
+      // result shape so callers render one consistent failure format.
+      if (!isAbortError(error)) throw error;
+      return {
+        exitCode: -1,
+        detail: `command aborted after ${opts.timeoutMs}ms`,
+        ms: Date.now() - startedAt,
+      };
+    }
   } finally {
     // Throwaway rule: the VM is torn down on every path. A close failure is
     // swallowed so it cannot mask the command's outcome.

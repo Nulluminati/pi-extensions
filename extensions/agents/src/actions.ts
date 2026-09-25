@@ -207,13 +207,22 @@ export async function collectWorkerPatch(
   const shouldCleanup = params.cleanup !== false;
   const lines: string[] = [];
   if (shouldApply) {
-    try {
-      await applyPatch(cwd, record.patchPath);
-      lines.push(`Applied patch ${record.patchPath} to the working tree.`);
-    } catch (err) {
-      throw new Error(
-        `Patch apply failed: ${(err as Error).message}. The patch file is kept at ${record.patchPath}; resolve conflicts manually if needed.`,
-      );
+    // A read-only worker captures an empty patch; `git apply` rejects it
+    // ("No valid patches in input"). Nothing to apply is success, decided
+    // before any git invocation. An unreadable patch file falls through to
+    // git apply so its error (and the kept patch path) surfaces as before.
+    const patchText = await readFile(record.patchPath, "utf8").catch(() => null);
+    if (patchText !== null && patchText.trim() === "") {
+      lines.push(`No changes in worker ${record.name}'s patch; nothing to apply.`);
+    } else {
+      try {
+        await applyPatch(cwd, record.patchPath);
+        lines.push(`Applied patch ${record.patchPath} to the working tree.`);
+      } catch (err) {
+        throw new Error(
+          `Patch apply failed: ${(err as Error).message}. The patch file is kept at ${record.patchPath}; resolve conflicts manually if needed.`,
+        );
+      }
     }
   } else {
     lines.push(`Patch left unapplied at ${record.patchPath}.`);

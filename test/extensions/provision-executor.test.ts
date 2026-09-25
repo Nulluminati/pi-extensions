@@ -151,6 +151,69 @@ describe("provision-executor", () => {
       expect(Number.isFinite(result.ms)).toBe(true);
     });
 
+    it("synthesizes a detail for a nonzero exit with empty output", async () => {
+      const fake = createFakeVm({ exitCode: 3, stdout: "", stderr: "" });
+
+      const result = await runProvisionCommand(runOptions(), {
+        createVm: () => fake.vmPromise,
+      });
+
+      expect(result.exitCode).toBe(3);
+      expect(result.detail).toBe("exit 3 with no output (killed before flush?)");
+    });
+
+    it("adds the sandbox-OOM hint to exit 137 with empty output", async () => {
+      const fake = createFakeVm({ exitCode: 137, stdout: "", stderr: "" });
+
+      const result = await runProvisionCommand(runOptions(), {
+        createVm: () => fake.vmPromise,
+      });
+
+      expect(result.detail).toBe(
+        "exit 137 with no output (killed before flush? exit 137 is typically sandbox OOM)",
+      );
+    });
+
+    it("keeps an empty detail for a successful run with no output", async () => {
+      const fake = createFakeVm({ exitCode: 0, stdout: "", stderr: "" });
+
+      const result = await runProvisionCommand(runOptions(), {
+        createVm: () => fake.vmPromise,
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.detail).toBe("");
+    });
+
+    it("synthesizes a timeout detail when the exec aborts and closes the vm", async () => {
+      const fake = createFakeVm();
+      const timeout = Object.assign(new Error("The operation was aborted due to timeout"), {
+        name: "TimeoutError",
+      });
+      fake.execThrows(timeout);
+
+      const result = await runProvisionCommand(runOptions({ timeoutMs: 120_000 }), {
+        createVm: () => fake.vmPromise,
+      });
+
+      expect(result.exitCode).toBe(-1);
+      expect(result.detail).toBe("command aborted after 120000ms");
+      expect(result.ms).toBeGreaterThanOrEqual(0);
+      expect(fake.close).toHaveBeenCalledTimes(1);
+    });
+
+    it("treats a generic abort-named exec error as the timeout case", async () => {
+      const fake = createFakeVm();
+      fake.execThrows(new Error("exec aborted"));
+
+      const result = await runProvisionCommand(runOptions({ timeoutMs: 5_000 }), {
+        createVm: () => fake.vmPromise,
+      });
+
+      expect(result.detail).toBe("command aborted after 5000ms");
+      expect(fake.close).toHaveBeenCalledTimes(1);
+    });
+
     it("bounds detail to the last 400 characters of combined output", async () => {
       const stdout = "a".repeat(600);
       const stderr = "b".repeat(300);
@@ -166,13 +229,13 @@ describe("provision-executor", () => {
   });
 
   describe("vm teardown", () => {
-    it("closes the vm even when exec throws", async () => {
+    it("rejects and closes the vm on a non-abort exec error", async () => {
       const fake = createFakeVm();
-      fake.execThrows(new Error("exec aborted"));
+      fake.execThrows(new Error("krun guest died"));
 
       await expect(
         runProvisionCommand(runOptions(), { createVm: () => fake.vmPromise }),
-      ).rejects.toThrow("exec aborted");
+      ).rejects.toThrow("krun guest died");
       expect(fake.close).toHaveBeenCalledTimes(1);
     });
 
