@@ -7,7 +7,7 @@ import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
  */
 export function worktreeGitCommonDir(cwd) {
   const pointer = join(cwd, ".git");
-  if (!statSync(pointer).isFile()) return undefined;
+  if (!statSync(pointer, { throwIfNoEntry: false })?.isFile()) return undefined;
   const match = /^gitdir: (.+)\r?\n?$/i.exec(readFileSync(pointer, "utf8").trim());
   if (!match) throw new Error("Invalid linked worktree Git pointer");
   const gitdir = realpathSync(resolve(cwd, match[1]));

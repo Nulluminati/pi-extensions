@@ -6,7 +6,7 @@
  */
 
 import { existsSync } from "node:fs";
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { runGit } from "../../../lib/git.ts";
 import { isProjectStatePath, projectStateDir } from "../../../lib/paths.ts";
@@ -16,6 +16,8 @@ import type { WorkerRecord } from "./types.ts";
 
 /** Marker file in the worktree's private git dir holding its fork point. */
 const BASE_COMMIT_FILE = "agents-base";
+/** The project hook creates temporary directories with eight random characters. */
+const PROVISION_SCRATCH = /^provision-[A-Za-z0-9]{8}$/;
 
 // --- Helpers ---
 
@@ -93,6 +95,19 @@ export async function createWorktree(
  * relative to the worktree's fork point as a patch.
  */
 export async function captureWorktreePatch(worktreePath: string, outFile: string): Promise<void> {
+  // A killed setup hook cannot run its EXIT trap. Remove only its temporary
+  // directories before Git stages worker changes, even if no session-start
+  // exclude was installed in this repository.
+  const stateRoot = projectStateDir(worktreePath, "");
+  const entries = await readdir(stateRoot, { withFileTypes: true }).catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  });
+  for (const entry of entries) {
+    if (entry.isDirectory() && PROVISION_SCRATCH.test(entry.name)) {
+      await rm(join(stateRoot, entry.name), { recursive: true, force: true });
+    }
+  }
   await runGit(worktreePath, ["add", "-A"]);
   const base = await worktreeBaseCommit(worktreePath);
   const diff = await runGit(worktreePath, ["diff", "--cached", base]);

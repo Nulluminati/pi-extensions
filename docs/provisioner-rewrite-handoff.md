@@ -237,7 +237,27 @@ scripts need Node's proxy option, while npm needs temporary storage outside
 this host's nearly full `/tmp` quota. Commits `2bcbbea` and `b749625`
 address the latter two problems; the hook also skips Husky installation
 because the parent's Git configuration is read-only. The current full check
-passes 58 files and 1353 tests.
+passes 58 files and 1356 tests.
+
+A peer review found that forced setup termination could leave npm cache under
+`.pi/provision-*`. Patch capture previously staged that cache. The agents
+extension now excludes those directories from Git status and removes orphaned
+scratch before patch capture. Tests cover both paths, including a linked
+worktree and a sandbox-startup refusal that spawns no worker.
+
+NuGet remains on the network allowlist because `onnxruntime-node` downloads
+optional CUDA libraries from `api.nuget.org` during installation. The first
+live setup failed on that host before the proxy route was enabled; a later
+setup fetched the GPU libraries and completed. A missing `.git` directory now
+needs no linked-worktree metadata grant. The setup hook always has `.pi`
+because startup requires `.pi/sandbox.json`. macOS sandbox behavior remains
+accepted but untested on this Fedora host.
+
+The measured worker runs used system `socat`: `npm run check` took 23.34
+seconds after 31 seconds of setup; `npm ci` took 36.34 seconds after 34
+seconds of setup. The npm install run needed worktree-local temporary storage
+and the proxy option. `npm ci` exited 0 but reported two audit vulnerabilities
+(one moderate, one high); this review did not change dependencies.
 
 **Owner-facing operational notes**
 

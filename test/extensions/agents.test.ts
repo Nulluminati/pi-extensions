@@ -873,13 +873,25 @@ sleep 30
     await initGitRepo(cwd);
     await mkdir(join(cwd, CONFIG_DIR_NAME, "workers"), { recursive: true });
     await writeFile(join(cwd, CONFIG_DIR_NAME, "workers", "registry.json"), "{}\n");
+    const scratch = `${CONFIG_DIR_NAME}/provision-Ab12Cd34/npm-cache/blob`;
+    await mkdir(join(cwd, CONFIG_DIR_NAME, "provision-Ab12Cd34", "npm-cache"), { recursive: true });
+    await writeFile(join(cwd, scratch), "cached package\n");
 
     await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
 
     const exclude = await readFile(join(cwd, ".git", "info", "exclude"), "utf8");
     expect(exclude.split("\n")).toContain(`${projectStateRelative("workers")}/`);
     expect(exclude.split("\n")).toContain(`${projectStateRelative("worktrees")}/`);
+    expect(exclude.split("\n")).toContain(`${projectStateRelative("provision-*")}/`);
+    expect(await runGit(cwd, ["check-ignore", "-v", scratch])).toContain("provision-*/");
     expect(await runGit(cwd, ["status", "--porcelain"])).toBe("");
+    const wt = await createWorktree(cwd, "w-exclude-scratch");
+    await mkdir(join(wt.path, CONFIG_DIR_NAME, "provision-Ab12Cd34", "npm-cache"), {
+      recursive: true,
+    });
+    await writeFile(join(wt.path, scratch), "cached package\n");
+    expect(await runGit(wt.path, ["check-ignore", "-v", scratch])).toContain("provision-*/");
+    expect(await runGit(wt.path, ["status", "--porcelain"])).toBe("");
     // The shared registry is gone after the one-time migration.
     await expect(
       stat(join(cwd, CONFIG_DIR_NAME, "workers", "registry.json")),
@@ -1623,6 +1635,31 @@ sleep 30
       expect(await loadWorker(cwd, record.id)).toBeUndefined();
     });
 
+    it("sandbox initialization failure refuses delegation without spawning an unsandboxed worker", async () => {
+      fakeWorktreeGit();
+      await writeProvisionConfig(cwd);
+      vi.mocked(runSetupHook).mockRejectedValueOnce(
+        new Error("Sandbox dependencies not available: socat not installed"),
+      );
+      const spawnMarker = join(fixtureDir, "unsandboxed-spawn-marker");
+      setEnv(
+        "PI_WORKER_COMMAND",
+        await writeFixture(
+          fixtureDir,
+          "unsandboxed-spawn-marker.sh",
+          `#!/bin/sh\ntouch '${spawnMarker}'\nexit 0\n`,
+        ),
+      );
+
+      await expect(executeTool("delegate", { task: "isolated task" })).rejects.toThrow(
+        /provisioned: failed \(Sandbox dependencies not available: socat not installed\)/,
+      );
+      const records = await listRecordFiles(cwd);
+      expect(records).toHaveLength(1);
+      expect(records[0].provision?.state).toBe("failed");
+      expect(existsSync(spawnMarker)).toBe(false);
+    });
+
     it("an empty-output hook failure points at the setup hook and log", async () => {
       fakeWorktreeGit();
       await writeProvisionConfig(cwd);
@@ -1913,6 +1950,27 @@ describe("agents-units", () => {
       await removeWorktree(repo, "w-test");
       const { existsSync } = await import("node:fs");
       expect(existsSync(wt.path)).toBe(false);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("captureWorktreePatch removes orphaned setup cache before staging worker changes", async () => {
+    const repo = await mkdtemp(join(tmpdir(), "agents-wt-orphan-cache-"));
+    try {
+      await initGitRepo(repo);
+      const wt = await createWorktree(repo, "w-orphan-cache");
+      const scratch = join(wt.path, CONFIG_DIR_NAME, "provision-Ab12Cd34");
+      await mkdir(join(scratch, "npm-cache"), { recursive: true });
+      await writeFile(join(scratch, "npm-cache", "blob"), "cached package\n");
+      await writeFile(join(wt.path, "result.txt"), "worker output\n");
+
+      const patchPath = join(repo, "orphan.patch.diff");
+      await captureWorktreePatch(wt.path, patchPath);
+      const patch = await readFile(patchPath, "utf8");
+      expect(patch).toContain("result.txt");
+      expect(patch).not.toContain("provision-Ab12Cd34");
+      await expect(stat(scratch)).rejects.toMatchObject({ code: "ENOENT" });
     } finally {
       await rm(repo, { recursive: true, force: true });
     }

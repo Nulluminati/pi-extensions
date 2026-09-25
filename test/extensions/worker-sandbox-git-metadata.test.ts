@@ -32,6 +32,15 @@ describe("worker worktree Git metadata", () => {
     }
   });
 
+  it("does not grant Git metadata in a directory without .git", () => {
+    const directory = mkdtempSync(join(tmpdir(), "worker-no-git-"));
+    try {
+      expect(worktreeGitCommonDir(directory)).toBeUndefined();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("refuses an unrelated Git directory even when the worktree pointer exists", () => {
     const fixture = mkdtempSync(join(tmpdir(), "worker-git-metadata-"));
     const worker = join(fixture, "worker");

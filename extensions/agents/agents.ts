@@ -537,6 +537,7 @@ export default async function agentsExtension(pi: ExtensionAPI) {
     try {
       await excludeFromGit(ctx.cwd, `${projectStateRelative("workers")}/`);
       await excludeFromGit(ctx.cwd, `${projectStateRelative("worktrees")}/`);
+      await excludeFromGit(ctx.cwd, `${projectStateRelative("provision-*")}/`);
     } catch (error) {
       console.error(`[agents] git exclude failed: ${(error as Error).message}`);
     }
