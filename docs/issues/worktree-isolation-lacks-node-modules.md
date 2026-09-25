@@ -128,3 +128,36 @@ probes must assert on status, not on fetch rejection.
 - [x] Tests: failed-provision record carries `worktree` and prunes; stale
       fingerprint refuses; preflight refusal precedes reservation; secret-glob
       carry refused; symlink escape skipped
+
+## Field feedback — first live run (2026-09-25, session swift-otter-4)
+
+Four delegates; three provision failures; final run "share reflink, command exit 0 (78s)".
+
+Confirmed working: refusal pointers actionable, skill path present, recovery flow's
+"second failure is loud" rule stopped the loop, commit `75d1f8b` scoped to the config
+file only, `Provision:` status line with mode + duration is valued, ENVIRONMENT block
+evidenced working through worker behavior.
+
+Gaps to fix:
+
+1. **Pointer lines lack evidence.** `failed (exec aborted)` and `failed (exit 137): .`
+   (empty detail after the colon). npm debug logs had to be found manually under
+   `~/.cache/pi-provision/npm/_logs`. Biggest ask: raw failure reason + `logs: <path>`
+   in the pointer line.
+2. **Skill gaps.** `share` default wording reads like a phantom enum value; default
+   `timeoutSeconds: 120` too small for a cold install (user ended at 3600); no
+   musl-guest/glibc-host note (the reason a plain copy cannot satisfy native tooling);
+   no log-location pointer; no worked example for the combination that actually worked:
+   `share: hardlink-copy` + `provision: "npm install --no-audit --no-fund"` (small
+   reify delta, adds musl binaries, low memory) with `github.com` in network —
+   `npm ci` cache-hit extraction was SIGKILLed (exit 137, likely sandbox OOM) and its
+   postinstall hung on a GitHub download.
+3. **Commit cadence undocumented + notification unseen.** Config commits only fire on a
+   successful provision, so three interim edits stayed uncommitted (only final state
+   landed in 75d1f8b). The "Provision config committed" notify was never seen —
+   investigate wiring; surface the commit in the durable delegate result either way.
+4. **Empty-patch collect fails.** `workers collect` on a read-only worker errors at
+   `git apply` ("No valid patches in input"); user had to re-run with `apply=false`.
+   Default must tolerate an empty patch.
+5. Minor: `isolate: false` currently dodges provisioning entirely (hits the musl wall
+   instead) — provision is easier to dodge than to debug. Document or close later.
