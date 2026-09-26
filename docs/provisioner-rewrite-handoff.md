@@ -3,10 +3,9 @@
 - For: **a new session with zero context** (owner directive, 2026-09-25)
 - From: amber-badger-28 (this session) + solar-heron-80 (review session, read-only, no tree state)
 - Status: direction decided; implementation not started; two gates open (below)
-- Companion docs: `docs/provisioner-redesign-options.md` (decision brief),
-  `docs/issues/worktree-isolation-lacks-node-modules.md` (provisioning design
-  record), `docs/issues/sandboxfs-metadata-latency.md` (perf ledger), plus the
-  issue files for mounts/env/egress evidence.
+- Companion doc: `docs/provisioner-redesign-options.md` (decision brief).
+  The resolved Gondolin and sandboxfs issue files were removed after the
+  rewrite; the migration evidence remains in this handoff.
 
 ## 1. Owner mandate (the binding part)
 

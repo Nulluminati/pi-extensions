@@ -80,10 +80,8 @@ describe("path conventions", () => {
     expect(files.length).toBeGreaterThan(150);
   });
 
-  // Owner decision (2026-09-25): raise the cap instead of masking failures.
-  // The repo walk through sandboxfs costs ~37s (stat latency, see
-  // sandboxfs-metadata-latency.md) while the host finishes in ~1s — slow,
-  // not broken. A real violation still fails on assertion, not on time.
+  // The larger cap accommodates slow filesystem metadata walks without
+  // masking path violations. A real violation still fails on assertion.
   it("resolves global and project paths through lib/paths.ts", () => {
     const offenders = files
       .filter((file) => !ALLOWLIST.has(relative(ROOT, file)) && needsAstCheck(file))
