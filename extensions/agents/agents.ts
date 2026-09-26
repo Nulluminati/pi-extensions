@@ -50,11 +50,13 @@ import {
   loadWorkersFromBranch,
   migrateLegacyRegistry,
   persistWorkerRecord,
+  persistWorkerRemoval,
   pruneStreams,
   pruneWorkerArtifacts,
   removeWorkerRecord,
   sweepWorkerArtifacts,
   updateRecordFile,
+  WORKER_REMOVED_ENTRY,
   WORKER_RETENTION_MS,
   writeRecordFile,
 } from "./src/store.ts";
@@ -168,12 +170,18 @@ export default async function agentsExtension(pi: ExtensionAPI) {
   }
 
   /** Adopt transcript entries added since the last refresh (pi -r restore,
-   *  or another writer of this same session). The transcript is the truth;
-   *  the live-activity overlay happens at render time. */
+   *  or another writer of this same session). Removal markers drop cached
+   *  records; a newly persisted record can precede the branch snapshot. */
   function refreshFromBranch(ctx: ExtensionContext): void {
     const branch = ctx.sessionManager.getBranch() ?? [];
-    for (const [id, record] of loadWorkersFromBranch(branch)) {
+    const records = loadWorkersFromBranch(branch);
+    for (const [id, record] of records) {
       state.branchWorkers.set(id, record);
+    }
+    for (const entry of branch) {
+      if (entry.type !== "custom" || entry.customType !== WORKER_REMOVED_ENTRY) continue;
+      const id = (entry.data as { id?: unknown })?.id;
+      if (typeof id === "string" && !records.has(id)) state.branchWorkers.delete(id);
     }
   }
 
@@ -456,6 +464,15 @@ export default async function agentsExtension(pi: ExtensionAPI) {
         if (record.status === "running") {
           throw new Error(`Worker ${id} is still running; cancel it before removing.`);
         }
+        if (
+          !state.branchWorkers.has(id) &&
+          record.parentPid !== undefined &&
+          isProcessAlive(record.parentPid)
+        ) {
+          throw new Error(
+            `Worker ${id} belongs to another live session and cannot be removed here.`,
+          );
+        }
         // Deliberate abandonment: discard the worktree and branch too — but
         // never when the patch file is gone and the worktree would be the
         // only remaining copy of the worker's changes.
@@ -465,7 +482,22 @@ export default async function agentsExtension(pi: ExtensionAPI) {
             `Patch file ${record.patchPath} is missing; keeping worktree ${record.worktree} so the worker's changes are not lost.`,
           );
         }
-        await removeWorkerRecord(ctx.cwd, id);
+        // Tombstone this session's own workers: the marker keeps the id
+        // absent across reloads (transcript entries are immutable, so the
+        // record entry alone would resurrect on every replay), and the
+        // persistence queue orders it against a racing terminal save.
+        // An orphan belongs to an ended session's transcript. This
+        // session's marker cannot govern that replay, so it gets artifact
+        // cleanup only.
+        if (state.branchWorkers.has(id)) {
+          await persistWorkerRemoval(
+            (customType, data) => pi.appendEntry(customType, data),
+            ctx.cwd,
+            id,
+          );
+        } else {
+          await removeWorkerRecord(ctx.cwd, id);
+        }
         state.branchWorkers.delete(id);
         await publish(ctx);
         const worktreeNote =

@@ -38,11 +38,14 @@ import {
   loadWorkersFromBranch,
   migrateLegacyRegistry,
   persistWorkerRecord,
+  persistWorkerRemoval,
   pruneWorkerArtifacts,
+  removeWorkerRecord,
   streamPath,
   sweepWorkerArtifacts,
   updateRecordFile,
   WORKER_RECORD_ENTRY,
+  WORKER_REMOVED_ENTRY,
   WORKER_RETENTION_MS,
 } from "../../extensions/agents/src/store.ts";
 import type { WorkerEvents, WorkerRecord } from "../../extensions/agents/src/types.ts";
@@ -260,6 +263,11 @@ function branchEntry(record: WorkerRecord): {
   data: WorkerRecord;
 } {
   return { type: "custom", customType: WORKER_RECORD_ENTRY, data: record };
+}
+
+/** Transcript entry shape the extension appends on worker removal. */
+function removedEntry(id: string): { type: string; customType: string; data: { id: string } } {
+  return { type: "custom", customType: WORKER_REMOVED_ENTRY, data: { id } };
 }
 
 // --- Suite ---
@@ -1502,6 +1510,129 @@ sleep 30
     await expect(runGit(cwd, ["rev-parse", "--verify", "agents/w-lost"])).rejects.toThrow();
   });
 
+  it("workers remove tombstones a transcript-owned worker so it stays absent after reload", async () => {
+    await initGitRepo(cwd);
+    const record = makeWorkerRecord({
+      id: "w-gone",
+      name: "gone",
+      status: "completed",
+      startedAt: Date.now(),
+      endedAt: Date.now(),
+    });
+    let branch: unknown[] = [branchEntry(record)];
+    mockCtx.sessionManager.getBranch = vi.fn(() => branch);
+
+    const removed = await executeTool("workers", { action: "remove", id: "w-gone" });
+    expect(removed.content[0].text).toContain("removed");
+    expect(mockPi.appendEntry).toHaveBeenCalledWith(
+      WORKER_REMOVED_ENTRY,
+      expect.objectContaining({ id: "w-gone" }),
+    );
+    expect(await loadWorker(cwd, "w-gone")).toBeUndefined();
+
+    // pi persisted the marker to the transcript: the next workers action
+    // and a session_start replay must both keep the id absent.
+    branch = [branchEntry(record), removedEntry("w-gone")];
+
+    const relisted = await executeTool("workers", { action: "list" });
+    expect(relisted.content[0].text).not.toContain("w-gone");
+
+    await getEventHandler("session_start")({ type: "session_start", reason: "reload" }, mockCtx);
+    const afterReload = await executeTool("workers", { action: "list" });
+    expect(afterReload.content[0].text).toContain("No workers yet");
+    await expect(executeTool("workers", { action: "status", id: "w-gone" })).rejects.toThrow(
+      /Unknown worker/,
+    );
+  });
+
+  it("refresh reconciles a removal marker replayed from the branch", async () => {
+    const record = makeWorkerRecord({
+      id: "w-drop",
+      name: "drop",
+      status: "completed",
+      startedAt: Date.now(),
+      endedAt: Date.now(),
+    });
+    let branch: unknown[] = [branchEntry(record)];
+    mockCtx.sessionManager.getBranch = vi.fn(() => branch);
+
+    // First action caches the record in memory.
+    const first = await executeTool("workers", { action: "list" });
+    expect(first.content[0].text).toContain("drop");
+
+    // A reload (or another writer of this session) replays the branch with
+    // the marker: the cached record must be dropped, not just shadowed.
+    branch = [branchEntry(record), removedEntry("w-drop")];
+    const second = await executeTool("workers", { action: "list" });
+    expect(second.content[0].text).toContain("No workers yet");
+  });
+
+  it("removing an orphan deletes its artifacts but refuses another live session's worker", async () => {
+    // An orphan's owner is gone; a foreign worker still has a live owner.
+    // Neither is governed by this session's transcript, so no marker here.
+    await seedRecord(
+      cwd,
+      makeWorkerRecord({
+        id: "w-orphan",
+        name: "abandoned",
+        parentPid: 999_999_999,
+        status: "completed",
+        startedAt: Date.now(),
+        endedAt: Date.now(),
+      }),
+    );
+    await seedRecord(
+      cwd,
+      makeWorkerRecord({
+        id: "w-foreign",
+        name: "foreign",
+        parentPid: process.pid,
+        status: "failed",
+        startedAt: Date.now(),
+        endedAt: Date.now(),
+      }),
+    );
+
+    await executeTool("workers", { action: "remove", id: "w-orphan" });
+    await expect(executeTool("workers", { action: "remove", id: "w-foreign" })).rejects.toThrow(
+      /another live session/,
+    );
+
+    expect(await loadWorker(cwd, "w-orphan")).toBeUndefined();
+    expect(await loadWorker(cwd, "w-foreign")).toBeDefined();
+    const markerCalls = mockPi.appendEntry.mock.calls.filter(
+      (call) => call[0] === WORKER_REMOVED_ENTRY,
+    );
+    expect(markerCalls).toHaveLength(0);
+  });
+
+  it("workers remove clears an old ghost with a transcript entry but no artifact file", async () => {
+    await initGitRepo(cwd);
+    const record = makeWorkerRecord({
+      id: "w-ghost",
+      name: "ghost",
+      status: "completed",
+      startedAt: Date.now(),
+      endedAt: Date.now(),
+    });
+    // The record file was pruned or lost; the transcript entry alone kept
+    // resurrecting this worker on every reload. No disk artifacts exist.
+    let branch: unknown[] = [branchEntry(record)];
+    mockCtx.sessionManager.getBranch = vi.fn(() => branch);
+
+    const removed = await executeTool("workers", { action: "remove", id: "w-ghost" });
+    expect(removed.content[0].text).toContain("removed");
+    expect(mockPi.appendEntry).toHaveBeenCalledWith(
+      WORKER_REMOVED_ENTRY,
+      expect.objectContaining({ id: "w-ghost" }),
+    );
+
+    branch = [branchEntry(record), removedEntry("w-ghost")];
+    await expect(executeTool("workers", { action: "status", id: "w-ghost" })).rejects.toThrow(
+      /Unknown worker/,
+    );
+  });
+
   it("session_start prunes records past the retention window", async () => {
     await seedRecord(
       cwd,
@@ -1800,6 +1931,38 @@ sleep 30
       expect(records[0].worktree).toBeUndefined(); // discarded: no orphan
       expect(vi.mocked(runSetupHook)).not.toHaveBeenCalled();
       expect(existsSync(join(cwd, CONFIG_DIR_NAME, "worktrees", records[0].id))).toBe(false);
+    });
+
+    it("a dirty-tree refusal before spawn leaves no record, slot, or worktree", async () => {
+      await initGitRepo(cwd);
+      await writeProvisionConfig(cwd);
+      // Dirty outside the config dir: preflight passes, createWorktree refuses.
+      await writeFile(join(cwd, "scratch.ts"), "export {};\n");
+      const spawnMarker = join(fixtureDir, "dirty-spawn-marker");
+      setEnv(
+        "PI_WORKER_COMMAND",
+        await writeFixture(
+          fixtureDir,
+          "dirty-spawn-marker.sh",
+          `#!/bin/sh\ntouch '${spawnMarker}'\n${SUCCESS_WORKER}`,
+        ),
+      );
+      setEnv("PI_MAX_WORKERS", "1");
+
+      await expect(executeTool("delegate", { task: "isolated task" })).rejects.toThrow(
+        /dirty tree/,
+      );
+
+      // The spawn was refused before anything existed: no phantom failed
+      // record (disk or transcript), no worktree, nothing spawned.
+      expect(await listRecordFiles(cwd)).toHaveLength(0);
+      expect(mockPi.appendEntry).not.toHaveBeenCalled();
+      expect(existsSync(join(cwd, CONFIG_DIR_NAME, "worktrees"))).toBe(false);
+      expect(existsSync(spawnMarker)).toBe(false);
+
+      // The slot was released: a next delegate works at the cap of 1.
+      const next = await executeTool("delegate", { task: "follow-up", isolate: false, wait: true });
+      expect((next.details.worker as WorkerRecord).status).toBe("completed");
     });
 
     it("a failed setup commit refuses the delegate before any slot, worktree, or record exists", async () => {
@@ -2163,6 +2326,129 @@ describe("agents-worker store (session-scoped)", () => {
       { type: "custom", customType: WORKER_RECORD_ENTRY, data: null },
     ]);
     expect(workers.size).toBe(0);
+  });
+
+  it("a removed finished worker stays absent on replay while kept history remains", () => {
+    const removedWorker = makeWorkerRecord({
+      id: "w-removed",
+      name: "removed",
+      status: "completed",
+      startedAt: 1,
+      endedAt: 2,
+    });
+    const kept = makeWorkerRecord({
+      id: "w-kept",
+      name: "kept",
+      status: "completed",
+      startedAt: 1,
+      endedAt: 2,
+    });
+
+    const workers = loadWorkersFromBranch([
+      branchEntry(removedWorker),
+      branchEntry(kept),
+      removedEntry("w-removed"),
+    ]);
+
+    expect(workers.has("w-removed")).toBe(false);
+    expect(workers.get("w-kept")?.id).toBe("w-kept");
+  });
+
+  it("loadWorkersFromBranch applies worker-removed markers with last-wins semantics", () => {
+    const completed = makeWorkerRecord({
+      id: "w-a",
+      name: "a",
+      status: "completed",
+      startedAt: 1,
+      endedAt: 2,
+    });
+
+    // Marker after the record: the removal wins.
+    expect(loadWorkersFromBranch([branchEntry(completed), removedEntry("w-a")]).size).toBe(0);
+
+    // A record after the marker re-adds the id (last entry wins).
+    const reAdded = loadWorkersFromBranch([removedEntry("w-a"), branchEntry(completed)]);
+    expect(reAdded.get("w-a")?.status).toBe("completed");
+
+    // Re-added, then removed again: absent.
+    expect(
+      loadWorkersFromBranch([removedEntry("w-a"), branchEntry(completed), removedEntry("w-a")])
+        .size,
+    ).toBe(0);
+
+    // A marker only shadows its own id.
+    const other = makeWorkerRecord({ id: "w-b", name: "b", status: "completed" });
+    const scoped = loadWorkersFromBranch([
+      branchEntry(completed),
+      removedEntry("w-a"),
+      branchEntry(other),
+    ]);
+    expect(scoped.has("w-a")).toBe(false);
+    expect(scoped.get("w-b")?.id).toBe("w-b");
+
+    // Corrupt markers (no id) are ignored.
+    const withCorrupt = loadWorkersFromBranch([
+      branchEntry(completed),
+      { type: "custom", customType: WORKER_REMOVED_ENTRY, data: {} },
+    ]);
+    expect(withCorrupt.get("w-a")?.id).toBe("w-a");
+  });
+
+  it("persistWorkerRemoval deletes artifacts, appends the marker, and blocks later saves", async () => {
+    const appendEntry = vi.fn();
+    await seedRecord(
+      cwd,
+      makeWorkerRecord({ id: "w-r", name: "r", status: "completed", startedAt: 1, endedAt: 2 }),
+    );
+    await mkdir(join(cwd, CONFIG_DIR_NAME, "workers", "streams"), { recursive: true });
+    const streamFile = streamPath(cwd, "w-r");
+    await writeFile(streamFile, "{}\n", "utf8");
+
+    await persistWorkerRemoval(appendEntry, cwd, "w-r");
+
+    expect(appendEntry).toHaveBeenCalledWith(
+      WORKER_REMOVED_ENTRY,
+      expect.objectContaining({ id: "w-r" }),
+    );
+    expect(await loadWorker(cwd, "w-r")).toBeUndefined();
+    await expect(stat(streamFile)).rejects.toMatchObject({ code: "ENOENT" });
+
+    // A terminal save arriving after the removal cannot re-add the worker:
+    // no transcript entry, no artifact file.
+    const lateSave = await persistWorkerRecord(
+      appendEntry,
+      cwd,
+      makeWorkerRecord({ id: "w-r", name: "r", status: "completed", startedAt: 3, endedAt: 4 }),
+    );
+    expect(lateSave).toBe(false);
+    expect(appendEntry).toHaveBeenCalledTimes(1);
+    expect(await loadWorker(cwd, "w-r")).toBeUndefined();
+  });
+
+  it("a terminal save queued behind a removal in the same tick is refused", async () => {
+    const appendEntry = vi.fn();
+
+    const removal = persistWorkerRemoval(appendEntry, cwd, "w-q");
+    const save = persistWorkerRecord(
+      appendEntry,
+      cwd,
+      makeWorkerRecord({ id: "w-q", name: "q", status: "completed" }),
+    );
+    await Promise.all([removal, save]);
+
+    expect(await save).toBe(false);
+    expect(appendEntry).toHaveBeenCalledTimes(1); // the marker only
+    expect(await loadWorker(cwd, "w-q")).toBeUndefined();
+  });
+
+  it("removeWorkerRecord clears a ghost with no artifact file but refuses a running record", async () => {
+    // Transcript ownership is the caller's check: a missing artifact file
+    // (pruned or lost) must not block removal.
+    await expect(removeWorkerRecord(cwd, "w-absent")).resolves.toBeUndefined();
+
+    await seedRecord(cwd, makeWorkerRecord({ id: "w-live", name: "live", pid: process.pid }));
+    await expect(removeWorkerRecord(cwd, "w-live")).rejects.toThrow(/still running/);
+    expect(await loadWorker(cwd, "w-live")).toBeDefined();
   });
 
   it("updateRecordFile read-modify-writes under the per-record lock", async () => {

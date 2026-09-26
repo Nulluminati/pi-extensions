@@ -23,7 +23,7 @@ import { generateWorkerId, sweepWorkerArtifacts } from "./store.ts";
 import type { WorkerEvents, WorkerRecord } from "./types.ts";
 import { resolveWorkerExtensions } from "./worker-extensions.ts";
 import { PROVISION_HOOK_RELATIVE, WORKER_SANDBOX_RELATIVE } from "./worker-sandbox-config.ts";
-import { createWorktree, isGitRepo, removeWorktree } from "./worktree.ts";
+import { createWorktree, DirtyWorktreeError, isGitRepo, removeWorktree } from "./worktree.ts";
 
 // --- Constants ---
 
@@ -469,6 +469,11 @@ export async function startDelegatedWorker(
       await removeWorktree(cwd, workerId).catch(() => {});
       worktree = undefined;
     }
+    // Dirty-tree refusal: the spawn was declined before anything existed
+    // (no worktree, no process; the reservation is released in finally),
+    // so no failed record is persisted — a refused spawn leaves nothing
+    // behind. Real provision failures below keep their record/worktree.
+    if (error instanceof DirtyWorktreeError) throw error;
     // Record the failure so history keeps it; a failed record frees its slot
     // immediately (nothing to reconcile later). A persist failure here must
     // not mask the original spawn error.

@@ -75,6 +75,13 @@ function recordLockPath(cwd: string, workerId: string): string {
 /** Transcript custom entry type carrying worker records. */
 export const WORKER_RECORD_ENTRY = "worker-record";
 
+/** Transcript custom entry type marking a worker id as removed. Refresh
+ *  replay treats it as a delete for its id: entries before it are shadowed,
+ *  a later record entry re-adds the id (last-wins). Without it, a remove
+ *  could not keep a deleted id absent — transcript entries are immutable
+ *  history, so the record entry alone would resurrect on every reload. */
+export const WORKER_REMOVED_ENTRY = "worker-removed";
+
 // --- Ids ---
 
 export function generateWorkerId(): string {
@@ -97,13 +104,20 @@ function isWorkerRecord(value: unknown): value is WorkerRecord {
 /**
  * Reconstruct the calling session's workers from its transcript branch.
  * Entries are append-only state transitions; the last entry per worker id
- * wins. Corrupt or foreign entries are ignored.
+ * wins — record entries upsert, removal markers delete. Corrupt or foreign
+ * entries are ignored.
  */
 export function loadWorkersFromBranch(branch: unknown[]): Map<string, WorkerRecord> {
   const workers = new Map<string, WorkerRecord>();
   for (const entry of branch) {
     const candidate = entry as { type?: string; customType?: string; data?: unknown };
-    if (candidate?.type !== "custom" || candidate.customType !== WORKER_RECORD_ENTRY) continue;
+    if (candidate?.type !== "custom") continue;
+    if (candidate.customType === WORKER_REMOVED_ENTRY) {
+      const marker = candidate.data as { id?: unknown } | undefined;
+      if (typeof marker?.id === "string") workers.delete(marker.id);
+      continue;
+    }
+    if (candidate.customType !== WORKER_RECORD_ENTRY) continue;
     if (!isWorkerRecord(candidate.data)) continue;
     workers.set(candidate.data.id, candidate.data);
   }
@@ -180,11 +194,19 @@ export async function listRecordFiles(cwd: string): Promise<WorkerRecord[]> {
  *  the queue keeps transcript and artifact file order stable. */
 const persistQueues = new Map<string, Promise<unknown>>();
 
+/** Removal tombstones for this process, keyed by cwd: saves for a removed
+ *  id are refused at execution time, when the queue guarantees the removal
+ *  (artifact deletion + transcript marker) has already run. Transcript
+ *  markers cover replay after restart; this set covers the in-process race
+ *  between a terminal save and a remove. */
+const removedWorkers = new Map<string, Set<string>>();
+
 /**
  * Persist one worker state transition: a transcript entry in the owning
  * session (ownership) plus the artifact metadata file (janitor). Returns
- * false when a late running snapshot would clobber a terminal state — the
- * caller must then not adopt it into its in-memory cache either.
+ * false when a late running snapshot would clobber a terminal state, or
+ * when the worker was removed in this process — either way the caller must
+ * not adopt the record into its in-memory cache.
  */
 export function persistWorkerRecord(
   appendEntry: (customType: string, data: unknown) => void,
@@ -193,6 +215,9 @@ export function persistWorkerRecord(
 ): Promise<boolean> {
   const task = (persistQueues.get(cwd) ?? Promise.resolve())
     .then(async () => {
+      // A queued terminal save must not re-add a worker whose removal is
+      // already ordered ahead of it on this queue.
+      if (removedWorkers.get(cwd)?.has(worker.id)) return false;
       const existing = await readRecordFile(cwd, worker.id);
       if (existing && existing.status !== "running" && worker.status === "running") {
         return false; // Terminal state already durable; a stale running snapshot loses.
@@ -204,6 +229,41 @@ export function persistWorkerRecord(
     .catch((error) => {
       // Persistence failure must not crash the runner; surface loudly.
       console.error(`[agents] worker record persistence failed: ${(error as Error).message}`);
+      throw error;
+    });
+  persistQueues.set(
+    cwd,
+    task.catch(() => {}),
+  );
+  return task;
+}
+
+/**
+ * Persist a worker removal: artifact cleanup plus a `worker-removed`
+ * transcript marker, ordered on the same persistence queue as record saves
+ * so a queued terminal save cannot land after the marker and resurrect the
+ * worker on the next replay. Only for workers this session's transcript
+ * owns (the marker governs this session's replay); orphans and foreign
+ * workers get artifact cleanup only.
+ */
+export function persistWorkerRemoval(
+  appendEntry: (customType: string, data: unknown) => void,
+  cwd: string,
+  workerId: string,
+): Promise<void> {
+  const task = (persistQueues.get(cwd) ?? Promise.resolve())
+    .then(async () => {
+      await removeWorkerRecord(cwd, workerId);
+      appendEntry(WORKER_REMOVED_ENTRY, { id: workerId, removedAt: Date.now() });
+      let tombstones = removedWorkers.get(cwd);
+      if (!tombstones) {
+        tombstones = new Set<string>();
+        removedWorkers.set(cwd, tombstones);
+      }
+      tombstones.add(workerId);
+    })
+    .catch((error) => {
+      console.error(`[agents] worker removal persistence failed: ${(error as Error).message}`);
       throw error;
     });
   persistQueues.set(
@@ -381,11 +441,13 @@ export async function migrateLegacyRegistry(cwd: string): Promise<boolean> {
 // --- Removal ---
 
 /** Supprimer un worker précis (action remove du tool workers) avec ses
- *  artifacts. Refuse un record running et un id inconnu. */
+ *  artifacts. Refuse un record running. L'existence du fichier d'artifacts
+ *  n'est pas exigée : le transcript est l'autorité d'ownership et l'appelant
+ *  valide l'ownership — un ghost (entrée transcript, fichier perdu) se
+ *  supprime proprement. */
 export async function removeWorkerRecord(cwd: string, id: string): Promise<void> {
   const record = await readRecordFile(cwd, id);
-  if (!record) throw new Error(`Unknown worker ${id}. Use action=list to see workers.`);
-  if (record.status === "running") {
+  if (record?.status === "running") {
     throw new Error(`Worker ${id} is still running; cancel it before removing.`);
   }
   await unlink(recordPath(cwd, id)).catch(() => {});

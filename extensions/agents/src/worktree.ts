@@ -35,6 +35,9 @@ export function worktreeBranch(workerId: string): string {
 
 // --- Operations ---
 
+/** Refusal before any worker worktree or process exists. */
+export class DirtyWorktreeError extends Error {}
+
 /** True when the directory is inside a git work tree. */
 export async function isGitRepo(cwd: string): Promise<boolean> {
   try {
@@ -74,7 +77,7 @@ export async function createWorktree(
 ): Promise<{ path: string; branch: string }> {
   const status = await runGit(cwd, ["status", "--porcelain"]);
   if (blockingStatusLines(status).length > 0) {
-    throw new Error(
+    throw new DirtyWorktreeError(
       "Refusing to create a worker worktree from a dirty tree. Commit or stash first so the worker's patch captures a clean baseline.",
     );
   }
