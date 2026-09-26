@@ -270,6 +270,15 @@ CONNECT returns proxy 403. macOS remains accepted but untested here; the
 peer-review closure reproduced the setup-scratch exclusion for directories,
 files, and symlinks in a fresh repository.
 
+Convention rename (same day, after review closure): the setup hook now lives
+at `.pi/provision-worktree`, a sibling of `.pi/sandbox.json`, so all harness
+files share the config directory. Setup scratch renamed to
+`.pi/provision-tmp-XXXXXXXX` because the tracked hook name itself matched the
+old eight-character scratch sweep and would have been deleted before capture.
+Exclusion and sweep tests cover the tracked hook surviving next to scratch.
+Sections above that name `scripts/provision-worktree` record the paths as
+they were at the time.
+
 **Owner-facing operational notes**
 
 1. Fedora 43 has `socat`, `bwrap`, and `rg` installed. The initial spike used

@@ -496,9 +496,10 @@ export default async function agentsExtension(pi: ExtensionAPI) {
     // Event contexts carry a usable ui surface: capture it so the widget is
     // restored on session_start (reload) before any tool call has run.
     if (ctx.hasUI) lastUi = ctx.ui;
-    // The setup hook (scripts/provision-worktree) and worker sandbox policy
-    // are project files; no bundled materialization or state exclusions are
-    // needed. Provision run logs live in the global cache, outside the repo.
+    // The setup hook (the config-dir provision-worktree file) and worker
+    // sandbox policy are project files; no bundled materialization or state
+    // exclusions are needed. Provision run logs live in the global cache,
+    // outside the repo.
     // One-time migration from the legacy shared registry to per-worker
     // artifact files (old records classify as orphans: no owner is known).
     await migrateLegacyRegistry(ctx.cwd);
@@ -537,7 +538,7 @@ export default async function agentsExtension(pi: ExtensionAPI) {
     try {
       await excludeFromGit(ctx.cwd, `${projectStateRelative("workers")}/`);
       await excludeFromGit(ctx.cwd, `${projectStateRelative("worktrees")}/`);
-      await excludeFromGit(ctx.cwd, projectStateRelative("provision-*"));
+      await excludeFromGit(ctx.cwd, projectStateRelative("provision-tmp-*"));
     } catch (error) {
       console.error(`[agents] git exclude failed: ${(error as Error).message}`);
     }

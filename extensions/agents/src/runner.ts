@@ -595,7 +595,7 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
         if (ingestStreamEvent(line, record) === "blocker" && !blockerWakeSent) {
           blockerWakeSent = true;
           events.wake(
-            `[worker ${record.name} (${record.id}) reported a blocker]. Use the workers tool (action=status, id=${record.id}) for details. If environmental, fix scripts/provision-worktree or ${projectStateRelative("sandbox.json")} in the parent checkout and re-delegate.`,
+            `[worker ${record.name} (${record.id}) reported a blocker]. Use the workers tool (action=status, id=${record.id}) for details. If environmental, fix ${projectStateRelative("provision-worktree")} or ${projectStateRelative("sandbox.json")} in the parent checkout and re-delegate.`,
           );
         }
       }

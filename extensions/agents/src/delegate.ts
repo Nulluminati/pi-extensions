@@ -22,15 +22,13 @@ import { type RunningWorker, startWorker } from "./runner.ts";
 import { generateWorkerId, sweepWorkerArtifacts } from "./store.ts";
 import type { WorkerEvents, WorkerRecord } from "./types.ts";
 import { resolveWorkerExtensions } from "./worker-extensions.ts";
-import { WORKER_SANDBOX_RELATIVE } from "./worker-sandbox-config.ts";
+import { PROVISION_HOOK_RELATIVE, WORKER_SANDBOX_RELATIVE } from "./worker-sandbox-config.ts";
 import { createWorktree, isGitRepo, removeWorktree } from "./worktree.ts";
 
 // --- Constants ---
 
 const DEFAULT_TIMEOUT_MS = 900_000;
 
-/** Conventional project setup hook (executable, project-owned). */
-const SETUP_HOOK_RELATIVE = "scripts/provision-worktree";
 /** Fixed message for the path-limited setup-file commit (review D2). */
 const SETUP_COMMIT_MESSAGE = "chore(provision): update worktree setup files";
 /** Setup budget for one worktree; secret values stay with the project files. */
@@ -78,13 +76,13 @@ class ProvisionRefusal extends Error {
 
 /** Repo-root-free relative listing of the setup files being checked. */
 function setupFileList(): string[] {
-  return [SETUP_HOOK_RELATIVE, WORKER_SANDBOX_RELATIVE];
+  return [PROVISION_HOOK_RELATIVE, WORKER_SANDBOX_RELATIVE];
 }
 
 /** Refusal text pointing at the path the model should fix. */
 function setupRefusal(reason: string): Error {
   return new Error(
-    `provisioned: ${reason}. Fix ${SETUP_HOOK_RELATIVE} and ${WORKER_SANDBOX_RELATIVE} in the parent checkout, then re-delegate.`,
+    `provisioned: ${reason}. Fix ${PROVISION_HOOK_RELATIVE} and ${WORKER_SANDBOX_RELATIVE} in the parent checkout, then re-delegate.`,
   );
 }
 
@@ -175,7 +173,7 @@ async function provisionWorktree(
               detail: detail ? `exit ${run.exitCode}: ${detail}` : `exit ${run.exitCode}`,
               at: Date.now(),
             },
-            `provisioned: failed (exit ${run.exitCode})${detail ? `: ${detail}` : ""}. Log: ${run.logPath}. Fix ${SETUP_HOOK_RELATIVE} or the environment, then re-delegate.`,
+            `provisioned: failed (exit ${run.exitCode})${detail ? `: ${detail}` : ""}. Log: ${run.logPath}. Fix ${PROVISION_HOOK_RELATIVE} or the environment, then re-delegate.`,
           );
         }
         detailParts.push(`hook exit ${run.exitCode} (${Math.round(run.ms / 1000)}s)`);
@@ -195,7 +193,7 @@ async function provisionWorktree(
     }
     throw new ProvisionRefusal(
       { state: "failed", detail: oneLine(messageOf(error)), at: Date.now() },
-      `provisioned: failed (${oneLine(messageOf(error))}). Fix ${SETUP_HOOK_RELATIVE} or the environment, then re-delegate.`,
+      `provisioned: failed (${oneLine(messageOf(error))}). Fix ${PROVISION_HOOK_RELATIVE} or the environment, then re-delegate.`,
     );
   }
   if (setupCommittedAtPreflight) detailParts.push("setup committed");

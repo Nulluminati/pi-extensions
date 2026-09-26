@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import { cacheDir } from "../../../../lib/paths.ts";
 import { startWorkerSandbox } from "../../../worker-sandbox/src/client.ts";
 
-const HOOK_PATH = join("scripts", "provision-worktree");
+const HOOK_PATH = join(CONFIG_DIR_NAME, "provision-worktree");
 const MAX_LOG_BYTES = 5 * 1024 * 1024;
 const DETAIL_LENGTH = 400;
 
@@ -46,7 +47,7 @@ export async function runSetupHook(worktree: string, timeoutMs: number): Promise
     controller.abort();
   }, timeoutMs);
   try {
-    const result = await client.runShell("./scripts/provision-worktree", {
+    const result = await client.runShell(`./${HOOK_PATH}`, {
       cwd: worktree,
       signal: controller.signal,
       timeout: Math.max(1, Math.ceil(timeoutMs / 1000)),

@@ -177,7 +177,6 @@ async function initGitRepo(cwd: string): Promise<void> {
 /** Setup files so isolated delegates clear the v2 preflight ladder. */
 async function writeProvisionConfig(cwd: string): Promise<void> {
   await mkdir(join(cwd, CONFIG_DIR_NAME), { recursive: true });
-  await mkdir(join(cwd, "scripts"), { recursive: true });
   await writeFile(
     join(cwd, CONFIG_DIR_NAME, "sandbox.json"),
     JSON.stringify({
@@ -186,8 +185,8 @@ async function writeProvisionConfig(cwd: string): Promise<void> {
     }),
     "utf8",
   );
-  await writeFile(join(cwd, "scripts", "provision-worktree"), "#!/bin/sh\nexit 0\n", "utf8");
-  await chmod(join(cwd, "scripts", "provision-worktree"), 0o755);
+  await writeFile(join(cwd, CONFIG_DIR_NAME, "provision-worktree"), "#!/bin/sh\nexit 0\n", "utf8");
+  await chmod(join(cwd, CONFIG_DIR_NAME, "provision-worktree"), 0o755);
 }
 
 interface WakeMessageShape {
@@ -883,9 +882,11 @@ sleep 30
     await initGitRepo(cwd);
     await mkdir(join(cwd, CONFIG_DIR_NAME, "workers"), { recursive: true });
     await writeFile(join(cwd, CONFIG_DIR_NAME, "workers", "registry.json"), "{}\n");
-    const scratch = `${CONFIG_DIR_NAME}/provision-Ab12Cd34/npm-cache/blob`;
-    const scratchFile = `${CONFIG_DIR_NAME}/provision-Ef56Gh78`;
-    await mkdir(join(cwd, CONFIG_DIR_NAME, "provision-Ab12Cd34", "npm-cache"), { recursive: true });
+    const scratch = `${CONFIG_DIR_NAME}/provision-tmp-Ab12Cd34/npm-cache/blob`;
+    const scratchFile = `${CONFIG_DIR_NAME}/provision-tmp-Ef56Gh78`;
+    await mkdir(join(cwd, CONFIG_DIR_NAME, "provision-tmp-Ab12Cd34", "npm-cache"), {
+      recursive: true,
+    });
     await writeFile(join(cwd, scratch), "cached package\n");
     await writeFile(join(cwd, scratchFile), "temporary credentials\n");
 
@@ -894,18 +895,18 @@ sleep 30
     const exclude = await readFile(join(cwd, ".git", "info", "exclude"), "utf8");
     expect(exclude.split("\n")).toContain(`${projectStateRelative("workers")}/`);
     expect(exclude.split("\n")).toContain(`${projectStateRelative("worktrees")}/`);
-    expect(exclude.split("\n")).toContain(projectStateRelative("provision-*"));
-    expect(await runGit(cwd, ["check-ignore", "-v", scratch])).toContain("provision-*");
-    expect(await runGit(cwd, ["check-ignore", "-v", scratchFile])).toContain("provision-*");
+    expect(exclude.split("\n")).toContain(projectStateRelative("provision-tmp-*"));
+    expect(await runGit(cwd, ["check-ignore", "-v", scratch])).toContain("provision-tmp-*");
+    expect(await runGit(cwd, ["check-ignore", "-v", scratchFile])).toContain("provision-tmp-*");
     expect(await runGit(cwd, ["status", "--porcelain"])).toBe("");
     const wt = await createWorktree(cwd, "w-exclude-scratch");
-    await mkdir(join(wt.path, CONFIG_DIR_NAME, "provision-Ab12Cd34", "npm-cache"), {
+    await mkdir(join(wt.path, CONFIG_DIR_NAME, "provision-tmp-Ab12Cd34", "npm-cache"), {
       recursive: true,
     });
     await writeFile(join(wt.path, scratch), "cached package\n");
     await writeFile(join(wt.path, scratchFile), "temporary credentials\n");
-    expect(await runGit(wt.path, ["check-ignore", "-v", scratch])).toContain("provision-*");
-    expect(await runGit(wt.path, ["check-ignore", "-v", scratchFile])).toContain("provision-*");
+    expect(await runGit(wt.path, ["check-ignore", "-v", scratch])).toContain("provision-tmp-*");
+    expect(await runGit(wt.path, ["check-ignore", "-v", scratchFile])).toContain("provision-tmp-*");
     expect(await runGit(wt.path, ["status", "--porcelain"])).toBe("");
     // The shared registry is gone after the one-time migration.
     await expect(
@@ -1565,8 +1566,8 @@ sleep 30
       );
 
       expect(error?.message).toContain("provisioned: none (setup hook missing or not executable");
-      expect(error?.message).toContain("scripts/provision-worktree");
-      expect(error?.message).toContain(".pi/sandbox.json");
+      expect(error?.message).toContain(join(CONFIG_DIR_NAME, "provision-worktree"));
+      expect(error?.message).toContain(join(CONFIG_DIR_NAME, "sandbox.json"));
       expect((await listRecordFiles(cwd)).length).toBe(0);
       expect(existsSync(join(cwd, CONFIG_DIR_NAME, "worktrees"))).toBe(false);
     });
@@ -1575,9 +1576,13 @@ sleep 30
       vi.mocked(runGit).mockImplementation(async (_repoCwd, args) =>
         args[0] === "rev-parse" && args[1] === "--is-inside-work-tree" ? "true\n" : "",
       );
-      await mkdir(join(cwd, "scripts"), { recursive: true });
-      await writeFile(join(cwd, "scripts", "provision-worktree"), "#!/bin/sh\nexit 0\n", "utf8");
-      await chmod(join(cwd, "scripts", "provision-worktree"), 0o755);
+      await mkdir(join(cwd, CONFIG_DIR_NAME), { recursive: true });
+      await writeFile(
+        join(cwd, CONFIG_DIR_NAME, "provision-worktree"),
+        "#!/bin/sh\nexit 0\n",
+        "utf8",
+      );
+      await chmod(join(cwd, CONFIG_DIR_NAME, "provision-worktree"), 0o755);
 
       await expect(executeTool("delegate", { task: "isolated task" })).rejects.toThrow(
         /provisioned: none \(sandbox policy missing/,
@@ -1588,8 +1593,12 @@ sleep 30
     it("a modified tracked setup file is path-committed and removed from the dirty gate", async () => {
       await writeProvisionConfig(cwd);
       await initGitRepo(cwd);
-      await writeFile(join(cwd, "scripts", "provision-worktree"), "#!/bin/sh\necho v2\n", "utf8");
-      await chmod(join(cwd, "scripts", "provision-worktree"), 0o755);
+      await writeFile(
+        join(cwd, CONFIG_DIR_NAME, "provision-worktree"),
+        "#!/bin/sh\necho v2\n",
+        "utf8",
+      );
+      await chmod(join(cwd, CONFIG_DIR_NAME, "provision-worktree"), 0o755);
       const fixture = await writeFixture(fixtureDir, "v2-worker.sh", SUCCESS_WORKER);
       setEnv("PI_WORKER_COMMAND", fixture);
 
@@ -1598,13 +1607,13 @@ sleep 30
 
       const status = await execFileAsync(
         "git",
-        ["status", "--porcelain", "--", "scripts/provision-worktree"],
+        ["status", "--porcelain", "--", join(CONFIG_DIR_NAME, "provision-worktree")],
         gitOpts(cwd),
       );
       expect(status.stdout.trim()).toBe("");
       const head = await execFileAsync(
         "git",
-        ["show", "HEAD:scripts/provision-worktree"],
+        ["show", `HEAD:${join(CONFIG_DIR_NAME, "provision-worktree")}`],
         gitOpts(cwd),
       );
       expect(head.stdout).toContain("v2");
@@ -1630,7 +1639,7 @@ sleep 30
       );
 
       await expect(executeTool("delegate", { task: "isolated task" })).rejects.toThrow(
-        /provisioned: failed \(exit 1\): setup failed\. Log: .+\. Fix scripts\/provision-worktree or the environment, then re-delegate\./,
+        /provisioned: failed \(exit 1\): setup failed\. Log: .+\. Fix \.pi\/provision-worktree or the environment, then re-delegate\./,
       );
 
       const records = await listRecordFiles(cwd);
@@ -1693,7 +1702,9 @@ sleep 30
       expect(error?.message).toEqual(
         expect.stringContaining("provisioned: failed (exit 137). Log: "),
       );
-      expect(error?.message).toEqual(expect.stringContaining("scripts/provision-worktree"));
+      expect(error?.message).toEqual(
+        expect.stringContaining(join(CONFIG_DIR_NAME, "provision-worktree")),
+      );
     });
 
     it("an empty detail never leaves a stray colon in the failure pointer", async () => {
@@ -1852,9 +1863,11 @@ sleep 30
       expect(await readFile(join(wt, "data", "config.json"), "utf8")).toBe("{}\n");
       expect(vi.mocked(runSetupHook)).toHaveBeenCalledWith(wt, 600_000);
       const gitCalls = vi.mocked(runGit).mock.calls.map((call) => call[1].join(" "));
-      expect(gitCalls.some((entry) => entry.includes("add -- scripts/provision-worktree"))).toBe(
-        true,
-      );
+      expect(
+        gitCalls.some((entry) =>
+          entry.includes(`add -- ${join(CONFIG_DIR_NAME, "provision-worktree")}`),
+        ),
+      ).toBe(true);
       expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("committed"), "info");
       expect(started.details.provision).toMatchObject({
         state: "yes",
@@ -1974,15 +1987,22 @@ describe("agents-units", () => {
     const repo = await mkdtemp(join(tmpdir(), "agents-wt-orphan-cache-"));
     try {
       await initGitRepo(repo);
+      // The tracked hook lives beside the scratch paths it may leave behind;
+      // the sweep must never mistake it for scratch.
+      const hook = join(repo, CONFIG_DIR_NAME, "provision-worktree");
+      await mkdir(join(repo, CONFIG_DIR_NAME), { recursive: true });
+      await writeFile(hook, "#!/bin/sh\nexit 0\n");
+      await execFileAsync("git", ["add", "."], gitOpts(repo));
+      await execFileAsync("git", ["commit", "-qm", "setup files"], gitOpts(repo));
       const wt = await createWorktree(repo, "w-orphan-cache");
-      const scratch = join(wt.path, CONFIG_DIR_NAME, "provision-Ab12Cd34");
+      const scratch = join(wt.path, CONFIG_DIR_NAME, "provision-tmp-Ab12Cd34");
       await mkdir(join(scratch, "npm-cache"), { recursive: true });
       await writeFile(join(scratch, "npm-cache", "blob"), "cached package\n");
-      const scratchFile = join(wt.path, CONFIG_DIR_NAME, "provision-Ef56Gh78");
+      const scratchFile = join(wt.path, CONFIG_DIR_NAME, "provision-tmp-Ef56Gh78");
       await writeFile(scratchFile, "temporary credentials\n");
       const outside = join(repo, "outside.txt");
       await writeFile(outside, "outside content\n");
-      const scratchLink = join(wt.path, CONFIG_DIR_NAME, "provision-Ij90Kl12");
+      const scratchLink = join(wt.path, CONFIG_DIR_NAME, "provision-tmp-Ij90Kl12");
       await symlink(outside, scratchLink);
       await writeFile(join(wt.path, "result.txt"), "worker output\n");
 
@@ -1990,13 +2010,17 @@ describe("agents-units", () => {
       await captureWorktreePatch(wt.path, patchPath);
       const patch = await readFile(patchPath, "utf8");
       expect(patch).toContain("result.txt");
-      expect(patch).not.toContain("provision-Ab12Cd34");
-      expect(patch).not.toContain("provision-Ef56Gh78");
-      expect(patch).not.toContain("provision-Ij90Kl12");
+      expect(patch).not.toContain("provision-tmp-Ab12Cd34");
+      expect(patch).not.toContain("provision-tmp-Ef56Gh78");
+      expect(patch).not.toContain("provision-tmp-Ij90Kl12");
+      expect(patch).not.toContain("provision-worktree");
       expect(patch).not.toContain("temporary credentials");
       await expect(stat(scratch)).rejects.toMatchObject({ code: "ENOENT" });
       await expect(stat(scratchFile)).rejects.toMatchObject({ code: "ENOENT" });
       await expect(stat(scratchLink)).rejects.toMatchObject({ code: "ENOENT" });
+      expect(await readFile(join(wt.path, CONFIG_DIR_NAME, "provision-worktree"), "utf8")).toBe(
+        "#!/bin/sh\nexit 0\n",
+      );
       expect(await readFile(outside, "utf8")).toBe("outside content\n");
     } finally {
       await rm(repo, { recursive: true, force: true });
@@ -2865,7 +2889,8 @@ function fakeWorktreeGit(opts: { configStatus?: string; commitError?: string } =
     if (cmd === "status" && sub === "--porcelain") {
       if (args[2] === "--") {
         return (
-          opts.configStatus ?? `?? scripts/provision-worktree\n?? ${CONFIG_DIR_NAME}/sandbox.json\n`
+          opts.configStatus ??
+          `?? ${CONFIG_DIR_NAME}/provision-worktree\n?? ${CONFIG_DIR_NAME}/sandbox.json\n`
         );
       }
       return ""; // clean tree

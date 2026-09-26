@@ -16,8 +16,8 @@ import type { WorkerRecord } from "./types.ts";
 
 /** Marker file in the worktree's private git dir holding its fork point. */
 const BASE_COMMIT_FILE = "agents-base";
-/** The project hook creates temporary directories with eight random characters. */
-const PROVISION_SCRATCH = /^provision-[A-Za-z0-9]{8}$/;
+/** The project hook creates temporary paths with eight random characters. */
+const PROVISION_SCRATCH = /^provision-tmp-[A-Za-z0-9]{8}$/;
 
 // --- Helpers ---
 

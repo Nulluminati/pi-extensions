@@ -1,6 +1,7 @@
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runSetupHook } from "../../extensions/agents/src/provision/hook.ts";
 import { startWorkerSandbox } from "../../extensions/worker-sandbox/src/client.ts";
@@ -36,7 +37,7 @@ describe("bounded worktree setup hook", () => {
     const result = await runSetupHook(worktree, 5000);
     expect(startWorkerSandbox).toHaveBeenCalledWith(worktree);
     expect(client.runShell).toHaveBeenCalledWith(
-      "./scripts/provision-worktree",
+      `./${join(CONFIG_DIR_NAME, "provision-worktree")}`,
       expect.objectContaining({ cwd: worktree, timeout: 5 }),
     );
     expect(client.close).toHaveBeenCalledTimes(1);
@@ -85,8 +86,10 @@ describe("bounded worktree setup hook", () => {
   it("refuses a missing or non-executable script before starting a sandbox", async () => {
     const worktree = temporaryDirectory();
     await expect(runSetupHook(worktree, 5000)).rejects.toThrow(/provision-worktree/);
-    mkdirSync(join(worktree, "scripts"));
-    writeFileSync(join(worktree, "scripts", "provision-worktree"), "#!/bin/sh\n", { mode: 0o644 });
+    mkdirSync(join(worktree, CONFIG_DIR_NAME));
+    writeFileSync(join(worktree, CONFIG_DIR_NAME, "provision-worktree"), "#!/bin/sh\n", {
+      mode: 0o644,
+    });
     await expect(runSetupHook(worktree, 5000)).rejects.toThrow(/executable/);
     expect(startWorkerSandbox).not.toHaveBeenCalled();
   });
@@ -109,8 +112,8 @@ function temporaryDirectory(): string {
 
 function setupWorktree(): string {
   const root = temporaryDirectory();
-  mkdirSync(join(root, "scripts"));
-  const file = join(root, "scripts", "provision-worktree");
+  mkdirSync(join(root, CONFIG_DIR_NAME));
+  const file = join(root, CONFIG_DIR_NAME, "provision-worktree");
   writeFileSync(file, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
   chmodSync(file, 0o755);
   return root;
