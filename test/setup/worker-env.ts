@@ -8,6 +8,7 @@
 for (const key of [
   "PI_WORKER",
   "PI_MESSENGER_NAME",
+  "PI_MESSENGER_PROJECT_ROOT",
   "PI_WORKER_STREAM",
   // Worker-extension allowlist: resolves extensions/<name>/<name>.ts. Tests
   // must exercise the default set against THIS repo's extensions; a stale

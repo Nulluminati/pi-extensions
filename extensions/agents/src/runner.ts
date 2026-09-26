@@ -549,6 +549,9 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
         // Stable messenger identity: the worker is addressable in the mesh
         // by its agents-registry name instead of a generated themed name.
         PI_MESSENGER_NAME: options.name,
+        // Shared registry and inbox; the child still uses its worktree cwd
+        // for file tools and reservation path normalization.
+        PI_MESSENGER_PROJECT_ROOT: options.cwd,
         // Blocker channel: the worker-side report_blocker tool appends
         // agents_blocker markers to this spool; the poller below ingests
         // them and wakes this session once, ids and status words only.

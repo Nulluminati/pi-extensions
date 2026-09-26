@@ -22,6 +22,7 @@ import {
   loadRegistry,
   loadReservations,
   markRead,
+  messengerDir,
   normalizePathPrefix,
   readInbox,
   release,
@@ -96,6 +97,7 @@ describe("messenger-extension", () => {
     // Deterministic regardless of the host shell: the variable starts unset
     // (empty is falsy for `?.trim()`), individual tests override it.
     vi.stubEnv("PI_MESSENGER_NAME", "");
+    vi.stubEnv("PI_MESSENGER_PROJECT_ROOT", "");
     await messengerExtension(mockPi);
   });
 
@@ -206,6 +208,83 @@ describe("messenger-extension", () => {
     ).rejects.toThrow(/worker/);
     // Rien n'a été déposé dans la mailbox du destinataire.
     expect((await readInbox(cwd, "parent")).unread).toHaveLength(0);
+  });
+
+  it("isolated workers receive parent mail and share presence without storing state in the worktree", async () => {
+    const worktree = join(cwd, "isolated-worktree");
+    await mkdir(worktree);
+    await heartbeat(cwd, "parent-agent", { pid: process.pid, cwd });
+    await reserve(cwd, "parent-agent", ["src/auth"], "parent editing", process.pid);
+    vi.stubEnv("PI_WORKER", "1");
+    vi.stubEnv("PI_MESSENGER_PROJECT_ROOT", cwd);
+    vi.stubEnv("PI_MESSENGER_NAME", "worker-agent");
+    (mockCtx as { cwd: string }).cwd = worktree;
+    mockCtx.isIdle = vi.fn(() => false);
+
+    await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+    expect((await loadRegistry(cwd))["worker-agent"]).toMatchObject({ cwd: worktree });
+    const sibling = join(cwd, "sibling-worktree");
+    await mkdir(sibling);
+    await heartbeat(sibling, "peer-worker", { pid: process.pid, cwd: sibling });
+    const presence = (await executeTool({ action: "list" })).content[0].text;
+    expect(presence).toContain("parent-agent");
+    expect(presence).toContain("peer-worker");
+    expect(
+      await getEventHandler("tool_call")(
+        { type: "tool_call", toolName: "edit", input: { path: "src/auth/login.ts" } },
+        mockCtx,
+      ),
+    ).toMatchObject({ block: true });
+
+    await sendMessage(cwd, "worker-agent", "parent-agent", "Check the login flow");
+    mockCtx.isIdle = vi.fn(() => true);
+    await getEventHandler("agent_settled")({ type: "agent_settled" }, mockCtx);
+    expect(mockPi.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customType: "messenger-inbox",
+        content: [{ type: "text", text: expect.stringContaining("Check the login flow") }],
+      }),
+      { triggerTurn: true },
+    );
+    expect((await readInbox(cwd, "worker-agent")).unread).toEqual([]);
+    expect(existsSync(join(worktree, CONFIG_DIR_NAME, "messenger"))).toBe(false);
+    await getEventHandler("session_shutdown")({ type: "session_shutdown" }, mockCtx);
+    expect((await loadRegistry(cwd))["worker-agent"]).toBeUndefined();
+    expect((await loadRegistry(cwd))["parent-agent"]).toBeDefined();
+  });
+
+  it("an idle isolated worker receives mail through the shared inbox watcher", async () => {
+    const worktree = join(cwd, "idle-worktree");
+    await mkdir(worktree);
+    vi.stubEnv("PI_WORKER", "1");
+    vi.stubEnv("PI_MESSENGER_PROJECT_ROOT", cwd);
+    vi.stubEnv("PI_MESSENGER_NAME", "idle-worker");
+    (mockCtx as { cwd: string }).cwd = worktree;
+    mockCtx.isIdle = vi.fn(() => true);
+    await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+
+    await sendMessage(cwd, "idle-worker", "parent-agent", "Check the login flow");
+    await vi.waitFor(() => {
+      expect(mockPi.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ customType: "messenger-inbox" }),
+        { triggerTurn: true },
+      );
+    }, WATCHER_WAIT);
+    await vi.waitFor(async () => {
+      expect((await readInbox(cwd, "idle-worker")).unread).toEqual([]);
+    }, WATCHER_WAIT);
+    expect(existsSync(join(worktree, CONFIG_DIR_NAME, "messenger"))).toBe(false);
+    await getEventHandler("session_shutdown")({ type: "session_shutdown" }, mockCtx);
+  });
+
+  it("refuses an invalid worker messenger root instead of opening a separate mailbox", async () => {
+    vi.stubEnv("PI_WORKER", "1");
+    vi.stubEnv("PI_MESSENGER_PROJECT_ROOT", "../another-project");
+    expect(() => messengerDir(cwd)).toThrow(/absolute/);
+    vi.stubEnv("PI_MESSENGER_PROJECT_ROOT", join(cwd, "missing"));
+    expect(() => messengerDir(cwd)).toThrow(/directory/);
+    vi.stubEnv("PI_WORKER", "");
+    expect(messengerDir(cwd)).toBe(join(cwd, CONFIG_DIR_NAME, "messenger"));
   });
 
   it("reserve claims paths and tool_call blocks other agents from editing them", async () => {

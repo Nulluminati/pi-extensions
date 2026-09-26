@@ -351,11 +351,13 @@ describe("agents-extension", () => {
   it("delegate from a planning session forces read-only sandboxed workers without worktrees", async () => {
     await initGitRepo(cwd);
     const argsFile = join(fixtureDir, "readonly-args.txt");
+    const rootFile = join(fixtureDir, "readonly-messenger-root.txt");
     const fixture = await writeFixture(
       fixtureDir,
       "readonly-worker.sh",
       `#!/bin/sh
 printf '%s\\n' "$@" > '${argsFile}'
+printf '%s' "$PI_MESSENGER_PROJECT_ROOT" > '${rootFile}'
 ${SUCCESS_WORKER}`,
     );
     setEnv("PI_WORKER_COMMAND", fixture);
@@ -376,6 +378,7 @@ ${SUCCESS_WORKER}`,
     expect(args).not.toContain("--gondolin");
     expect(args.some((arg) => arg.includes("worker-sandbox.ts"))).toBe(true);
     expect(result.details.worker.worktree).toBeUndefined();
+    expect(await readFile(rootFile, "utf8")).toBe(cwd);
     const planPaths = args.filter((arg) => arg.includes("plan.ts"));
     expect(planPaths.length).toBeGreaterThanOrEqual(1);
   });
@@ -1816,10 +1819,11 @@ sleep 30
     it("a non-isolated delegate skips provisioning and never runs the hook", async () => {
       await writeProvisionConfig(cwd);
       const argsFile = join(fixtureDir, "skipped-args.txt");
+      const rootFile = join(fixtureDir, "skipped-messenger-root.txt");
       const fixture = await writeFixture(
         fixtureDir,
         "skipped-worker.sh",
-        `#!/bin/sh\nprintf '%s\\n' "$@" > '${argsFile}'\n${SUCCESS_WORKER}`,
+        `#!/bin/sh\nprintf '%s\\n' "$@" > '${argsFile}'\nprintf '%s' "$PI_MESSENGER_PROJECT_ROOT" > '${rootFile}'\n${SUCCESS_WORKER}`,
       );
       setEnv("PI_WORKER_COMMAND", fixture);
 
@@ -1834,6 +1838,7 @@ sleep 30
       const environment = args.find((line) => line.startsWith("ENVIRONMENT:"));
       expect(environment).toContain("Provision: skipped — no worktree");
       expect(environment).toContain("call report_blocker with the exact missing tool");
+      expect(await readFile(rootFile, "utf8")).toBe(cwd);
     });
 
     it("an isolated delegate carries the include paths, runs the setup hook, and commits setup files", async () => {
@@ -1843,12 +1848,14 @@ sleep 30
       await writeFile(join(cwd, "data", "config.json"), "{}\n");
       await writeFile(join(cwd, ".worktreeinclude"), "data/\n");
       const argsFile = join(fixtureDir, "happy-args.txt");
+      const rootFile = join(fixtureDir, "happy-messenger-root.txt");
       const fixture = await writeFixture(
         fixtureDir,
         "happy-worker.sh",
-        `#!/bin/sh\nprintf '%s\\n' "$@" > '${argsFile}'\n${SUCCESS_WORKER}`,
+        `#!/bin/sh\nprintf '%s\\n' "$@" > '${argsFile}'\nprintf '%s' "$PI_MESSENGER_PROJECT_ROOT" > '${rootFile}'\n${SUCCESS_WORKER}`,
       );
       setEnv("PI_WORKER_COMMAND", fixture);
+      setEnv("PI_MESSENGER_PROJECT_ROOT", join(fixtureDir, "stale-root"));
       vi.mocked(runSetupHook).mockResolvedValueOnce({
         exitCode: 0,
         detail: "setup done",
@@ -1877,6 +1884,7 @@ sleep 30
       const args = (await readFile(argsFile, "utf8")).split("\n");
       const environment = args.find((line) => line.startsWith("ENVIRONMENT:"));
       expect(environment).toContain("Provision: yes — carry 1, hook exit 0 (16s)");
+      expect(await readFile(rootFile, "utf8")).toBe(cwd);
 
       const record = await waitForRecord(cwd, id, "completed");
       expect(record.provision).toMatchObject({ state: "yes" });

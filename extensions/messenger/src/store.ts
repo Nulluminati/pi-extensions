@@ -11,6 +11,7 @@
  */
 
 import { randomBytes } from "node:crypto";
+import { statSync } from "node:fs";
 import { appendFile, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { withFileLock } from "../../../lib/file-lock.ts";
@@ -28,6 +29,17 @@ import type { Message, Presence, PresenceRegistry, ReservationMap } from "./type
 // --- Paths ---
 
 export function messengerDir(cwd: string): string {
+  // Workers keep file paths relative to their worktree, but share the
+  // parent's mailbox and presence state across worktrees.
+  const root =
+    process.env.PI_WORKER === "1" ? process.env.PI_MESSENGER_PROJECT_ROOT?.trim() : undefined;
+  if (root) {
+    if (!isAbsolute(root)) throw new Error("Worker messenger project root must be absolute");
+    if (!statSync(root, { throwIfNoEntry: false })?.isDirectory()) {
+      throw new Error(`Worker messenger project root is not a directory: ${root}`);
+    }
+    return projectStateDir(root, "messenger");
+  }
   return projectStateDir(cwd, "messenger");
 }
 
