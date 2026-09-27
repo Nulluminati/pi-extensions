@@ -30,6 +30,11 @@ export interface WorkerRecord {
   provision?: ProvisionStatus;
   status: WorkerStatus;
   startedAt: number;
+  /** Absolute hard-timeout deadline (epoch ms), armed at spawn as
+   *  startedAt + timeout. An adopter re-arms the remaining time and kills
+   *  the worker when it elapses; records created before this field existed
+   *  carry no deadline and are never retroactively timed out. */
+  deadlineAt?: number;
   endedAt?: number;
   exitCode?: number | null;
   /** Final assistant text extracted from the worker's JSON event stream. */

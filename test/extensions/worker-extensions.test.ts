@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_WORKER_EXTENSIONS,
@@ -54,6 +54,27 @@ describe("worker-extensions", () => {
     expect(names.at(-1)).toBe("worker-sandbox");
     for (const name of DEFAULT_WORKER_EXTENSIONS) expect(names).toContain(name);
     for (const r of resolved) expect(existsSync(r.path)).toBe(true);
+  });
+
+  it("defaults extensionsRoot to the repository extensions directory", () => {
+    const repoExtensionsDir = resolve(import.meta.dirname, "../../extensions");
+
+    // No extensionsRoot: the default must point at this repository's
+    // extensions/ directory. A missing config file keeps the fallback
+    // hermetic (no machine config is read).
+    const resolved = resolveWorkerExtensions(undefined, {
+      configPath: join(root, "missing-config.json"),
+    });
+
+    const pathsByName = new Map(resolved.map((r) => [r.name, r.path]));
+    for (const name of REQUIRED_WORKER_EXTENSIONS) {
+      const path = pathsByName.get(name);
+      expect(path).toBe(join(repoExtensionsDir, name, `${name}.ts`));
+      expect(existsSync(path ?? "")).toBe(true);
+    }
+    for (const name of DEFAULT_WORKER_EXTENSIONS) {
+      expect(existsSync(pathsByName.get(name) ?? "")).toBe(true);
+    }
   });
 
   it("explicit parameter wins over environment and config", () => {

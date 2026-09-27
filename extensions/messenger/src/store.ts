@@ -11,7 +11,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { statSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, statSync, unlinkSync } from "node:fs";
 import { appendFile, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { withFileLock } from "../../../lib/file-lock.ts";
@@ -448,6 +448,87 @@ async function saveReservations(cwd: string, reservations: ReservationMap): Prom
   await writeJsonAtomic(reservationsPath(cwd), reservations);
 }
 
+// --- Filesystem case policy ---
+
+/**
+ * Override for the reservation matchers' filesystem case behavior: `true`
+ * compares path prefixes without case (case-insensitive volume), `false`
+ * compares exactly. When omitted, the policy is detected from the filesystem
+ * backing the project state directory — a macOS volume can be either flavor,
+ * so the volume is measured, never inferred from the operating system.
+ */
+export interface CaseFoldOptions {
+  caseInsensitiveFs?: boolean;
+}
+
+const CASE_PROBE_TTL_MS = 60_000;
+/** Memoized probe result, not coordination state: a wrong entry expires with
+ *  the TTL and only skips re-measuring an unchanged volume. */
+let caseProbeCache: { dir: string; insensitive: boolean; at: number } | undefined;
+
+/**
+ * Whether the filesystem backing `dir` treats names differing only by case as
+ * one file. Probes by creating a uniquely named file and looking for its
+ * case-flipped twin; a failed probe folds case to avoid missing a held path.
+ * Cached briefly per directory: a probe costs one file create per TTL window.
+ */
+function isCaseInsensitiveVolume(dir: string): boolean {
+  const now = Date.now();
+  if (caseProbeCache && caseProbeCache.dir === dir && now - caseProbeCache.at < CASE_PROBE_TTL_MS) {
+    return caseProbeCache.insensitive;
+  }
+  let insensitive = true;
+  try {
+    mkdirSync(dir, { recursive: true });
+    const probe = `case-probe-${process.pid}-${randomBytes(4).toString("hex")}`;
+    const handle = openSync(join(dir, probe), "wx", 0o600);
+    try {
+      try {
+        statSync(join(dir, probe.toUpperCase()));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") insensitive = false;
+        else throw error;
+      }
+    } finally {
+      closeSync(handle);
+      unlinkSync(join(dir, probe));
+    }
+  } catch {
+    insensitive = true;
+  }
+  caseProbeCache = { dir, insensitive, at: now };
+  return insensitive;
+}
+
+/** Effective fold policy for one reservation operation. */
+function resolveCaseFold(cwd: string, options?: CaseFoldOptions): boolean {
+  if (options?.caseInsensitiveFs !== undefined) return options.caseInsensitiveFs;
+  try {
+    return isCaseInsensitiveVolume(messengerDir(cwd));
+  } catch {
+    return true;
+  }
+}
+
+/** Fold a normalized or stored prefix for comparison under the fold policy. */
+function foldKey(key: string, fold: boolean): string {
+  return fold ? key.toLowerCase() : key;
+}
+
+/** The stored key that covers `prefix` under the fold policy, if any. */
+function findStoredKey(
+  reservations: ReservationMap,
+  prefix: string,
+  fold: boolean,
+): string | undefined {
+  if (!fold) return prefix in reservations ? prefix : undefined;
+  const folded = foldKey(prefix, true);
+  for (const key of Object.keys(reservations)) {
+    if (foldKey(key, true) === folded) return key;
+  }
+  return undefined;
+}
+
 /**
  * Normalize a user-supplied reservation or target path into a stable relative
  * prefix key (posix separators, relative to cwd). Absolute paths inside the
@@ -472,21 +553,25 @@ export function normalizePathPrefix(cwd: string, raw: string): string | undefine
 
 /**
  * Whether two normalized path prefixes cover any of the same tree: equal,
- * one nested under the other, or either being the project root (".").
+ * one nested under the other, or either being the project root ("."). Under
+ * the fold policy both sides are compared case-insensitively.
  */
-function overlapsPrefix(a: string, b: string): boolean {
-  if (a === "." || b === ".") return true;
-  return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+function overlapsPrefix(a: string, b: string, fold = false): boolean {
+  const fa = foldKey(a, fold);
+  const fb = foldKey(b, fold);
+  if (fa === "." || fb === ".") return true;
+  return fa === fb || fa.startsWith(`${fb}/`) || fb.startsWith(`${fa}/`);
 }
 
 function findOverlappingOwner(
   reservations: ReservationMap,
   prefix: string,
   selfName: string,
+  fold = false,
 ): string | undefined {
   for (const [key, claim] of Object.entries(reservations)) {
     if (claim.owner === selfName) continue;
-    if (overlapsPrefix(prefix, key)) return claim.owner;
+    if (overlapsPrefix(prefix, key, fold)) return claim.owner;
   }
   return undefined;
 }
@@ -497,9 +582,11 @@ export async function reserve(
   paths: string[],
   reason?: string,
   pid?: number,
+  options?: CaseFoldOptions,
 ): Promise<{ reserved: string[]; conflicts: Array<{ path: string; owner: string }> }> {
   return withFileLock(reservationsLockPath(cwd), async () => {
     const reservations = await loadReservationsUnlocked(cwd);
+    const fold = resolveCaseFold(cwd, options);
     const reserved: string[] = [];
     const conflicts: Array<{ path: string; owner: string }> = [];
     for (const raw of paths) {
@@ -508,25 +595,29 @@ export async function reserve(
         conflicts.push({ path: raw, owner: "(outside project)" });
         continue;
       }
-      const existing = reservations[prefix];
+      // An existing claim covering this prefix is matched under the fold
+      // policy and keeps its original stored key, so one path never holds
+      // two keys that differ only by case.
+      const storedKey = findStoredKey(reservations, prefix, fold);
+      const existing = storedKey === undefined ? undefined : reservations[storedKey];
       if (existing && existing.owner !== name) {
         conflicts.push({ path: prefix, owner: existing.owner });
         continue;
       }
       // Claims may not overlap an ancestor or descendant claim held by
       // another agent, so reservation matching stays unambiguous.
-      const overlappingOwner = findOverlappingOwner(reservations, prefix, name);
+      const overlappingOwner = findOverlappingOwner(reservations, prefix, name, fold);
       if (overlappingOwner) {
         conflicts.push({ path: prefix, owner: overlappingOwner });
         continue;
       }
-      reservations[prefix] = {
+      reservations[storedKey ?? prefix] = {
         owner: name,
         ...(pid !== undefined ? { pid } : {}),
         ...(reason?.trim() ? { reason: reason.trim() } : {}),
         at: Date.now(),
       };
-      reserved.push(prefix);
+      reserved.push(storedKey ?? prefix);
     }
     if (reserved.length > 0) await saveReservations(cwd, reservations);
     return { reserved, conflicts };
@@ -554,9 +645,15 @@ export async function readoptReservations(cwd: string, name: string): Promise<vo
   });
 }
 
-export async function release(cwd: string, name: string, paths?: string[]): Promise<string[]> {
+export async function release(
+  cwd: string,
+  name: string,
+  paths?: string[],
+  options?: CaseFoldOptions,
+): Promise<string[]> {
   return withFileLock(reservationsLockPath(cwd), async () => {
     const reservations = await loadReservationsUnlocked(cwd);
+    const fold = resolveCaseFold(cwd, options);
     const released: string[] = [];
     for (const [prefix, claim] of Object.entries(reservations)) {
       if (claim.owner !== name) continue;
@@ -567,8 +664,9 @@ export async function release(cwd: string, name: string, paths?: string[]): Prom
       }
       const wanted = paths
         .map((p) => normalizePathPrefix(cwd, p))
-        .filter((p): p is string => p !== undefined);
-      if (wanted.includes(prefix)) {
+        .filter((p): p is string => p !== undefined)
+        .map((p) => foldKey(p, fold));
+      if (wanted.includes(foldKey(prefix, fold))) {
         delete reservations[prefix];
         released.push(prefix);
       }
@@ -588,19 +686,25 @@ export interface ReservationBlock {
  * Check whether a target file path is reserved by another agent. Target paths
  * are resolved against cwd and matched against reservation prefixes by
  * directory boundary (prefix `src/auth` matches `src/auth/login.ts` and
- * `src/auth/sub/x.ts`, not `src/auth2/x.ts`).
+ * `src/auth/sub/x.ts`, not `src/auth2/x.ts`). Under the fold policy (detected
+ * from the volume, or forced via `options`) both sides compare without case,
+ * so `Docs` and `docs` match on a case-insensitive filesystem.
  */
 export function findBlockingReservation(
   cwd: string,
   targetPath: string,
   selfName: string,
   reservations: ReservationMap,
+  options?: CaseFoldOptions,
 ): ReservationBlock | undefined {
   const prefix = normalizePathPrefix(cwd, targetPath);
   if (prefix === undefined) return undefined;
+  const fold = resolveCaseFold(cwd, options);
+  const needle = foldKey(prefix, fold);
   for (const [key, claim] of Object.entries(reservations)) {
     if (claim.owner === selfName) continue;
-    const covered = key === "." ? true : prefix === key || prefix.startsWith(`${key}/`);
+    const stored = foldKey(key, fold);
+    const covered = stored === "." ? true : needle === stored || needle.startsWith(`${stored}/`);
     if (covered) {
       return {
         prefix: key,

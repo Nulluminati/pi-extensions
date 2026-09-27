@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { runSetupHook } from "../../extensions/agents/src/provision/hook.ts";
+import { runSetupHook, SetupHookCancelled } from "../../extensions/agents/src/provision/hook.ts";
 import { startWorkerSandbox } from "../../extensions/worker-sandbox/src/client.ts";
 
 vi.mock("../../extensions/worker-sandbox/src/client.ts", () => ({
@@ -100,6 +100,85 @@ describe("bounded worktree setup hook", () => {
     client.runShell.mockRejectedValue(new Error("hook crashed"));
     vi.mocked(startWorkerSandbox).mockResolvedValue(client);
     await expect(runSetupHook(worktree, 5000)).rejects.toThrow(/hook crashed/);
+    expect(client.close).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("external abort during provisioning", () => {
+  it("rejects an already-aborted signal before checking the script or starting a sandbox", async () => {
+    const worktree = temporaryDirectory();
+    const external = new AbortController();
+    external.abort();
+    const pending = runSetupHook(worktree, 5000, external.signal);
+    await expect(pending).rejects.toThrow(SetupHookCancelled);
+    await expect(pending).rejects.not.toThrow(/missing|executable/);
+    expect(startWorkerSandbox).not.toHaveBeenCalled();
+  });
+
+  it("cancels a blocked hook when the external signal aborts and rejects with a cancellation error", async () => {
+    const worktree = setupWorktree();
+    const client = mockClient();
+    let started: () => void = () => {};
+    let capturedSignal: AbortSignal | undefined;
+    const executing = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    client.runShell.mockImplementation(async (_command, options) => {
+      capturedSignal = options.signal;
+      started();
+      return new Promise((_resolve, reject) => {
+        options.signal?.addEventListener("abort", () => reject(new Error("Operation aborted")), {
+          once: true,
+        });
+      });
+    });
+    vi.mocked(startWorkerSandbox).mockResolvedValue(client);
+    const external = new AbortController();
+    const pending = runSetupHook(worktree, 5000, external.signal);
+    await executing;
+    external.abort();
+    await expect(pending).rejects.toThrow(SetupHookCancelled);
+    await expect(pending).rejects.not.toThrow(/aborted after/);
+    expect(capturedSignal?.aborted).toBe(true);
+    expect(client.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports sandbox cleanup failure when cancellation cannot close the broker", async () => {
+    const worktree = setupWorktree();
+    const client = mockClient();
+    client.runShell.mockImplementation(
+      async (_command, options) =>
+        new Promise((_resolve, reject) => {
+          options.signal?.addEventListener("abort", () => reject(new Error("Operation aborted")), {
+            once: true,
+          });
+        }),
+    );
+    client.close.mockRejectedValue(new Error("broker cleanup failed"));
+    vi.mocked(startWorkerSandbox).mockResolvedValue(client);
+    const external = new AbortController();
+    const pending = runSetupHook(worktree, 5000, external.signal);
+    await vi.waitFor(() => expect(client.runShell).toHaveBeenCalledTimes(1));
+    external.abort();
+
+    await expect(pending).rejects.toThrow(/sandbox cleanup failed/);
+    expect(client.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes a sandbox that finishes starting after the abort and never runs the hook", async () => {
+    const worktree = setupWorktree();
+    const client = mockClient();
+    let resolveStart: (value: typeof client) => void = () => {};
+    const starting = new Promise<typeof client>((resolve) => {
+      resolveStart = resolve;
+    });
+    vi.mocked(startWorkerSandbox).mockReturnValue(starting);
+    const external = new AbortController();
+    const pending = runSetupHook(worktree, 5000, external.signal);
+    external.abort();
+    resolveStart(client);
+    await expect(pending).rejects.toThrow(SetupHookCancelled);
+    expect(client.runShell).not.toHaveBeenCalled();
     expect(client.close).toHaveBeenCalledTimes(1);
   });
 });

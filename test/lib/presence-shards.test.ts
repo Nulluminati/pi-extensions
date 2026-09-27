@@ -21,8 +21,9 @@ describe("presence-shards", () => {
     dir = await mkdtemp(join(tmpdir(), "presence-shards-"));
   });
 
-  afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
+  afterEach(() => {
+    for (const restore of globalRestores) restore();
+    globalRestores.length = 0;
   });
 
   it("writes one shard per agent without touching other agents' shards", async () => {
@@ -139,4 +140,59 @@ describe("presence-shards", () => {
     expect(isProcessAlive(0)).toBe(false);
     expect(isProcessAlive(-1)).toBe(false);
   });
+
+  it("isProcessAlive treats EPERM as a live process", () => {
+    // EPERM means the process exists but the caller cannot signal it (other
+    // user, sandbox): pruning it would drop a live session's presence.
+    failKillFor({ 4242: killError("EPERM") });
+    expect(isProcessAlive(4242)).toBe(true);
+  });
+
+  it("isProcessAlive keeps other uncertain kill errors dead", () => {
+    // Only EPERM proves existence; every other error keeps the historical
+    // conservative result instead of guessing.
+    failKillFor({ 4242: killError("EACCES") });
+    expect(isProcessAlive(4242)).toBe(false);
+  });
+
+  it("loadShards keeps a shard whose pid exists but cannot be signalled", async () => {
+    failKillFor({ 4242: killError("EPERM") });
+    await writeShard(dir, record("sandboxed-agent", 4242));
+
+    const registry = await loadShards(dir);
+
+    expect(registry["sandboxed-agent"]).toMatchObject({ name: "sandboxed-agent", pid: 4242 });
+    expect(existsSync(shardPath(dir, "sandboxed-agent"))).toBe(true);
+  });
+
+  it("loadShards still prunes a shard whose pid reports ESRCH", async () => {
+    failKillFor({ 4242: killError("ESRCH") });
+    await writeShard(dir, record("gone-agent", 4242));
+
+    const registry = await loadShards(dir);
+
+    expect(registry["gone-agent"]).toBeUndefined();
+    expect(existsSync(shardPath(dir, "gone-agent"))).toBe(false);
+  });
 });
+
+const globalRestores: Array<() => void> = [];
+
+/** A kill(2) error carrying the given errno code. */
+function killError(code: string): NodeJS.ErrnoException {
+  return Object.assign(new Error(code.toLowerCase()), { code });
+}
+
+/** Route process.kill(pid, 0) for the listed pids to the given errors; every
+ *  other pid keeps the real implementation. Restore runs in afterEach. */
+function failKillFor(failures: Record<number, NodeJS.ErrnoException>): void {
+  const originalKill = process.kill;
+  globalRestores.push(() => {
+    process.kill = originalKill;
+  });
+  process.kill = ((pid: number, signal?: string | number) => {
+    const error = failures[pid];
+    if (error !== undefined) throw error;
+    return originalKill(pid, signal);
+  }) as typeof process.kill;
+}

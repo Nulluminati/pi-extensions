@@ -106,6 +106,17 @@ export async function runMessengerAction(
     const paths = Array.isArray(params.paths) ? params.paths.map(String) : [];
     if (paths.length === 0) throw new Error("reserve requires paths (array of paths).");
     const reason = typeof params.reason === "string" ? params.reason : undefined;
+    // Peers see reservation reasons in block messages, so worker reasons
+    // use the same bounded values as worker status. Parents may use free text.
+    if (
+      process.env.PI_WORKER === "1" &&
+      reason?.trim() &&
+      !(WORKER_STATUS_VALUES as readonly string[]).includes(reason.trim())
+    ) {
+      throw new Error(
+        `reason is restricted to ${WORKER_STATUS_VALUES.map((v) => `"${v}"`).join(", ")} (or omit it) for worker sessions: the reservation reason is rendered in every peer's block message. Free-text reasons are only available to non-worker sessions.`,
+      );
+    }
     const { reserved, conflicts } = await reserve(ctx.cwd, agentName, paths, reason, process.pid);
     const lines: string[] = [];
     for (const p of reserved) lines.push(`Reserved ${p}.`);

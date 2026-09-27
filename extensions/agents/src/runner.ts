@@ -16,7 +16,7 @@
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
-import { appendFile, mkdir, open, readFile, stat } from "node:fs/promises";
+import { appendFile, mkdir, open, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { ThinkingLevel } from "pi";
 import { cleanGitEnv } from "../../../lib/git.ts";
@@ -27,6 +27,7 @@ import {
   parseBlockerMarker,
   WORKER_STREAM_ENV_VAR,
 } from "../../../lib/worker-blocker.ts";
+import { SetupHookCancelled } from "./provision/hook.ts";
 import type { ProvisionStatus } from "./provision/types.ts";
 import { patchesDir, stderrLogPath, streamPath } from "./store.ts";
 import type { WorkerActivity, WorkerEvents, WorkerRecord } from "./types.ts";
@@ -39,8 +40,9 @@ export const CANCEL_GRACE_MS = 4_000;
 export const STREAM_SUMMARY_CHARS = 200;
 /** How often the parent tails the spool for live activity. */
 const INGEST_POLL_MS = 400;
-/** Tail reads are bounded: the display never loads more than this much of
- *  a spool, however much the child wrote. */
+const STDERR_TAIL_BYTES = 4 * 1024;
+/** Tail reads are bounded: the tail display and finalization never load
+ *  more than this much of a spool, however much the child wrote. */
 export const STREAM_TAIL_BYTES = 512 * 1024;
 
 /** Parent-appended markers in the raw spool (distinguishable from pi JSON
@@ -86,13 +88,19 @@ async function appendSpoolLine(cwd: string, workerId: string, event: AgentSpoolM
 }
 
 /** Last `bytes` of a file, split into complete lines (a trailing partial
- *  line without a newline is still returned). */
-async function readTailLines(path: string, bytes: number): Promise<string[]> {
+ *  line without a newline is still returned). A first line cut by the
+ *  window boundary is dropped, not parsed; `truncated` reports whether
+ *  the window cut earlier bytes off the file, so a caller can tell an
+ *  absent event from an unreadable one. */
+async function readTailLines(
+  path: string,
+  bytes: number,
+): Promise<{ lines: string[]; truncated: boolean }> {
   let handle: import("node:fs/promises").FileHandle;
   try {
     handle = await open(path, "r");
   } catch {
-    return [];
+    return { lines: [], truncated: false };
   }
   try {
     const { size } = await handle.stat();
@@ -106,7 +114,7 @@ async function readTailLines(path: string, bytes: number): Promise<string[]> {
     if (lines[lines.length - 1] === "") lines.pop();
     // Drop a possibly-partial first line unless it is the file's first.
     if (start > 0 && lines.length > 0) lines.shift();
-    return lines;
+    return { lines, truncated: start > 0 };
   } finally {
     await handle.close().catch(() => {});
   }
@@ -264,11 +272,21 @@ function spoolEndStatus(lines: string[]): { status?: string; error?: string } {
   return {};
 }
 
-/** Read stderr capture and return a short tail for error attribution. */
+/** Read only the end of stderr so a noisy worker cannot exhaust memory
+ *  during finalization. Keep the last error text, not the start of the tail. */
 async function readStderrTail(cwd: string, workerId: string): Promise<string> {
-  const raw = await readFile(stderrLogPath(cwd, workerId), "utf8").catch(() => "");
-  const tail = raw.trim().slice(-2000);
-  return summarizeStreamValue(tail) ?? tail.slice(0, STREAM_SUMMARY_CHARS);
+  const handle = await open(stderrLogPath(cwd, workerId), "r").catch(() => undefined);
+  if (handle === undefined) return "";
+  try {
+    const { size } = await handle.stat();
+    const length = Math.min(size, STDERR_TAIL_BYTES);
+    const buffer = Buffer.alloc(length);
+    const { bytesRead } = await handle.read(buffer, 0, length, size - length);
+    const tail = buffer.subarray(0, bytesRead).toString("utf8").trim().slice(-STREAM_SUMMARY_CHARS);
+    return summarizeStreamValue(tail) ?? tail;
+  } finally {
+    await handle.close().catch(() => {});
+  }
 }
 
 /** Read the last `bytes` of a worker's spool as complete lines. Used by
@@ -278,7 +296,7 @@ export async function readSpoolLines(
   workerId: string,
   bytes = STREAM_TAIL_BYTES,
 ): Promise<string[]> {
-  return readTailLines(streamPath(cwd, workerId), bytes);
+  return (await readTailLines(streamPath(cwd, workerId), bytes)).lines;
 }
 
 // --- Finalization (shared by parent, adopter, janitor) ---
@@ -305,7 +323,10 @@ export interface FinalizeOptions {
  * already terminal is returned untouched. Status inference: an explicit
  * override (cancel/timeout) wins; an end marker in the spool is honored;
  * otherwise a final assistant report means completed and its absence means
- * failed (with the stderr tail as the error detail).
+ * failed (with the stderr tail as the error detail). The spool is read as
+ * a bounded tail, so absence is only trusted for a spool that fits the
+ * window: a truncated spool without a readable report fails with explicit
+ * truncation detail, since the report may live in the cut bytes.
  */
 export async function finalizeWorker(options: FinalizeOptions): Promise<WorkerRecord> {
   const { cwd, record, statusOverride, errorOverride, exitCode, events, onRecord } = options;
@@ -318,12 +339,13 @@ export async function finalizeWorker(options: FinalizeOptions): Promise<WorkerRe
       ? { path: record.worktree, branch: record.branch ?? "" }
       : undefined);
 
-  const lines = await readTailLines(streamPath(cwd, record.id), Number.MAX_SAFE_INTEGER);
+  const spool = await readTailLines(streamPath(cwd, record.id), STREAM_TAIL_BYTES);
+  const lines = spool.lines;
   const outputText = extractFinalText(lines, record.streamFormat);
   const endMark = spoolEndStatus(lines);
 
   // A blocker reported while nobody was watching (adoption, janitor sweep)
-  // lives in the spool; recover it so the terminal record keeps the why.
+  // lives in the spool tail; recover it so the terminal record keeps the why.
   for (const line of lines) {
     const blocker = parseBlockerMarker(line);
     if (blocker !== undefined) record.blocker = blocker;
@@ -342,7 +364,15 @@ export async function finalizeWorker(options: FinalizeOptions): Promise<WorkerRe
   } else {
     status = "failed";
     const stderrTail = await readStderrTail(cwd, record.id);
-    error = stderrTail || "worker exited without producing a report";
+    if (spool.truncated) {
+      // The window cut bytes away, so an unreadable report cannot be
+      // distinguished from a missing one: name the truncation instead of
+      // claiming the worker never reported.
+      error = `no report in the retained tail; the spool exceeds the finalization read window (${STREAM_TAIL_BYTES} bytes) and earlier output was truncated`;
+      if (stderrTail) error += `; stderr: ${stderrTail}`;
+    } else {
+      error = stderrTail || "worker exited without producing a report";
+    }
   }
 
   record.status = status;
@@ -444,6 +474,82 @@ export async function killPidTree(pid: number): Promise<void> {
   }
 }
 
+// --- Adopted deadline ---
+
+/** Hard-timeout detail for a record carrying a persisted deadline: the
+ *  spawning parent's exact message, recovered from the record's own
+ *  startedAt/deadlineAt pair so adoption renders the same cause. */
+function adoptedTimeoutDetail(record: WorkerRecord): string {
+  const timeoutMs = Math.max(0, (record.deadlineAt ?? record.startedAt) - record.startedAt);
+  return `worker exceeded ${Math.round(timeoutMs / 1000)}s timeout`;
+}
+
+export interface AdoptedTimeoutOptions {
+  cwd: string;
+  /** Terminal persistence for the adopted worker (transcript entry + record
+   *  file for owned workers; record file only for orphans). */
+  onRecord?(record: WorkerRecord): Promise<unknown>;
+  /** Wake/notify channel, when the adopter owns the worker. */
+  events?: WorkerEvents;
+  /** Called synchronously when the deadline fires, before any signal is
+   *  sent: the adopter stops its exit poller so the natural-death path
+   *  (completed/failed inferred from the spool) cannot win the race against
+   *  the timeout terminal save. */
+  beforeKill?(): void;
+  /** Called after the deadline terminal save settles: the adopter refreshes
+   *  its widget and status line. */
+  onSettled?(): void;
+}
+
+/**
+ * Arm an adopted worker's persisted hard timeout — the durable counterpart
+ * of the spawning parent's in-memory timer. A record without a deadline
+ * (created before deadlines were persisted) is never retroactively timed
+ * out: the disposer is a no-op. Otherwise the remaining time — not the
+ * original full timeout — is armed; when it elapses the worker's process
+ * group is killed and the record is terminalized as "timeout" with the
+ * same detail the parent would have written. Returns a disposer clearing
+ * the armed timer; a timer that already fired cannot be recalled, but
+ * finalizeWorker refuses a record that the adopter's own exit watcher has
+ * already terminalized.
+ */
+export function armAdoptedTimeout(
+  record: WorkerRecord,
+  options: AdoptedTimeoutOptions,
+): () => void {
+  if (record.deadlineAt === undefined) return () => {};
+  const remaining = Math.max(0, record.deadlineAt - Date.now());
+  const timer = setTimeout(() => {
+    // Synchronous, before any signal: from here on the exit poller must be
+    // out of the way, or its natural-death inference could terminalize the
+    // record as completed/failed while the kill is still in flight.
+    options.beforeKill?.();
+    void (async () => {
+      if (record.status !== "running") return;
+      if (record.pid !== undefined) await killPidTree(record.pid);
+      await finalizeWorker({
+        cwd: options.cwd,
+        record,
+        statusOverride: "timeout",
+        errorOverride: adoptedTimeoutDetail(record),
+        ...(options.events !== undefined ? { events: options.events } : {}),
+        ...(options.onRecord !== undefined ? { onRecord: options.onRecord } : {}),
+      });
+      options.onSettled?.();
+    })().catch((error) => {
+      // Enforcement must never surface as an unhandled rejection. A later
+      // janitor sweep can recover a record that remains running on disk.
+      console.error(
+        `[agents] adopted worker ${record.id} deadline enforcement failed: ${(error as Error).message}`,
+      );
+    });
+  }, remaining);
+  timer.unref?.();
+  return () => {
+    clearTimeout(timer);
+  };
+}
+
 // --- Task composition ---
 
 /**
@@ -461,6 +567,15 @@ export function composeWorkerTask(task: string, provision: ProvisionStatus | und
 }
 
 // --- Runner ---
+
+/** One-line reason for a caller's abort, kept as the cancelled record's
+ *  error detail. */
+function abortDetail(signal: AbortSignal): string {
+  const reason = signal.reason;
+  if (typeof reason === "string" && reason.length > 0) return reason;
+  if (reason instanceof Error && reason.message.length > 0) return reason.message;
+  return "cancelled before the worker started";
+}
 
 export interface StartWorkerOptions {
   cwd: string;
@@ -487,6 +602,9 @@ export interface StartWorkerOptions {
   /** Provisioning outcome for this worker; appended to the task prompt as
    *  the ENVIRONMENT block and stamped on the record. */
   provision?: ProvisionStatus;
+  /** Caller's abort signal: checked during preparation and directly before
+   *  spawn. An abort before spawn rejects without creating a worker. */
+  signal?: AbortSignal;
   events: WorkerEvents;
   /** Terminal persistence callback (transcript entry + record file). */
   onRecord(worker: WorkerRecord): Promise<unknown>;
@@ -502,6 +620,7 @@ export interface RunningWorker {
 export async function startWorker(options: StartWorkerOptions): Promise<RunningWorker> {
   const { events } = options;
   const task = composeWorkerTask(options.task, options.provision);
+  const startedAt = Date.now();
   const args = ["--mode", "json", "--no-session", "--no-extensions", "-p", task];
   if (options.model) args.push("--model", options.model);
   args.push("--thinking", options.thinkingLevel);
@@ -525,7 +644,10 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
       : {}),
     ...(options.provision !== undefined ? { provision: options.provision } : {}),
     status: "running",
-    startedAt: Date.now(),
+    startedAt,
+    // The durable counterpart of the in-memory timeout timer below: an
+    // adopter re-arms the remaining time once this process is gone.
+    deadlineAt: startedAt + options.timeoutMs,
     streamFormat: "raw",
   };
 
@@ -535,43 +657,54 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
   // live activity instead of reading a pipe.
   const childRef: { value?: ChildProcess } = {};
   let spawnError: Error | undefined;
+  const assertNotAborted = () => {
+    if (options.signal?.aborted) throw new SetupHookCancelled(abortDetail(options.signal));
+  };
   const started = (async (): Promise<ChildProcess> => {
+    assertNotAborted();
     await mkdir(join(spoolFile, ".."), { recursive: true });
+    assertNotAborted();
     const taskSummary = summarizeStreamValue(options.task);
     await appendSpoolLine(options.cwd, options.workerId, {
       type: "agents_start",
       at: Date.now(),
       ...(taskSummary !== undefined ? { task: taskSummary } : {}),
     });
+    assertNotAborted();
     const spoolHandle = await open(spoolFile, "a");
-    const stderrHandle = await open(stderrFile, "a");
-    const child = spawn(workerBinary(), args, {
-      cwd: options.worktree?.path ?? options.cwd,
-      env: {
-        ...cleanGitEnv(),
-        PI_WORKER: "1",
-        // Stable messenger identity: the worker is addressable in the mesh
-        // by its agents-registry name instead of a generated themed name.
-        PI_MESSENGER_NAME: options.name,
-        // Shared registry and inbox; the child still uses its worktree cwd
-        // for file tools and reservation path normalization.
-        PI_MESSENGER_PROJECT_ROOT: options.cwd,
-        // Blocker channel: the worker-side report_blocker tool appends
-        // agents_blocker markers to this spool; the poller below ingests
-        // them and wakes this session once, ids and status words only.
-        [WORKER_STREAM_ENV_VAR]: spoolFile,
-      },
-      detached: true,
-      // The child holds its own dups of these descriptors; the parent closes
-      // its copies right after spawn.
-      stdio: ["ignore", spoolHandle.fd, stderrHandle.fd],
-    });
-    // Exit wiring BEFORE any await: the child may outpace the handle cleanup.
-    wireChildEvents(child);
-    await spoolHandle.close().catch(() => {});
-    await stderrHandle.close().catch(() => {});
-    childRef.value = child;
-    return child;
+    let stderrHandle: import("node:fs/promises").FileHandle | undefined;
+    try {
+      stderrHandle = await open(stderrFile, "a");
+      assertNotAborted();
+      const child = spawn(workerBinary(), args, {
+        cwd: options.worktree?.path ?? options.cwd,
+        env: {
+          ...cleanGitEnv(),
+          PI_WORKER: "1",
+          // Stable messenger identity: the worker is addressable in the mesh
+          // by its agents-registry name instead of a generated themed name.
+          PI_MESSENGER_NAME: options.name,
+          // Shared registry and inbox; the child still uses its worktree cwd
+          // for file tools and reservation path normalization.
+          PI_MESSENGER_PROJECT_ROOT: options.cwd,
+          // Blocker channel: the worker-side report_blocker tool appends
+          // agents_blocker markers to this spool; the poller below ingests
+          // them and wakes this session once, ids and status words only.
+          [WORKER_STREAM_ENV_VAR]: spoolFile,
+        },
+        detached: true,
+        // The child holds its own dups of these descriptors; the parent closes
+        // its copies right after spawn.
+        stdio: ["ignore", spoolHandle.fd, stderrHandle.fd],
+      });
+      // Exit wiring BEFORE any await: the child may outpace handle cleanup.
+      wireChildEvents(child);
+      childRef.value = child;
+      return child;
+    } finally {
+      await spoolHandle.close().catch(() => {});
+      await stderrHandle?.close().catch(() => {});
+    }
   })().catch((error: Error) => {
     // Spawn-time failures (unreadable paths, ENOSPC on the spool) must not
     // reject into the completion chain: finalize as failed instead.
@@ -592,11 +725,12 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
   const ingestTimer = setInterval(() => {
     void ingestNewSpoolBytes(spoolFile).then((ingested) => {
       if (ingested === undefined) return;
-      const [newBytes, nextOffset] = ingested;
+      const [newBytes, nextOffset, skipped] = ingested;
       ingestOffset = nextOffset;
-      ingestBuffer += newBytes;
-      const lines = ingestBuffer.split("\n");
-      ingestBuffer = lines.pop() ?? "";
+      if (skipped) ingestBuffer = "";
+      const lines = `${ingestBuffer}${newBytes}`.split("\n");
+      ingestBuffer = (lines.pop() ?? "").slice(-STREAM_TAIL_BYTES);
+      if (skipped) lines.shift();
       for (const line of lines) {
         if (!line.trim()) continue;
         if (ingestStreamEvent(line, record) === "blocker" && !blockerWakeSent) {
@@ -616,7 +750,7 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
   }, INGEST_POLL_MS);
   ingestTimer.unref?.();
 
-  async function ingestNewSpoolBytes(path: string): Promise<[string, number] | undefined> {
+  async function ingestNewSpoolBytes(path: string): Promise<[string, number, boolean] | undefined> {
     let handle: import("node:fs/promises").FileHandle;
     try {
       handle = await open(path, "r");
@@ -626,9 +760,10 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
     try {
       const { size } = await handle.stat();
       if (size <= ingestOffset) return undefined;
-      const buffer = Buffer.alloc(size - ingestOffset);
-      await handle.read(buffer, 0, buffer.length, ingestOffset);
-      return [buffer.toString("utf8"), size];
+      const start = Math.max(ingestOffset, size - STREAM_TAIL_BYTES);
+      const buffer = Buffer.alloc(size - start);
+      await handle.read(buffer, 0, buffer.length, start);
+      return [buffer.toString("utf8"), size, start > ingestOffset];
     } finally {
       await handle.close().catch(() => {});
     }
@@ -643,7 +778,7 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
    *  (no report → failed with the stderr tail as detail). */
   const finish = (
     statusOverride?: WorkerRecord["status"],
-    _errorOverride?: string,
+    errorOverride?: string,
   ): Promise<WorkerRecord> => {
     if (!finishPromise) {
       finishPromise = (async () => {
@@ -652,7 +787,10 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
         // activity snapshot in the terminal save is current.
         const ingested = await ingestNewSpoolBytes(spoolFile);
         if (ingested !== undefined) {
-          for (const line of `${ingestBuffer}${ingested[0]}`.split("\n")) {
+          const [bytes, , skipped] = ingested;
+          const lines = `${skipped ? "" : ingestBuffer}${bytes}`.split("\n");
+          if (skipped) lines.shift();
+          for (const line of lines) {
             if (line.trim()) ingestStreamEvent(line, record);
           }
           ingestBuffer = "";
@@ -673,6 +811,7 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
           cwd: options.cwd,
           record,
           ...(statusOverride !== undefined ? { statusOverride } : {}),
+          ...(errorOverride !== undefined ? { errorOverride } : {}),
           ...(options.worktree !== undefined ? { worktree: options.worktree } : {}),
           exitCode: child.exitCode,
           events,
@@ -712,11 +851,10 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
     });
     child.on("error", (err) => {
       clearTimeout(timer);
-      void finish("failed").then((finalized) => {
-        finalized.error =
-          finalized.error !== undefined ? `${finalized.error}; ${err.message}` : err.message;
-        resolveDone(finalized);
-      });
+      // The error override reaches finalizeWorker before persistence and
+      // notification, so the saved record, the notify, and the caller all
+      // carry the same cause.
+      void finish("failed", err.message).then(resolveDone);
     });
   }
 
@@ -724,13 +862,19 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
     if (record.status !== "running") return;
     cancelRequested = true;
     const child = await started;
-    if (child.pid !== undefined) await killPidTree(child.pid);
+    // A failed spawn resolves `started` to undefined: nothing to signal, and
+    // finish settles the failed record once below.
+    if (child !== undefined && child.pid !== undefined) await killPidTree(child.pid);
     await finish("cancelled");
   };
 
   // The pid must be on the record before the caller's initial persist:
   // adoption, orphan detection, and pid-based kill all key off it.
   const child = await started;
+  if (spawnError instanceof SetupHookCancelled) {
+    clearInterval(ingestTimer);
+    throw spawnError;
+  }
   if (child !== undefined && child.pid !== undefined) record.pid = child.pid;
   return {
     record,

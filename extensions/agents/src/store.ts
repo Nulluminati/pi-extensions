@@ -6,8 +6,9 @@
  * `pi -c`/`-r` with the session), so ownership needs no registry. Project
  * disk keeps only per-worker artifact files — `records/<id>.json` (metadata
  * written by the owning session alone, carrying the parent pid so a later
- * session can classify leftovers), the `streams/<id>.jsonl` spool, and
- * `patches/<id>.diff`. No shared mutable registry, no cross-process
+ * session can classify leftovers), the `streams/<id>.jsonl` spool, the
+ * `streams/<id>.stderr.log` capture, and `patches/<id>.diff`. No shared
+ * mutable registry, no cross-process
  * read-modify-write; the only lock left guards a collect's recordedBy write.
  */
 
@@ -62,8 +63,10 @@ export function stderrLogPath(cwd: string, workerId: string): string {
   return join(streamsDir(cwd), `${workerId}.stderr.log`);
 }
 
-/** Stream spool cap: past this, the runner stops appending and records a
- *  truncation marker (the head of the stream is preserved). */
+/** Nominal stream spool size. No writer enforces this cap: a chatty worker
+ *  can grow its spool past it before its hard timeout fires. Readers bound
+ *  themselves instead — the tail display and finalization read at most the
+ *  last STREAM_TAIL_BYTES (runner.ts) of the file. */
 export const STREAM_MAX_BYTES = 512 * 1024;
 
 /** Per-record lock: sérialise le read-modify-write de collect sur le
@@ -364,16 +367,19 @@ export async function pruneWorkerArtifacts(cwd: string, now = Date.now()): Promi
     pruned.push(record.id);
     await unlink(recordPath(cwd, record.id)).catch(() => {});
     await unlink(streamPath(cwd, record.id)).catch(() => {});
+    await unlink(stderrLogPath(cwd, record.id)).catch(() => {});
     await unlink(join(patchesDir(cwd), `${record.id}.diff`)).catch(() => {});
   }
   return pruned;
 }
 
-/** Delete stream spool files that no record claims and whose worker
- *  finished more than a day ago; post-mortem tails stay available for a day.
- *  `protectIds` are spared unconditionally — transcript-owned running
- *  workers whose record file does not exist yet (adoption pending) would
- *  otherwise lose their spool before finalization can read it. */
+/** Delete stream files (`.jsonl` spool and `.stderr.log` capture) that no
+ *  record claims and whose worker finished more than a day ago; post-mortem
+ *  tails stay available for a day. Both suffixes map to the same worker id,
+ *  so a running worker keeps both and a terminal record ages both out
+ *  together. `protectIds` are spared unconditionally — transcript-owned
+ *  running workers whose record file does not exist yet (adoption pending)
+ *  would otherwise lose their spool before finalization can read it. */
 export async function pruneStreams(
   cwd: string,
   now = Date.now(),
@@ -387,7 +393,9 @@ export async function pruneStreams(
     return;
   }
   for (const file of files) {
-    const id = file.replace(/\.jsonl$/, "");
+    const id = file.endsWith(".stderr.log")
+      ? file.slice(0, -".stderr.log".length)
+      : file.replace(/\.jsonl$/, "");
     if (protectIds.has(id)) continue;
     const record = records.get(id);
     // Running workers keep their stream; known terminal records keep it for a
@@ -450,6 +458,7 @@ export async function removeWorkerRecord(cwd: string, id: string): Promise<void>
   }
   await unlink(recordPath(cwd, id)).catch(() => {});
   await unlink(streamPath(cwd, id)).catch(() => {});
+  await unlink(stderrLogPath(cwd, id)).catch(() => {});
   await unlink(join(patchesDir(cwd), `${id}.diff`)).catch(() => {});
 }
 

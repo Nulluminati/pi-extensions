@@ -177,8 +177,10 @@ function workerExtensionsConfigPath(env: NodeJS.ProcessEnv): string {
   return override || agentConfigPath("worker-extensions", defaultAgentDir());
 }
 
+// This module lives at <repo>/extensions/agents/src/, so two directory
+// levels up is the repository's extensions/ directory.
 function defaultExtensionsRoot(): string {
-  return fileURLToPath(new URL("../extensions/", import.meta.url));
+  return fileURLToPath(new URL("../../", import.meta.url));
 }
 
 function defaultAgentDir(): string {

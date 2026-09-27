@@ -30,14 +30,17 @@ export interface LoadShardsOptions {
 
 // --- Liveness ---
 
-/** True when the pid belongs to a live process. */
+/** True when the pid belongs to a live process. signal 0 throws EPERM when
+ *  the process exists but the caller cannot signal it (another user's
+ *  session, a sandbox): that is a live process, so it must never be pruned
+ *  like a dead one. Any other error keeps the conservative dead result. */
 export function isProcessAlive(pid: number): boolean {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    return isNodeError(error) && error.code === "EPERM";
   }
 }
 

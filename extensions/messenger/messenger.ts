@@ -163,6 +163,13 @@ export default async function messengerExtension(pi: ExtensionAPI) {
     // mailbox and reservation identity.
     assertValidAgentName(resolved);
     agentName = await claimIdentity(ctx.cwd, resolved);
+    // claimIdentity moves to a suffixed name when a live session holds the
+    // resolved one; persisting the claimed name keeps the next resume on the
+    // same mailbox and reservation identity instead of falling back to the
+    // abandoned original.
+    if (agentName !== resolved) {
+      pi.appendEntry(IDENTITY_CUSTOM_TYPE, { name: agentName });
+    }
     const model = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined;
     await heartbeat(ctx.cwd, agentName, {
       pid: process.pid,
@@ -177,6 +184,9 @@ export default async function messengerExtension(pi: ExtensionAPI) {
   });
 
   pi.on("agent_settled", async (_event, ctx) => {
+    // A failed session_start leaves no identity; a heartbeat would write a
+    // nameless presence shard that peers cannot address.
+    if (!agentName) return;
     await heartbeat(ctx.cwd, agentName, { pid: process.pid, cwd: ctx.cwd });
     await deliverInbox(ctx);
   });
@@ -185,8 +195,10 @@ export default async function messengerExtension(pi: ExtensionAPI) {
     // Drop presence only. Claims and mailboxes persist: the identity is
     // stored in the session, so a resumed session (pi -c) re-adopts its
     // claims on session_start. If the session never resumes, claims expire
-    // via the orphan grace window in loadReservations.
-    await leaveRegistry(ctx.cwd, agentName);
+    // via the orphan grace window in loadReservations. No identity claimed
+    // (failed session_start): nothing to release, and releasing "" would
+    // address a nameless shard.
+    if (agentName) await leaveRegistry(ctx.cwd, agentName);
     inboxWatcher.stop();
     if (ctx.hasUI) ctx.ui.setStatus(MESSENGER_STATUS_KEY, undefined);
   });

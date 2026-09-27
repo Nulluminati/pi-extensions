@@ -6,7 +6,7 @@
  * concurrency-safety core of delegation.
  */
 
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import type { AgentToolResult, ExtensionContext, ThinkingLevel } from "pi";
 import { withFileLock } from "../../../lib/file-lock.ts";
@@ -16,7 +16,7 @@ import { isPlanModeActive } from "../../../lib/plan-state.ts";
 import { resolveWorkerModelSpec } from "../../../lib/worker-model.ts";
 import { formatWorkerStatus } from "./format.ts";
 import { carryIncludedPaths } from "./provision/carry.ts";
-import { assertSetupHook, runSetupHook } from "./provision/hook.ts";
+import { assertSetupHook, runSetupHook, SetupHookCancelled } from "./provision/hook.ts";
 import type { ProvisionStatus } from "./provision/types.ts";
 import { type RunningWorker, startWorker } from "./runner.ts";
 import { generateWorkerId, sweepWorkerArtifacts } from "./store.ts";
@@ -59,8 +59,7 @@ function oneLine(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
-/**
- * A refusal raised by the provisioning flow. It carries the ProvisionStatus
+/** A refusal raised by the provisioning flow. It carries the ProvisionStatus
  * recorded on the failed worker record, and the message is the refusal text
  * returned to the delegating model.
  */
@@ -72,6 +71,19 @@ class ProvisionRefusal extends Error {
     this.name = "ProvisionRefusal";
     this.provision = provision;
   }
+}
+
+/** Stop preparation before a cancelled delegate starts a child. */
+function assertNotAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  const reason = signal.reason;
+  const detail =
+    typeof reason === "string"
+      ? reason
+      : reason instanceof Error
+        ? reason.message
+        : "caller aborted";
+  throw new SetupHookCancelled(detail);
 }
 
 /** Repo-root-free relative listing of the setup files being checked. */
@@ -156,15 +168,20 @@ async function provisionWorktree(
   worktree: { path: string; branch: string },
   _notifyInfo: (message: string) => void,
   setupCommittedAtPreflight: boolean,
+  signal?: AbortSignal,
 ): Promise<ProvisionStatus> {
   const detailParts: string[] = [];
   try {
+    assertNotAborted(signal);
     await withFileLock(
       `${cwd}/${projectStateRelative("worktree-setup")}.lock`,
       async () => {
+        assertNotAborted(signal);
         const carry = await carryIncludedPaths(cwd, worktree.path);
+        assertNotAborted(signal);
         detailParts.push(`carry ${carry.carried.length}`);
-        const run = await runSetupHook(worktree.path, SETUP_TIMEOUT_MS);
+        const run = await runSetupHook(worktree.path, SETUP_TIMEOUT_MS, signal);
+        assertNotAborted(signal);
         if (run.exitCode !== 0) {
           const detail = oneLine(run.detail);
           throw new ProvisionRefusal(
@@ -184,6 +201,9 @@ async function provisionWorktree(
       },
     );
   } catch (error) {
+    // A cancelled hook is the caller's abort, not a setup failure: it must
+    // not be recorded as one. Propagate as cancellation (see the caller).
+    if (error instanceof SetupHookCancelled) throw error;
     if (error instanceof ProvisionRefusal) throw error;
     if (error instanceof Error && error.message === PROVISION_BUSY_MESSAGE) {
       throw new ProvisionRefusal(
@@ -196,6 +216,7 @@ async function provisionWorktree(
       `provisioned: failed (${oneLine(messageOf(error))}). Fix ${PROVISION_HOOK_RELATIVE} or the environment, then re-delegate.`,
     );
   }
+  assertNotAborted(signal);
   if (setupCommittedAtPreflight) detailParts.push("setup committed");
   return { state: "yes", detail: detailParts.join(", "), at: Date.now() };
 }
@@ -335,46 +356,30 @@ export interface StartDelegatedWorkerOptions {
   /** Persist a state transition (transcript entry + artifact record file).
    *  Returns false when a stale running snapshot lost to a terminal state. */
   persist(record: WorkerRecord): Promise<boolean>;
+  /** Tool cancellation stops setup before a worker child starts. */
+  signal?: AbortSignal;
 }
 
 /**
- * Reserve a worker slot, create the worktree when wanted, and spawn the
- * child session. The cap is per session and enforced in-process: the check
- * plus the reservation are synchronous (no await between them), so parallel
- * delegate calls in one session cannot both cross the limit. The
- * reservation precedes the worktree: a refusal (limit, name already taken)
- * must not leave an orphaned worktree behind. If anything fails after the
- * reservation (worktree, spawn), the worker is recorded failed.
+ * Refuse when the requested name is taken or the worker cap is full, before
+ * any side effect. Foreign-live names (workers of other live sessions) keep
+ * messenger-name collisions unlikely; the check is best-effort (no lock,
+ * small race window) because names route mail, not correctness. Runs before
+ * the provision preflight so a limit or name refusal cannot leave a setup
+ * commit behind. The slot is reserved synchronously after this check.
  */
-export async function startDelegatedWorker(
-  options: StartDelegatedWorkerOptions,
-): Promise<{ runningWorker: RunningWorker; worktree?: { path: string; branch: string } }> {
-  const { cwd, plan, state, events, persist } = options;
-  // Whether preflight path-committed the config; rides the provision status
-  // so the durable response shows the commit fact (field feedback: notify unseen).
-  let configCommittedAtPreflight = false;
-  const { workerId, name, task, model, thinkingLevel, timeoutMs, parentPlanning, extensionPaths } =
-    plan;
+async function foreignLiveNames(cwd: string, state: WorkerSessionState): Promise<string[]> {
+  const sweep = await sweepWorkerArtifacts(cwd, new Set(state.branchWorkers.keys()));
+  return sweep.foreignLive.map((worker) => worker.name);
+}
 
-  // Provision preflight first (review D1): a refusal here must burn no slot
-  // and create nothing, so it runs before the reservation and the worktree.
-  // It only applies when a worktree would be created; plan-mode and
-  // non-isolated workers never provision (review I10).
-  if (plan.wantIsolate && (await isGitRepo(cwd))) {
-    configCommittedAtPreflight = await assertProvisionReady(cwd, (message) =>
-      events.notify("info", message),
-    );
-  }
-
-  // Foreign-live names (workers of other live sessions) keep messenger-name
-  // collisions unlikely; the check is best-effort (no lock, small race
-  // window) because names route mail, not correctness.
-  const foreignLive = (await sweepWorkerArtifacts(cwd, new Set(state.branchWorkers.keys())))
-    .foreignLive;
-  const takenNames = new Set<string>([
-    ...state.reserved.values(),
-    ...foreignLive.map((w) => w.name),
-  ]);
+function assertWorkerLimits(
+  state: WorkerSessionState,
+  name: string,
+  maxWorkers: number,
+  foreignNames: string[],
+): void {
+  const takenNames = new Set<string>([...state.reserved.values(), ...foreignNames]);
   let runningCount = 0;
   for (const record of state.branchWorkers.values()) {
     if (record.status !== "running") continue;
@@ -385,26 +390,67 @@ export async function startDelegatedWorker(
   if (takenNames.has(name)) {
     throw new Error(`A worker named "${name}" is already running.`);
   }
-  if (runningCount >= plan.maxWorkers) {
+  if (runningCount >= maxWorkers) {
     throw new Error(
-      `Worker limit reached (${runningCount}/${plan.maxWorkers}). Wait for a worker to finish or raise PI_MAX_WORKERS.`,
+      `Worker limit reached (${runningCount}/${maxWorkers}). Wait for a worker to finish or raise PI_MAX_WORKERS.`,
     );
   }
-  // Reserve synchronously (no await between check and add): single-threaded,
-  // so concurrent delegate calls in this session serialize here.
+}
+
+/**
+ * Reserve a worker slot, create the worktree when wanted, and spawn the
+ * child session. The cap is per session and enforced in-process: the check
+ * plus the reservation are synchronous (no await between them), so parallel
+ * delegate calls in one session cannot both cross the limit. The temporary
+ * reservation precedes provision preflight, which can commit dirty setup
+ * files. A refused preflight releases that slot without a worker record.
+ * If worktree creation or spawn fails after preflight, the worker is
+ * recorded failed.
+ */
+export async function startDelegatedWorker(
+  options: StartDelegatedWorkerOptions,
+): Promise<{ runningWorker: RunningWorker; worktree?: { path: string; branch: string } }> {
+  const { cwd, plan, state, events, persist, signal } = options;
+  assertNotAborted(signal);
+  // Whether preflight path-committed the config; rides the provision status
+  // so the durable response shows the commit fact (field feedback: notify unseen).
+  let configCommittedAtPreflight = false;
+  const { workerId, name, task, model, thinkingLevel, timeoutMs, parentPlanning, extensionPaths } =
+    plan;
+
+  // Check and reserve without an await between them. A second delegate
+  // cannot take this slot while preflight commits setup files.
+  const foreignNames = await foreignLiveNames(cwd, state);
+  assertNotAborted(signal);
+  assertWorkerLimits(state, name, plan.maxWorkers, foreignNames);
   state.reserved.set(workerId, name);
 
   let worktree: { path: string; branch: string } | undefined;
   let runningWorker: RunningWorker | undefined;
   let provisionStatus: ProvisionStatus | undefined;
+  let preflightComplete = false;
   try {
+    assertNotAborted(signal);
+    // Invalid setup releases the temporary slot without recording a failed
+    // worker. Planning and non-isolated workers do not provision.
+    if (plan.wantIsolate && (await isGitRepo(cwd))) {
+      assertNotAborted(signal);
+      configCommittedAtPreflight = await assertProvisionReady(cwd, (message) =>
+        events.notify("info", message),
+      );
+    }
+    assertNotAborted(signal);
+    preflightComplete = true;
     if (plan.wantIsolate) {
-      if (!(await isGitRepo(cwd))) {
+      const inGitRepo = await isGitRepo(cwd);
+      assertNotAborted(signal);
+      if (!inGitRepo) {
         if (plan.isolateRequired) {
           throw new Error("isolate=true requires a git repository.");
         }
       } else {
         worktree = await createWorktree(cwd, workerId);
+        assertNotAborted(signal);
       }
     }
 
@@ -417,11 +463,13 @@ export async function startDelegatedWorker(
         worktree,
         (message) => events.notify("info", message),
         configCommittedAtPreflight,
+        signal,
       );
     } else {
       provisionStatus = { state: "skipped", detail: "no worktree", at: Date.now() };
     }
 
+    assertNotAborted(signal);
     const sandbox = true;
     const readOnly = parentPlanning;
 
@@ -436,6 +484,7 @@ export async function startDelegatedWorker(
       extensionPaths,
       sandbox,
       readOnly,
+      ...(signal !== undefined ? { signal } : {}),
       parentPid: process.pid,
       parentSessionId: plan.parentSessionId,
       ...(worktree !== undefined ? { worktree } : {}),
@@ -457,6 +506,42 @@ export async function startDelegatedWorker(
       () => {},
     );
   } catch (error) {
+    if (!preflightComplete) throw error;
+    if (error instanceof SetupHookCancelled) {
+      if (worktree !== undefined) {
+        try {
+          await removeWorktree(cwd, workerId);
+          const remains = await stat(worktree.path).then(
+            () => true,
+            (error: NodeJS.ErrnoException) => {
+              if (error.code === "ENOENT") return false;
+              throw error;
+            },
+          );
+          if (remains) throw new Error(`worktree still exists: ${worktree.path}`);
+        } catch (cleanupError) {
+          const detail = `cancelled; worktree cleanup failed: ${oneLine(messageOf(cleanupError))}`;
+          await persist({
+            id: workerId,
+            name,
+            task,
+            model,
+            thinkingLevel,
+            cwd,
+            status: "failed",
+            worktree: worktree.path,
+            branch: worktree.branch,
+            parentPid: process.pid,
+            parentSessionId: plan.parentSessionId,
+            error: detail,
+            startedAt: Date.now(),
+            endedAt: Date.now(),
+          }).catch(() => {});
+          throw new AggregateError([error, cleanupError], detail);
+        }
+      }
+      throw error;
+    }
     // Busy: nothing was provisioned into the fresh worktree, so it is
     // discarded here and the failed record carries no worktree (no orphan).
     // Every other failure keeps the worktree ON the record (review B4):

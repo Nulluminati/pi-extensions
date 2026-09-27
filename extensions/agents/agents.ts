@@ -42,7 +42,13 @@ import {
   type WorkerSessionState,
 } from "./src/delegate.ts";
 import { AGENTS_STATE_EVENT, createWorkersWidget, WORKERS_WIDGET_KEY } from "./src/format.ts";
-import { finalizeWorker, killPidTree, type RunningWorker } from "./src/runner.ts";
+import { SetupHookCancelled } from "./src/provision/hook.ts";
+import {
+  armAdoptedTimeout,
+  finalizeWorker,
+  killPidTree,
+  type RunningWorker,
+} from "./src/runner.ts";
 import { DELEGATE_PARAMETERS, WORKERS_PARAMETERS } from "./src/schemas.ts";
 import {
   listRecordFiles,
@@ -81,17 +87,47 @@ export default async function agentsExtension(pi: ExtensionAPI) {
   let lastCwd = process.cwd();
   // Workers running under other (dead) sessions or restored by pi -c: this
   // session watches their pid and finalizes them from disk when they exit.
+  // disarm clears the worker's re-armed hard timeout (a no-op for records
+  // created before deadlines were persisted).
   const adopted = new Map<
     string,
-    { pid: number; owned: boolean; timer: ReturnType<typeof setInterval> }
+    { pid: number; owned: boolean; timer: ReturnType<typeof setInterval>; disarm: () => void }
   >();
 
   /** Watch a running worker this session does not hold a RunningWorker for.
    *  Owned workers (restored by pi -c) get wakes on completion; foreign
-   *  leftovers finalize silently into their record files. */
+   *  leftovers finalize silently into their record files. The record's
+   *  persisted deadline is re-armed for the remaining time. */
   function adoptWorker(ctx: ExtensionContext, record: WorkerRecord, owned: boolean): boolean {
     if (record.pid === undefined || !isProcessAlive(record.pid)) return false;
     if (adopted.has(record.id)) return true;
+    // The exit poller's interval is created below; the holder lets the
+    // deadline's synchronous hook clear it before the kill.
+    const poll: { timer?: ReturnType<typeof setInterval> } = {};
+    // Durable hard timeout: when the persisted deadline elapses, the worker
+    // is killed and terminalized as a timeout. beforeKill stops the exit
+    // poller synchronously first — its natural-death inference
+    // (completed/failed from the spool) must not win the race against the
+    // deadline's terminal save.
+    const disarm = armAdoptedTimeout(record, {
+      cwd: lastCwd,
+      beforeKill: () => {
+        if (poll.timer !== undefined) clearInterval(poll.timer);
+        adopted.delete(record.id);
+      },
+      ...(owned
+        ? {
+            events: makeEvents(ctx),
+            onRecord: (finalized: WorkerRecord) => persistRecord(finalized),
+          }
+        : { onRecord: (finalized: WorkerRecord) => writeRecordFile(lastCwd, finalized) }),
+      onSettled: () => {
+        if (shutDown) return;
+        publish(ctx).catch((error) => {
+          console.error(`[agents] publish failed: ${(error as Error).message}`);
+        });
+      },
+    });
     const timer = setInterval(() => {
       if (isProcessAlive(record.pid ?? -1)) return;
       void stopWatching(record.id).then(async (stillRunning) => {
@@ -111,7 +147,8 @@ export default async function agentsExtension(pi: ExtensionAPI) {
       });
     }, 2_000);
     timer.unref?.();
-    adopted.set(record.id, { pid: record.pid, owned, timer });
+    poll.timer = timer;
+    adopted.set(record.id, { pid: record.pid, owned, timer, disarm });
     return true;
   }
 
@@ -119,6 +156,7 @@ export default async function agentsExtension(pi: ExtensionAPI) {
     const entry = adopted.get(id);
     if (entry === undefined) return false;
     clearInterval(entry.timer);
+    entry.disarm();
     adopted.delete(id);
     const current = await loadWorker(lastCwd, id);
     return current === undefined || current.status === "running";
@@ -299,6 +337,7 @@ export default async function agentsExtension(pi: ExtensionAPI) {
       lastUi = ctx.ui;
       lastCwd = ctx.cwd;
       refreshFromBranch(ctx);
+      if (signal?.aborted) throw new SetupHookCancelled("caller aborted the delegate");
       const plan = await planDelegate(params as DelegateParams, ctx);
       const { runningWorker, worktree } = await startDelegatedWorker({
         cwd: ctx.cwd,
@@ -306,25 +345,31 @@ export default async function agentsExtension(pi: ExtensionAPI) {
         state,
         events: makeEvents(ctx),
         persist: persistRecord,
+        ...(signal !== undefined ? { signal } : {}),
       });
-      await publish(ctx);
 
       if (params.wait === true) {
-        // A cancelled turn aborts this tool call; cancel the worker too so it
-        // does not stay pending until the hard timeout.
-        signal?.addEventListener(
-          "abort",
-          () => {
-            void runningWorker.cancel();
-          },
-          { once: true },
-        );
-        const record = await runningWorker.done;
-        state.running.delete(plan.workerId);
-        await publish(ctx);
-        return buildDelegateWaitedResponse(record);
+        // Attach before another await, then check the current signal state:
+        // an abort during setup or running-record persistence cannot be lost.
+        const cancel = () => {
+          void runningWorker.cancel().catch((error) => {
+            console.error(`[agents] worker cancel failed: ${(error as Error).message}`);
+          });
+        };
+        signal?.addEventListener("abort", cancel, { once: true });
+        try {
+          if (signal?.aborted) cancel();
+          await publish(ctx);
+          const record = await runningWorker.done;
+          state.running.delete(plan.workerId);
+          await publish(ctx);
+          return buildDelegateWaitedResponse(record);
+        } finally {
+          signal?.removeEventListener("abort", cancel);
+        }
       }
 
+      await publish(ctx);
       return buildDelegateStartedResponse(
         plan,
         worktree,
@@ -608,6 +653,7 @@ export default async function agentsExtension(pi: ExtensionAPI) {
     }
     for (const [id, entry] of adopted) {
       clearInterval(entry.timer);
+      entry.disarm();
       adopted.delete(id);
       if (!entry.owned) continue;
       // An adopted (restored) worker is ours: cancel it on the way out,

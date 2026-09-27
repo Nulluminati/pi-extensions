@@ -24,12 +24,16 @@ import {
   type WorkerSessionState,
 } from "../../extensions/agents/src/delegate.ts";
 import { createWorkersWidget } from "../../extensions/agents/src/format.ts";
-import { runSetupHook } from "../../extensions/agents/src/provision/hook.ts";
+import { runSetupHook, SetupHookCancelled } from "../../extensions/agents/src/provision/hook.ts";
 import {
+  armAdoptedTimeout,
   extractAssistantText,
   finalizeWorker,
   ingestStreamEvent,
   killPidTree,
+  readSpoolLines,
+  STREAM_TAIL_BYTES,
+  startWorker,
 } from "../../extensions/agents/src/runner.ts";
 import {
   generateWorkerId,
@@ -39,14 +43,17 @@ import {
   migrateLegacyRegistry,
   persistWorkerRecord,
   persistWorkerRemoval,
+  pruneStreams,
   pruneWorkerArtifacts,
   removeWorkerRecord,
+  stderrLogPath,
   streamPath,
   sweepWorkerArtifacts,
   updateRecordFile,
   WORKER_RECORD_ENTRY,
   WORKER_REMOVED_ENTRY,
   WORKER_RETENTION_MS,
+  writeRecordFile,
 } from "../../extensions/agents/src/store.ts";
 import type { WorkerEvents, WorkerRecord } from "../../extensions/agents/src/types.ts";
 import {
@@ -61,6 +68,7 @@ import {
 import { withFileLock } from "../../lib/file-lock.ts";
 import { cleanGitEnv, runGit } from "../../lib/git.ts";
 import { projectStateRelative } from "../../lib/paths.ts";
+import { isProcessAlive } from "../../lib/presence-shards.ts";
 
 // Call-through spy: real cross-process locking behavior stays active for
 // every code path, while tests can assert who took which lock.
@@ -712,6 +720,42 @@ sleep 30
     expect(patch).toContain("late.txt");
   });
 
+  it("a timed-out worker keeps the timeout reason in its record and response", async () => {
+    const fixture = await writeFixture(fixtureDir, "slow-worker.sh", SLOW_WORKER);
+    setEnv("PI_WORKER_COMMAND", fixture);
+
+    const result = await executeTool("delegate", {
+      task: "long",
+      isolate: false,
+      wait: true,
+      timeout_seconds: 1,
+    });
+
+    expect(result.details.worker.status).toBe("timeout");
+    expect(result.details.worker.error).toContain("worker exceeded 1s timeout");
+    const record = await loadWorker(cwd, result.details.worker.id as string);
+    expect(record?.status).toBe("timeout");
+    expect(record?.error).toContain("worker exceeded 1s timeout");
+  });
+
+  it("a spawned worker's record persists its hard-timeout deadline", async () => {
+    const fixture = await writeFixture(fixtureDir, "ok-worker.sh", SUCCESS_WORKER);
+    setEnv("PI_WORKER_COMMAND", fixture);
+
+    const result = await executeTool("delegate", {
+      task: "quick",
+      isolate: false,
+      wait: true,
+      timeout_seconds: 5,
+    });
+
+    const record = await loadWorker(cwd, result.details.worker.id as string);
+    // The deadline is the exact spawn-time bound (startedAt + timeout), so
+    // an adopter can re-arm the remaining time once the parent is gone.
+    expect(record?.status).toBe("completed");
+    expect(record?.deadlineAt).toBe((record?.startedAt ?? 0) + 5_000);
+  });
+
   it("enforces the worker concurrency limit", async () => {
     const fixture = await writeFixture(fixtureDir, "slow-worker.sh", SLOW_WORKER);
     setEnv("PI_WORKER_COMMAND", fixture);
@@ -990,6 +1034,122 @@ sleep 30
     expect(result.content[0].text).toContain("slot is free");
     expect(result.content[0].text).toContain("action=remove");
     expect(result.content[0].text).toContain("delegate to start a new worker");
+  });
+
+  it("a worker whose binary is missing persists and notifies the spawn error", async () => {
+    setEnv("PI_WORKER_COMMAND", join(fixtureDir, "missing-binary.sh"));
+
+    const result = await executeTool("delegate", { task: "doomed", isolate: false, wait: true });
+
+    expect(result.details.worker.status).toBe("failed");
+    expect(result.details.worker.error).toContain("ENOENT");
+    const id = result.details.worker.id as string;
+    const record = await loadWorker(cwd, id);
+    expect(record?.status).toBe("failed");
+    expect(record?.error).toContain("ENOENT");
+    expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("ENOENT"), "error");
+  });
+
+  it("workers cancel settles a worker whose spawn never produced a child", async () => {
+    // The streams path as a regular file fails the runner's spool mkdir before
+    // spawn: no child process exists, so nothing finalizes the record and
+    // cancellation is the only path that must settle it.
+    const streams = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
+    await mkdir(join(streams, ".."), { recursive: true });
+    await writeFile(streams, "not a directory", "utf8");
+
+    const started = await executeTool("delegate", { task: "doomed", isolate: false });
+    const id = started.details.workerId as string;
+
+    const cancelled = await executeTool("workers", { action: "cancel", id });
+    expect(cancelled.details.worker.status).toBe("failed");
+    expect(cancelled.details.worker.error).toContain("EEXIST");
+    const record = await loadWorker(cwd, id);
+    expect(record?.status).toBe("failed");
+    expect(record?.error).toContain("EEXIST");
+  });
+
+  it("drains a large worker spool without allocating the whole burst", async () => {
+    const fixture = await writeFixture(
+      fixtureDir,
+      "large-spool-worker.sh",
+      `#!/bin/sh\nnode -e 'process.stdout.write("x".repeat(${STREAM_TAIL_BYTES * 4}) + "\\n")'\nprintf '\\n%s\\n' '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"complete"}]}}'\n`,
+    );
+    setEnv("PI_WORKER_COMMAND", fixture);
+    const alloc = vi.spyOn(Buffer, "alloc");
+    try {
+      const result = await executeTool("delegate", {
+        task: "large spool",
+        isolate: false,
+        wait: true,
+      });
+      expect((result.details.worker as WorkerRecord).status).toBe("completed");
+      expect(alloc.mock.calls.some(([size]) => size > STREAM_TAIL_BYTES)).toBe(false);
+    } finally {
+      alloc.mockRestore();
+    }
+  });
+
+  it("startWorker rejects an already-aborted signal without spawning a child", async () => {
+    const spawnMarker = join(fixtureDir, "preaborted-spawn-marker");
+    setEnv(
+      "PI_WORKER_COMMAND",
+      await writeFixture(
+        fixtureDir,
+        "preaborted-spawn-marker.sh",
+        `#!/bin/sh\ntouch '${spawnMarker}'\nexit 0\n`,
+      ),
+    );
+    const events = testEvents();
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      startWorker({
+        cwd,
+        task: "never starts",
+        model: "test-model",
+        thinkingLevel: "medium",
+        name: "preaborted",
+        timeoutMs: 60_000,
+        workerId: "w-preaborted",
+        extensionPaths: [],
+        signal: controller.signal,
+        events,
+        onRecord: async () => {},
+      }),
+    ).rejects.toThrow(SetupHookCancelled);
+
+    expect(existsSync(spawnMarker)).toBe(false);
+    expect(existsSync(streamPath(cwd, "w-preaborted"))).toBe(false);
+    expect(events.wake).not.toHaveBeenCalled();
+    expect(events.notify).not.toHaveBeenCalled();
+  });
+
+  it("session_shutdown settles a failed-spawn worker and still cancels a live one", async () => {
+    const streams = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
+    await mkdir(join(streams, ".."), { recursive: true });
+    await writeFile(streams, "not a directory", "utf8");
+    const doomed = await executeTool("delegate", { task: "doomed", isolate: false });
+    const doomedId = doomed.details.workerId as string;
+
+    // Restore the streams dir so the second worker spawns normally.
+    await rm(streams, { force: true });
+    const fixture = await writeFixture(fixtureDir, "slow-worker.sh", SLOW_WORKER);
+    setEnv("PI_WORKER_COMMAND", fixture);
+    const live = await executeTool("delegate", { task: "long", isolate: false });
+    const liveId = live.details.workerId as string;
+
+    await getEventHandler("session_shutdown")(
+      { type: "session_shutdown", reason: "quit" },
+      mockCtx,
+    );
+
+    const doomedRecord = await loadWorker(cwd, doomedId);
+    expect(doomedRecord?.status).toBe("failed");
+    expect(doomedRecord?.error).toContain("EEXIST");
+    const liveRecord = await loadWorker(cwd, liveId);
+    expect(liveRecord?.status).toBe("cancelled");
   });
 
   it("workers collect applies an isolated worker's patch and cleans up, keeping the stream", async () => {
@@ -2035,7 +2195,7 @@ sleep 30
       const id = started.details.workerId as string;
       const wt = join(cwd, CONFIG_DIR_NAME, "worktrees", id);
       expect(await readFile(join(wt, "data", "config.json"), "utf8")).toBe("{}\n");
-      expect(vi.mocked(runSetupHook)).toHaveBeenCalledWith(wt, 600_000);
+      expect(vi.mocked(runSetupHook)).toHaveBeenCalledWith(wt, 600_000, undefined);
       const gitCalls = vi.mocked(runGit).mock.calls.map((call) => call[1].join(" "));
       expect(
         gitCalls.some((entry) =>
@@ -2055,6 +2215,234 @@ sleep 30
 
       const record = await waitForRecord(cwd, id, "completed");
       expect(record.provision).toMatchObject({ state: "yes" });
+    });
+
+    describe("abort during delegation", () => {
+      /** Blocked-hook mock: parks until the external signal aborts, then
+       *  rejects with SetupHookCancelled exactly like the real hook. */
+      function blockHookOnAbort(): {
+        blocked: Promise<void>;
+        hookedSignal: AbortSignal | undefined;
+      } {
+        let hookedSignal: AbortSignal | undefined;
+        let start: () => void = () => {};
+        const blocked = new Promise<void>((resolve) => {
+          start = resolve;
+        });
+        vi.mocked(runSetupHook).mockImplementationOnce(
+          async (_worktree: string, _timeoutMs: number, signal?: AbortSignal) => {
+            hookedSignal = signal;
+            start();
+            return new Promise((_resolve, reject) => {
+              signal?.addEventListener(
+                "abort",
+                () => reject(new SetupHookCancelled("test abort")),
+                { once: true },
+              );
+            });
+          },
+        );
+        return {
+          blocked,
+          get hookedSignal() {
+            return hookedSignal;
+          },
+        };
+      }
+
+      it("an already-aborted signal refuses the delegate before any preparation or spawn", async () => {
+        const spawnMarker = join(fixtureDir, "aborted-refusal-marker");
+        setEnv(
+          "PI_WORKER_COMMAND",
+          await writeFixture(
+            fixtureDir,
+            "aborted-refusal-marker.sh",
+            `#!/bin/sh\ntouch '${spawnMarker}'\nexit 0\n`,
+          ),
+        );
+        const controller = new AbortController();
+        controller.abort();
+
+        await expect(
+          executeTool("delegate", { task: "t", isolate: false, wait: true }, controller.signal),
+        ).rejects.toThrow(/abort/i);
+
+        expect(existsSync(spawnMarker)).toBe(false); // refused before spawn
+        expect(await listRecordFiles(cwd)).toHaveLength(0); // nothing recorded
+        expect(mockPi.appendEntry).not.toHaveBeenCalled();
+      });
+
+      it("aborting a wait=true delegate during a blocked setup hook starts no worker, frees the slot, and leaves nothing behind", async () => {
+        fakeWorktreeGit();
+        await writeProvisionConfig(cwd);
+        const spawnMarker = join(fixtureDir, "abort-hook-spawn-marker");
+        setEnv(
+          "PI_WORKER_COMMAND",
+          await writeFixture(
+            fixtureDir,
+            "abort-hook-spawn-marker.sh",
+            `#!/bin/sh\ntouch '${spawnMarker}'\nexit 0\n`,
+          ),
+        );
+        setEnv("PI_MAX_WORKERS", "1");
+        const hook = blockHookOnAbort();
+
+        const controller = new AbortController();
+        const pending = executeTool(
+          "delegate",
+          { task: "isolated task", wait: true },
+          controller.signal,
+        );
+        await hook.blocked; // the hook is now parked inside provisioning
+        // The tool's signal reaches the setup hook as its external signal.
+        expect(vi.mocked(runSetupHook)).toHaveBeenCalledWith(
+          expect.any(String),
+          600_000,
+          controller.signal,
+        );
+        controller.abort();
+
+        await expect(pending).rejects.toThrow(SetupHookCancelled);
+
+        expect(hook.hookedSignal?.aborted).toBe(true); // the hook cancelled on it
+        expect(existsSync(spawnMarker)).toBe(false); // the child never started
+        expect(await listRecordFiles(cwd)).toHaveLength(0); // no failed record
+        expect(mockPi.appendEntry).not.toHaveBeenCalled(); // nothing persisted
+        // The fresh worktree was removed: the worktrees dir holds nothing.
+        const worktrees = join(cwd, CONFIG_DIR_NAME, "worktrees");
+        const leftover = existsSync(worktrees) ? await readdir(worktrees) : [];
+        expect(leftover.filter((entry) => !entry.endsWith(".git"))).toEqual([]);
+
+        // The reservation was freed: the next delegate fits at the cap of 1.
+        setEnv(
+          "PI_WORKER_COMMAND",
+          await writeFixture(fixtureDir, "after-abort.sh", SUCCESS_WORKER),
+        );
+        const next = await executeTool("delegate", {
+          task: "follow-up",
+          isolate: false,
+          wait: true,
+        });
+        expect((next.details.worker as WorkerRecord).status).toBe("completed");
+      });
+
+      it("an abort during a blocked setup hook removes the worktree and persists nothing", async () => {
+        fakeWorktreeGit();
+        await writeProvisionConfig(cwd);
+        const { blocked } = blockHookOnAbort();
+        const state: WorkerSessionState = {
+          running: new Map(),
+          branchWorkers: new Map(),
+          reserved: new Map(),
+        };
+        const persist = vi.fn(async () => true);
+        const plan = await planDelegate({ task: "isolated task" }, mockCtx);
+
+        const controller = new AbortController();
+        const pending = startDelegatedWorker({
+          cwd,
+          plan,
+          state,
+          events: testEvents(),
+          persist,
+          signal: controller.signal,
+        });
+        await blocked; // the hook is now parked inside provisioning
+        controller.abort();
+
+        await expect(pending).rejects.toThrow(SetupHookCancelled);
+        expect(state.reserved.size).toBe(0); // the slot was released
+        expect(persist).not.toHaveBeenCalled(); // nothing was recorded
+        // The fresh worktree was removed: the worktrees dir holds nothing.
+        const worktrees = join(cwd, CONFIG_DIR_NAME, "worktrees");
+        expect(existsSync(join(worktrees, plan.workerId))).toBe(false);
+      });
+
+      it("keeps a recoverable record if a cancelled worktree cannot be removed", async () => {
+        fakeWorktreeGit();
+        await writeProvisionConfig(cwd);
+        const git = vi.mocked(runGit).getMockImplementation();
+        if (!git) throw new Error("fake git was not installed");
+        vi.mocked(runGit).mockImplementation(async (repo, args, options) => {
+          if (args[0] === "worktree" && args[1] === "remove") throw new Error("busy worktree");
+          return git(repo, args, options);
+        });
+        const hook = blockHookOnAbort();
+        const state: WorkerSessionState = {
+          running: new Map(),
+          branchWorkers: new Map(),
+          reserved: new Map(),
+        };
+        const persist = vi.fn(async (record: WorkerRecord) => {
+          await writeRecordFile(cwd, record);
+          return true;
+        });
+        const plan = await planDelegate({ task: "isolated task" }, mockCtx);
+        const controller = new AbortController();
+        const pending = startDelegatedWorker({
+          cwd,
+          plan,
+          state,
+          events: testEvents(),
+          persist,
+          signal: controller.signal,
+        });
+        await hook.blocked;
+        controller.abort();
+
+        await expect(pending).rejects.toThrow(/worktree cleanup failed/);
+        expect(state.reserved.size).toBe(0);
+        expect(await loadWorker(cwd, plan.workerId)).toMatchObject({
+          status: "failed",
+          worktree: join(cwd, CONFIG_DIR_NAME, "worktrees", plan.workerId),
+        });
+      });
+
+      it("an abort after the child starts but before the wait listener still cancels the worker immediately", async () => {
+        const fixture = await writeFixture(fixtureDir, "wait-gap-worker.sh", SLOW_WORKER);
+        setEnv("PI_WORKER_COMMAND", fixture);
+
+        // Gate on the first appendEntry: the running-record persist happens
+        // strictly after the child spawned and strictly before the tool
+        // attaches its wait listener, so aborting from the gate lands inside
+        // the attach gap. The mock never returns (its promise is discarded)
+        // and the next appendEntry call (the terminal save) uses the default.
+        let releaseGate: () => void = () => {};
+        const gate = new Promise<void>((resolve) => {
+          releaseGate = resolve;
+        });
+        mockPi.appendEntry.mockImplementationOnce(() => {
+          releaseGate();
+          return new Promise<void>(() => {});
+        });
+
+        const controller = new AbortController();
+        const pending = executeTool(
+          "delegate",
+          { task: "long task", isolate: false, wait: true },
+          controller.signal,
+        );
+        await gate; // the child is live; the listener is not attached yet
+        controller.abort();
+
+        const result = await pending;
+        const record = result.details.worker as WorkerRecord;
+        expect(record.status).toBe("cancelled");
+        // The child process is gone right after the response settles.
+        const pidDeadline = Date.now() + 5_000;
+        while (record.pid !== undefined && isProcessAlive(record.pid)) {
+          if (Date.now() > pidDeadline) throw new Error("worker child was not killed");
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        expect(await waitForRecord(cwd, record.id, "cancelled").then((r) => r.status)).toBe(
+          "cancelled",
+        );
+        // A cancellation never wakes the parent.
+        const wakeCall = mockPi.sendMessage.mock.calls.find(
+          ([message]) => (message as WakeMessageShape).customType === "agents:wake",
+        );
+        expect(wakeCall).toBeUndefined();
+      });
     });
   });
 });
@@ -2627,6 +3015,25 @@ describe("agents-worker store (session-scoped)", () => {
     expect(await loadWorker(cwd, "w-live")).toBeDefined();
   });
 
+  it("removeWorkerRecord deletes the paired stderr log with the spool", async () => {
+    await seedRecord(
+      cwd,
+      makeWorkerRecord({ id: "w-gone", name: "gone", status: "completed", endedAt: Date.now() }),
+    );
+    const streams = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
+    await mkdir(streams, { recursive: true });
+    const spool = streamPath(cwd, "w-gone");
+    const stderrLog = stderrLogPath(cwd, "w-gone");
+    await writeFile(spool, '{"at":1}\n', "utf8");
+    await writeFile(stderrLog, "startup noise\n", "utf8");
+
+    await removeWorkerRecord(cwd, "w-gone");
+
+    await expect(stat(spool)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(stderrLog)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await loadWorker(cwd, "w-gone")).toBeUndefined();
+  });
+
   it("updateRecordFile read-modify-writes under the per-record lock", async () => {
     await seedRecord(cwd, makeWorkerRecord({ id: "w-x", name: "x", status: "completed" }));
 
@@ -2836,6 +3243,72 @@ describe("agents-worker store (session-scoped)", () => {
     expect(await readFile(join(wt.path, "README.md"), "utf8")).toBe("# worker changes\n");
   });
 
+  it("pruneStreams keeps a running worker's spool and stderr log", async () => {
+    const now = Date.now();
+    await seedRecord(cwd, makeWorkerRecord({ id: "w-live", name: "live", pid: process.pid }));
+    const streams = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
+    await mkdir(streams, { recursive: true });
+    const spool = streamPath(cwd, "w-live");
+    const stderrLog = stderrLogPath(cwd, "w-live");
+    await writeFile(spool, '{"at":1}\n', "utf8");
+    await writeFile(stderrLog, "worker booted\n", "utf8");
+
+    await pruneStreams(cwd, now);
+
+    await expect(stat(spool)).resolves.toBeTruthy();
+    await expect(stat(stderrLog)).resolves.toBeTruthy();
+  });
+
+  it("pruneStreams removes the spool and stderr log of a terminal worker past a day", async () => {
+    const now = Date.now();
+    await seedRecord(
+      cwd,
+      makeWorkerRecord({
+        id: "w-dead",
+        name: "dead",
+        status: "failed",
+        endedAt: now - 25 * 60 * 60_000,
+      }),
+    );
+    const streams = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
+    await mkdir(streams, { recursive: true });
+    const spool = streamPath(cwd, "w-dead");
+    const stderrLog = stderrLogPath(cwd, "w-dead");
+    await writeFile(spool, '{"at":1}\n', "utf8");
+    await writeFile(stderrLog, "boom\n", "utf8");
+
+    await pruneStreams(cwd, now);
+
+    await expect(stat(spool)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(stderrLog)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("pruneWorkerArtifacts removes the paired stderr log with past-retention artifacts", async () => {
+    const now = Date.now();
+    await seedRecord(
+      cwd,
+      makeWorkerRecord({
+        id: "w-stale",
+        name: "stale",
+        status: "completed",
+        startedAt: now - WORKER_RETENTION_MS - 60_000,
+        endedAt: now - WORKER_RETENTION_MS - 60_000,
+      }),
+    );
+    const streams = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
+    await mkdir(streams, { recursive: true });
+    const spool = streamPath(cwd, "w-stale");
+    const stderrLog = stderrLogPath(cwd, "w-stale");
+    await writeFile(spool, '{"at":1}\n', "utf8");
+    await writeFile(stderrLog, "old failure detail\n", "utf8");
+
+    const pruned = await pruneWorkerArtifacts(cwd);
+
+    expect(pruned).toContain("w-stale");
+    await expect(stat(spool)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(stderrLog)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("sweepWorkerArtifacts reports worktree dirs with no record file as unowned", async () => {
     await initGitRepo(cwd);
     await createWorktree(cwd, "w-unowned");
@@ -2908,6 +3381,127 @@ describe("agents-worker store (session-scoped)", () => {
 
     expect(finalized.status).toBe("failed");
     expect(finalized.error).toContain("boom went the worker");
+  });
+
+  it("finalizeWorker infers completed from a report within a bounded tail of an oversized spool", async () => {
+    const record = makeWorkerRecord({
+      id: "w-oversized",
+      name: "oversized",
+      status: "running",
+      streamFormat: "raw",
+    });
+    const spoolDir = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
+    await mkdir(spoolDir, { recursive: true });
+    // Noise well past the finalization read window, then two reports: the
+    // most recent one must win.
+    const noise = `{"type":"tool_execution_start","toolName":"bash","args":{"command":"${"x".repeat(512)}"}}\n`;
+    const oversized = noise.repeat(Math.ceil((STREAM_TAIL_BYTES * 2) / noise.length));
+    await writeFile(
+      join(spoolDir, "w-oversized.jsonl"),
+      `${oversized}{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"draft report"}]}}\n{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"the final report"}]}}\n`,
+      "utf8",
+    );
+
+    const finalized = await finalizeWorker({ cwd, record });
+
+    expect(finalized.status).toBe("completed");
+    expect(finalized.outputText).toBe("the final report");
+  });
+
+  it("finalizeWorker fails with truncation detail when an oversized report straddles the read window", async () => {
+    const record = makeWorkerRecord({
+      id: "w-straddle",
+      name: "straddle",
+      status: "running",
+      streamFormat: "raw",
+    });
+    const spoolDir = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
+    await mkdir(spoolDir, { recursive: true });
+    // The only report is one huge JSON line larger than the read window: the
+    // window boundary lands inside it, so no valid report is recoverable.
+    const hugeReport = `{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"${"y".repeat(STREAM_TAIL_BYTES)} the whole report"}]}}\n`;
+    await writeFile(
+      join(spoolDir, "w-straddle.jsonl"),
+      `{"type":"agents_start","at":1}\n${hugeReport}`,
+      "utf8",
+    );
+
+    const finalized = await finalizeWorker({ cwd, record });
+
+    expect(finalized.status).toBe("failed");
+    expect(finalized.error).toContain("truncat");
+    expect(finalized.outputText).toBeUndefined();
+  });
+
+  it("finalizeWorker fails with truncation detail when the only report was cut off by the read window", async () => {
+    const record = makeWorkerRecord({
+      id: "w-head-report",
+      name: "head-report",
+      status: "running",
+      streamFormat: "raw",
+    });
+    const spoolDir = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
+    await mkdir(spoolDir, { recursive: true });
+    // The report sits at the spool head; noise pushes it past the window.
+    const report =
+      '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"early report"}]}}\n';
+    const noise = `{"type":"tool_execution_start","toolName":"bash","args":{"command":"${"x".repeat(512)}"}}\n`;
+    await writeFile(
+      join(spoolDir, "w-head-report.jsonl"),
+      `${report}${noise.repeat(Math.ceil((STREAM_TAIL_BYTES * 2) / noise.length))}`,
+      "utf8",
+    );
+
+    const finalized = await finalizeWorker({ cwd, record });
+
+    // Truncation must not read as "exited without producing a report": the
+    // report may exist in the bytes the window cut away.
+    expect(finalized.status).toBe("failed");
+    expect(finalized.error).toContain("truncat");
+    expect(finalized.error).not.toContain("without producing a report");
+    expect(finalized.outputText).toBeUndefined();
+  });
+
+  it("finalizeWorker honors an end marker within the tail of an oversized spool", async () => {
+    const record = makeWorkerRecord({
+      id: "w-marked-huge",
+      name: "marked-huge",
+      status: "running",
+      streamFormat: "raw",
+    });
+    const spoolDir = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
+    await mkdir(spoolDir, { recursive: true });
+    const noise = `{"type":"tool_execution_start","toolName":"bash","args":{"command":"${"x".repeat(512)}"}}\n`;
+    await writeFile(
+      join(spoolDir, "w-marked-huge.jsonl"),
+      `${noise.repeat(Math.ceil((STREAM_TAIL_BYTES * 2) / noise.length))}{"type":"agents_end","at":2,"status":"timeout","error":"worker exceeded 30s timeout"}\n`,
+      "utf8",
+    );
+
+    const finalized = await finalizeWorker({ cwd, record });
+
+    expect(finalized.status).toBe("timeout");
+    expect(finalized.error).toContain("30s timeout");
+  });
+
+  it("readSpoolLines drops the first incomplete line when the window cuts a JSON event", async () => {
+    const spoolDir = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
+    await mkdir(spoolDir, { recursive: true });
+    const noise = `{"type":"tool_execution_start","toolName":"bash","args":{"command":"${"x".repeat(600)}"}}\n`;
+    const report =
+      '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"tail report"}]}}\n';
+    await writeFile(
+      join(spoolDir, "w-cut.jsonl"),
+      `{"type":"agents_start","at":1}\n${noise}${report}`,
+      "utf8",
+    );
+
+    const lines = await readSpoolLines(cwd, "w-cut", 120);
+
+    // The window cut inside the noise line: its partial remainder is not a
+    // valid event and must not surface; the complete report line survives.
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0])).toMatchObject({ type: "message_end" });
   });
 
   it("finalizeWorker keeps the worktree recoverable when patch capture refuses", async () => {
@@ -3336,6 +3930,402 @@ describe("agents-worker session scoping", () => {
       expect(wake.message.content[0].text).toContain("w-adopted");
     } finally {
       if (shortSleeper.pid !== undefined) await killPidTree(shortSleeper.pid);
+    }
+  });
+
+  it("an adopted worker past its persisted deadline is killed and recorded as a timeout", async () => {
+    const sleeper = execFile("sleep", ["30"]);
+    const now = Date.now();
+    // Original bound: 60s, already elapsed before adoption. Corresponds to
+    // a delegate with timeout_seconds: 60.
+    const record = makeWorkerRecord({
+      id: "w-expired",
+      name: "expired",
+      pid: sleeper.pid ?? 0,
+      parentPid: 999_999_999,
+      status: "running",
+      streamFormat: "raw",
+      startedAt: now - 61_000,
+      deadlineAt: now - 1_000,
+    });
+    await seedRecord(cwd, record);
+
+    try {
+      const disarm = armAdoptedTimeout(record, {
+        cwd,
+        onRecord: (finalized) => writeRecordFile(cwd, finalized),
+      });
+
+      await vi.waitFor(
+        async () => {
+          const stored = await loadWorker(cwd, "w-expired");
+          expect(stored?.status).toBe("timeout");
+        },
+        { timeout: 8_000 },
+      );
+      // The terminal record carries the same detail the spawning parent
+      // would have written for the same bound.
+      const stored = await loadWorker(cwd, "w-expired");
+      expect(stored?.error).toBe("worker exceeded 60s timeout");
+      // Enforcement kills the process group before terminalizing, so the
+      // timeout record implies the worker is gone.
+      expect(isProcessAlive(sleeper.pid ?? 0)).toBe(false);
+      disarm();
+    } finally {
+      if (sleeper.pid !== undefined) await killPidTree(sleeper.pid);
+    }
+  });
+
+  it("an adopted worker is killed when the remaining deadline elapses, not after the full timeout", async () => {
+    const sleeper = execFile("sleep", ["30"]);
+    const now = Date.now();
+    // Original bound: 120s, ~119s already spent before adoption. Arming the
+    // remaining ~1s is the only way the kill can happen inside this test;
+    // a full-timeout re-arm could not fire, and no arming would never kill.
+    const record = makeWorkerRecord({
+      id: "w-remaining",
+      name: "remaining",
+      pid: sleeper.pid ?? 0,
+      parentPid: 999_999_999,
+      status: "running",
+      streamFormat: "raw",
+      startedAt: now - 119_000,
+      deadlineAt: now + 1_000,
+    });
+    await seedRecord(cwd, record);
+
+    try {
+      const disarm = armAdoptedTimeout(record, {
+        cwd,
+        onRecord: (finalized) => writeRecordFile(cwd, finalized),
+      });
+
+      await vi.waitFor(
+        async () => {
+          const stored = await loadWorker(cwd, "w-remaining");
+          expect(stored?.status).toBe("timeout");
+        },
+        { timeout: 8_000 },
+      );
+      expect(await loadWorker(cwd, "w-remaining")).toMatchObject({
+        status: "timeout",
+        error: "worker exceeded 120s timeout",
+      });
+      disarm();
+    } finally {
+      if (sleeper.pid !== undefined) await killPidTree(sleeper.pid);
+    }
+  });
+
+  it("a legacy adopted worker without a persisted deadline is not retroactively timed out", async () => {
+    const sleeper = execFile("sleep", ["30"]);
+    // Records created before deadlines were persisted carry no deadlineAt;
+    // startedAt alone must never become a retroactive bound.
+    const record = makeWorkerRecord({
+      id: "w-legacy",
+      name: "legacy",
+      pid: sleeper.pid ?? 0,
+      parentPid: 999_999_999,
+      status: "running",
+      streamFormat: "raw",
+      startedAt: Date.now() - 10 * 60_000,
+    });
+    await seedRecord(cwd, record);
+
+    try {
+      const disarm = armAdoptedTimeout(record, {
+        cwd,
+        onRecord: (finalized) => writeRecordFile(cwd, finalized),
+      });
+
+      // Far past any plausible retroactive bound: still alive, still running.
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      expect(isProcessAlive(sleeper.pid ?? 0)).toBe(true);
+      expect((await loadWorker(cwd, "w-legacy"))?.status).toBe("running");
+      disarm();
+    } finally {
+      if (sleeper.pid !== undefined) await killPidTree(sleeper.pid);
+    }
+  });
+
+  it("disarming an adopted worker's deadline leaves it running past the deadline", async () => {
+    const sleeper = execFile("sleep", ["30"]);
+    const now = Date.now();
+    const record = makeWorkerRecord({
+      id: "w-disarm",
+      name: "disarm",
+      pid: sleeper.pid ?? 0,
+      parentPid: 999_999_999,
+      status: "running",
+      streamFormat: "raw",
+      startedAt: now - 119_000,
+      deadlineAt: now + 600,
+    });
+    await seedRecord(cwd, record);
+
+    try {
+      const disarm = armAdoptedTimeout(record, {
+        cwd,
+        onRecord: (finalized) => writeRecordFile(cwd, finalized),
+      });
+      disarm();
+
+      // Past the deadline: disarmed means no kill, no terminal record.
+      await new Promise((resolve) => setTimeout(resolve, 1_200));
+      expect(isProcessAlive(sleeper.pid ?? 0)).toBe(true);
+      expect((await loadWorker(cwd, "w-disarm"))?.status).toBe("running");
+    } finally {
+      if (sleeper.pid !== undefined) await killPidTree(sleeper.pid);
+    }
+  });
+
+  it("session_start adopting a live worker past its deadline kills it and records a timeout", async () => {
+    // pi -c restored a running worker whose persisted deadline already
+    // elapsed: adoption must re-arm the remaining (zero) time, kill the
+    // child, and terminalize the record as a timeout — not leave it running
+    // unbounded, and not let the exit poller classify the kill as a
+    // completed report (the spool below carries one).
+    const sleeper = execFile("sleep", ["30"]);
+    const now = Date.now();
+    // Original bound: 60s, already elapsed before adoption.
+    const record = makeWorkerRecord({
+      id: "w-adopt-expired",
+      name: "expired",
+      pid: sleeper.pid ?? 0,
+      parentPid: 999_999_999,
+      status: "running",
+      streamFormat: "raw",
+      startedAt: now - 61_000,
+      deadlineAt: now - 1_000,
+    });
+    const spoolDir = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
+    await mkdir(spoolDir, { recursive: true });
+    await writeFile(
+      join(spoolDir, "w-adopt-expired.jsonl"),
+      '{"type":"agents_start","at":1}\n{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"expired report"}]}}\n',
+      "utf8",
+    );
+
+    try {
+      mockCtx.sessionManager.getBranch = vi.fn(() => [branchEntry(record)]);
+      await getEventHandlerFrom(mockPi, "session_start")(
+        { type: "session_start", reason: "startup" },
+        mockCtx,
+      );
+
+      const stored = await waitForRecord(cwd, "w-adopt-expired", "timeout", 10_000);
+      // The record carries the same cause the spawning parent would have
+      // written for the same bound — not a completed-report classification
+      // of the deadline kill.
+      expect(stored.error).toBe("worker exceeded 60s timeout");
+      expect(stored.outputText).toContain("expired report");
+      // Enforcement kills the process group before terminalizing.
+      expect(isProcessAlive(sleeper.pid ?? 0)).toBe(false);
+      // Owned worker: the terminal record lands in this session's transcript.
+      expect(mockPi.appendEntry).toHaveBeenCalledWith(
+        WORKER_RECORD_ENTRY,
+        expect.objectContaining({ id: "w-adopt-expired", status: "timeout" }),
+      );
+      // Notification and wake tell the user why the worker stopped.
+      expect(mockCtx.ui.notify).toHaveBeenCalledWith(
+        expect.stringContaining("timed out"),
+        "warning",
+      );
+      expect(findWakeCall(mockPi).message.content[0].text).toContain("timed out");
+      // Widget cleanup: the worker no longer runs, so the last publish clears it.
+      await vi.waitFor(() => {
+        expect(mockCtx.ui.setWidget).toHaveBeenLastCalledWith(STRIP_KEY_ABOVE, undefined);
+      });
+    } finally {
+      if (sleeper.pid !== undefined) await killPidTree(sleeper.pid);
+    }
+  });
+
+  it("session_start arms only the remaining deadline for an adopted worker", async () => {
+    // Original bound: 120s with ~119s already spent. Re-arming the full
+    // timeout would push the kill two minutes out and fail this test.
+    const sleeper = execFile("sleep", ["30"]);
+    const now = Date.now();
+    const record = makeWorkerRecord({
+      id: "w-adopt-remaining",
+      name: "remaining",
+      pid: sleeper.pid ?? 0,
+      parentPid: 999_999_999,
+      status: "running",
+      streamFormat: "raw",
+      startedAt: now - 119_000,
+      deadlineAt: now + 600,
+    });
+
+    try {
+      mockCtx.sessionManager.getBranch = vi.fn(() => [branchEntry(record)]);
+      await getEventHandlerFrom(mockPi, "session_start")(
+        { type: "session_start", reason: "startup" },
+        mockCtx,
+      );
+
+      const stored = await waitForRecord(cwd, "w-adopt-remaining", "timeout", 10_000);
+      expect(stored.error).toBe("worker exceeded 120s timeout");
+      expect(isProcessAlive(sleeper.pid ?? 0)).toBe(false);
+    } finally {
+      if (sleeper.pid !== undefined) await killPidTree(sleeper.pid);
+    }
+  });
+
+  it("session_start does not impose a deadline on an adopted worker whose record predates deadlines", async () => {
+    // Legacy records carry no deadlineAt; startedAt alone must never become
+    // a retroactive bound through adoption.
+    const sleeper = execFile("sleep", ["30"]);
+    const record = makeWorkerRecord({
+      id: "w-adopt-legacy",
+      name: "legacy",
+      pid: sleeper.pid ?? 0,
+      parentPid: 999_999_999,
+      status: "running",
+      streamFormat: "raw",
+      startedAt: Date.now() - 10 * 60_000,
+    });
+    await seedRecord(cwd, record);
+
+    try {
+      mockCtx.sessionManager.getBranch = vi.fn(() => [branchEntry(record)]);
+      await getEventHandlerFrom(mockPi, "session_start")(
+        { type: "session_start", reason: "startup" },
+        mockCtx,
+      );
+
+      // Far past any plausible retroactive bound: still alive, still running.
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      expect(isProcessAlive(sleeper.pid ?? 0)).toBe(true);
+      expect((await loadWorker(cwd, "w-adopt-legacy"))?.status).toBe("running");
+    } finally {
+      if (sleeper.pid !== undefined) await killPidTree(sleeper.pid);
+    }
+  });
+
+  it("cancelling an adopted worker disposes its deadline", async () => {
+    const sleeper = execFile("sleep", ["30"]);
+    const now = Date.now();
+    const record = makeWorkerRecord({
+      id: "w-adopt-cancel",
+      name: "adopt-cancel",
+      pid: sleeper.pid ?? 0,
+      parentPid: 999_999_999,
+      status: "running",
+      streamFormat: "raw",
+      startedAt: now - 119_000,
+      deadlineAt: now + 1_500,
+    });
+    await seedRecord(cwd, record);
+
+    try {
+      mockCtx.sessionManager.getBranch = vi.fn(() => [branchEntry(record)]);
+      await getEventHandlerFrom(mockPi, "session_start")(
+        { type: "session_start", reason: "startup" },
+        mockCtx,
+      );
+
+      const result = await executeTool("workers", { action: "cancel", id: "w-adopt-cancel" });
+      expect(result.content[0].text).toContain("cancelled");
+      expect(await waitForRecord(cwd, "w-adopt-cancel", "cancelled")).toMatchObject({
+        error: "cancelled by user",
+      });
+      expect(isProcessAlive(sleeper.pid ?? 0)).toBe(false);
+
+      // Past the deadline the disposed timer must not rewrite the record:
+      // cancelled stays cancelled.
+      await new Promise((resolve) => setTimeout(resolve, 1_800));
+      expect((await loadWorker(cwd, "w-adopt-cancel"))?.status).toBe("cancelled");
+      const timeoutSave = mockPi.appendEntry.mock.calls.some(
+        ([customType, data]) =>
+          customType === WORKER_RECORD_ENTRY &&
+          (data as WorkerRecord).id === "w-adopt-cancel" &&
+          (data as WorkerRecord).status === "timeout",
+      );
+      expect(timeoutSave).toBe(false);
+    } finally {
+      if (sleeper.pid !== undefined) await killPidTree(sleeper.pid);
+    }
+  });
+
+  it("session_shutdown disposes an adopted worker's deadline timer", async () => {
+    const sleeper = execFile("sleep", ["30"]);
+    const now = Date.now();
+    const record = makeWorkerRecord({
+      id: "w-adopt-shutdown",
+      name: "adopt-shutdown",
+      pid: sleeper.pid ?? 0,
+      parentPid: 999_999_999,
+      status: "running",
+      streamFormat: "raw",
+      startedAt: now - 119_000,
+      deadlineAt: now + 800,
+    });
+    await seedRecord(cwd, record);
+
+    try {
+      mockCtx.sessionManager.getBranch = vi.fn(() => [branchEntry(record)]);
+      await getEventHandlerFrom(mockPi, "session_start")(
+        { type: "session_start", reason: "startup" },
+        mockCtx,
+      );
+      // Shutdown cancels owned adopted workers and must disarm the deadline
+      // with them.
+      await getEventHandlerFrom(mockPi, "session_shutdown")(
+        { type: "session_shutdown", reason: "quit" },
+        mockCtx,
+      );
+      expect(await waitForRecord(cwd, "w-adopt-shutdown", "cancelled")).toMatchObject({
+        error: "cancelled by user",
+      });
+      expect(isProcessAlive(sleeper.pid ?? 0)).toBe(false);
+
+      // Past the deadline: disposed means no timeout kill and no rewrite.
+      await new Promise((resolve) => setTimeout(resolve, 1_200));
+      expect((await loadWorker(cwd, "w-adopt-shutdown"))?.status).toBe("cancelled");
+    } finally {
+      if (sleeper.pid !== undefined) await killPidTree(sleeper.pid);
+    }
+  });
+
+  it("the deadline hook stops watching synchronously before the kill", async () => {
+    // The exit poller must be disabled before the deadline sends a signal:
+    // otherwise its natural-death finalize (completed/failed from the spool)
+    // can win the race against the timeout terminal save.
+    const sleeper = execFile("sleep", ["30"]);
+    const now = Date.now();
+    const record = makeWorkerRecord({
+      id: "w-before-kill",
+      name: "before-kill",
+      pid: sleeper.pid ?? 0,
+      parentPid: 999_999_999,
+      status: "running",
+      streamFormat: "raw",
+      startedAt: now - 119_000,
+      deadlineAt: now + 600,
+    });
+    await seedRecord(cwd, record);
+    let aliveAtBeforeKill: boolean | undefined;
+    const beforeKill = vi.fn(() => {
+      aliveAtBeforeKill = isProcessAlive(record.pid ?? -1);
+    });
+
+    try {
+      const disarm = armAdoptedTimeout(record, {
+        cwd,
+        beforeKill,
+        onRecord: (finalized) => writeRecordFile(cwd, finalized),
+      });
+
+      expect(await waitForRecord(cwd, "w-before-kill", "timeout")).toMatchObject({
+        error: "worker exceeded 120s timeout",
+      });
+      expect(beforeKill).toHaveBeenCalledTimes(1);
+      // No signal had been sent when the hook ran, so the worker was alive.
+      expect(aliveAtBeforeKill).toBe(true);
+      disarm();
+    } finally {
+      if (sleeper.pid !== undefined) await killPidTree(sleeper.pid);
     }
   });
 
