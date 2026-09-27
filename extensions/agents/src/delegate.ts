@@ -1,6 +1,6 @@
 /**
  * Delegate tool behavior: resolves the delegate call's arguments (task,
- * worker name, model, extensions, plan-mode constraints, worktree decision),
+ * worker name, model, extensions, read-only constraints, worktree decision),
  * reserves a worker slot and spawns the child session, and builds the tool
  * responses. The reservation and its failure-release flow are the
  * concurrency-safety core of delegation.
@@ -12,7 +12,6 @@ import type { AgentToolResult, ExtensionContext, ThinkingLevel } from "pi";
 import { withFileLock } from "../../../lib/file-lock.ts";
 import { runGit } from "../../../lib/git.ts";
 import { projectStateRelative } from "../../../lib/paths.ts";
-import { isPlanModeActive } from "../../../lib/plan-state.ts";
 import { resolveWorkerModelSpec } from "../../../lib/worker-model.ts";
 import { formatWorkerStatus } from "./format.ts";
 import { carryIncludedPaths } from "./provision/carry.ts";
@@ -229,6 +228,7 @@ export interface DelegateParams {
   name?: unknown;
   extensions?: unknown;
   isolate?: boolean;
+  read_only?: boolean;
   wait?: boolean;
   timeout_seconds?: number;
 }
@@ -242,10 +242,10 @@ export interface DelegatePlan {
   model: string;
   thinkingLevel: ThinkingLevel;
   timeoutMs: number;
-  /** Parent session is planning: worker is read-only and never isolated. */
-  parentPlanning: boolean;
+  /** Explicit investigation worker: read-only, no worktree or patch. */
+  readOnly: boolean;
   extensionPaths: string[];
-  /** The worker wants a worktree (not planning, isolate not disabled). */
+  /** The worker wants a worktree (not read-only, isolate not disabled). */
   wantIsolate: boolean;
   /** The caller demanded isolation (isolate=true): error outside git repos. */
   isolateRequired: boolean;
@@ -279,7 +279,10 @@ export async function planDelegate(
     typeof params.timeout_seconds === "number" && params.timeout_seconds > 0
       ? params.timeout_seconds * 1000
       : envTimeoutMs();
-  const parentPlanning = isPlanModeActive((ctx.sessionManager.getBranch() ?? []) as unknown[]);
+  const readOnly = params.read_only === true;
+  if (readOnly && params.isolate === true) {
+    throw new Error("read_only=true cannot request an isolated write worktree.");
+  }
 
   // Sanitize at the boundary: the name flows into wake messages and
   // PI_MESSENGER_NAME, a trusted channel that carries ids and status
@@ -302,17 +305,12 @@ export async function planDelegate(
   });
 
   // Every worker routes built-in file and shell tools through the OS
-  // sandbox extension. Planning workers additionally load the headless plan
-  // gate, which reduces active tools to the research allowlist.
+  // sandbox extension and command calls through the mandatory approval gate.
   const extensionPaths = resolvedExtensions.map((extension) => extension.path);
-  if (parentPlanning) {
-    extensionPaths.push(fileURLToPath(new URL("../../plan/plan.ts", import.meta.url)));
-  }
 
-  // Read-only planning workers inspect the parent's current files through
-  // the sandbox and never need a branch or patch. Avoid changing git
-  // metadata merely to perform research during plan mode.
-  const wantIsolate = !parentPlanning && params.isolate !== false;
+  // Investigation workers inspect the parent's files through a read-only
+  // sandbox and never need a branch or patch.
+  const wantIsolate = !readOnly && params.isolate !== false;
 
   return {
     workerId,
@@ -321,7 +319,7 @@ export async function planDelegate(
     model,
     thinkingLevel,
     timeoutMs,
-    parentPlanning,
+    readOnly,
     extensionPaths,
     wantIsolate,
     isolateRequired: params.isolate === true,
@@ -415,8 +413,7 @@ export async function startDelegatedWorker(
   // Whether preflight path-committed the config; rides the provision status
   // so the durable response shows the commit fact (field feedback: notify unseen).
   let configCommittedAtPreflight = false;
-  const { workerId, name, task, model, thinkingLevel, timeoutMs, parentPlanning, extensionPaths } =
-    plan;
+  const { workerId, name, task, model, thinkingLevel, timeoutMs, extensionPaths } = plan;
 
   // Check and reserve without an await between them. A second delegate
   // cannot take this slot while preflight commits setup files.
@@ -432,7 +429,7 @@ export async function startDelegatedWorker(
   try {
     assertNotAborted(signal);
     // Invalid setup releases the temporary slot without recording a failed
-    // worker. Planning and non-isolated workers do not provision.
+    // worker. Read-only and non-isolated workers do not provision.
     if (plan.wantIsolate && (await isGitRepo(cwd))) {
       assertNotAborted(signal);
       configCommittedAtPreflight = await assertProvisionReady(cwd, (message) =>
@@ -456,7 +453,7 @@ export async function startDelegatedWorker(
 
     // Provision the fresh worktree (carry → share → provision under the
     // config lock). A refusal throws after recording the failure below; a
-    // non-isolated or planning worker is skipped, never provisioned.
+    // non-isolated or read-only worker is skipped, never provisioned.
     if (worktree !== undefined) {
       provisionStatus = await provisionWorktree(
         cwd,
@@ -471,7 +468,7 @@ export async function startDelegatedWorker(
 
     assertNotAborted(signal);
     const sandbox = true;
-    const readOnly = parentPlanning;
+    const readOnly = plan.readOnly;
 
     runningWorker = await startWorker({
       cwd,
@@ -600,13 +597,13 @@ export async function startDelegatedWorker(
 
 /** Fire-and-forget path: the worker started and the parent goes back to work. */
 export function buildDelegateStartedResponse(
-  plan: Pick<DelegatePlan, "workerId" | "name" | "model" | "parentPlanning">,
+  plan: Pick<DelegatePlan, "workerId" | "name" | "model" | "readOnly">,
   worktree: { path: string; branch: string } | undefined,
   wait: boolean | undefined,
   provision: ProvisionStatus | undefined,
 ): AgentToolResult {
-  const isolateNote = plan.parentPlanning
-    ? "Read-only planning worker: the sandbox is enforced and workspace mutation is blocked."
+  const isolateNote = plan.readOnly
+    ? "Read-only investigation worker: workspace writes are blocked by the sandbox; no patch is produced."
     : worktree
       ? `Isolated in worktree ${worktree.branch}. Its patch is collected with workers (action=collect, id=${plan.workerId}).`
       : "Not isolated: the worker edits this working tree directly.";

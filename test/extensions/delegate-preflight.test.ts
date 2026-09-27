@@ -137,7 +137,7 @@ function makePlan(overrides: Partial<DelegatePlan> = {}): DelegatePlan {
     model: "test-model",
     thinkingLevel: "medium",
     timeoutMs: 60_000,
-    parentPlanning: false,
+    readOnly: false,
     extensionPaths: [],
     wantIsolate: true,
     isolateRequired: false,

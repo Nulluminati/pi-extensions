@@ -1,6 +1,6 @@
 ---
 name: shared-helpers
-description: Use the shared helper modules in lib/ when building or modifying Pi extensions in this repo. Covers session entry parsing (session-utils), cheap model resolution (small-model), modal frames (tui-frame), single-line input modals (input-modal), status lines and key hints (ui-format), tool result renderers (tool-renderer), searchable select modals (searchable-select), editor factory layering (editor-factory), sharded presence registries with dead-pid pruning (presence-shards), plan mode state shared between sessions (plan-state), and canonical config/state/cache locations (paths). Use whenever an extension needs TUI rendering, a status line, a picker dialog, a text prompt, a custom editor wrapper, transcript parsing, a cheap direct LLM call, or a place to store config or state — import the lib/ helper instead of reimplementing the pattern.
+description: Use the shared helper modules in lib/ when building or modifying Pi extensions in this repo. Covers session entry parsing (session-utils), cheap model resolution (small-model), modal frames (tui-frame), single-line input modals (input-modal), status lines and key hints (ui-format), tool result renderers (tool-renderer), searchable select modals (searchable-select), editor factory layering (editor-factory), sharded presence registries with dead-pid pruning (presence-shards), and canonical config/state/cache locations (paths). Use whenever an extension needs TUI rendering, a status line, a picker dialog, a text prompt, a custom editor wrapper, transcript parsing, a cheap direct LLM call, or a place to store config or state — import the lib/ helper instead of reimplementing the pattern.
 ---
 
 # Shared Helpers in `lib/`
@@ -37,7 +37,6 @@ import { renderModalFrame } from "../../../lib/tui-frame.ts";
 | Wrap/replace the editor component (`ctx.ui.setEditorComponent`) | `installEditorFactoryLayer`, `hasEditorFactoryLayer`, `removeEditorFactoryLayer` | `lib/editor-factory.ts` |
 | Write config/state JSON without risking a torn file on crash | `writeJsonAtomic` | `lib/json-atomic.ts` |
 | Mutate shared state files across sessions without clobbering | `withFileLock` | `lib/file-lock.ts` |
-| Read or update the plan-mode state from another extension (e.g. to adapt behavior while the parent is planning) | `isPlanModeActive`, `findPlanStateEntry`, `reconstructState` | `lib/plan-state.ts` |
 | Resolve where an extension stores config, state, cache, or project files | `agentConfigPath`, `agentStateDir`, `cacheDir`, `projectStateDir`, `projectStateRelative` | `lib/paths.ts` |
 | Point a user-facing message at Pi's auth file | `authPath` | `lib/paths.ts` |
 | Keep project-local state out of `git status` | `excludeFromGit` | `lib/git.ts` |
@@ -324,13 +323,6 @@ capability flags), and `selectModelWithSearch(ctx, items, activeValue, title)` �
 `ui.custom` searchable modal used in TUI mode (resolves the selected value, `undefined` on
 cancel; fall back to `ctx.ui.select` outside TUI). `ModelMetadata` is the shared model shape.
 Config load/save stays in `lib/small-model.ts` / `lib/worker-model.ts`.
-
-## `lib/plan-state.ts` — plan mode shared state
-
-The plan extension persists its plan-mode state as a session custom entry; this module is the read/update contract other extensions use. Used by `plan` (source of truth) and `agents` (delegate adapts to a planning parent).
-
-- `isPlanModeActive(entries)` → whether the session branch shows plan mode as active.
-- Keep the entry type stable across versions so older transcripts still resolve.
 
 ## `lib/presence-shards.ts` — sharded presence registry
 

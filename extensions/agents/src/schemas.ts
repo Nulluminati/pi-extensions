@@ -16,12 +16,17 @@ export const DELEGATE_PARAMETERS = {
       type: "array",
       items: { type: "string" },
       description:
-        "Extension names for the worker to load (resolution: this param, then $PI_WORKER_EXTENSIONS, then worker-extensions.json, then the default set). messenger and worker-sandbox are always loaded. Workflow extensions (agents, missions, autoresearch, goal, plan) are forbidden in workers.",
+        "Extension names for the worker to load (resolution: this param, then $PI_WORKER_EXTENSIONS, then worker-extensions.json, then the default set). messenger and worker-sandbox are always loaded. Workflow extensions (agents, missions, autoresearch, goal) are forbidden in workers.",
     },
     isolate: {
       type: "boolean",
       description:
-        "Run in an isolated git worktree and capture a patch (default true in git repos). Set false only for read-only tasks. Plan-mode workers are always read-only and inspect the current workspace without creating a worktree.",
+        "Run in an isolated git worktree and capture a patch (default true in git repos). Set false only when a writable worker must use the current tree; for investigation use read_only instead.",
+    },
+    read_only: {
+      type: "boolean",
+      description:
+        "Investigation-only worker: inspect the current workspace with read-only tools and a read-only sandbox. Never create a patch.",
     },
     wait: {
       type: "boolean",

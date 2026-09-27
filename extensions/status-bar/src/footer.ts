@@ -1,6 +1,7 @@
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { ExtensionCommandContext } from "pi";
 import {
+  APPROVAL_STATUS_KEY,
   AUTORESEARCH_STATUS_KEY,
   BAR_SEGMENTS,
   GOAL_STATUS_KEY,
@@ -234,11 +235,10 @@ export function buildFooterLines(
       // Skip our own indicator and the small-model status: the small model is
       // shown in the editor meta line, not the footer. Skip goal: a running
       // goal is shown as a "Goal" badge in the editor frame. Skip missions,
-      // messenger, and
-      // autoresearch as well: they are moving widget-first, so their setStatus
-      // entries are only the fallback for the default footer and would
-      // double-render here (the messenger's unread count reaches line 1 via
-      // the messenger:state event instead).
+      // messenger and autoresearch as well: their setStatus entries are
+      // fallback text for the default footer. Approval Mode shows its off
+      // state in the editor instead. Messenger's unread count reaches line 1
+      // via messenger:state.
       if (
         key !== STATUS_KEY &&
         key !== SMALL_MODEL_STATUS_KEY &&
@@ -246,6 +246,7 @@ export function buildFooterLines(
         key !== MISSIONS_STATUS_KEY &&
         key !== MESSENGER_STATUS_KEY &&
         key !== AUTORESEARCH_STATUS_KEY &&
+        key !== APPROVAL_STATUS_KEY &&
         text
       ) {
         line2Segments.push(text);

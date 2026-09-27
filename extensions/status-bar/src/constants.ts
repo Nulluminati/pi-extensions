@@ -137,6 +137,8 @@ export const MISSIONS_STATUS_KEY = "missions";
 
 export const MESSENGER_STATUS_KEY = "messenger";
 
+export const APPROVAL_STATUS_KEY = "approval-mode";
+
 export const AUTORESEARCH_STATUS_KEY = "autoresearch";
 
 /**
@@ -157,12 +159,11 @@ export const MESSENGER_STATE_EVENT = "messenger:state";
 export const FLEX_EVENT = "neuralwatt:flex-change";
 
 /**
- * Event the plan extension emits on pi.events when plan mode changes. Used to
- * tint the editor frame while planning. Defined here (not imported) so the
- * status-bar extension stays self-contained; the plan extension owns the
- * contract and emits the same string.
+ * Event the approval-mode extension emits on pi.events when Jev review changes.
+ * The editor shows a warning badge only while main-session review is off.
+ * This mirror keeps the status-bar extension self-contained.
  */
-export const PLAN_MODE_EVENT = "plan:mode-change";
+export const APPROVAL_MODE_EVENT = "approval-mode:state";
 
 /** Wire name of the event the agents extension publishes on worker
  *  lifecycle changes (see extensions/agents). Payload:

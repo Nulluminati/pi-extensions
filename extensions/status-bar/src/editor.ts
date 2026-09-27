@@ -73,11 +73,11 @@ export interface EditorModalFrameInput {
   /** Pre-colored title string shown in the top border (model + thinking). */
   title: string;
   /** Pre-colored right-aligned label in the top border, opposite the title
-   * (for example "Plan Mode" while the plan extension is in plan mode). */
+   * (for example "Approval Mode off" while Jev review is disabled). */
   titleRight?: string;
   theme: any;
   /** Optional theme color name for the frame strokes; tints the whole frame
-   * (for example the warning color while the plan extension is in plan mode). */
+   * (for example the warning color while Jev review is disabled). */
   borderColor?: string;
 }
 

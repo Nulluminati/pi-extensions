@@ -42,8 +42,7 @@ export interface State {
   workerModelLabel: string;
   // True while the goal extension has a running goal (status "active"),
   // published on the pi.events bus (see goal:state-change). Shown as a
-  // "Goal N/cap" badge in the editor frame's top-right cell, beside
-  // "Plan Mode" when both are active.
+  // "Goal N/cap" badge in the editor frame's top-right cell.
   goalRunning: boolean;
   // Iteration count and cap from the goal:state-change payload, shown in the
   // badge while the goal is running. goalIteration resets to 0 when no goal
@@ -61,9 +60,8 @@ export interface State {
   // badge is shown solely on that. `flexOn` drives the on/off label.
   flexOn: boolean;
   flexCapable: boolean;
-  // True while the plan extension is in plan mode (see plan:mode-change on the
-  // pi.events bus); tints the editor frame with the warning color.
-  planModeActive: boolean;
+  // True while Jev review is off in the main session; shows the warning badge.
+  approvalModeOff: boolean;
   // Unread messenger mail count, published by the messenger extension on the
   // pi.events bus (see messenger:state). Shown as an "✉ N" segment in the
   // line-1 right block while N > 0. Like goalRunning, it is not cleared on

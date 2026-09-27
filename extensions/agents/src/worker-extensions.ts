@@ -9,12 +9,11 @@
  *
  * Resolution order: the delegate call's explicit list, then
  * PI_WORKER_EXTENSIONS (comma-separated names), then the config file, then
- * the default set. `messenger`, `worker-blocker`, and `worker-sandbox` are
- * always included: messenger is the coordination channel to the parent,
- * worker-blocker is the blocker-reporting channel to the parent, and
- * worker-sandbox is the mandatory worker sandbox. A hard denylist rejects
- * workflow extensions that would break the one-level delegation model, even
- * when explicitly requested.
+ * the default set. `messenger`, `worker-blocker`, `approval-mode`, and
+ * `worker-sandbox` are always included: the first two coordinate with the
+ * parent, approval-mode gates commands, and worker-sandbox isolates tools.
+ * A hard denylist rejects workflow extensions that would break the one-level
+ * delegation model, even when explicitly requested.
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -35,23 +34,16 @@ export const DEFAULT_WORKER_EXTENSIONS = [
   "web-search",
   "synthetic",
   "neuralwatt",
+  "approval-mode",
   "worker-sandbox",
 ] as const;
 
 /**
  * Workflow extensions that must never load in a worker: agents would allow
  * nested delegation, missions/autoresearch/goal would let a one-shot worker
- * mutate durable project records or run campaigns, and plan's overlay needs
- * an interactive user (read-only enforcement for workers is handled by the
- * runner's dedicated flag, not by loading plan).
+ * mutate durable project records or run campaigns.
  */
-export const FORBIDDEN_WORKER_EXTENSIONS = [
-  "agents",
-  "missions",
-  "autoresearch",
-  "goal",
-  "plan",
-] as const;
+export const FORBIDDEN_WORKER_EXTENSIONS = ["agents", "missions", "autoresearch", "goal"] as const;
 
 /** Coordination, blocker reporting, and sandbox extensions loaded by every
  *  worker. worker-sandbox pins last so its built-in tool overrides cannot be
@@ -59,6 +51,7 @@ export const FORBIDDEN_WORKER_EXTENSIONS = [
 export const REQUIRED_WORKER_EXTENSIONS = [
   "messenger",
   "worker-blocker",
+  "approval-mode",
   "worker-sandbox",
 ] as const;
 

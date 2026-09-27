@@ -591,7 +591,7 @@ export interface StartWorkerOptions {
   extensionPaths: string[];
   /** Route the worker's built-in tools through the worker sandbox. */
   sandbox?: boolean;
-  /** Headless read-only enforcement (parent session is planning). */
+  /** Investigation-only worker: read-only tools and filesystem. */
   readOnly?: boolean;
   /** Isolated worktree; when set the captured patch is stored on the record. */
   worktree?: { path: string; branch: string };
@@ -681,6 +681,7 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
         env: {
           ...cleanGitEnv(),
           PI_WORKER: "1",
+          PI_WORKER_READONLY: options.readOnly ? "1" : "0",
           // Stable messenger identity: the worker is addressable in the mesh
           // by its agents-registry name instead of a generated themed name.
           PI_MESSENGER_NAME: options.name,

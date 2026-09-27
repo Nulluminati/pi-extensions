@@ -325,11 +325,11 @@ export default async function agentsExtension(pi: ExtensionAPI) {
     name: "delegate",
     label: "Delegate Worker",
     description:
-      "Hand a bounded, self-contained task to a cheap-model worker Pi session with built-in file and shell tools routed through the OS sandbox (worker-sandbox). The worker gets its own context and, outside plan mode, its own git worktree by default. Planning workers are read-only and report-only. Use for parallelizable investigation and well-specified implementation work; keep design decisions, integration, and review in this session.",
+      "Hand a bounded, self-contained task to a cheap-model worker Pi session with built-in file and shell tools routed through the OS sandbox (worker-sandbox). The worker gets its own context and its own git worktree by default. Set read_only for investigation-only workers that inspect the current workspace and produce no patch. Use for parallelizable investigation and well-specified implementation work; keep design decisions, integration, and review in this session.",
     promptGuidelines: [
       "Use delegate when a task is separable and well-specified: scouting a subsystem, mechanical edits across files, or trying an approach in isolation. Write the task so a fresh session with no conversation history can succeed: goal, files, constraints, verification.",
       "Do not delegate vague or judgment-heavy work; workers use the globally configured worker model. Escalate to the main session when a worker fails twice or the task turns ambiguous.",
-      "After delegating, do not block: you are woken when the worker exits. Read its report with workers (action=status). Apply an implementation worker's patch with action=collect; planning workers are read-only and produce no patch.",
+      "After delegating, do not block: you are woken when the worker exits. Read its report with workers (action=status). Apply an implementation worker's patch with action=collect; read_only workers produce no patch.",
       "Worker slots free themselves: only a running worker holds a slot, and a worker in a terminal state (completed, failed, timeout, cancelled) consumes none — never cancel it. cancel stops a live process; remove deletes a terminal worker's record and artifacts; to relaunch, just delegate again.",
     ],
     parameters: DELEGATE_PARAMETERS,

@@ -42,11 +42,11 @@ import {
 } from "../../lib/worker-model.ts";
 import {
   AGENTS_STATE_EVENT,
+  APPROVAL_MODE_EVENT,
   FLEX_EVENT,
   GOAL_STATE_EVENT,
   ICON_COLOR,
   MESSENGER_STATE_EVENT,
-  PLAN_MODE_EVENT,
   STATUS_ICON,
   STATUS_KEY,
   TEXT_COLOR,
@@ -130,7 +130,7 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     lastHandle: null,
     flexOn: false,
     flexCapable: false,
-    planModeActive: false,
+    approvalModeOff: false,
     unreadMail: 0,
     workerCostUsd: 0,
     workerTokens: 0,
@@ -183,6 +183,14 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
       state.lastHandle?.requestRender();
     },
   );
+
+  // The approval gate announces its state on session_start. Subscribe before
+  // that event so the editor never misses the initial enabled state.
+  pi.events.on(APPROVAL_MODE_EVENT, (payload: { enabled: boolean }) => {
+    state.approvalModeOff = !payload.enabled;
+    state.lastHandle?.requestRender();
+    editorRequestRender?.();
+  });
 
   function setFooter(ctx: ExtensionCommandContext): void {
     if (!ctx.hasUI) return;
@@ -257,10 +265,10 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
           () => state.smallModelLabel,
           () => pi.getThinkingLevel() ?? "none",
           () => ({ on: state.flexOn, capable: state.flexCapable }),
-          () => (state.planModeActive ? "warning" : undefined),
+          () => (state.approvalModeOff ? "warning" : undefined),
           () => {
             const parts: string[] = [];
-            if (state.planModeActive) parts.push(ctx.ui.theme.fg("warning", "Plan Mode"));
+            if (state.approvalModeOff) parts.push(ctx.ui.theme.fg("warning", "Approval Mode off"));
             if (state.goalRunning) {
               const capLabel = state.goalCap && state.goalCap > 0 ? `/${state.goalCap}` : "";
               parts.push(ctx.ui.theme.fg("mdHeading", `Goal ${state.goalIteration}${capLabel}`));
@@ -468,15 +476,6 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     pi.events.on(FLEX_EVENT, (flex: { flexOn: boolean; flexCapable: boolean }) => {
       state.flexOn = flex.flexOn;
       state.flexCapable = flex.flexCapable;
-      state.lastHandle?.requestRender();
-      editorRequestRender?.();
-    });
-
-    // Tint the editor frame while the plan extension is in plan mode. The
-    // plan extension publishes on the pi.events bus (see plan:mode-change);
-    // re-render so the frame picks up the new border color immediately.
-    pi.events.on(PLAN_MODE_EVENT, (payload: { mode: string }) => {
-      state.planModeActive = payload.mode === "plan";
       state.lastHandle?.requestRender();
       editorRequestRender?.();
     });

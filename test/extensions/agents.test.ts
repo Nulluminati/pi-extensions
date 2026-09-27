@@ -366,7 +366,7 @@ describe("agents-extension", () => {
     );
   });
 
-  it("delegate from a planning session forces read-only sandboxed workers without worktrees", async () => {
+  it("delegate read_only starts an investigation worker without a worktree", async () => {
     await initGitRepo(cwd);
     const argsFile = join(fixtureDir, "readonly-args.txt");
     const rootFile = join(fixtureDir, "readonly-messenger-root.txt");
@@ -380,16 +380,7 @@ ${SUCCESS_WORKER}`,
     );
     setEnv("PI_WORKER_COMMAND", fixture);
     setEnv("PI_WORKER_EXTENSIONS", undefined);
-    // Parent is planning: a plan-state entry with mode "plan".
-    vi.mocked(mockCtx.sessionManager.getBranch).mockReturnValue([
-      {
-        type: "custom",
-        customType: "plan-state",
-        data: { state: { mode: "plan", plan: null, toolsBeforePlan: undefined } },
-      },
-    ]);
-
-    const result = await executeTool("delegate", { task: "research", wait: true });
+    const result = await executeTool("delegate", { task: "research", read_only: true, wait: true });
 
     const args = (await readFile(argsFile, "utf8")).split("\n");
     expect(args).toContain("--worker-readonly");
@@ -397,8 +388,14 @@ ${SUCCESS_WORKER}`,
     expect(args.some((arg) => arg.includes("worker-sandbox.ts"))).toBe(true);
     expect(result.details.worker.worktree).toBeUndefined();
     expect(await readFile(rootFile, "utf8")).toBe(cwd);
-    const planPaths = args.filter((arg) => arg.includes("plan.ts"));
-    expect(planPaths.length).toBeGreaterThanOrEqual(1);
+    const gatePaths = args.filter((arg) => arg.includes("approval-mode.ts"));
+    expect(gatePaths).toHaveLength(1);
+  });
+
+  it("rejects a read_only worker that also requests an isolated write worktree", async () => {
+    await expect(
+      executeTool("delegate", { task: "research", read_only: true, isolate: true }),
+    ).rejects.toThrow(/read_only=true/);
   });
 
   it("delegate enforces the environment worker model when a caller supplies another model", async () => {

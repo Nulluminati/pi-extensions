@@ -46,7 +46,7 @@ function withinWorkspace(cwd: string, value: string): boolean {
 }
 
 /** Load a project-owned srt policy. Missing or weaker policies refuse worker startup. */
-export function loadWorkerSandboxPolicy(cwd: string): WorkerSandboxPolicy {
+export function loadWorkerSandboxPolicy(cwd: string, readOnly = false): WorkerSandboxPolicy {
   const file = join(cwd, CONFIG_DIR_NAME, "sandbox.json");
   let raw: unknown;
   try {
@@ -102,8 +102,10 @@ export function loadWorkerSandboxPolicy(cwd: string): WorkerSandboxPolicy {
       ...parsed.filesystem,
       denyRead: mapPaths(parsed.filesystem.denyRead),
       allowRead: mapPaths(parsed.filesystem.allowRead),
-      allowWrite: mapPaths(parsed.filesystem.allowWrite),
-      denyWrite: mapPaths(parsed.filesystem.denyWrite),
+      allowWrite: readOnly ? [] : mapPaths(parsed.filesystem.allowWrite),
+      denyWrite: readOnly
+        ? [worktree, ...mapPaths(parsed.filesystem.denyWrite)]
+        : mapPaths(parsed.filesystem.denyWrite),
     },
   };
 }

@@ -1401,10 +1401,10 @@ describe("status-bar editor frame", () => {
       autocompleteCount: 0,
       width: 40,
       title: "anthropic/claude",
-      titleRight: "⟦Plan Mode⟧",
+      titleRight: "⟦Review off⟧",
       theme: plainTheme(),
     });
-    expect(lines[0]).toContain("⟦Plan Mode⟧");
+    expect(lines[0]).toContain("⟦Review off⟧");
     expect(lines[0]).toContain("╭");
     expect(lines[0]).toContain("╮");
     for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(40);
@@ -1713,14 +1713,14 @@ function getFlexHandler(mockPi: ReturnType<typeof createMockPi>) {
 }
 
 /**
- * Extract the plan-mode handler the status-bar registered on pi.events. The
- * plan extension populates the real state; tests drive it directly.
+ * Extract the approval-state handler the status-bar registered on pi.events.
+ * The approval extension populates the real state; tests drive it directly.
  */
-function getPlanModeHandler(mockPi: ReturnType<typeof createMockPi>) {
+function getApprovalHandler(mockPi: ReturnType<typeof createMockPi>) {
   const calls = (mockPi.events.on as ReturnType<typeof vi.fn>).mock.calls;
   for (const [event, handler] of calls) {
-    if (event === "plan:mode-change") {
-      return handler as (payload: { mode: string }) => void;
+    if (event === "approval-mode:state") {
+      return handler as (payload: { enabled: boolean }) => void;
     }
   }
   return undefined;
@@ -1805,17 +1805,17 @@ describe("status-bar goal badge", () => {
     expect(topLine).not.toContain("Goal 4/");
   });
 
-  it("shows the Goal badge beside Plan Mode when both are active", async () => {
+  it("shows the Goal badge beside Approval Mode off", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await enableBar(mockPi, mockCtx);
 
-    getPlanModeHandler(mockPi)?.({ mode: "plan" });
+    getApprovalHandler(mockPi)?.({ enabled: false });
     getGoalHandler(mockPi)?.({ status: "active", iteration: 2, maxIterations: 25 });
 
     const editor = renderInstalledEditor(mockCtx);
     const topLine = editor.render(120)[0] ?? "";
-    expect(topLine).toContain("Plan Mode");
+    expect(topLine).toContain("Approval Mode off");
     expect(topLine).toContain("Goal");
   });
 
@@ -2162,42 +2162,39 @@ describe("status-bar flex badge", () => {
   });
 });
 
-describe("status-bar plan mode tint", () => {
-  it("installed editor tints the frame while plan mode is active", async () => {
+describe("status-bar approval indicator", () => {
+  it("shows a warning badge when main-session Jev review is off", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await enableBar(mockPi, mockCtx);
 
-    const planHandler = getPlanModeHandler(mockPi);
-    expect(planHandler).toBeDefined();
-    planHandler?.({ mode: "plan" });
+    const handler = getApprovalHandler(mockPi);
+    expect(handler).toBeDefined();
+    handler?.({ enabled: false });
 
     const editor = renderInstalledEditor(mockCtx);
-    const lines = editor.render(100);
-    expect(lines[0]).toContain("Plan Mode");
+    expect(editor.render(100)[0]).toContain("Approval Mode off");
     expect(mockCtx.ui.theme.fg).toHaveBeenCalledWith("warning", expect.any(String));
   });
 
-  it("installed editor keeps the default frame color when not planning", async () => {
+  it("hides the badge and keeps the default frame when review is on", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await enableBar(mockPi, mockCtx);
 
-    const planHandler = getPlanModeHandler(mockPi);
-    planHandler?.({ mode: "executing" });
+    const handler = getApprovalHandler(mockPi);
+    handler?.({ enabled: false });
+    handler?.({ enabled: true });
 
     const editor = renderInstalledEditor(mockCtx);
-    const lines = editor.render(100);
-    expect(lines.some((l) => l.includes("Plan Mode"))).toBe(false);
+    expect(editor.render(100).some((line) => line.includes("Approval Mode off"))).toBe(false);
     expect(mockCtx.ui.theme.fg).toHaveBeenCalledWith("borderAccent", expect.any(String));
-    expect(mockCtx.ui.theme.fg).not.toHaveBeenCalledWith("warning", expect.any(String));
   });
 
-  it("status-bar subscribes to plan:mode-change on session_start", async () => {
+  it("subscribes to approval-mode:state before session_start", async () => {
     const mockPi = createMockPi();
-    const mockCtx = createMockCommandContext();
-    await enableBar(mockPi, mockCtx);
-    expect(getPlanModeHandler(mockPi)).toBeDefined();
+    await statusBarExtension(mockPi);
+    expect(getApprovalHandler(mockPi)).toBeDefined();
   });
 });
 

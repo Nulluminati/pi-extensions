@@ -65,6 +65,17 @@ describe("worker sandbox policy", () => {
     expect(policy.filesystem.denyWrite).toEqual([join(root, ".env")]);
   });
 
+  it("makes a read-only worker's workspace unwritable regardless of project policy", () => {
+    const root = project();
+    savePolicy(root, {
+      network: { allowedDomains: ["example.com"], deniedDomains: [] },
+      filesystem: { denyRead: ["~"], allowRead: ["."], allowWrite: ["."], denyWrite: [".env"] },
+    });
+    const policy = loadWorkerSandboxPolicy(root, true);
+    expect(policy.filesystem.allowWrite).toEqual([]);
+    expect(policy.filesystem.denyWrite).toContain(root);
+  });
+
   it("refuses relative write rules that escape the worktree", () => {
     const root = project();
     savePolicy(root, {

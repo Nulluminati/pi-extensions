@@ -89,6 +89,7 @@ describe("worker-extensions", () => {
     expect(resolved.map((r) => r.name)).toEqual([
       "messenger",
       "worker-blocker",
+      "approval-mode",
       "context7",
       "worker-sandbox",
     ]);
@@ -105,6 +106,7 @@ describe("worker-extensions", () => {
     expect(resolved.map((r) => r.name)).toEqual([
       "messenger",
       "worker-blocker",
+      "approval-mode",
       "web-search",
       "worker-sandbox",
     ]);
@@ -121,18 +123,24 @@ describe("worker-extensions", () => {
     expect(resolved.map((r) => r.name)).toEqual([
       "messenger",
       "worker-blocker",
+      "approval-mode",
       "web-search",
       "worker-sandbox",
     ]);
   });
 
-  it("force-includes messenger and worker-sandbox even when the explicit list is empty", () => {
+  it("force-includes the command gate and sandbox even when the explicit list is empty", () => {
     const resolved = resolveWorkerExtensions([], {
       extensionsRoot: root,
       configPath,
     });
 
-    expect(resolved.map((r) => r.name)).toEqual(["messenger", "worker-blocker", "worker-sandbox"]);
+    expect(resolved.map((r) => r.name)).toEqual([
+      "messenger",
+      "worker-blocker",
+      "approval-mode",
+      "worker-sandbox",
+    ]);
   });
 
   it("always includes the blocker channel (worker-blocker) even when not requested", () => {
@@ -222,6 +230,7 @@ describe("worker-extensions", () => {
     expect(resolved.map((r) => r.name)).toEqual([
       "messenger",
       "worker-blocker",
+      "approval-mode",
       "web-search",
       "worker-sandbox",
     ]);

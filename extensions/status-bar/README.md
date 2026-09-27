@@ -22,7 +22,7 @@ The whole second line is omitted when there's nothing transient to show.
 - The input box is wrapped in the same rounded accent modal frame the voice/handoff overlays use (`renderModalFrame`), with side borders and padding
 - The title (top border) shows the main model and its thinking level (color-coded per level), plus a flex badge when the model is flex-capable
 - Configured small and worker models appear as grey, icon-labelled segments after the main model, separated by `/`
-- While a goal is running, a **Goal** badge shows in the frame's top-right cell (same place as the **Plan Mode** badge, joined by a dim `·` when both are active)
+- While a goal is running, a **Goal** badge shows in the frame's top-right cell (beside the **Approval Mode off** badge, joined by a dim `·` when both are active)
 
 ## Usage
 
@@ -54,7 +54,7 @@ The right block has a usage bar, a `tokens/contextWindow` ratio, the token break
 
 ### Editor
 
-The editor is a `CustomEditor` subclass that overrides only `render()`. It renders the base editor at the modal's inner content width, strips the base editor's own top and bottom borders, and wraps the remaining content in the shared `renderModalFrame` chrome (rounded `╭╯` corners, `borderAccent` color, side `│` borders, padding). The title contains the main model, thinking level, optional flex badge, and configured small- and worker-model labels. The secondary labels use icons and grey `/` separators. The title is passed as `rawTitle` so its colored segments are not wrapped again. The frame's top-right cell shows **Plan Mode** (warning color) while plan mode is active and **Goal** while a goal is running, joined by a dim `·` when both apply. The extension reads both model configs on session start, refreshes them at the start of each turn, and watches their files. Changes from `/smallmodel`, `/worker-model`, or an external edit appear without waiting for the next turn. Autocomplete dropdown lines from the base editor remain below the box instead of being absorbed into the frame.
+The editor is a `CustomEditor` subclass that overrides only `render()`. It renders the base editor at the modal's inner content width, strips the base editor's own top and bottom borders, and wraps the remaining content in the shared `renderModalFrame` chrome (rounded `╭╯` corners, `borderAccent` color, side `│` borders, padding). The title contains the main model, thinking level, optional flex badge, and configured small- and worker-model labels. The secondary labels use icons and grey `/` separators. The title is passed as `rawTitle` so its colored segments are not wrapped again. The frame's top-right cell shows **Approval Mode off** (warning color) while main-session Jev review is disabled and **Goal** while a goal is running, joined by a dim `·` when both apply. The extension reads both model configs on session start, refreshes them at the start of each turn, and watches their files. Changes from `/smallmodel`, `/worker-model`, or an external edit appear without waiting for the next turn. Autocomplete dropdown lines from the base editor remain below the box instead of being absorbed into the frame.
 
 On `session_start` the extension captures whatever editor factory is currently registered (typically undefined, meaning Pi's default) and installs its own. On `session_shutdown` it restores the captured factory. `/statusbar:toggle` does the same swap, on demand.
 
