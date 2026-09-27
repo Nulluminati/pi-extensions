@@ -54,6 +54,19 @@ const KNOWN_SAFE = [
   /^git status(?: --(?:short|porcelain))?$/, // exact forms already used for repository inspection
 ];
 
+/** These options invoke another program whose effects the outer command does not describe. */
+const EXECUTION_HOOKS = [
+  /\bgit\s+-c\s+(?:core\.(?:fsmonitor|sshcommand|hookspath)|alias\.[\w-]+)=/i,
+  /\bgit\s+ls-remote\b[^\n;&|]*--upload-pack(?:=|\s)/i,
+  /\bsort\b[^\n;&|]*--compress-program(?:=|\s)/i,
+  /\brg\b[^\n;&|]*--pre(?:=|\s)/i,
+  /\bfd\b[^\n;&|]*\s-[xX](?:\S*|\s)/i,
+];
+
+export function hasExecutionHook(command: string): boolean {
+  return EXECUTION_HOOKS.some((pattern) => pattern.test(command));
+}
+
 function isProtectedForcePush(command: string): boolean {
   const stages = command.split(/[;\n&|]/);
   return stages.some(

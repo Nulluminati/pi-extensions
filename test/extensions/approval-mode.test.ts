@@ -74,11 +74,64 @@ describe("approval-mode Jev diagnostics", () => {
     });
     expect(result).toMatchObject({
       decision: "uncertain",
-      scores: { intent: 0.7, harm: 0.3, secrets: 0.05 },
+      scores: { harm: 0.3, secrets: 0.05, externalChange: 0.01 },
     });
   });
 
-  it("uses the substantive request instead of reload acknowledgments", async () => {
+  it("allows low-risk local work without relying on recent user text", async () => {
+    const fetchMock = mockAnswer({ intent: 0.01, harm: 0.03, secrets: 0.02 });
+    for (const entries of [
+      [{ type: "message", message: { role: "user", content: "Investigate the UI." } }],
+      [{ type: "message", message: { role: "user", content: "I have reloaded." } }],
+      [],
+    ]) {
+      expect(
+        (
+          await judgeCommand({
+            command: "npm run check",
+            cwd: "/workspace",
+            entries,
+            apiKey: "test-key",
+          })
+        ).decision,
+      ).toBe("allow");
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(body.questions).not.toHaveProperty("intent");
+    expect(body.state).not.toHaveProperty("user_request");
+  });
+
+  it("does not auto-approve commands with executable helper options", async () => {
+    mockAnswer({ intent: 0.99, harm: 0.01, secrets: 0.01 });
+    for (const command of [
+      "git -c core.fsmonitor=./evil status --short",
+      "git ls-remote --upload-pack=./evil .",
+      "sort --compress-program=./evil input",
+      "rg --pre ./evil pattern",
+      "fd -xnode payload",
+    ]) {
+      expect(
+        (await judgeCommand({ command, cwd: "/workspace", apiKey: "test-key" })).decision,
+      ).toBe("uncertain");
+    }
+  });
+
+  it("escalates remote mutation even when a user requests it", async () => {
+    mockAnswer({ intent: 0.99, harm: 0.01, secrets: 0.01, externalChange: 0.91 });
+    expect(
+      (
+        await judgeCommand({
+          command: "git push origin feature/auth",
+          cwd: "/workspace",
+          entries: [{ type: "message", message: { role: "user", content: "Push the branch." } }],
+          apiKey: "test-key",
+        })
+      ).decision,
+    ).toBe("reject");
+  });
+
+  it("does not send task context or reload acknowledgments to the risk judge", async () => {
     const fetchMock = mockAnswer({ intent: 0.97, harm: 0.01, secrets: 0.04 });
     await judgeCommand({
       command: "git diff -- src/auth.ts",
@@ -91,7 +144,7 @@ describe("approval-mode Jev diagnostics", () => {
       apiKey: "test-key",
     });
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
-    expect(body.state.user_request).toBe("Review the auth changes.");
+    expect(body.state).toEqual({ command: "git diff -- src/auth.ts", cwd: "/workspace" });
   });
 
   it("asks about concrete secret access rather than hypothetical output from normal project work", async () => {
@@ -116,9 +169,9 @@ describe("approval-mode Jev diagnostics", () => {
       entries: [{ type: "message", message: { role: "user", content: "Format auth" } }],
       apiKey: "test-key",
     };
-    mockAnswer({ intent: 0.98, harm: 0.04, secrets: 0.15 });
+    mockAnswer({ intent: 0.98, harm: 0.04, secrets: 0.2 });
     expect((await judgeCommand(options)).decision).toBe("allow");
-    mockAnswer({ intent: 0.98, harm: 0.04, secrets: 0.16 });
+    mockAnswer({ intent: 0.98, harm: 0.04, secrets: 0.21 });
     expect((await judgeCommand(options)).decision).toBe("uncertain");
   });
 
@@ -147,7 +200,7 @@ describe("approval-mode extension", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
     expect(body.state.command).toBe("npm test");
-    expect(body.questions.intent.type).toBe("noul");
+    expect(body.questions.externalChange.type).toBe("noul");
   });
 
   it("judges a background command in its requested directory", async () => {
@@ -314,9 +367,17 @@ async function setup(hasUI = true) {
   return { pi, ctx, handler };
 }
 
-function mockAnswer(probabilities: { intent: number; harm: number; secrets: number }) {
+function mockAnswer(probabilities: {
+  intent: number;
+  harm: number;
+  secrets: number;
+  externalChange?: number;
+}) {
   const answers = Object.fromEntries(
-    Object.entries(probabilities).map(([key, noul]) => [key, { type: "noul", noul }]),
+    Object.entries({ externalChange: 0.01, ...probabilities }).map(([key, noul]) => [
+      key,
+      { type: "noul", noul },
+    ]),
   );
   const mock = vi
     .fn()

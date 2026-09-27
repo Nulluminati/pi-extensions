@@ -105,7 +105,6 @@ export default async function approvalMode(pi: ExtensionAPI) {
     const result = await judgeCommand({
       command,
       cwd,
-      entries: ctx.sessionManager.getBranch() ?? [],
       apiKey: process.env.TYPESAFEAI_API_KEY,
       ...(ctx.signal ? { signal: ctx.signal } : {}),
     });
