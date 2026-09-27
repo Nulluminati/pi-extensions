@@ -14,6 +14,10 @@ TODO.md
 .pi/workers/
 .pi/worktrees/
 
+# Package-manager caches that worker sessions create inside worktrees;
+# capture stages untracked files only where ignore policy permits them
+.npm-cache/
+
 # Claude Code local state
 .claude/settings.local.json
 .claude/plans/

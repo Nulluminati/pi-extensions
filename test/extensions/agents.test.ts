@@ -53,6 +53,8 @@ import {
   applyPatch,
   captureWorktreePatch,
   createWorktree,
+  DirtyWorktreeError,
+  discardWorktree,
   isGitRepo,
   removeWorktree,
 } from "../../extensions/agents/src/worktree.ts";
@@ -1949,9 +1951,11 @@ sleep 30
       );
       setEnv("PI_MAX_WORKERS", "1");
 
-      await expect(executeTool("delegate", { task: "isolated task" })).rejects.toThrow(
-        /dirty tree/,
-      );
+      const refusal = executeTool("delegate", { task: "isolated task" });
+      await expect(refusal).rejects.toThrow(/dirty tree/);
+      // The refusal names the blocker, so the parent needs no extra
+      // diagnostic status call to find it.
+      await expect(refusal).rejects.toThrow(/scratch\.ts/);
 
       // The spawn was refused before anything existed: no phantom failed
       // record (disk or transcript), no worktree, nothing spawned.
@@ -2229,12 +2233,184 @@ describe("agents-units", () => {
     }
   });
 
+  it("captureWorktreePatch excludes ignored worker cache artifacts but keeps source and tracked config changes", async () => {
+    const repo = await mkdtemp(join(tmpdir(), "agents-wt-cache-"));
+    try {
+      await initGitRepo(repo);
+      // The project's ignore policy declares worker cache directories, and a
+      // tracked config file exists before the worker branches.
+      await writeFile(join(repo, ".gitignore"), ".npm-cache/\n");
+      await mkdir(join(repo, "config"), { recursive: true });
+      await writeFile(join(repo, "config", "app.json"), '{"name": "base"}\n');
+      await execFileAsync("git", ["add", "."], gitOpts(repo));
+      await execFileAsync(
+        "git",
+        ["commit", "-qm", "ignore policy and tracked config"],
+        gitOpts(repo),
+      );
+
+      const wt = await createWorktree(repo, "w-cache");
+      // The worker populates a package cache inside the worktree...
+      const cacheBlob = join(wt.path, ".npm-cache", "_cacache", "index-v5", "ab");
+      await mkdir(cacheBlob, { recursive: true });
+      await writeFile(join(cacheBlob, "cd"), Buffer.from([0x00, 0x01, 0xff, 0xfe]));
+      // ...populates its own runtime state in the config dir...
+      await mkdir(join(wt.path, CONFIG_DIR_NAME, "messenger", "inbox"), { recursive: true });
+      await writeFile(join(wt.path, CONFIG_DIR_NAME, "messenger", "inbox", "peer.jsonl"), "{}\n");
+      // ...edits tracked source and tracked config...
+      await writeFile(join(wt.path, "README.md"), "# worker edit\n");
+      await writeFile(join(wt.path, "config", "app.json"), '{"name": "worker"}\n');
+      // ...and adds a new source file.
+      await mkdir(join(wt.path, "src"), { recursive: true });
+      await writeFile(join(wt.path, "src", "feature.ts"), "export const feature = true;\n");
+
+      const patchPath = join(repo, CONFIG_DIR_NAME, "workers", "patches", "w-cache.diff");
+      await captureWorktreePatch(wt.path, patchPath);
+      const patch = await readFile(patchPath, "utf8");
+      expect(patch).not.toContain(".npm-cache");
+      expect(patch).not.toContain("_cacache");
+      expect(patch).not.toContain(CONFIG_DIR_NAME);
+      expect(patch).toContain("README.md");
+      expect(patch).toContain("config/app.json");
+      expect(patch).toContain("src/feature.ts");
+
+      // The patch applies cleanly and leaves the cache untouched in the
+      // worktree rather than deleting it.
+      await applyPatch(repo, patchPath);
+      expect(await readFile(join(repo, "config", "app.json"), "utf8")).toBe('{"name": "worker"}\n');
+      expect(await readFile(join(repo, "src", "feature.ts"), "utf8")).toBe(
+        "export const feature = true;\n",
+      );
+      expect(existsSync(join(cacheBlob, "cd"))).toBe(true);
+      expect(existsSync(join(wt.path, CONFIG_DIR_NAME, "messenger", "inbox", "peer.jsonl"))).toBe(
+        true,
+      );
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("captureWorktreePatch stores binary changes as applicable binary patches", async () => {
+    const repo = await mkdtemp(join(tmpdir(), "agents-wt-binary-"));
+    try {
+      await initGitRepo(repo);
+      const wt = await createWorktree(repo, "w-binary");
+      const bytes = Buffer.from([0x00, 0x01, 0x02, 0xff, 0xfe, 0x0a, 0x00]);
+      await mkdir(join(wt.path, "assets"), { recursive: true });
+      await writeFile(join(wt.path, "assets", "logo.bin"), bytes);
+
+      const patchPath = join(repo, "binary.patch.diff");
+      await captureWorktreePatch(wt.path, patchPath);
+      const patch = await readFile(patchPath, "utf8");
+      expect(patch).toContain("GIT binary patch");
+
+      await applyPatch(repo, patchPath);
+      expect(await readFile(join(repo, "assets", "logo.bin"))).toEqual(bytes);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("captureWorktreePatch refuses an unapplicable patch without storing it and keeps the worktree", async () => {
+    const repo = await mkdtemp(join(tmpdir(), "agents-wt-refuse-"));
+    try {
+      await initGitRepo(repo);
+      const wt = await createWorktree(repo, "w-drift");
+      // The parent tree drifts after the worker branched (uncommitted is
+      // enough: `git apply --check` tests against the working tree)...
+      await writeFile(join(repo, "README.md"), "# parent drifted\n");
+      // ...and the worker edits the same file.
+      await writeFile(join(wt.path, "README.md"), "# worker edit\n");
+
+      const patchesDir = join(repo, CONFIG_DIR_NAME, "workers", "patches");
+      const patchPath = join(patchesDir, "w-drift.diff");
+      await expect(captureWorktreePatch(wt.path, patchPath)).rejects.toThrow(/refusing/i);
+
+      // Nothing is stored — neither the patch nor a validation leftover.
+      await expect(stat(patchPath)).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(stat(`${patchPath}.tmp`)).rejects.toMatchObject({ code: "ENOENT" });
+      // The worktree survives with the worker's changes for manual recovery.
+      expect(existsSync(wt.path)).toBe(true);
+      expect(await readFile(join(wt.path, "README.md"), "utf8")).toBe("# worker edit\n");
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
   it("createWorktree refuses a dirty tree", async () => {
     const repo = await mkdtemp(join(tmpdir(), "agents-dirty-"));
     try {
       await initGitRepo(repo);
       await writeFile(join(repo, "README.md"), "# changed\n");
       await expect(createWorktree(repo, "w-dirty")).rejects.toThrow(/dirty tree/);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("createWorktree names the blocking paths in the dirty-tree refusal", async () => {
+    const repo = await mkdtemp(join(tmpdir(), "agents-dirty-named-"));
+    try {
+      await initGitRepo(repo);
+      await writeFile(join(repo, "README.md"), "# changed\n");
+      await writeFile(join(repo, "src notes.md"), "export {};\n");
+
+      const failure = await createWorktree(repo, "w-named").then(
+        () => null,
+        (error: unknown) => error,
+      );
+      expect(failure).toBeInstanceOf(DirtyWorktreeError);
+      const message = (failure as Error).message;
+      expect(message).toContain("README.md");
+      expect(message).toContain("src notes.md");
+      // The actionable guidance stays: commit or stash before delegating.
+      expect(message).toContain("Commit or stash first");
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("createWorktree names at most five blocking paths and counts the rest", async () => {
+    const repo = await mkdtemp(join(tmpdir(), "agents-dirty-many-"));
+    try {
+      await initGitRepo(repo);
+      for (const name of ["a", "b", "c", "d", "e", "f", "g"]) {
+        await writeFile(join(repo, `blocked-${name}.ts`), "export {};\n");
+      }
+
+      const failure = await createWorktree(repo, "w-many").then(
+        () => null,
+        (error: unknown) => error,
+      );
+      expect(failure).toBeInstanceOf(DirtyWorktreeError);
+      const message = (failure as Error).message;
+      // Git sorts porcelain output: the first five names appear, the rest
+      // collapse into a count.
+      expect(message).toContain("blocked-a.ts");
+      expect(message).toContain("blocked-e.ts (and 2 more)");
+      expect(message).not.toContain("blocked-f.ts");
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("createWorktree names real blockers but never untracked config-dir state", async () => {
+    const repo = await mkdtemp(join(tmpdir(), "agents-dirty-mixed-"));
+    try {
+      await initGitRepo(repo);
+      // Messenger writes here in repos that do not gitignore the config dir.
+      await mkdir(join(repo, CONFIG_DIR_NAME, "messenger", "inbox"), { recursive: true });
+      await writeFile(join(repo, CONFIG_DIR_NAME, "messenger", "inbox", "peer.jsonl"), "{}\n");
+      await writeFile(join(repo, "scratch.ts"), "export {};\n");
+
+      const failure = await createWorktree(repo, "w-mixed").then(
+        () => null,
+        (error: unknown) => error,
+      );
+      expect(failure).toBeInstanceOf(DirtyWorktreeError);
+      const message = (failure as Error).message;
+      expect(message).toContain("scratch.ts");
+      expect(message).not.toContain("peer.jsonl");
     } finally {
       await rm(repo, { recursive: true, force: true });
     }
@@ -2635,6 +2811,31 @@ describe("agents-worker store (session-scoped)", () => {
     expect(await loadWorker(cwd, "w-live")).toBeDefined();
   });
 
+  it("pruneWorkerArtifacts keeps a failed capture record while its worktree holds the changes", async () => {
+    await initGitRepo(cwd);
+    const wt = await createWorktree(cwd, "w-recovery");
+    await writeFile(join(wt.path, "README.md"), "# worker changes\n", "utf8");
+    const patchPath = join(cwd, CONFIG_DIR_NAME, "workers", "patches", "w-recovery.diff");
+    await seedRecord(
+      cwd,
+      makeWorkerRecord({
+        id: "w-recovery",
+        name: "recovery",
+        status: "completed",
+        worktree: wt.path,
+        branch: wt.branch,
+        patchPath,
+        endedAt: Date.now() - WORKER_RETENTION_MS - 60_000,
+      }),
+    );
+
+    const pruned = await pruneWorkerArtifacts(cwd);
+
+    expect(pruned).not.toContain("w-recovery");
+    expect(await loadWorker(cwd, "w-recovery")).toBeDefined();
+    expect(await readFile(join(wt.path, "README.md"), "utf8")).toBe("# worker changes\n");
+  });
+
   it("sweepWorkerArtifacts reports worktree dirs with no record file as unowned", async () => {
     await initGitRepo(cwd);
     await createWorktree(cwd, "w-unowned");
@@ -2707,6 +2908,41 @@ describe("agents-worker store (session-scoped)", () => {
 
     expect(finalized.status).toBe("failed");
     expect(finalized.error).toContain("boom went the worker");
+  });
+
+  it("finalizeWorker keeps the worktree recoverable when patch capture refuses", async () => {
+    await initGitRepo(cwd);
+    const wt = await createWorktree(cwd, "w-uncaptured");
+    // The parent tree drifts after the branch, making the worker's patch
+    // inapplicable at capture time.
+    await writeFile(join(cwd, "README.md"), "# parent drifted\n", "utf8");
+    await writeFile(join(wt.path, "README.md"), "# worker edit\n", "utf8");
+    const record = makeWorkerRecord({
+      id: "w-uncaptured",
+      name: "uncaptured",
+      status: "running",
+      worktree: wt.path,
+      branch: wt.branch,
+      streamFormat: "raw",
+    });
+    const spoolDir = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
+    await mkdir(spoolDir, { recursive: true });
+    await writeFile(
+      join(spoolDir, "w-uncaptured.jsonl"),
+      '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"the report"}]}}\n',
+      "utf8",
+    );
+
+    const finalized = await finalizeWorker({ cwd, record });
+
+    expect(finalized.status).toBe("completed");
+    expect(finalized.patchPath).toBeDefined();
+    await expect(stat(finalized.patchPath as string)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(finalized.error).toContain("patch capture failed");
+    // The record points at the absent patch, so collect and retention treat
+    // the worktree as the only remaining copy of the worker's changes.
+    expect(existsSync(wt.path)).toBe(true);
+    await expect(discardWorktree(cwd, finalized)).resolves.toBe("kept");
   });
 
   it("finalizeWorker honors an explicit end marker over inference", async () => {

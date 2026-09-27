@@ -6,8 +6,8 @@
  */
 
 import { existsSync } from "node:fs";
-import { access, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { access, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { runGit } from "../../../lib/git.ts";
 import { isProjectStatePath, projectStateDir } from "../../../lib/paths.ts";
 import type { WorkerRecord } from "./types.ts";
@@ -18,6 +18,10 @@ import type { WorkerRecord } from "./types.ts";
 const BASE_COMMIT_FILE = "agents-base";
 /** The project hook creates temporary paths with eight random characters. */
 const PROVISION_SCRATCH = /^provision-tmp-[A-Za-z0-9]{8}$/;
+/** Untracked paths per `git add` invocation, bounded for argv limits. */
+const UNTRACKED_ADD_BATCH = 64;
+/** Blocking paths named by the dirty-tree refusal before the rest collapse into a count. */
+const MAX_NAMED_BLOCKERS = 5;
 
 // --- Helpers ---
 
@@ -49,6 +53,17 @@ export async function isGitRepo(cwd: string): Promise<boolean> {
 }
 
 /**
+ * The path a porcelain status line names (the `XY ` prefix is three
+ * characters), without Git's C-style surrounding quotes. Git quotes paths
+ * with spaces, so the strip is what makes names like `src notes.md` whole.
+ * Inner escape sequences are shown as Git emits them.
+ */
+function statusLinePath(line: string): string {
+  const path = line.slice(3);
+  return path.startsWith('"') && path.endsWith('"') && path.length >= 2 ? path.slice(1, -1) : path;
+}
+
+/**
  * Untracked files under the config dir — messenger inboxes, mission records,
  * worker registries — are tooling state, not work. They never enter the
  * worktree (branched from HEAD) and never appear in the captured patch, so
@@ -62,8 +77,15 @@ function blockingStatusLines(status: string): string[] {
     .filter((line) => line.trim() !== "")
     .filter((line) => {
       if (!line.startsWith("?? ")) return true;
-      return !isProjectStatePath(line.slice(3).replace(/^"(.*)"$/, "$1"));
+      return !isProjectStatePath(statusLinePath(line));
     });
+}
+
+/** The bounded blocker list for the refusal: names, plus a count of the rest. */
+function blockingPathSummary(lines: string[]): string {
+  const named = lines.slice(0, MAX_NAMED_BLOCKERS).map(statusLinePath);
+  const rest = lines.length - named.length;
+  return rest > 0 ? `${named.join(", ")} (and ${rest} more)` : named.join(", ");
 }
 
 /**
@@ -76,9 +98,11 @@ export async function createWorktree(
   workerId: string,
 ): Promise<{ path: string; branch: string }> {
   const status = await runGit(cwd, ["status", "--porcelain"]);
-  if (blockingStatusLines(status).length > 0) {
+  const blocking = blockingStatusLines(status);
+  if (blocking.length > 0) {
     throw new DirtyWorktreeError(
-      "Refusing to create a worker worktree from a dirty tree. Commit or stash first so the worker's patch captures a clean baseline.",
+      `Refusing to create a worker worktree from a dirty tree. Blocking paths: ${blockingPathSummary(blocking)}. ` +
+        "Commit or stash first so the worker's patch captures a clean baseline.",
     );
   }
   const branch = worktreeBranch(workerId);
@@ -94,8 +118,45 @@ export async function createWorktree(
 }
 
 /**
+ * The working tree the patch will be applied to at collect time, when it can
+ * be located: a linked worktree's common git dir sits inside the parent
+ * checkout. Bare repositories, ancient git, and unknown layouts return
+ * undefined — capture then stores the patch unvalidated rather than refusing
+ * valid work. Note that collect may run `git apply` from a subdirectory of
+ * this tree when the session started there; validation from the root is
+ * optimistic in that layout.
+ */
+async function parentWorktreePath(worktreePath: string): Promise<string | undefined> {
+  let commonDir: string;
+  try {
+    commonDir = (
+      await runGit(worktreePath, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
+    ).trim();
+  } catch {
+    return undefined;
+  }
+  if (commonDir === "") return undefined;
+  const parent = dirname(commonDir);
+  const inside = await runGit(parent, ["rev-parse", "--is-inside-work-tree"]).then(
+    (out) => out.trim() === "true",
+    () => false,
+  );
+  return inside ? parent : undefined;
+}
+
+/**
  * Capture everything the worker changed (including new files and commits)
  * relative to the worktree's fork point as a patch.
+ *
+ * Staging is policy-driven instead of `add -A`: tracked changes stage
+ * directly, and untracked files stage only where the project's Git ignore
+ * policy permits them, minus extension runtime state under the config dir.
+ * Artifact directories the project ignores (`.npm-cache`, `node_modules`,
+ * build output) therefore never enter the patch. The diff is binary-safe so
+ * legitimate binary changes stay applicable, and the patch is validated with
+ * `git apply --check` against the parent working tree before being stored —
+ * an inapplicable patch refuses at capture, while the worktree still exists,
+ * instead of surfacing at collect.
  */
 export async function captureWorktreePatch(worktreePath: string, outFile: string): Promise<void> {
   // A killed setup hook cannot run its EXIT trap. Remove its temporary
@@ -111,11 +172,39 @@ export async function captureWorktreePatch(worktreePath: string, outFile: string
       await rm(join(stateRoot, entry.name), { recursive: true, force: true });
     }
   }
-  await runGit(worktreePath, ["add", "-A"]);
+
+  // Tracked modifications and deletions stage regardless of ignore policy.
+  await runGit(worktreePath, ["add", "-u"]);
+  // Untracked files stage only where the project's ignore policy permits.
+  // Runtime state under the config dir is tooling, never worker work.
+  const others = await runGit(worktreePath, ["ls-files", "--others", "--exclude-standard", "-z"]);
+  const untracked = others.split("\0").filter((path) => path !== "" && !isProjectStatePath(path));
+  for (let i = 0; i < untracked.length; i += UNTRACKED_ADD_BATCH) {
+    await runGit(worktreePath, ["add", "--", ...untracked.slice(i, i + UNTRACKED_ADD_BATCH)]);
+  }
+
   const base = await worktreeBaseCommit(worktreePath);
-  const diff = await runGit(worktreePath, ["diff", "--cached", base]);
+  const diff = await runGit(worktreePath, ["diff", "--binary", "--full-index", "--cached", base]);
+
   await mkdir(join(outFile, ".."), { recursive: true });
-  await writeFile(outFile, diff, "utf8");
+  // The patch is only stored once it is known to apply: a refused capture
+  // leaves neither a broken patch for collect to trip over nor a validation
+  // leftover behind.
+  const staged = `${outFile}.tmp`;
+  await writeFile(staged, diff, "utf8");
+  const parent = await parentWorktreePath(worktreePath);
+  if (parent !== undefined && diff.trim() !== "") {
+    try {
+      await runGit(parent, ["apply", "--check", resolve(staged)]);
+    } catch (error) {
+      await rm(staged, { force: true });
+      throw new Error(
+        `Refusing to store the worker patch: it does not apply to the parent tree at ${parent}. ` +
+          `The worktree keeps the changes for recovery. Git said: ${(error as Error).message}`,
+      );
+    }
+  }
+  await rename(staged, outFile);
 }
 
 /**

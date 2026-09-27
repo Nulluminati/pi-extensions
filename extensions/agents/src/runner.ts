@@ -359,8 +359,12 @@ export async function finalizeWorker(options: FinalizeOptions): Promise<WorkerRe
       await captureWorktreePatch(worktree.path, patchPath);
       record.patchPath = patchPath;
     } catch (err) {
-      // Keep an earlier terminal error (e.g. the timeout reason) and append
-      // the patch failure instead of overwriting it.
+      // Capture refuses before storing a patch. Point the record at the
+      // absent patch path so collect and retention treat the worktree as
+      // the only remaining copy of the worker's changes and keep it for
+      // recovery. Keep an earlier terminal error (e.g. the timeout reason)
+      // and append the patch failure instead of overwriting it.
+      record.patchPath = patchPath;
       const patchError = `patch capture failed: ${(err as Error).message}`;
       record.error = record.error !== undefined ? `${record.error}; ${patchError}` : patchError;
     }

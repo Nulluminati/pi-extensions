@@ -12,6 +12,7 @@
  */
 
 import { randomBytes } from "node:crypto";
+import { existsSync } from "node:fs";
 import { readdir, readFile, rm, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { withFileLock } from "../../../lib/file-lock.ts";
@@ -343,30 +344,27 @@ export async function sweepWorkerArtifacts(
 // --- Retention ---
 
 /** Delete artifact files of terminal records past the retention window.
- *  Records still running, and anything whose parent session may still want
- *  it, are never touched. Returns the pruned ids. */
+ *  Records still running, and worktrees holding the only copy of changes,
+ *  are never touched. Returns the pruned ids. */
 export async function pruneWorkerArtifacts(cwd: string, now = Date.now()): Promise<string[]> {
-  const all = await listRecordFiles(cwd);
-  const prunedRecords = new Map<string, WorkerRecord>();
   const pruned: string[] = [];
-  for (const record of all) {
+  for (const record of await listRecordFiles(cwd)) {
     if (record.status === "running") continue;
     if (record.endedAt === undefined || now - record.endedAt <= WORKER_RETENTION_MS) continue;
-    pruned.push(record.id);
-    prunedRecords.set(record.id, record);
-  }
-  for (const id of pruned) {
-    // Worktree and branch go with the rest of the purge: retention deletes
-    // the captured patch too, so keeping the checkout would only strand an
-    // unowned worktree. The record carries the worktree path; find it again
-    // for the discard.
-    const record = prunedRecords.get(id);
-    if (record) {
-      await discardWorktree(cwd, record).catch(() => "failed");
+    // Retain the record when the worktree cannot be discarded. A missing
+    // capture patch makes this checkout the only remaining copy of changes.
+    const outcome = await discardWorktree(cwd, record).catch(() => "failed");
+    if (
+      (outcome === "kept" || outcome === "failed") &&
+      record.worktree &&
+      existsSync(record.worktree)
+    ) {
+      continue;
     }
-    await unlink(recordPath(cwd, id)).catch(() => {});
-    await unlink(streamPath(cwd, id)).catch(() => {});
-    await unlink(join(patchesDir(cwd), `${id}.diff`)).catch(() => {});
+    pruned.push(record.id);
+    await unlink(recordPath(cwd, record.id)).catch(() => {});
+    await unlink(streamPath(cwd, record.id)).catch(() => {});
+    await unlink(join(patchesDir(cwd), `${record.id}.diff`)).catch(() => {});
   }
   return pruned;
 }
