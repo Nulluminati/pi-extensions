@@ -30,10 +30,11 @@ const QUESTIONS = {
   secrets: {
     type: "noul",
     instructions:
-      "Could this command disclose a credential, private key, token, or other secret through its output or network traffic?",
+      "Does the exact command specifically access, print, stage, or transmit a credential, private key, token, sensitive environment value, or secret-bearing file? Judge concrete arguments and destinations, not hypothetical contents of normal project output.",
     criteria: {
-      true: "The command can expose a secret in its output or send it to an endpoint.",
-      false: "No secret disclosure is evident.",
+      true: "The command targets credential stores, environment values, private keys, .env or auth files, or sends sensitive data to an endpoint.",
+      false:
+        "Normal project inspection, tests, builds, or version-control work without a specific secret target. Incidental secret text could appear but is not requested by the command.",
     },
   },
 } as const;
@@ -81,7 +82,11 @@ export async function judgeCommand(options: {
   entries: unknown[];
   apiKey: string | undefined;
   signal?: AbortSignal;
-}): Promise<{ decision: JevDecision; reason: string }> {
+}): Promise<{
+  decision: JevDecision;
+  reason: string;
+  scores?: { intent: number; harm: number; secrets: number };
+}> {
   const { command, cwd, entries, apiKey, signal } = options;
   if (!apiKey) return { decision: "unavailable", reason: "TypeSafe API key is missing" };
   if (command.length > MAX_COMMAND_LENGTH) {
@@ -125,20 +130,24 @@ export async function judgeCommand(options: {
         reason: "TypeSafe response has missing or invalid answers",
       };
     }
+    const scores = { intent: userIntent, harm, secrets };
     if (userIntent <= 0.2)
-      return { decision: "reject", reason: "The command does not match your request" };
-    if (secrets >= 0.8) return { decision: "reject", reason: "The command could expose a secret" };
+      return { decision: "reject", reason: "The command does not match your request", scores };
+    if (secrets >= 0.8)
+      return { decision: "reject", reason: "The command could expose a secret", scores };
     if (harm >= 0.8)
-      return { decision: "reject", reason: "The command presents serious damage risk" };
-    if (userIntent >= 0.8 && harm <= 0.15 && secrets <= 0.1) {
+      return { decision: "reject", reason: "The command presents serious damage risk", scores };
+    if (userIntent >= 0.8 && harm <= 0.15 && secrets <= 0.15) {
       return {
         decision: "allow",
         reason: "Command matches the request without evident serious risk",
+        scores,
       };
     }
     return {
       decision: "uncertain",
       reason: "Jev could not judge the command with sufficient confidence",
+      scores,
     };
   } catch {
     return { decision: "unavailable", reason: "TypeSafe request failed or was cancelled" };

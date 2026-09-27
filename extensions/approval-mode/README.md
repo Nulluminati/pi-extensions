@@ -14,4 +14,8 @@ Use `/approval-mode off` to skip Jev review for the rest of the main session. Ha
 
 ## Configuration
 
-Set `TYPESAFE_API_KEY` in the environment that launches Pi. Approval Mode sends the command, current directory, and up to three recent user requests to TypeSafe. It redacts common credentials and limits request size. Redaction cannot identify every secret. Commands containing a recognized credential block rather than being sent with missing text. Jev uses `jev-latest` with a four-second request limit. This extension uses the TypeSafe HTTP API and adds no package dependency.
+Set `TYPESAFEAI_API_KEY` in the environment that launches Pi. If the key is missing, Pi warns at session startup. Commands that need Jev still block; the warning does not disable the gate. Approval Mode sends the command, current directory, and up to three recent user requests to TypeSafe. It redacts common credentials and limits request size. Redaction cannot identify every secret. Commands containing a recognized credential block rather than being sent with missing text. Jev uses `jev-latest` with a four-second request limit. This extension uses the TypeSafe HTTP API and adds no package dependency.
+
+## Live calibration
+
+Run `node --import tsx scripts/evaluate-approval-mode.ts` from the repository root with `TYPESAFEAI_API_KEY` set. The script sends synthetic requests and command strings to Jev. It never runs those commands. It fails if a routine command does not get approval or a risky command gets automatic approval. This opt-in check makes network requests and is not part of `npm run check`. Repeat it to look for score changes; one passing run does not prove safety.
