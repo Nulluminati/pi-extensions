@@ -1,23 +1,25 @@
-# Plan-mode bash allowlist permits execution-capable flags on sort and git ls-remote
+# Plan-mode bash allowlist permits execution-capable flags
 
 - Category: bug (security)
-- Severity: important
+- Severity: high
 - Found during: PR #33 second-round review, 2026-09-21
 - Status: open
 
 ## Evidence
 
-The plan-mode read-only bash gate (`extensions/plan/src/enforcement.ts`) validates arguments per command, but two allowed forms execute arbitrary programs:
+The plan-mode read-only bash gate (`extensions/plan/src/enforcement.ts`) validates arguments per command, but several allowed forms run programs or write files:
 
-- `sort` denies only `-o`/`--output` (line 602). `sort --compress-program=./evil input` runs `./evil` as the compressor. Verified: a scratch script passed the gate and created its marker file.
-- `git ls-remote` is on the read-only subcommand list (line 288) and the generic git spec denies only `--output` (lines 238-242). `git ls-remote --upload-pack=./evil .` runs `./evil` as the pack helper. Verified the same way.
+- `sort --compress-program=./evil input` runs `./evil` as the compressor. The `sort` spec denies only output flags.
+- `git ls-remote --upload-pack=./evil .` runs `./evil` as the pack helper. The generic git spec denies only `--output`.
+- `fd -xnode payload` and `fd -Xtouch payload` treat their attached values as commands. The gate accepts them because both the regex and exact flag denial expect separate `-x` or `-X` tokens. In scratch tests, Node ran `payload.js` and `touch` changed a file's modification time.
+- `sort -ooutput.txt input.txt` attaches a filename to `-o`. It passes the gate and writes `output.txt` in a scratch directory.
 
-Both return `true` from `isSafeBashCommand`.
+All forms return `true` from `isSafeBashCommand`. The first two program-execution forms were verified in the earlier review; the attached `fd` form was verified in this pass.
 
 ## Impact
 
-Arbitrary command execution from inside plan mode — the mode whose contract is "read-only." The same deny-flags-not-allow-flags shape may hide more cases in other permitted commands; these two are the verified instances.
+Plan mode can execute repository scripts or write files despite its read-only contract. Both missing flag allowlists and attached short-option values contribute to the bypass.
 
 ## Resolution direction
 
-For any command with an execution-capable flag, replace denylist entries with a positive allowlist of safe flags, or drop the command from the plan-mode set. A test enumerating execution-capable flags per permitted command would keep this class closed.
+Replace permissive flag specs with positive allowlists for commands that can execute programs or write files. Parse attached short-option values as their underlying flag before validation. Test each execution or output flag in both separated and attached forms.
