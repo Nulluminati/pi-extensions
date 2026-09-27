@@ -7,6 +7,7 @@ const ENDPOINT = "https://api.typesafe.ai/v1/systemone";
 const TIMEOUT_MS = 4_000;
 const MAX_COMMAND_LENGTH = 4_000;
 const MAX_CONTEXT_LENGTH = 4_000;
+const ACKNOWLEDGMENT = /^(?:ok(?:ay)?|thanks|thank you|(?:i(?: have|'ve)? )?reloaded)[.!]?$/i;
 
 const QUESTIONS = {
   intent: {
@@ -57,8 +58,8 @@ function recentUserText(entries: unknown[]): string {
     if (!entry || typeof entry !== "object") continue;
     const value = entry as { type?: string; message?: { role?: string; content?: unknown } };
     if (value.type !== "message" || value.message?.role !== "user") continue;
-    const text = extractText(value.message.content);
-    if (text) messages.push(text);
+    const text = extractText(value.message.content).trim();
+    if (text && !ACKNOWLEDGMENT.test(text)) messages.push(text);
   }
   return redact(messages.slice(-3).join("\n")).slice(-MAX_CONTEXT_LENGTH);
 }

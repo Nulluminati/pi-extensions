@@ -35,12 +35,20 @@ describe("approval-mode command policy", () => {
   });
 
   it("only approves reviewed read-only forms, not execution or output flags", () => {
-    for (const command of ["pwd", "ls -la"])
+    for (const command of [
+      "pwd",
+      "ls -la",
+      "git status",
+      "git status --short",
+      "git status --porcelain",
+    ])
       expect(classifyCommand(command, "/workspace")).toBe("known-safe");
     for (const command of [
       "sort --compress-program=./evil input",
       "git ls-remote --upload-pack=./evil .",
-      "git status --short",
+      "git status --short $(touch file)",
+      "git -c core.fsmonitor=./evil status --short",
+      "git status --short | sh",
       "rm -rf /home/natekift/project/node_modules",
       "rg -n pattern src",
       "fd -xnode payload",
@@ -68,6 +76,22 @@ describe("approval-mode Jev diagnostics", () => {
       decision: "uncertain",
       scores: { intent: 0.7, harm: 0.3, secrets: 0.05 },
     });
+  });
+
+  it("uses the substantive request instead of reload acknowledgments", async () => {
+    const fetchMock = mockAnswer({ intent: 0.97, harm: 0.01, secrets: 0.04 });
+    await judgeCommand({
+      command: "git diff -- src/auth.ts",
+      cwd: "/workspace",
+      entries: [
+        { type: "message", message: { role: "user", content: "Review the auth changes." } },
+        { type: "message", message: { role: "user", content: "I have reloaded." } },
+        { type: "message", message: { role: "user", content: "Okay." } },
+      ],
+      apiKey: "test-key",
+    });
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(body.state.user_request).toBe("Review the auth changes.");
   });
 
   it("asks about concrete secret access rather than hypothetical output from normal project work", async () => {
@@ -212,6 +236,18 @@ describe("approval-mode extension", () => {
     vi.stubEnv("TYPESAFEAI_API_KEY", "");
     const { ctx } = await setup(false);
     expect(ctx.ui.notify).not.toHaveBeenCalled();
+  });
+
+  it("allows exact Git status without Jev after a reload acknowledgment", async () => {
+    vi.stubEnv("TYPESAFEAI_API_KEY", "");
+    const { handler, ctx } = await setup();
+    ctx.sessionManager.getBranch = vi.fn(() => [
+      { type: "message", message: { role: "user", content: "I have reloaded." } },
+    ]);
+    expect(
+      await handler({ toolName: "bash", input: { command: "git status --short" } }, ctx),
+    ).toBeUndefined();
+    expect(ctx.ui.select).not.toHaveBeenCalled();
   });
 
   it("blocks a missing API key without offering an approval dialog", async () => {

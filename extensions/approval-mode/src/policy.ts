@@ -51,6 +51,7 @@ function isRootDeletion(command: string, cwd: string): boolean {
 const KNOWN_SAFE = [
   /^pwd$/,
   /^ls(?: -(?:l|a|h|1|la|al|lah|alh))?$/, // current directory only
+  /^git status(?: --(?:short|porcelain))?$/, // exact forms already used for repository inspection
 ];
 
 function isProtectedForcePush(command: string): boolean {
