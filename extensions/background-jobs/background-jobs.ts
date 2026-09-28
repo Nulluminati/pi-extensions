@@ -65,9 +65,7 @@ export default async function backgroundJobsExtension(pi: ExtensionAPI) {
     }
   }
 
-  function refreshWidget(): void {
-    const ui = lastUi;
-    if (!ui?.setWidget) return;
+  function publishWidget(ui: ExtensionUIContext): void {
     const active = activeJobs(registry);
     try {
       setStripWidget(ui, "aboveEditor", {
@@ -81,6 +79,12 @@ export default async function backgroundJobsExtension(pi: ExtensionAPI) {
         console.error(`[background-jobs] widget refresh failed: ${message}`);
       }
     }
+  }
+
+  function refreshWidget(): void {
+    const ui = lastUi;
+    if (!ui?.setWidget) return;
+    publishWidget(ui);
   }
 
   const events: JobEvents = {
@@ -109,7 +113,7 @@ export default async function backgroundJobsExtension(pi: ExtensionAPI) {
     },
   };
 
-  pi.on("session_start", async (_event, _ctx) => {
+  pi.on("session_start", async (_event, ctx) => {
     // Retention runs against the pre-reset registry so logs for jobs that are
     // still terminating are never deletion candidates.
     const liveSpoolPaths = new Set(
@@ -125,6 +129,11 @@ export default async function backgroundJobsExtension(pi: ExtensionAPI) {
     registry.nextId = 1;
     lastUi = undefined;
     shuttingDown = false;
+    // Re-publish the strip entry: pi clears widgets at the session boundary
+    // and the strip contract expects extensions to re-register on
+    // session_start. The registry is empty here, so the entry is removed
+    // (factory undefined) until a new job publishes it again.
+    if (ctx.hasUI) publishWidget(ctx.ui);
     try {
       await pruneSpoolDir(agentStateDir("background-jobs"), { keep: liveSpoolPaths });
     } catch (error) {

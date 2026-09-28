@@ -324,7 +324,6 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
    */
   function startSmallModelWatch(): void {
     stopSmallModelWatch();
-    stopWorkerModelWatch();
     let configPath: string;
     try {
       configPath = resolveSmallModelConfigPath();
@@ -543,6 +542,8 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
         accumulateTokenUsage();
         refreshSmallModel();
         refreshWorkerModel();
+        startSmallModelWatch();
+        startWorkerModelWatch();
         refreshContextUsage(ctx);
         await refreshGitStatus();
         setFooter(ctx);

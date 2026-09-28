@@ -1,6 +1,10 @@
 /** Deterministic command checks. Hard denies precede every approval path. */
 
+// --- Types ---
+
 export type CommandClass = "hard-deny" | "known-safe" | "needs-jev";
+
+// --- Hard denies ---
 
 /** These rules catch clear catastrophic forms; they do not pretend to parse shell programs. */
 const HARD_DENIES = [
@@ -47,12 +51,16 @@ function isRootDeletion(command: string, cwd: string): boolean {
   );
 }
 
+// --- Known safe ---
+
 /** A deliberately tiny fast path. No shell syntax, substitutions, or unknown flags. */
 const KNOWN_SAFE = [
   /^pwd$/,
   /^ls(?: -(?:l|a|h|1|la|al|lah|alh))?$/, // current directory only
   /^git status(?: --(?:short|porcelain))?$/, // exact forms already used for repository inspection
 ];
+
+// --- Execution hooks ---
 
 /** These options invoke another program whose effects the outer command does not describe. */
 const EXECUTION_HOOKS = [
@@ -63,6 +71,8 @@ const EXECUTION_HOOKS = [
   /\bfd\b[^\n;&|]*\s(?:-[xX](?:\S*|\s)|--exec(?:-batch)?(?:=|\s|$))/i,
   /\bfind\b[^\n;&|]*\s-exec(?:dir)?(?:\s|$)/i,
 ];
+
+// --- Classification ---
 
 export function hasExecutionHook(command: string): boolean {
   return EXECUTION_HOOKS.some((pattern) => pattern.test(command));

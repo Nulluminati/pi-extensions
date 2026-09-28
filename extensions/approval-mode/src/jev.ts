@@ -2,7 +2,12 @@
 
 import { hasExecutionHook } from "./policy.ts";
 
+// --- Types ---
+
 export type JevDecision = "allow" | "reject" | "uncertain" | "unavailable";
+
+// --- Constants ---
+
 const ENDPOINT = "https://api.typesafe.ai/v1/systemone";
 const TIMEOUT_MS = 4_000;
 const MAX_COMMAND_LENGTH = 4_000;
@@ -63,11 +68,12 @@ function probability(value: unknown): number | undefined {
     : undefined;
 }
 
+// --- Judging ---
+
 /** Jev must judge the complete command; truncated or redacted commands are not approved. */
 export async function judgeCommand(options: {
   command: string;
   cwd: string;
-  entries?: unknown[];
   apiKey: string | undefined;
   signal?: AbortSignal;
 }): Promise<{

@@ -69,7 +69,6 @@ describe("approval-mode Jev diagnostics", () => {
     const result = await judgeCommand({
       command: "npm run check",
       cwd: "/workspace",
-      entries: [{ type: "message", message: { role: "user", content: "Check the project" } }],
       apiKey: "test-key",
     });
     expect(result).toMatchObject({
@@ -80,17 +79,12 @@ describe("approval-mode Jev diagnostics", () => {
 
   it("allows low-risk local work without relying on recent user text", async () => {
     const fetchMock = mockAnswer({ intent: 0.01, harm: 0.03, secrets: 0.02 });
-    for (const entries of [
-      [{ type: "message", message: { role: "user", content: "Investigate the UI." } }],
-      [{ type: "message", message: { role: "user", content: "I have reloaded." } }],
-      [],
-    ]) {
+    for (let call = 0; call < 3; call++) {
       expect(
         (
           await judgeCommand({
             command: "npm run check",
             cwd: "/workspace",
-            entries,
             apiKey: "test-key",
           })
         ).decision,
@@ -130,7 +124,6 @@ describe("approval-mode Jev diagnostics", () => {
         await judgeCommand({
           command: "git push origin feature/auth",
           cwd: "/workspace",
-          entries: [{ type: "message", message: { role: "user", content: "Push the branch." } }],
           apiKey: "test-key",
         })
       ).decision,
@@ -142,11 +135,6 @@ describe("approval-mode Jev diagnostics", () => {
     await judgeCommand({
       command: "git diff -- src/auth.ts",
       cwd: "/workspace",
-      entries: [
-        { type: "message", message: { role: "user", content: "Review the auth changes." } },
-        { type: "message", message: { role: "user", content: "I have reloaded." } },
-        { type: "message", message: { role: "user", content: "Okay." } },
-      ],
       apiKey: "test-key",
     });
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
@@ -158,7 +146,6 @@ describe("approval-mode Jev diagnostics", () => {
     await judgeCommand({
       command: "git diff -- src/auth.ts",
       cwd: "/workspace",
-      entries: [{ type: "message", message: { role: "user", content: "Review auth changes" } }],
       apiKey: "test-key",
     });
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));

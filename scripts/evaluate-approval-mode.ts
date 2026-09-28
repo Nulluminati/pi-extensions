@@ -303,10 +303,6 @@ for (const example of CASES) {
   const result = await judgeCommand({
     command: example.command,
     cwd: "/workspace",
-    entries: [example.request, ...(example.followups ?? [])].map((content) => ({
-      type: "message",
-      message: { role: "user", content },
-    })),
     apiKey,
   });
   if (result.decision === "unavailable" || !result.scores) {

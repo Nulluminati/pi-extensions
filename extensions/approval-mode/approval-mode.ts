@@ -30,6 +30,8 @@ const READONLY_TOOLS = new Set([
   "web_fetch",
 ]);
 
+// --- Extension ---
+
 export default async function approvalMode(pi: ExtensionAPI) {
   const worker = process.env.PI_WORKER === "1";
   let readOnly = worker && process.env.PI_WORKER_READONLY === "1";
