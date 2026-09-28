@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import goalExtension from "../../extensions/goal/goal.ts";
 import { createMockCommandContext } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
-import { getCommandHandler, getEventHandler } from "../mocks/test-helpers.ts";
+import { getCommandHandler, getEventHandler, makeConfirmCustom } from "../mocks/test-helpers.ts";
 
 vi.mock("@earendil-works/pi-ai", () => ({
   completeSimple: vi.fn(),
@@ -723,11 +723,10 @@ describe("goal-extension", () => {
     it("/goal reset cancels the goal after confirmation", async () => {
       const mockPi = createMockPi();
       const mockCtx = createMockCommandContext();
-      mockCtx.ui.confirm = vi.fn(() => Promise.resolve(true));
+      mockCtx.ui.custom = makeConfirmCustom(mockCtx, true);
       await goalExtension(mockPi);
       await getCommandHandler(mockPi, "goal:new")("implement snake game", mockCtx);
       await getCommandHandler(mockPi, "goal:reset")("", mockCtx);
-      expect(mockCtx.ui.confirm).toHaveBeenCalledTimes(1);
       expect(mockPi.appendEntry).toHaveBeenLastCalledWith("goal-state", { goal: null });
       expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("goal", undefined);
       expect(mockPi.events.emit).toHaveBeenCalledWith("goal:state-change", { status: null });
@@ -736,7 +735,7 @@ describe("goal-extension", () => {
     it("/goal reset declined keeps the goal", async () => {
       const mockPi = createMockPi();
       const mockCtx = createMockCommandContext();
-      mockCtx.ui.confirm = vi.fn(() => Promise.resolve(false));
+      mockCtx.ui.custom = makeConfirmCustom(mockCtx, false);
       await goalExtension(mockPi);
       await getCommandHandler(mockPi, "goal:new")("implement snake game", mockCtx);
       mockPi.appendEntry.mockClear();

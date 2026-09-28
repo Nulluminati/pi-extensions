@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { createInputModal, promptText } from "../../lib/input-modal.ts";
+import {
+  confirmModal,
+  createConfirmModal,
+  createInputModal,
+  promptText,
+} from "../../lib/input-modal.ts";
 
 function createModal(
   overrides: { onSubmit?: (value: string) => void; onCancel?: () => void } = {},
@@ -124,6 +129,131 @@ describe("promptText", () => {
   });
 });
 
+describe("createConfirmModal", () => {
+  function createConfirm(overrides: { onConfirm?: () => void; onCancel?: () => void } = {}) {
+    const requestRender = vi.fn();
+    const onConfirm = overrides.onConfirm ?? vi.fn();
+    const onCancel = overrides.onCancel ?? vi.fn();
+    const modal = createConfirmModal({
+      tui: { requestRender },
+      theme: {
+        fg: (_color, text) => text,
+        bold: (text) => text,
+      },
+      keybindings: { matches: matchesKey },
+      title: "Start a fresh session?",
+      body: "This replaces the current session.\nThe old session stays in your history.",
+      onConfirm,
+      onCancel,
+    });
+    return { modal, requestRender, onConfirm, onCancel };
+  }
+
+  it("renders inside the shared modal frame with title, body, and key hints", () => {
+    const { modal } = createConfirm();
+    const rendered = modal.render(60).join("\n");
+
+    expect(rendered).toContain("╭── Start a fresh session? ");
+    expect(rendered).toContain("This replaces the current session.");
+    expect(rendered).toContain("enter: confirm · esc: cancel");
+  });
+
+  it("wraps long body lines to the frame width instead of truncating", () => {
+    const modal = createConfirmModal({
+      tui: { requestRender: vi.fn() },
+      theme: { fg: (_color, text) => text, bold: (text) => text },
+      keybindings: { matches: matchesKey },
+      title: "Replace current goal?",
+      body: "Current goal: implement snake game with menus\nNew goal: write a platformer\n\nThis will reset usage counters.",
+      onConfirm: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    const rendered = modal.render(40).join("\n");
+    expect(rendered).toContain("This will reset usage counters.");
+    expect(rendered).not.toContain("…");
+  });
+
+  it("confirms on enter", () => {
+    const { modal, onConfirm, onCancel } = createConfirm();
+    modal.handleInput("\r");
+
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  it("cancels on escape without confirming", () => {
+    const { modal, onConfirm, onCancel } = createConfirm();
+    modal.handleInput("\x1b");
+
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it("requests a render after input", () => {
+    const { modal, requestRender } = createConfirm();
+    modal.handleInput("\r");
+
+    expect(requestRender).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("confirmModal", () => {
+  it("resolves true when confirmed in TUI mode", async () => {
+    const ctx = createMockPromptContext();
+    ctx.ui.custom = vi.fn((factory: (...args: unknown[]) => unknown) => {
+      return new Promise((resolve) => {
+        const component = factory(
+          { requestRender: vi.fn() },
+          ctx.ui.theme,
+          { matches: matchesKey },
+          resolve,
+        ) as { handleInput(data: string): void };
+        component.handleInput("\r");
+      });
+    });
+
+    await expect(confirmModal(ctx, { title: "Confirm", body: "Proceed?" })).resolves.toBe(true);
+    expect(ctx.ui.confirm).not.toHaveBeenCalled();
+  });
+
+  it("resolves false when cancelled in TUI mode", async () => {
+    const ctx = createMockPromptContext();
+    ctx.ui.custom = vi.fn((factory: (...args: unknown[]) => unknown) => {
+      return new Promise((resolve) => {
+        const component = factory(
+          { requestRender: vi.fn() },
+          ctx.ui.theme,
+          { matches: matchesKey },
+          resolve,
+        ) as { handleInput(data: string): void };
+        component.handleInput("\x1b");
+      });
+    });
+
+    await expect(confirmModal(ctx, { title: "Confirm", body: "Proceed?" })).resolves.toBe(false);
+  });
+
+  it("falls back to ctx.ui.confirm outside TUI mode", async () => {
+    const ctx = createMockPromptContext();
+    ctx.mode = "rpc";
+    ctx.ui.confirm = vi.fn(() => Promise.resolve(true));
+
+    await expect(confirmModal(ctx, { title: "Confirm", body: "Proceed?" })).resolves.toBe(true);
+    expect(ctx.ui.custom).not.toHaveBeenCalled();
+    expect(ctx.ui.confirm).toHaveBeenCalledWith("Confirm", "Proceed?");
+  });
+
+  it("resolves false without UI", async () => {
+    const ctx = createMockPromptContext();
+    ctx.hasUI = false;
+
+    await expect(confirmModal(ctx, { title: "Confirm", body: "Proceed?" })).resolves.toBe(false);
+    expect(ctx.ui.custom).not.toHaveBeenCalled();
+    expect(ctx.ui.confirm).not.toHaveBeenCalled();
+  });
+});
+
 function matchesKey(data: string, keybinding: string): boolean {
   const keys: Record<string, string[]> = {
     "tui.select.confirm": ["\r", "\n"],
@@ -144,6 +274,7 @@ function createMockPromptContext(): any {
         bold: (text: string) => text,
       },
       custom: vi.fn(),
+      confirm: vi.fn(),
       input: vi.fn(),
     },
   };

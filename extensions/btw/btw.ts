@@ -14,6 +14,7 @@
  */
 
 import type { ExtensionAPI, ExtensionCommandContext } from "pi";
+import { confirmModal } from "../../lib/input-modal.ts";
 import { requestSideTurn } from "./src/agent.ts";
 import {
   FOCUS_SHORTCUT_FALLBACK,
@@ -185,10 +186,10 @@ export default async function btwExtension(pi: ExtensionAPI) {
         ctx.ui.notify("No side thread to reset.", "info");
         return;
       }
-      const confirmed = await ctx.ui.confirm(
-        "Reset side thread?",
-        "This wipes the whole side conversation and closes the side window.",
-      );
+      const confirmed = await confirmModal(ctx, {
+        title: "Reset side thread?",
+        body: "This wipes the whole side conversation and closes the side window.",
+      });
       if (!confirmed) return;
       state.thread = emptyThread("contextual");
       state.transcript = [];
@@ -215,10 +216,10 @@ export default async function btwExtension(pi: ExtensionAPI) {
         return;
       }
       const instructions = args.trim();
-      const confirmed = await ctx.ui.confirm(
-        "Inject side thread?",
-        "The full side thread is handed to the main agent and the side thread is wiped.",
-      );
+      const confirmed = await confirmModal(ctx, {
+        title: "Inject side thread?",
+        body: "The full side thread is handed to the main agent and the side thread is wiped.",
+      });
       if (!confirmed) return;
       const content = buildHandoffContent(state.thread, instructions, "full", "");
       const idle = ctx.isIdle();
@@ -252,10 +253,10 @@ export default async function btwExtension(pi: ExtensionAPI) {
         return;
       }
       const instructions = args.trim();
-      const confirmed = await ctx.ui.confirm(
-        "Summarize and inject side thread?",
-        "The side thread is distilled, the summary is handed to the main agent, and the side thread is wiped.",
-      );
+      const confirmed = await confirmModal(ctx, {
+        title: "Summarize and inject side thread?",
+        body: "The side thread is distilled, the summary is handed to the main agent, and the side thread is wiped.",
+      });
       if (!confirmed) return;
       state.status = "summarizing";
       state.statusText = statusToText("summarizing", null);

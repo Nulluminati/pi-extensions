@@ -1,3 +1,5 @@
+import { vi } from "vitest";
+
 /**
  * Extract a registered event handler by event type from a mock Pi instance.
  *
@@ -34,4 +36,36 @@ export function getCommandHandler(
     if (call[0] === commandName) return call[1].handler;
   }
   throw new Error(`Command handler for ${commandName} not found`);
+}
+
+/**
+ * Drive the framed confirmModal through `mockCtx.ui.custom`: presses Enter
+ * (resolves `true`) when `confirmed`, otherwise Esc (resolves `false`).
+ * Assign the result to `mockCtx.ui.custom` before invoking the handler.
+ */
+export function makeConfirmCustom(mockCtx: { ui: { theme: unknown } }, confirmed: boolean) {
+  return vi.fn((factory: unknown) => {
+    return new Promise((resolve) => {
+      const component = (
+        factory as (
+          tui: unknown,
+          theme: unknown,
+          keybindings: unknown,
+          done: (value: boolean) => void,
+        ) => { handleInput(data: string): void }
+      )(
+        { requestRender: () => {} },
+        mockCtx.ui.theme,
+        {
+          matches: (data: string, keybinding: string) =>
+            ({
+              "tui.select.confirm": ["\r", "\n"],
+              "tui.select.cancel": ["\u001b", "\u0003"],
+            })[keybinding]?.includes(data) ?? false,
+        },
+        resolve,
+      );
+      component.handleInput(confirmed ? "\r" : "\u001b");
+    });
+  });
 }

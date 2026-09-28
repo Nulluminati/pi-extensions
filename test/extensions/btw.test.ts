@@ -165,11 +165,20 @@ function setupTools() {
   return { readTool, bashTool, editTool, writeTool };
 }
 
-function setupContext() {
+function setupContext(confirms: boolean[] = []) {
   const overlays: CapturedOverlay[] = [];
   const mockCtx = createMockCommandContext();
-  // Destructive commands (reset, inject, summarize) confirm first.
-  mockCtx.ui.confirm = vi.fn(() => Promise.resolve(true));
+  // ctx.ui.custom serves both the overlay and the framed confirmModal. A call
+  // is a confirm when the component renders the shared confirm key hints;
+  // each confirm resolves from `confirms` in order (default: true).
+  const pendingConfirms = [...confirms];
+  const confirmKeybindings = {
+    matches: (data: string, keybinding: string) =>
+      ({
+        "tui.select.confirm": ["\r", "\n"],
+        "tui.select.cancel": ["\u001b", "\u0003"],
+      })[keybinding]?.includes(data) ?? false,
+  };
   // biome-ignore lint/suspicious/noExplicitAny: test mock
   mockCtx.ui.custom = vi.fn((factory: any, options?: any) => {
     const handle: FakeHandle = {
@@ -180,19 +189,32 @@ function setupContext() {
       setHidden: vi.fn(),
     };
     const tui = { requestRender: vi.fn() };
-    // biome-ignore lint/suspicious/noConfusingVoidType: matches Promise<void> resolve signature
-    let resolveClose: (value?: void) => void;
-    const done = vi.fn(() => resolveClose());
-    const promise = new Promise<void>((resolve) => {
+    let resolveClose: (value?: unknown) => void;
+    const done = vi.fn((value?: unknown) => resolveClose(value));
+    const promise = new Promise<unknown>((resolve) => {
       resolveClose = resolve;
     });
-    const component = factory(tui, THEME, null, done);
+    const component = factory(tui, THEME, confirmKeybindings, done);
+    const rendered = safeRender(component);
+    if (rendered.includes("enter: confirm")) {
+      const confirmed = pendingConfirms.shift() ?? true;
+      component.handleInput(confirmed ? "\r" : "\u001b");
+      return promise;
+    }
     if (options?.onHandle) options.onHandle(handle);
     overlays.push({ component, done, handle, tui, options: options ?? {} });
     return promise;
     // biome-ignore lint/suspicious/noExplicitAny: test mock
   }) as any;
   return { mockCtx, overlays };
+}
+
+function safeRender(component: { render?: (width: number) => string[] }): string {
+  try {
+    return component.render?.(80).join("\n") ?? "";
+  } catch {
+    return "";
+  }
 }
 
 /** Drain the microtask queue enough to settle async fire-and-forget work. */
@@ -678,19 +700,17 @@ describe("btw-extension", () => {
     it("/btw:inject sends the full thread to the main agent and clears it", async () => {
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       const mockPi = createMockPi() as any;
-      const { mockCtx } = setupContext();
+      const { mockCtx } = setupContext([false, true]);
       await registerAll(mockPi);
       await getCommandHandler(mockPi, "btw")("what is 2+2?", mockCtx);
       await flush();
       mockPi.sendUserMessage.mockClear();
-      mockCtx.ui.confirm = vi.fn(() => Promise.resolve(false));
 
       await getCommandHandler(mockPi, "btw:inject")("", mockCtx);
       await flush();
 
       expect(mockPi.sendUserMessage).not.toHaveBeenCalled();
 
-      mockCtx.ui.confirm = vi.fn(() => Promise.resolve(true));
       await getCommandHandler(mockPi, "btw:inject")("", mockCtx);
       await flush();
 

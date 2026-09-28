@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import clearExtension from "../../extensions/clear/clear.ts";
 import { createMockCommandContext } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
-import { getCommandHandler } from "../mocks/test-helpers.ts";
+import { getCommandHandler, makeConfirmCustom } from "../mocks/test-helpers.ts";
 
 describe("clear-extension", () => {
   beforeEach(() => {
@@ -26,32 +26,33 @@ describe("clear-extension", () => {
   it("invokes newSession when /clear is confirmed", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
-    mockCtx.ui.confirm = vi.fn(() => Promise.resolve(true));
+    mockCtx.ui.custom = makeConfirmCustom(mockCtx, true);
     await clearExtension(mockPi);
 
     const handler = getCommandHandler(mockPi, "clear");
     await handler("", mockCtx);
 
-    expect(mockCtx.ui.confirm).toHaveBeenCalledTimes(1);
+    expect(mockCtx.ui.custom).toHaveBeenCalledTimes(1);
     expect(mockCtx.newSession).toHaveBeenCalledTimes(1);
   });
 
   it("does not start a new session when /clear is declined", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
-    mockCtx.ui.confirm = vi.fn(() => Promise.resolve(false));
+    mockCtx.ui.custom = makeConfirmCustom(mockCtx, false);
     await clearExtension(mockPi);
 
     const handler = getCommandHandler(mockPi, "clear");
     await handler("", mockCtx);
 
+    expect(mockCtx.ui.custom).toHaveBeenCalledTimes(1);
     expect(mockCtx.newSession).not.toHaveBeenCalled();
   });
 
   it("ignores trailing arguments", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
-    mockCtx.ui.confirm = vi.fn(() => Promise.resolve(true));
+    mockCtx.ui.custom = makeConfirmCustom(mockCtx, true);
     await clearExtension(mockPi);
 
     const handler = getCommandHandler(mockPi, "clear");
@@ -63,7 +64,7 @@ describe("clear-extension", () => {
   it("does not notify when the new session is cancelled", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
-    mockCtx.ui.confirm = vi.fn(() => Promise.resolve(true));
+    mockCtx.ui.custom = makeConfirmCustom(mockCtx, true);
     mockCtx.newSession = vi.fn(() => Promise.resolve({ cancelled: true }));
     await clearExtension(mockPi);
 
@@ -72,5 +73,18 @@ describe("clear-extension", () => {
 
     expect(mockCtx.newSession).toHaveBeenCalledTimes(1);
     expect(mockCtx.ui.notify).not.toHaveBeenCalled();
+  });
+
+  it("starts a new session without asking in non-UI mode", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.hasUI = false;
+    await clearExtension(mockPi);
+
+    const handler = getCommandHandler(mockPi, "clear");
+    await handler("", mockCtx);
+
+    expect(mockCtx.ui.custom).not.toHaveBeenCalled();
+    expect(mockCtx.newSession).toHaveBeenCalledTimes(1);
   });
 });

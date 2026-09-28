@@ -12,7 +12,7 @@
  */
 
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "pi";
-import { promptText } from "../../lib/input-modal.ts";
+import { confirmModal, promptText } from "../../lib/input-modal.ts";
 import { extractToolCallBlocks } from "../../lib/session-utils.ts";
 import { formatStatusLine } from "../../lib/ui-format.ts";
 import { parseNewGoalArgs, validateObjective } from "./src/command-parser.ts";
@@ -315,10 +315,10 @@ export default async function goalExtension(pi: ExtensionAPI) {
 
     // Confirm replacement of unfinished goal
     if (state && state.status !== "complete") {
-      const confirmed = await ctx.ui.confirm(
-        "Replace current goal?",
-        `Current goal: "${state.objective}"\nNew goal: "${objective}"\n\nThis will reset usage counters.`,
-      );
+      const confirmed = await confirmModal(ctx, {
+        title: "Replace current goal?",
+        body: `Current goal: "${state.objective}"\nNew goal: "${objective}"\n\nThis will reset usage counters.`,
+      });
       if (!confirmed) return;
     }
 
@@ -483,10 +483,10 @@ export default async function goalExtension(pi: ExtensionAPI) {
 
       // Resetting discards the objective and all usage counters — confirm
       // before wiping so a stray keystroke can't lose an active goal.
-      const confirmed = await ctx.ui.confirm(
-        "Reset current goal?",
-        `Goal: "${state.objective}"\n\nThis discards the goal and its usage counters.`,
-      );
+      const confirmed = await confirmModal(ctx, {
+        title: "Reset current goal?",
+        body: `Goal: "${state.objective}"\n\nThis discards the goal and its usage counters.`,
+      });
       if (!confirmed) return;
 
       state = null;

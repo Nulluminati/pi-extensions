@@ -34,6 +34,7 @@ import { renderModalFrame } from "../../../lib/tui-frame.ts";
 | Write a `renderResult` for a registered tool | `createToolStatus`, `wrapToolText` | `lib/tool-renderer.ts` |
 | Let the user fuzzy-pick from a list in a modal | `createSearchableSelectModal` | `lib/searchable-select.ts` |
 | Prompt for one line of text in a framed modal | `promptText`, `createInputModal` | `lib/input-modal.ts` |
+| Ask a yes/no question in a framed modal | `confirmModal`, `createConfirmModal` | `lib/input-modal.ts` |
 | Wrap/replace the editor component (`ctx.ui.setEditorComponent`) | `installEditorFactoryLayer`, `hasEditorFactoryLayer`, `removeEditorFactoryLayer` | `lib/editor-factory.ts` |
 | Write config/state JSON without risking a torn file on crash | `writeJsonAtomic` | `lib/json-atomic.ts` |
 | Mutate shared state files across sessions without clobbering | `withFileLock` | `lib/file-lock.ts` |
@@ -128,6 +129,20 @@ if (!objective) return; // cancelled
 ```
 
 Enter submits, Esc cancels. Use `createInputModal` directly only when embedding the input inside a larger custom component.
+
+### `confirmModal` — framed yes/no dialog
+
+Ask a confirmation question in a framed modal (same border, title, and key-hint styling as `promptText`); body lines word-wrap to the frame width. Use `confirmModal(ctx, { title, body })` from a command handler instead of raw `ctx.ui.confirm` whenever the user must approve a destructive action (clear, goal reset, btw reset/inject do); it falls back to plain `ctx.ui.confirm` outside TUI mode and resolves `false` without UI (matching pi's no-op confirm context):
+
+```typescript
+const confirmed = await confirmModal(ctx, {
+  title: "Reset current goal?",
+  body: `Goal: "${objective}"\n\nThis discards the goal and its usage counters.`,
+});
+if (!confirmed) return; // declined or cannot ask
+```
+
+Enter confirms, Esc cancels. Optional `confirmLabel` / `cancelLabel` override the hint text. Use `createConfirmModal` directly only when embedding the dialog in a larger custom component.
 
 ## `lib/searchable-select.ts` — fuzzy picker modal
 

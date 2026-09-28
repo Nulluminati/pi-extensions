@@ -1,7 +1,8 @@
-/** Single-line text prompt rendered inside the shared modal frame. */
+/** Single-line text prompt and yes/no confirmation rendered inside the shared modal frame. */
 
 import { Input } from "@earendil-works/pi-tui";
 import type { ExtensionCommandContext } from "pi";
+import { wrapToolText } from "./tool-renderer.ts";
 import { modalContentWidth, renderModalFrame } from "./tui-frame.ts";
 import { formatStyledKeyHints } from "./ui-format.ts";
 
@@ -70,6 +71,88 @@ export function createInputModal(options: InputModalOptions): InputModal {
       options.tui.requestRender();
     },
   };
+}
+
+export interface ConfirmModalOptions {
+  tui: InputModalTui;
+  theme: InputModalTheme;
+  keybindings: InputModalKeybindings;
+  title: string;
+  /** Body text; long lines are word-wrapped to the frame width. */
+  body: string;
+  confirmLabel?: string | undefined;
+  cancelLabel?: string | undefined;
+  onConfirm(): void;
+  onCancel(): void;
+}
+
+/**
+ * Yes/no dialog in the shared modal frame. Enter confirms, Esc cancels. The
+ * body is word-wrapped so long explanations stay fully visible.
+ */
+export function createConfirmModal(options: ConfirmModalOptions): InputModal {
+  return {
+    focused: true,
+    render: (width) => {
+      const frameWidth = Math.max(0, Math.floor(width));
+      if (frameWidth === 0) return [];
+      const contentWidth = modalContentWidth(frameWidth);
+      const lines = [
+        ...wrapToolText(options.body, contentWidth),
+        "",
+        formatStyledKeyHints(options.theme, [
+          ["enter", options.confirmLabel ?? "confirm"],
+          ["esc", options.cancelLabel ?? "cancel"],
+        ]),
+      ];
+      return renderModalFrame(options.theme, frameWidth, lines, { title: options.title });
+    },
+    invalidate: () => {},
+    handleInput: (data) => {
+      if (options.keybindings.matches(data, "tui.select.confirm")) {
+        options.onConfirm();
+      } else if (options.keybindings.matches(data, "tui.select.cancel")) {
+        options.onCancel();
+      }
+      options.tui.requestRender();
+    },
+  };
+}
+
+export interface ConfirmOptions {
+  title: string;
+  /** Body text; long lines are word-wrapped to the frame width. */
+  body: string;
+  confirmLabel?: string | undefined;
+  cancelLabel?: string | undefined;
+}
+
+/**
+ * Ask a yes/no question in a framed modal matching the repo's shared dialog
+ * styling. Outside TUI mode, falls back to the plain `ctx.ui.confirm` dialog.
+ * Without UI, resolves `false`, matching pi's no-op confirm context.
+ */
+export async function confirmModal(
+  ctx: ExtensionCommandContext,
+  options: ConfirmOptions,
+): Promise<boolean> {
+  if (!ctx.hasUI || ctx.mode !== "tui") {
+    if (!ctx.hasUI) return false;
+    return ctx.ui.confirm(options.title, options.body);
+  }
+  return ctx.ui.custom<boolean>((tui, theme, keybindings, done) =>
+    createConfirmModal({
+      tui,
+      theme,
+      keybindings,
+      title: options.title,
+      body: options.body,
+      confirmLabel: options.confirmLabel,
+      cancelLabel: options.cancelLabel,
+      onConfirm: () => done(true),
+      onCancel: () => done(false),
+    }),
+  );
 }
 
 export interface PromptTextOptions {
