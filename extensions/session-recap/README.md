@@ -33,7 +33,7 @@ The extension generates recaps automatically in three scenarios:
 1. **Context extraction** — Reads the session branch and builds a text transcript from the last user message onward. Includes user text, assistant text, tool calls (with truncated arguments), and tool results.
 2. **Meaningful activity check** — Only generates a recap if the transcript contains at least 30 assistant words or 1+ tool call after the last user message. This prevents empty/empty-looking recaps.
 3. **LLM call** — Uses `completeSimple()` from `@earendil-works/pi-ai` with a dedicated system prompt ("You write terse, concrete session recaps for a coding agent UI."). The prompt instructs the model to produce exactly one line in the format: `recap: <what happened, past tense, concrete>. Next: <one-line next step>.`
-4. **Display** — The recap is shown via `ctx.ui.setWidget("session-recap", ...)` with `placement: "aboveEditor"`, then a `recap:changed` event is published on the shared `pi.events` bus so sibling widgets (todos) can re-insert themselves below the recap.
+4. **Display** — The recap is published through the shared widget strip (`setStripWidget` with `WIDGET_PRIORITY_RECAP`), which pins it above the other strip widgets (workers, jobs, todos, missions, autoresearch). A `recap:changed` event is still emitted on the shared `pi.events` bus for external consumers.
 
 ### Focus reporting (DECSET ?1004)
 
@@ -96,8 +96,8 @@ All state is stored in a `WeakMap<ExtensionAPI, RecapState>` with the following 
 | `pi.on("session_start")` | Attaches focus reporting, generates resume/fork recaps |
 | `pi.on("session_shutdown")` | Detaches focus reporting and clears state |
 | `pi.getFlag()` | Reads configuration flags at runtime |
-| `ctx.ui.setWidget()` | Displays/clears the recap widget |
-| `pi.events.emit("recap:changed")` | Notifies sibling widgets when the recap appears or clears (todos re-inserts itself so the recap renders on top) |
+| `setStripWidget()` (`lib/widget-strip.ts`) | Displays/clears the recap widget at `WIDGET_PRIORITY_RECAP` |
+| `pi.events.emit("recap:changed")` | Notifies external consumers when the recap appears or clears (strip priority now keeps the recap above sibling widgets) |
 | `ctx.ui.theme.fg()` | Styles the recap header with accent color |
 | `ctx.sessionManager.getBranch()` | Extracts conversation transcript |
 | `ctx.sessionManager.getLeafId()` | Detects branch navigation during generation |

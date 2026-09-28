@@ -29,7 +29,7 @@ Tool actions: `create`, `status`, `list`, `switch`, `task_add`, `task_update`, `
 
 ## How It Works
 
-- **Storage**: one JSON file per mission under `.pi/missions/`. Mission writes are atomic and serialized across processes; an update based on stale data fails with instructions to reload mission status instead of overwriting another session's work. Which mission a session is working is session state, persisted in that session's transcript — missions affect only the session that created or switched to them, and two sessions can each hold their own active mission. Cross-session edits to the same mission are CAS-protected. Add `.pi/missions/` to the project's `.gitignore` if you don't want mission records committed.
+- **Storage**: one JSON file per mission under `.pi/missions/`. Mission writes are atomic and serialized across processes; an update based on stale data fails with instructions to reload mission status instead of overwriting another session's work. Which mission a session is working is session state, persisted in that session's transcript — missions affect only the session that created or switched to them, and two sessions can each hold their own active mission. Cross-session edits to the same mission are CAS-protected. Mission records stay out of git automatically: `session_start` appends `.pi/missions/` to the repository's local `.git/info/exclude`.
 - **Task graph**: tasks declare `dependsOn` ids; a task cannot be marked done while dependencies are open, and `done` requires a delivery summary.
 - **Verification**: tasks may carry a `verification` command. `reconcile` re-runs every done task's command; failures move the task to `regressed` so the record matches reality instead of optimism.
 - **Budget**: `maxIterations`/`maxTokens` with a `spend` action that reports over-budget explicitly.
@@ -44,7 +44,7 @@ Tool actions: `create`, `status`, `list`, `switch`, `task_add`, `task_update`, `
 | `pi.on("session_start")` | Restore active mission into status/widget |
 | `pi.on("session_shutdown")` | Clear session UI |
 | `pi.events.emit("missions:state")` | Publishes mission state (`{ active, status, title }`) for future consumers such as the status bar |
-| `ctx.ui.setWidget("missions", …)` | Framed panel above the input: mission title/status, task lines, `tasks d/total` in the frame corner |
+| `setStripWidget` (`lib/widget-strip.ts`) | Framed panel above the input at `WIDGET_PRIORITY_MISSIONS`: mission title/status, task lines, `tasks d/total` in the frame corner |
 | `ctx.ui.setStatus("missions", …)` | Fallback footer line for pi's default footer (skipped by the bundled status bar, which shows the widget instead) |
 
 ## Configuration

@@ -7,9 +7,9 @@
 
 // --- Status (mechanism output) ---
 
-/** `yes` ran green; `failed` refused with detail; `skipped` no worktree or
- *  plan-mode worker; `busy` lock wait exhausted. */
-export type ProvisionState = "yes" | "none" | "failed" | "skipped" | "busy";
+/** `yes` ran green; `failed` refused with detail; `skipped` no worktree
+ *  (read-only worker); `busy` lock wait exhausted. */
+export type ProvisionState = "yes" | "failed" | "skipped" | "busy";
 
 /** Persisted on `WorkerRecord.provision`; echoed in delegate responses. */
 export interface ProvisionStatus {

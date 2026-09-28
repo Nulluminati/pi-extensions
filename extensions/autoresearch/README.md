@@ -29,7 +29,7 @@ The agent then loops: edit code → `action=run` → `action=log` with `status=k
 | `pi.sendUserMessage(..., { deliverAs: "followUp" })` | Continue the loop |
 | `pi.on("session_start")` | Resume loop state from `.pi/autoresearch/` |
 | `pi.events.emit("autoresearch:state")` | Publish state for the status bar |
-| `ctx.ui.setWidget("autoresearch", …)` | Framed panel above the input while a campaign is active: `it n[/max]` in the frame corner, best/spread and latest run lines |
+| `setStripWidget` (`lib/widget-strip.ts`) | Framed panel above the input at `WIDGET_PRIORITY_AUTORESEARCH` while a campaign is active: `it n[/max]` in the frame corner, best/spread and latest run lines |
 | `ctx.ui.setStatus("autoresearch", …)` | Fallback footer line for pi's default footer (skipped by the bundled status bar, which shows the widget instead) |
 
 State lives in `<cwd>/.pi/autoresearch/` (locally git-excluded; keep it out of remotes).

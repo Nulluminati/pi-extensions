@@ -53,7 +53,7 @@ rm kitten-nano-en-v0_8-int8.tar.bz2
 wget https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx
 ```
 
-Optional additions: Moonshine v2 Tiny for the smallest footprint, Parakeet TDT 0.6B v2 for the highest English accuracy, and Supertonic 3 for a 31-language speech model with ten voices:
+Optional additions: Moonshine v2 Tiny for the smallest footprint, Parakeet TDT 0.6B v2 for the highest English accuracy, and Supertonic 3 for a ten-voice speech model (English generation; the upstream model covers 31 languages):
 
 ```bash
 wget https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-moonshine-tiny-en-quantized-2026-02-27.tar.bz2
@@ -144,11 +144,11 @@ Model engines are loaded on first use and cached. This keeps them out of Pi's st
 | Model | Backend | Download size | Voice | Languages |
 |-------|---------|--------------:|-------|-----------|
 | `kitten-nano-en-v0_8-int8` | sherpa-onnx | 29 MB | Eight selectable English voices | English |
-| `supertonic-3-int8` | sherpa-onnx | 122 MB | Ten selectable voices | 31 |
+| `supertonic-3-int8` | sherpa-onnx | 122 MB | Ten selectable voices | English |
 | `inflect-nano-v2-onnx` | ONNX Runtime | 16 MB extracted | One fixed English male voice | English |
 | `inflect-micro-v2-onnx` | ONNX Runtime | 38 MB extracted | One fixed English male voice | English |
 
-Kitten Nano v0.8 is a 15M-parameter model that produces noticeably more natural speech than the previous v0.1 release while shipping smaller. Supertonic 3 is a 99M-parameter model covering 31 languages with ten speakers; it needs roughly 500 MB of RAM at synthesis time, and its upstream repository is no longer maintained (the weights remain available). The Inflect measurements used the extension's inference path on the development machine: Nano generated 2.06 seconds of audio in 0.29 seconds; Micro generated 2.16 seconds in 0.50 seconds.
+Kitten Nano v0.8 is a 15M-parameter model that produces noticeably more natural speech than the previous v0.1 release while shipping smaller. Supertonic 3 is a 99M-parameter model with ten speakers; its upstream release covers 31 languages, but this extension generates English only. It needs roughly 500 MB of RAM at synthesis time, and its upstream repository is no longer maintained (the weights remain available). The Inflect measurements used the extension's inference path on the development machine: Nano generated 2.06 seconds of audio in 0.29 seconds; Micro generated 2.16 seconds in 0.50 seconds.
 
 Inflect's official ONNX export uses a duration graph and a decode graph. The extension runs both through ONNX Runtime, uses eSpeak-ng for English phonemes, and joins long text at punctuation-aware boundaries. Inflect models have fixed voices, so the voice row in `/voice` becomes read-only while either one is active.
 
@@ -168,7 +168,7 @@ Kitten Nano provides eight speaker choices:
 | `expr-voice-5-m` | Voice 5, masculine |
 | `expr-voice-5-f` | Voice 5, feminine |
 
-The default is `expr-voice-2-m`. Use the local voice row in `/voice` to choose another speaker. These choices apply to both Kitten models. Supertonic 3 exposes ten voices addressed by index (`Voice 1` through `Voice 10`); both Inflect models have fixed voices.
+The default is `expr-voice-2-m`. Use the local voice row in `/voice` to choose another speaker. These choices apply to Kitten Nano. Supertonic 3 exposes ten voices addressed by index (`Voice 1` through `Voice 10`); both Inflect models have fixed voices.
 
 ## Transcription models
 
