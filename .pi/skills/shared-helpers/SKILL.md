@@ -106,7 +106,7 @@ Pass `undefined` to `setWidget` when there is nothing to show. For a theme riche
 
 ### Widget-first status rule
 
-Extensions whose live state is shown in a framed editor widget (missions, agents, autoresearch) follow two rules so the surfaces stay consistent and never double-render:
+Extensions whose live state is shown in a framed editor widget (missions, workers, autoresearch) follow two rules so the surfaces stay consistent and never double-render:
 
 1. **Keep the `ctx.ui.setStatus` fallback.** It is what pi's default footer shows when the bundled status bar is disabled (`/statusbar:toggle`). Never remove it; build it with `formatStatusLine`.
 2. **Register the status key in the status bar's line-2 skip list** (`extensions/status-bar/src/constants.ts`, mirrored string like `MISSIONS_STATUS_KEY`). The custom footer skips widget-first keys on its second line because the widget already shows the state.
@@ -316,7 +316,7 @@ Ephemeral spills with no retention go in `os.tmpdir()` with a `pi-<name>-` prefi
 Crash-safe state file writes: `writeJsonAtomic(path, data)` pretty-prints `data`, writes a
 `${path}.${pid}.${random}.tmp` sibling, then renames it over the target (rename is atomic),
 creating parent directories as needed. Use for every persisted JSON state file (reservations,
-missions, registries). Used by `messenger`, `missions`, `autoresearch`, `agents`, and
+missions, registries). Used by `messenger`, `missions`, `autoresearch`, `workers`, and
 `lib/presence-shards`.
 
 ## `lib/file-lock.ts` — cross-process advisory file lock
@@ -327,7 +327,7 @@ options?)` runs `fn` holding a `wx`-created lock file. Waiters poll; a lock unto
 `refreshMs` (default 5s) so long critical sections are never stolen, and `timeoutMs`
 (default 30s, must be ≥ `staleMs`) caps the wait — `timeoutMessage` lets a consumer name its
 domain in the error. Used by `messenger` (registry claims, reservations, mailbox compaction),
-`missions` (mission saves, via an acquire/release adapter in its storage module) and `agents`
+`missions` (mission saves, via an acquire/release adapter in its storage module) and `workers`
 (worker registry read-modify-writes).
 
 ## `lib/model-picker.ts` — model picker pieces
@@ -341,7 +341,7 @@ Config load/save stays in `lib/small-model.ts` / `lib/worker-model.ts`.
 
 ## `lib/presence-shards.ts` — sharded presence registry
 
-Live presence shared by concurrent sessions. One shard file per agent: heartbeats only ever write the caller's own shard, so concurrent writers cannot clobber each other's entries. Reads merge all shards, fail closed on corrupt or unreadable shards (they are never silently deleted or read as absent), prune entries whose pid is dead, and can migrate a legacy single-file registry. Used by `messenger` (presence) and `agents` (pid liveness).
+Live presence shared by concurrent sessions. One shard file per agent: heartbeats only ever write the caller's own shard, so concurrent writers cannot clobber each other's entries. Reads merge all shards, fail closed on corrupt or unreadable shards (they are never silently deleted or read as absent), prune entries whose pid is dead, and can migrate a legacy single-file registry. Used by `messenger` (presence) and `workers` (pid liveness).
 
 - `writeShard(dir, record)` / `readShard(dir, name)` / `removeShard(dir, name)` — per-agent operations.
 - `loadShards(dir, { legacyPath? })` → `Record<name, record>` after pruning dead pids.

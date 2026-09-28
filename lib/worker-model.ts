@@ -2,7 +2,7 @@
  * Worker model configuration.
  *
  * Mirrors the small-model config pattern: an environment variable wins over a
- * JSON config file, and nothing is hardcoded. Delegate fails with a descriptive
+ * JSON config file, and nothing is hardcoded. spawn_worker fails with a descriptive
  * error when no worker model is configured. The selected model and thinking
  * level are passed to every worker process as `--model` and `--thinking`; the
  * child resolves its own auth.

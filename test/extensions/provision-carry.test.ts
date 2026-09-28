@@ -14,7 +14,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   carryIncludedPaths,
   readIncludePatterns,
-} from "../../extensions/agents/src/provision/carry.ts";
+} from "../../extensions/workers/src/provision/carry.ts";
 
 const roots: string[] = [];
 

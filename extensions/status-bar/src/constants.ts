@@ -36,7 +36,7 @@ export const ICON_FLEX = "⚡";
 // imported) so the status-bar extension stays self-contained.
 export const ICON_MAIL = "✉";
 
-// ⚙ marks the delegated-worker spend roll-up (see agents:state).
+// ⚙ marks the delegated-worker spend roll-up (see workers:state).
 export const ICON_WORKER = "⚙";
 export const WORKER_COLOR = "accent";
 
@@ -165,7 +165,7 @@ export const FLEX_EVENT = "neuralwatt:flex-change";
  */
 export const APPROVAL_MODE_EVENT = "approval-mode:state";
 
-/** Wire name of the event the agents extension publishes on worker
- *  lifecycle changes (see extensions/agents). Payload:
+/** Wire name of the event the workers extension publishes on worker
+ *  lifecycle changes (see extensions/workers). Payload:
  *  { running, workerCostUsd, workerTokens }. */
-export const AGENTS_STATE_EVENT = "agents:state";
+export const WORKERS_STATE_EVENT = "workers:state";

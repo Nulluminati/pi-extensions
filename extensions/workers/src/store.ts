@@ -237,7 +237,7 @@ export function persistWorkerRecord(
     })
     .catch((error) => {
       // Persistence failure must not crash the runner; surface loudly.
-      console.error(`[agents] worker record persistence failed: ${(error as Error).message}`);
+      console.error(`[workers] worker record persistence failed: ${(error as Error).message}`);
       throw error;
     });
   persistQueues.set(
@@ -272,7 +272,7 @@ export function persistWorkerRemoval(
       tombstones.add(workerId);
     })
     .catch((error) => {
-      console.error(`[agents] worker removal persistence failed: ${(error as Error).message}`);
+      console.error(`[workers] worker removal persistence failed: ${(error as Error).message}`);
       throw error;
     });
   persistQueues.set(
@@ -443,7 +443,7 @@ export async function migrateLegacyRegistry(cwd: string): Promise<boolean> {
   } catch (error) {
     // A corrupt legacy registry must not block sessions forever: keep it
     // aside for forensics and move on.
-    console.error(`[agents] legacy worker registry unreadable: ${(error as Error).message}`);
+    console.error(`[workers] legacy worker registry unreadable: ${(error as Error).message}`);
   }
   await rm(legacyRegistryPath(cwd), { force: true }).catch(() => {});
   return true;

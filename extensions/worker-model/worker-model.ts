@@ -2,7 +2,7 @@
  * Worker Model Extension
  *
  * Selects one global model and thinking level for delegated worker sessions.
- * The agents extension resolves every `delegate` call through
+ * The workers extension resolves every `spawn_worker` call through
  * lib/worker-model.ts: this config (or the PI_WORKER_MODEL environment
  * variables) is the source of truth; there is no hardcoded worker model.
  * The status-bar extension renders the selection next to the small model on

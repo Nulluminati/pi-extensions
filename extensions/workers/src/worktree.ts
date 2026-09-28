@@ -1,6 +1,6 @@
 /**
  * Git worktree helpers for worker isolation. Each isolated worker gets its
- * own branch (`agents/<workerId>`) and directory (`.pi/worktrees/<workerId>`)
+ * own branch (`workers/<workerId>`) and directory (`.pi/worktrees/<workerId>`)
  * created from HEAD, so parallel workers never collide on files. Worktrees
  * provide *isolation*, not security: workers still run with user privileges.
  */
@@ -16,7 +16,7 @@ import type { WorkerRecord } from "./types.ts";
 // --- Constants ---
 
 /** Marker file in the worktree's private git dir holding its fork point. */
-const BASE_COMMIT_FILE = "agents-base";
+const BASE_COMMIT_FILE = "workers-base";
 /** The project hook creates temporary paths with eight random characters. */
 const PROVISION_SCRATCH = /^provision-tmp-[A-Za-z0-9]{8}$/;
 /** Untracked paths per `git add` invocation, bounded for argv limits. */
@@ -35,7 +35,7 @@ export function worktreePath(cwd: string, workerId: string): string {
 }
 
 export function worktreeBranch(workerId: string): string {
-  return `agents/${assertWorkerId(workerId)}`;
+  return `workers/${assertWorkerId(workerId)}`;
 }
 
 // --- Operations ---

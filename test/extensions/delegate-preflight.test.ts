@@ -9,13 +9,13 @@ import {
   type DelegatePlan,
   startDelegatedWorker,
   type WorkerSessionState,
-} from "../../extensions/agents/src/delegate.ts";
-import { listRecordFiles } from "../../extensions/agents/src/store.ts";
-import type { WorkerEvents, WorkerRecord } from "../../extensions/agents/src/types.ts";
+} from "../../extensions/workers/src/delegate.ts";
+import { listRecordFiles } from "../../extensions/workers/src/store.ts";
+import type { WorkerEvents, WorkerRecord } from "../../extensions/workers/src/types.ts";
 import {
   PROVISION_HOOK_RELATIVE,
   WORKER_SANDBOX_RELATIVE,
-} from "../../extensions/agents/src/worker-sandbox-config.ts";
+} from "../../extensions/workers/src/worker-sandbox-config.ts";
 import { cleanGitEnv, runGit } from "../../lib/git.ts";
 
 /**
@@ -49,9 +49,9 @@ vi.mock("../../lib/git.ts", async (importOriginal) => {
 // The setup hook is faked so a regressed reservation path (recheck dropped)
 // stays hermetic and cannot boot a real sandbox; correct refusals never
 // reach provisioning.
-vi.mock("../../extensions/agents/src/provision/hook.ts", async (importOriginal) => {
+vi.mock("../../extensions/workers/src/provision/hook.ts", async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import("../../extensions/agents/src/provision/hook.ts")>();
+    await importOriginal<typeof import("../../extensions/workers/src/provision/hook.ts")>();
   return {
     ...actual,
     runSetupHook: vi.fn(async (worktree: string) => ({

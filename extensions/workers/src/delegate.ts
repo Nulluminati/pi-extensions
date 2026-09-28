@@ -1,5 +1,5 @@
 /**
- * Delegate tool behavior: resolves the delegate call's arguments (task,
+ * Spawn-worker tool behavior: resolves the spawn_worker call's arguments (task,
  * worker name, model, extensions, read-only constraints, worktree decision),
  * reserves a worker slot and spawns the child session, and builds the tool
  * responses. The reservation and its failure-release flow are the
@@ -72,7 +72,7 @@ class ProvisionRefusal extends Error {
   }
 }
 
-/** Stop preparation before a cancelled delegate starts a child. */
+/** Stop preparation before a cancelled spawn starts a child. */
 function assertNotAborted(signal?: AbortSignal): void {
   if (!signal?.aborted) return;
   const reason = signal.reason;
@@ -93,12 +93,12 @@ function setupFileList(): string[] {
 /** Refusal text pointing at the path the model should fix. */
 function setupRefusal(reason: string): Error {
   return new Error(
-    `provisioned: ${reason}. Fix ${PROVISION_HOOK_RELATIVE} and ${WORKER_SANDBOX_RELATIVE} in the parent checkout, then re-delegate.`,
+    `provisioned: ${reason}. Fix ${PROVISION_HOOK_RELATIVE} and ${WORKER_SANDBOX_RELATIVE} in the parent checkout, then re-run spawn_worker.`,
   );
 }
 
 /**
- * Preflight for isolated delegates (review D1): refuse before the slot
+ * Preflight for isolated spawns (review D1): refuse before the slot
  * reservation when the project setup files cannot provision a worktree —
  * hook missing/not executable, sandbox policy absent/invalid, or a dirty
  * tracked setup file that must be path-committed first (review D2). Returns
@@ -149,7 +149,7 @@ export async function assertProvisionReady(
         detail: `setup commit failed: ${oneLine(messageOf(error))}`,
         at: Date.now(),
       },
-      `provisioned: setup commit failed (${oneLine(messageOf(error))}). Commit ${paths.join(" and ")} host-side, then re-delegate.`,
+      `provisioned: setup commit failed (${oneLine(messageOf(error))}). Commit ${paths.join(" and ")} host-side, then re-run spawn_worker.`,
     );
   }
   notifyInfo(`Worktree setup files committed (${paths.join(", ")}) so workers branch from it.`);
@@ -199,7 +199,7 @@ async function provisionWorktree(
               detail: detail ? `exit ${run.exitCode}: ${detail}` : `exit ${run.exitCode}`,
               at: Date.now(),
             },
-            `provisioned: failed (exit ${run.exitCode})${detail ? `: ${detail}` : ""}. Log: ${run.logPath}. Fix ${PROVISION_HOOK_RELATIVE} or the environment, then re-delegate.`,
+            `provisioned: failed (exit ${run.exitCode})${detail ? `: ${detail}` : ""}. Log: ${run.logPath}. Fix ${PROVISION_HOOK_RELATIVE} or the environment, then re-run spawn_worker.`,
           );
         }
         detailParts.push(`hook exit ${run.exitCode} (${Math.round(run.ms / 1000)}s)`);
@@ -222,7 +222,7 @@ async function provisionWorktree(
     }
     throw new ProvisionRefusal(
       { state: "failed", detail: oneLine(messageOf(error)), at: Date.now() },
-      `provisioned: failed (${oneLine(messageOf(error))}). Fix ${PROVISION_HOOK_RELATIVE} or the environment, then re-delegate.`,
+      `provisioned: failed (${oneLine(messageOf(error))}). Fix ${PROVISION_HOOK_RELATIVE} or the environment, then re-run spawn_worker.`,
     );
   }
   assertNotAborted(signal);
@@ -232,7 +232,7 @@ async function provisionWorktree(
 
 // --- Types ---
 
-/** Loose view of the delegate tool parameters; each field is validated at runtime. */
+/** Loose view of the spawn_worker tool parameters; each field is validated at runtime. */
 export interface DelegateParams {
   task?: unknown;
   name?: unknown;
@@ -268,7 +268,7 @@ export interface DelegatePlan {
 // --- Argument resolution ---
 
 /**
- * Resolve the delegate call into a spawnable plan. Throws on an empty task
+ * Resolve the spawn_worker call into a spawnable plan. Throws on an empty task
  * or an unresolvable worker model; the reservation itself happens later (see
  * startDelegatedWorker) so refusals there never leave partial state.
  */
@@ -277,13 +277,13 @@ export async function planDelegate(
   ctx: ExtensionContext,
 ): Promise<DelegatePlan> {
   const task = typeof params.task === "string" ? params.task.trim() : "";
-  if (!task) throw new Error("delegate requires task.");
+  if (!task) throw new Error("spawn_worker requires task.");
   const workerId = generateWorkerId();
 
   const maxWorkers = envMaxWorkers();
 
   // The global environment/config selection is authoritative. Individual
-  // delegate calls cannot silently substitute another model.
+  // spawn_worker calls cannot silently substitute another model.
   const { model, thinkingLevel } = await resolveWorkerModelSpec();
   const timeoutMs =
     typeof params.timeout_seconds === "number" && params.timeout_seconds > 0
@@ -303,7 +303,7 @@ export async function planDelegate(
     requestedName && requestedName.length <= 64 && /^[A-Za-z0-9_-]+$/.test(requestedName)
       ? requestedName
       : workerId;
-  // Worker extension allowlist: delegate param -> PI_WORKER_EXTENSIONS ->
+  // Worker extension allowlist: spawn_worker extensions param -> PI_WORKER_EXTENSIONS ->
   // worker-extensions.json -> default set. Messenger, worker-blocker, and
   // worker-sandbox are mandatory; denylisted workflow extensions are
   // rejected outright.
@@ -343,7 +343,7 @@ export async function planDelegate(
 /**
  * Per-session worker state owned by the composition root: live children,
  * the session's transcript-derived records, and ids reserved by in-flight
- * delegate calls (checked against the cap before their record exists).
+ * spawn_worker calls (checked against the cap before their record exists).
  */
 export interface WorkerSessionState {
   /** Live-worker map owned by the composition root for this Pi instance. */
@@ -409,7 +409,7 @@ function assertWorkerLimits(
  * Reserve a worker slot, create the worktree when wanted, and spawn the
  * child session. The cap is per session and enforced in-process: the check
  * plus the reservation are synchronous (no await between them), so parallel
- * delegate calls in one session cannot both cross the limit. The temporary
+ * spawn_worker calls in one session cannot both cross the limit. The temporary
  * reservation precedes provision preflight, which can commit dirty setup
  * files. A refused preflight releases that slot without a worker record.
  * If worktree creation or spawn fails after preflight, the worker is
@@ -425,7 +425,7 @@ export async function startDelegatedWorker(
   let configCommittedAtPreflight = false;
   const { workerId, name, task, model, thinkingLevel, timeoutMs, extensionPaths } = plan;
 
-  // Check and reserve without an await between them. A second delegate
+  // Check and reserve without an await between them. A second spawn_worker
   // cannot take this slot while preflight commits setup files.
   const foreignNames = await foreignLiveNames(cwd, state);
   assertNotAborted(signal);
@@ -597,7 +597,7 @@ export async function startDelegatedWorker(
   // Persist the running record (with the child pid): the transcript entry
   // and the artifact record file make the worker the session's own. The
   // child is already live, so a persistence failure here must not fail the
-  // delegate call — persist logs it, the widget still tracks the live child,
+  // spawn_worker call — persist logs it, the widget still tracks the live child,
   // and the runner's terminal save retries the transcript entry.
   await persist(runningWorker.record).catch(() => {});
   return worktree === undefined ? { runningWorker } : { runningWorker, worktree };

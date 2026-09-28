@@ -79,7 +79,7 @@ export function listWorkers(options: {
           (foreignLive.length > 0
             ? ` (${foreignLive.length} worker(s) running in other live sessions, hidden)`
             : "")
-        : "No workers yet. Use the delegate tool to hand a task to a cheap-model worker session.";
+        : "No workers yet. Use the spawn_worker tool to hand a task to a cheap-model worker session.";
   return {
     content: [{ type: "text", text }],
     details: {
@@ -153,8 +153,8 @@ export async function cancelWorker(options: {
   if (!runningWorker) {
     throw new Error(
       record.status === "running"
-        ? `Worker ${id} belongs to another session or an earlier run and cannot be cancelled here (pid ${record.pid ?? "?"}); it holds no slot in this session. Track it with workers action=list scope=all, or delegate to start a new worker.`
-        : `Worker ${id} is already ${record.status}; its slot is free. Use action=remove to delete the record and artifacts, or delegate to start a new worker.`,
+        ? `Worker ${id} belongs to another session or an earlier run and cannot be cancelled here (pid ${record.pid ?? "?"}); it holds no slot in this session. Track it with workers action=list scope=all, or spawn_worker to start a new worker.`
+        : `Worker ${id} is already ${record.status}; its slot is free. Use action=remove to delete the record and artifacts, or spawn_worker to start a new worker.`,
     );
   }
   await runningWorker.cancel();
@@ -169,7 +169,7 @@ export async function cancelWorker(options: {
       content: [
         {
           type: "text",
-          text: `Worker ${record.name} is already ${status}; its slot is free. Use action=remove to delete the record and artifacts, or delegate to start a new worker.`,
+          text: `Worker ${record.name} is already ${status}; its slot is free. Use action=remove to delete the record and artifacts, or spawn_worker to start a new worker.`,
         },
       ],
       details: { worker: runningWorker.record },

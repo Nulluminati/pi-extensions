@@ -202,7 +202,7 @@ export function buildFooterLines(
   const mailStr =
     state.unreadMail > 0 ? theme.fg(MAIL_COLOR, `${ICON_MAIL} ${state.unreadMail}`) : "";
   const costStr = theme.fg("mdHeading", `$${tu.cost.toFixed(3)}`);
-  // Delegated-worker spend roll-up (published on agents:state). Sheds with
+  // Delegated-worker spend roll-up (published on workers:state). Sheds with
   // the cost segment — ambient totals, not actionable mid-turn.
   const workerStr =
     state.workerCostUsd > 0

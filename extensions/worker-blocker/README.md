@@ -4,7 +4,7 @@ Worker-side half of the blocker-reporting channel between delegated worker sessi
 
 ## What It Does
 
-The worker calls `report_blocker` with a one-line reason (for example: "no AWS credentials in the sandbox; deployment task cannot run"). The sanitized reason is appended as an `agents_blocker` marker to the worker's own event spool — the same file the parent session already tails for live activity. The parent wakes once (the wake carries ids and status words only), then reads the full reason through its `workers` tool (`action=status`).
+The worker calls `report_blocker` with a one-line reason (for example: "no AWS credentials in the sandbox; deployment task cannot run"). The sanitized reason is appended as an `workers_blocker` marker to the worker's own event spool — the same file the parent session already tails for live activity. The parent wakes once (the wake carries ids and status words only), then reads the full reason through its `workers` tool (`action=status`).
 
 ## Design Notes
 
@@ -30,5 +30,5 @@ The main session's model never sees the `report_blocker` tool.
 
 ## Related
 
-- `lib/worker-blocker.ts` — marker type, reason sanitizing, and size limits shared with the agents extension.
-- `extensions/agents/` — the parent side: spool tailing, blocker wake messages, and `workers` tool surfacing.
+- `lib/worker-blocker.ts` — marker type, reason sanitizing, and size limits shared with the workers extension.
+- `extensions/workers/` — the parent side: spool tailing, blocker wake messages, and `workers` tool surfacing.

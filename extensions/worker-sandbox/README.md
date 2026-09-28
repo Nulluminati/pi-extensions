@@ -46,5 +46,5 @@ Rules come from the project's `.pi/sandbox.json` (srt schema: filesystem read/wr
 
 ## Related
 
-- `extensions/agents/` — starts worker sessions with `PI_WORKER=1` and provisions the worktree this sandbox runs in.
+- `extensions/workers/` — starts worker sessions with `PI_WORKER=1` and provisions the worktree this sandbox runs in.
 - `.pi/sandbox.json` — this project's own policy file; see `.pi/skills/provision/SKILL.md` for the setup contract.

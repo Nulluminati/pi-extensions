@@ -17,14 +17,13 @@ import { promisify } from "node:util";
 import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext } from "pi";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import agentsExtension from "../../extensions/agents/agents.ts";
 import {
   planDelegate,
   startDelegatedWorker,
   type WorkerSessionState,
-} from "../../extensions/agents/src/delegate.ts";
-import { createWorkersWidget } from "../../extensions/agents/src/format.ts";
-import { runSetupHook, SetupHookCancelled } from "../../extensions/agents/src/provision/hook.ts";
+} from "../../extensions/workers/src/delegate.ts";
+import { createWorkersWidget } from "../../extensions/workers/src/format.ts";
+import { runSetupHook, SetupHookCancelled } from "../../extensions/workers/src/provision/hook.ts";
 import {
   armAdoptedTimeout,
   extractAssistantText,
@@ -34,7 +33,7 @@ import {
   readSpoolLines,
   STREAM_TAIL_BYTES,
   startWorker,
-} from "../../extensions/agents/src/runner.ts";
+} from "../../extensions/workers/src/runner.ts";
 import {
   generateWorkerId,
   listRecordFiles,
@@ -56,8 +55,8 @@ import {
   WORKER_REMOVED_ENTRY,
   WORKER_RETENTION_MS,
   writeRecordFile,
-} from "../../extensions/agents/src/store.ts";
-import type { WorkerEvents, WorkerRecord } from "../../extensions/agents/src/types.ts";
+} from "../../extensions/workers/src/store.ts";
+import type { WorkerEvents, WorkerRecord } from "../../extensions/workers/src/types.ts";
 import {
   applyPatch,
   captureWorktreePatch,
@@ -68,7 +67,8 @@ import {
   removeWorktree,
   worktreeBranch,
   worktreePath,
-} from "../../extensions/agents/src/worktree.ts";
+} from "../../extensions/workers/src/worktree.ts";
+import workersExtension from "../../extensions/workers/workers.ts";
 import { withFileLock } from "../../lib/file-lock.ts";
 import { cleanGitEnv, runGit } from "../../lib/git.ts";
 import { projectStateRelative } from "../../lib/paths.ts";
@@ -84,9 +84,9 @@ vi.mock("../../lib/file-lock.ts", async (importOriginal) => {
 // Provisioning stack: the setup hook and sandbox client are faked (tests
 // never boot a sandbox); git stays a call-through spy so provision tests can
 // fake a repository per test.
-vi.mock("../../extensions/agents/src/provision/hook.ts", async (importOriginal) => {
+vi.mock("../../extensions/workers/src/provision/hook.ts", async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import("../../extensions/agents/src/provision/hook.ts")>();
+    await importOriginal<typeof import("../../extensions/workers/src/provision/hook.ts")>();
   return {
     ...actual,
     runSetupHook: vi.fn(async (worktree: string) => ({
@@ -154,11 +154,11 @@ while [ ! -f "$GATED_WORKER_RELEASE" ]; do sleep 0.05; done
 ${SUCCESS_WORKER}`;
 const BLOCKER_REASON = "this VM has no node_modules and no parent checkout";
 const BLOCKER_RUNNING_WORKER = `#!/bin/sh
-printf '%s\n' '{"type":"agents_blocker","at":123,"reason":"${BLOCKER_REASON}"}' >> "$PI_WORKER_STREAM"
+printf '%s\n' '{"type":"workers_blocker","at":123,"reason":"${BLOCKER_REASON}"}' >> "$PI_WORKER_STREAM"
 sleep 30
 `;
 const BLOCKER_DONE_WORKER = `#!/bin/sh
-printf '%s\n' '{"type":"agents_blocker","at":123,"reason":"blocked briefly, worked around it"}' >> "$PI_WORKER_STREAM"
+printf '%s\n' '{"type":"workers_blocker","at":123,"reason":"blocked briefly, worked around it"}' >> "$PI_WORKER_STREAM"
 ${SUCCESS_WORKER}`;
 
 /**
@@ -196,7 +196,7 @@ async function initGitRepo(cwd: string): Promise<void> {
   await execFileAsync("git", ["commit", "-qm", "init"], gitOpts(cwd));
 }
 
-/** Setup files so isolated delegates clear the v2 preflight ladder. */
+/** Setup files so isolated spawns clear the v2 preflight ladder. */
 async function writeProvisionConfig(cwd: string): Promise<void> {
   await mkdir(join(cwd, CONFIG_DIR_NAME), { recursive: true });
   await writeFile(
@@ -229,14 +229,14 @@ function findWakeCall(pi: DeepMocked<ExtensionAPI>): {
 } {
   for (const call of pi.sendMessage.mock.calls) {
     const [message, options] = call;
-    if ((message as WakeMessageShape).customType === "agents:wake") {
+    if ((message as WakeMessageShape).customType === "workers:wake") {
       return {
         message: message as WakeMessageShape,
         options: options as WakeOptionsShape,
       };
     }
   }
-  throw new Error("no agents:wake message was sent via pi.sendMessage");
+  throw new Error("no workers:wake message was sent via pi.sendMessage");
 }
 
 /** The wake is emitted after the registry write, so poll rather than read once. */
@@ -244,10 +244,10 @@ async function waitForWake(pi: DeepMocked<ExtensionAPI>, timeoutMs = 5_000): Pro
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const found = pi.sendMessage.mock.calls.some(
-      ([message]) => (message as WakeMessageShape).customType === "agents:wake",
+      ([message]) => (message as WakeMessageShape).customType === "workers:wake",
     );
     if (found) return;
-    if (Date.now() > deadline) throw new Error("no agents:wake message within timeout");
+    if (Date.now() > deadline) throw new Error("no workers:wake message within timeout");
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
 }
@@ -291,7 +291,7 @@ function removedEntry(id: string): { type: string; customType: string; data: { i
 
 // --- Suite ---
 
-describe("agents-extension", () => {
+describe("workers-extension", () => {
   let cwd: string;
   let fixtureDir: string;
   let mockPi: DeepMocked<ExtensionAPI>;
@@ -323,18 +323,18 @@ describe("agents-extension", () => {
 
   beforeEach(async () => {
     __resetWidgetStrip();
-    cwd = await mkdtemp(join(tmpdir(), "agents-test-"));
-    fixtureDir = await mkdtemp(join(tmpdir(), "agents-fixture-"));
+    cwd = await mkdtemp(join(tmpdir(), "workers-test-"));
+    fixtureDir = await mkdtemp(join(tmpdir(), "workers-fixture-"));
     mockPi = createMockPi() as DeepMocked<ExtensionAPI>;
     mockCtx = createMockContext();
     (mockCtx as { cwd: string }).cwd = cwd;
-    // Default test configuration: most tests delegate, so a worker model
+    // Default test configuration: most tests spawn workers, so a worker model
     // must resolve. The unconfigured-error test clears it again.
     setEnv("PI_WORKER_MODEL", "opencode-go/glm-5.3-flash");
     setEnv("PI_WORKER_MODEL_THINKING", undefined);
     setEnv("PI_MAX_WORKERS", undefined);
     setEnv("PI_WORKER_TIMEOUT_S", undefined);
-    await agentsExtension(mockPi);
+    await workersExtension(mockPi);
   });
 
   afterEach(async () => {
@@ -351,31 +351,31 @@ describe("agents-extension", () => {
     await removeTempDir(fixtureDir);
   });
 
-  it("registers delegate and workers tools without a per-call model override", () => {
+  it("registers spawn_worker and workers tools without a per-call model override", () => {
     const definitions = mockPi.registerTool.mock.calls.map((c) => c[0]);
-    const delegate = definitions.find((definition) => definition.name === "delegate");
-    expect(delegate).toBeDefined();
-    expect(delegate?.parameters.properties).not.toHaveProperty("model");
+    const spawnTool = definitions.find((definition) => definition.name === "spawn_worker");
+    expect(spawnTool).toBeDefined();
+    expect(spawnTool?.parameters.properties).not.toHaveProperty("model");
     expect(definitions.some((definition) => definition.name === "workers")).toBe(true);
   });
 
-  it("delegate promptGuidelines state the worker slot lifecycle", () => {
-    const delegate = mockPi.registerTool.mock.calls.find((c) => c[0].name === "delegate")?.[0];
-    const guidelines = (delegate?.promptGuidelines ?? []).join(" ");
+  it("spawn_worker promptGuidelines state the worker slot lifecycle", () => {
+    const spawnTool = mockPi.registerTool.mock.calls.find((c) => c[0].name === "spawn_worker")?.[0];
+    const guidelines = (spawnTool?.promptGuidelines ?? []).join(" ");
     expect(guidelines).toContain("slot");
     expect(guidelines).toContain("terminal state");
     expect(guidelines).toContain("cancel");
     expect(guidelines).toContain("remove");
-    expect(guidelines).toContain("delegate again");
+    expect(guidelines).toContain("spawn_worker again");
   });
 
-  it("delegate throws on an empty task", async () => {
-    await expect(executeTool("delegate", { task: "   " })).rejects.toThrow(
-      /delegate requires task/,
+  it("spawn_worker throws on an empty task", async () => {
+    await expect(executeTool("spawn_worker", { task: "   " })).rejects.toThrow(
+      /spawn_worker requires task/,
     );
   });
 
-  it("delegate read_only starts an investigation worker without a worktree", async () => {
+  it("spawn_worker read_only starts an investigation worker without a worktree", async () => {
     await initGitRepo(cwd);
     const argsFile = join(fixtureDir, "readonly-args.txt");
     const rootFile = join(fixtureDir, "readonly-messenger-root.txt");
@@ -389,7 +389,11 @@ ${SUCCESS_WORKER}`,
     );
     setEnv("PI_WORKER_COMMAND", fixture);
     setEnv("PI_WORKER_EXTENSIONS", undefined);
-    const result = await executeTool("delegate", { task: "research", read_only: true, wait: true });
+    const result = await executeTool("spawn_worker", {
+      task: "research",
+      read_only: true,
+      wait: true,
+    });
 
     const args = (await readFile(argsFile, "utf8")).split("\n");
     expect(args).toContain("--worker-readonly");
@@ -403,11 +407,11 @@ ${SUCCESS_WORKER}`,
 
   it("rejects a read_only worker that also requests an isolated write worktree", async () => {
     await expect(
-      executeTool("delegate", { task: "research", read_only: true, isolate: true }),
+      executeTool("spawn_worker", { task: "research", read_only: true, isolate: true }),
     ).rejects.toThrow(/read_only=true/);
   });
 
-  it("delegate enforces the environment worker model when a caller supplies another model", async () => {
+  it("spawn_worker enforces the environment worker model when a caller supplies another model", async () => {
     const argsFile = join(fixtureDir, "model-args.txt");
     const fixture = await writeFixture(
       fixtureDir,
@@ -419,7 +423,7 @@ ${SUCCESS_WORKER}`,
     setEnv("PI_WORKER_COMMAND", fixture);
     setEnv("PI_WORKER_MODEL_THINKING", "xhigh");
 
-    const result = await executeTool("delegate", {
+    const result = await executeTool("spawn_worker", {
       task: "say hi",
       model: "synthetic/hf:zai-org/GLM-5.3-Flash",
       isolate: false,
@@ -435,7 +439,7 @@ ${SUCCESS_WORKER}`,
     expect(result.details.worker.thinkingLevel).toBe("xhigh");
   });
 
-  it("delegate enforces the saved worker model when a caller supplies another model", async () => {
+  it("spawn_worker enforces the saved worker model when a caller supplies another model", async () => {
     const argsFile = join(fixtureDir, "saved-model-args.txt");
     const configPath = join(fixtureDir, "worker-model.json");
     const fixture = await writeFixture(
@@ -457,7 +461,7 @@ ${SUCCESS_WORKER}`,
     setEnv("PI_WORKER_MODEL", undefined);
     setEnv("PI_WORKER_MODEL_CONFIG", configPath);
 
-    const result = await executeTool("delegate", {
+    const result = await executeTool("spawn_worker", {
       task: "say hi",
       model: "opencode-go/different-model",
       isolate: false,
@@ -473,7 +477,7 @@ ${SUCCESS_WORKER}`,
     expect(result.details.worker.thinkingLevel).toBe("low");
   });
 
-  it("delegate enforces messenger and worker-sandbox when extensions are empty", async () => {
+  it("spawn_worker enforces messenger and worker-sandbox when extensions are empty", async () => {
     const argsFile = join(fixtureDir, "mandatory-args.txt");
     const fixture = await writeFixture(
       fixtureDir,
@@ -484,7 +488,7 @@ ${SUCCESS_WORKER}`,
     );
     setEnv("PI_WORKER_COMMAND", fixture);
 
-    await executeTool("delegate", {
+    await executeTool("spawn_worker", {
       task: "say hi",
       extensions: [],
       isolate: false,
@@ -496,7 +500,7 @@ ${SUCCESS_WORKER}`,
     expect(args.some((arg) => arg.includes("worker-sandbox.ts"))).toBe(true);
   });
 
-  it("delegate spawns workers with the resolved extension paths and worker-sandbox", async () => {
+  it("spawn_worker spawns workers with the resolved extension paths and worker-sandbox", async () => {
     const argsFile = join(fixtureDir, "captured-args.txt");
     const fixture = await writeFixture(
       fixtureDir,
@@ -508,7 +512,7 @@ ${SUCCESS_WORKER}`,
     setEnv("PI_WORKER_COMMAND", fixture);
     setEnv("PI_WORKER_EXTENSIONS", undefined);
 
-    await executeTool("delegate", { task: "say hi", isolate: false, wait: true });
+    await executeTool("spawn_worker", { task: "say hi", isolate: false, wait: true });
 
     const args = (await readFile(argsFile, "utf8")).split("\n");
     expect(args).not.toContain("--gondolin");
@@ -519,22 +523,22 @@ ${SUCCESS_WORKER}`,
     expect(args.some((arg) => arg.includes("code-search"))).toBe(true);
   });
 
-  it("delegate rejects forbidden worker extensions outright", async () => {
+  it("spawn_worker rejects forbidden worker extensions outright", async () => {
     setEnv("PI_WORKER_COMMAND", join(fixtureDir, "unused.sh"));
 
     await expect(
-      executeTool("delegate", { task: "anything", isolate: false, extensions: ["agents"] }),
+      executeTool("spawn_worker", { task: "anything", isolate: false, extensions: ["workers"] }),
     ).rejects.toThrow(/forbidden/);
   });
 
-  it("delegate throws when isolate=true outside a git repo", async () => {
+  it("spawn_worker throws when isolate=true outside a git repo", async () => {
     // cwd is a plain temp directory, not a git repository.
-    await expect(executeTool("delegate", { task: "t", isolate: true })).rejects.toThrow(
+    await expect(executeTool("spawn_worker", { task: "t", isolate: true })).rejects.toThrow(
       /isolate=true requires a git repository/,
     );
   });
 
-  it("delegate returns the report when terminal persistence fails", async () => {
+  it("spawn_worker returns the report when terminal persistence fails", async () => {
     const fixture = await writeFixture(fixtureDir, "ok-worker.sh", SUCCESS_WORKER);
     setEnv("PI_WORKER_COMMAND", fixture);
     // Transcript entry writes fail at the worst moment: the terminal save.
@@ -544,7 +548,7 @@ ${SUCCESS_WORKER}`,
       throw new Error("ENOSPC: transcript write failed");
     });
 
-    const result = await executeTool("delegate", {
+    const result = await executeTool("spawn_worker", {
       task: "Summarize the auth module",
       isolate: false,
       wait: true,
@@ -562,7 +566,7 @@ ${SUCCESS_WORKER}`,
       throw new Error("ENOSPC: transcript write failed");
     });
 
-    const started = await executeTool("delegate", { task: "long", isolate: false });
+    const started = await executeTool("spawn_worker", { task: "long", isolate: false });
     const id = started.details.workerId as string;
 
     const cancelled = await executeTool("workers", { action: "cancel", id });
@@ -572,7 +576,7 @@ ${SUCCESS_WORKER}`,
   it("workers cancel records cancellation instead of a timeout", async () => {
     const fixture = await writeFixture(fixtureDir, "slow-worker.sh", SLOW_WORKER);
     setEnv("PI_WORKER_COMMAND", fixture);
-    const started = await executeTool("delegate", { task: "long", isolate: false });
+    const started = await executeTool("spawn_worker", { task: "long", isolate: false });
     const id = started.details.workerId as string;
 
     const cancelled = await executeTool("workers", { action: "cancel", id });
@@ -588,19 +592,19 @@ ${SUCCESS_WORKER}`,
     );
   });
 
-  it("delegate fails with a descriptive error when no worker model is configured", async () => {
+  it("spawn_worker fails with a descriptive error when no worker model is configured", async () => {
     setEnv("PI_WORKER_MODEL", undefined);
     // No worker-model.json config exists in the temp cwd's agent dir.
     await expect(
-      executeTool("delegate", { task: "anything", isolate: false, model: undefined }),
+      executeTool("spawn_worker", { task: "anything", isolate: false, model: undefined }),
     ).rejects.toThrow(/worker model is not configured/i);
   });
 
-  it("delegate runs a worker and returns its report when wait=true", async () => {
+  it("spawn_worker runs a worker and returns its report when wait=true", async () => {
     const fixture = await writeFixture(fixtureDir, "ok-worker.sh", SUCCESS_WORKER);
     setEnv("PI_WORKER_COMMAND", fixture);
 
-    const result = await executeTool("delegate", {
+    const result = await executeTool("spawn_worker", {
       task: "Summarize the auth module",
       isolate: false,
       wait: true,
@@ -618,7 +622,7 @@ ${SUCCESS_WORKER}`,
     expect(stored?.outputText).toContain("JWT tokens");
   });
 
-  it("delegate sets PI_MESSENGER_NAME so workers are addressable by their worker name", async () => {
+  it("spawn_worker sets PI_MESSENGER_NAME so workers are addressable by their worker name", async () => {
     const envFile = join(fixtureDir, "captured-name.txt");
     const fixture = await writeFixture(
       fixtureDir,
@@ -629,7 +633,7 @@ ${SUCCESS_WORKER}`,
     );
     setEnv("PI_WORKER_COMMAND", fixture);
 
-    await executeTool("delegate", {
+    await executeTool("spawn_worker", {
       task: "say hi",
       isolate: false,
       wait: true,
@@ -639,11 +643,11 @@ ${SUCCESS_WORKER}`,
     expect(await readFile(envFile, "utf8")).toBe("addressable");
   });
 
-  it("delegate marks failed workers with stderr detail", async () => {
+  it("spawn_worker marks failed workers with stderr detail", async () => {
     const fixture = await writeFixture(fixtureDir, "fail-worker.sh", FAILING_WORKER);
     setEnv("PI_WORKER_COMMAND", fixture);
 
-    const result = await executeTool("delegate", { task: "do it", isolate: false, wait: true });
+    const result = await executeTool("spawn_worker", { task: "do it", isolate: false, wait: true });
     expect(result.details.worker.status).toBe("failed");
     expect(result.details.worker.error).toContain("boom");
   });
@@ -652,14 +656,14 @@ ${SUCCESS_WORKER}`,
     const fixture = await writeFixture(fixtureDir, "noisy-fail-worker.sh", NOISY_FAILING_WORKER);
     setEnv("PI_WORKER_COMMAND", fixture);
 
-    const started = await executeTool("delegate", { task: "do it", isolate: false });
+    const started = await executeTool("spawn_worker", { task: "do it", isolate: false });
     const id = started.details.workerId as string;
 
     await waitForRecord(cwd, id, "failed");
     await waitForWake(mockPi);
     const wake = findWakeCall(mockPi);
 
-    expect(wake.message.details).toMatchObject({ source: "agents", trusted: true });
+    expect(wake.message.details).toMatchObject({ source: "workers", trusted: true });
     expect(wake.options.triggerTurn).toBe(true);
     const text = wake.message.content[0].text;
     expect(text).toContain("failed");
@@ -672,7 +676,11 @@ ${SUCCESS_WORKER}`,
     const fixture = await writeFixture(fixtureDir, "silent-worker.sh", "#!/bin/sh\nexit 0\n");
     setEnv("PI_WORKER_COMMAND", fixture);
 
-    const result = await executeTool("delegate", { task: "silent", isolate: false, wait: true });
+    const result = await executeTool("spawn_worker", {
+      task: "silent",
+      isolate: false,
+      wait: true,
+    });
 
     expect(result.details.worker.status).toBe("failed");
     expect(result.details.worker.error).toMatch(/report/i);
@@ -694,7 +702,7 @@ exit 0
     );
     setEnv("PI_WORKER_COMMAND", fixture);
 
-    const result = await executeTool("delegate", { task: "split", isolate: false, wait: true });
+    const result = await executeTool("spawn_worker", { task: "split", isolate: false, wait: true });
 
     expect(result.details.worker.status).toBe("completed");
     expect(result.details.worker.outputText).toBe("split report");
@@ -710,7 +718,7 @@ exit 0
     );
     setEnv("PI_WORKER_COMMAND", fixture);
 
-    const result = await executeTool("delegate", { task: "tail", isolate: false, wait: true });
+    const result = await executeTool("spawn_worker", { task: "tail", isolate: false, wait: true });
 
     expect(result.details.worker.status).toBe("completed");
     expect(result.details.worker.outputText).toBe("no newline");
@@ -732,7 +740,7 @@ sleep 30
     );
     setEnv("PI_WORKER_COMMAND", fixture);
 
-    const result = await executeTool("delegate", {
+    const result = await executeTool("spawn_worker", {
       task: "slow write",
       isolate: true,
       wait: true,
@@ -749,7 +757,7 @@ sleep 30
     const fixture = await writeFixture(fixtureDir, "slow-worker.sh", SLOW_WORKER);
     setEnv("PI_WORKER_COMMAND", fixture);
 
-    const result = await executeTool("delegate", {
+    const result = await executeTool("spawn_worker", {
       task: "long",
       isolate: false,
       wait: true,
@@ -767,7 +775,7 @@ sleep 30
     const fixture = await writeFixture(fixtureDir, "ok-worker.sh", SUCCESS_WORKER);
     setEnv("PI_WORKER_COMMAND", fixture);
 
-    const result = await executeTool("delegate", {
+    const result = await executeTool("spawn_worker", {
       task: "quick",
       isolate: false,
       wait: true,
@@ -786,21 +794,21 @@ sleep 30
     setEnv("PI_WORKER_COMMAND", fixture);
     setEnv("PI_MAX_WORKERS", "1");
 
-    const first = await executeTool("delegate", { task: "one", isolate: false });
+    const first = await executeTool("spawn_worker", { task: "one", isolate: false });
     expect(first.details.workerId).toBeDefined();
 
-    await expect(executeTool("delegate", { task: "two", isolate: false })).rejects.toThrow(
+    await expect(executeTool("spawn_worker", { task: "two", isolate: false })).rejects.toThrow(
       /limit reached/,
     );
   });
 
-  it("delegate rejects duplicate running worker names", async () => {
+  it("spawn_worker rejects duplicate running worker names", async () => {
     const fixture = await writeFixture(fixtureDir, "slow-worker.sh", SLOW_WORKER);
     setEnv("PI_WORKER_COMMAND", fixture);
 
-    await executeTool("delegate", { task: "one", isolate: false, name: "scout" });
+    await executeTool("spawn_worker", { task: "one", isolate: false, name: "scout" });
     await expect(
-      executeTool("delegate", { task: "two", isolate: false, name: "scout" }),
+      executeTool("spawn_worker", { task: "two", isolate: false, name: "scout" }),
     ).rejects.toThrow(/already running/);
   });
 
@@ -808,7 +816,7 @@ sleep 30
     const fixture = await writeFixture(fixtureDir, "ok-worker.sh", SUCCESS_WORKER);
     setEnv("PI_WORKER_COMMAND", fixture);
 
-    const started = await executeTool("delegate", { task: "look", isolate: false, wait: true });
+    const started = await executeTool("spawn_worker", { task: "look", isolate: false, wait: true });
     const id = started.details.worker.id as string;
 
     const status = await executeTool("workers", { action: "status", id });
@@ -923,7 +931,7 @@ sleep 30
     await mkdir(spoolDir, { recursive: true });
     await writeFile(
       join(spoolDir, `${id}.jsonl`),
-      `{"type":"agents_start","at":1}\n{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"salvaged report"}]}}\n`,
+      `{"type":"workers_start","at":1}\n{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"salvaged report"}]}}\n`,
       "utf8",
     );
 
@@ -1000,7 +1008,7 @@ sleep 30
     const fixture = await writeFixture(fixtureDir, "slow-worker.sh", SLOW_WORKER);
     setEnv("PI_WORKER_COMMAND", fixture);
 
-    const started = await executeTool("delegate", { task: "long", isolate: false });
+    const started = await executeTool("spawn_worker", { task: "long", isolate: false });
     const id = started.details.workerId as string;
 
     await getEventHandler("session_shutdown")(
@@ -1016,9 +1024,9 @@ sleep 30
     const fixture = await writeFixture(fixtureDir, "slow-worker.sh", SLOW_WORKER);
     setEnv("PI_WORKER_COMMAND", fixture);
 
-    await executeTool("delegate", { task: "long", isolate: false });
+    await executeTool("spawn_worker", { task: "long", isolate: false });
     const stateEmitCount = () =>
-      mockPi.events.emit.mock.calls.filter(([event]) => event === "agents:state").length;
+      mockPi.events.emit.mock.calls.filter(([event]) => event === "workers:state").length;
 
     await getEventHandler("session_shutdown")(
       { type: "session_shutdown", reason: "quit" },
@@ -1039,7 +1047,7 @@ sleep 30
     const fixture = await writeFixture(fixtureDir, "slow-worker.sh", SLOW_WORKER);
     setEnv("PI_WORKER_COMMAND", fixture);
 
-    const started = await executeTool("delegate", { task: "long", isolate: false });
+    const started = await executeTool("spawn_worker", { task: "long", isolate: false });
     const id = started.details.workerId as string;
 
     const cancelled = await executeTool("workers", { action: "cancel", id });
@@ -1058,7 +1066,7 @@ sleep 30
     expect(result.content[0].text).toContain("is already timeout");
     expect(result.content[0].text).toContain("slot is free");
     expect(result.content[0].text).toContain("action=remove");
-    expect(result.content[0].text).toContain("delegate to start a new worker");
+    expect(result.content[0].text).toContain("spawn_worker to start a new worker");
   });
 
   it("workers remove rejects traversal before touching another worker's worktree", async () => {
@@ -1079,7 +1087,11 @@ sleep 30
   it("a worker whose binary is missing persists and notifies the spawn error", async () => {
     setEnv("PI_WORKER_COMMAND", join(fixtureDir, "missing-binary.sh"));
 
-    const result = await executeTool("delegate", { task: "doomed", isolate: false, wait: true });
+    const result = await executeTool("spawn_worker", {
+      task: "doomed",
+      isolate: false,
+      wait: true,
+    });
 
     expect(result.details.worker.status).toBe("failed");
     expect(result.details.worker.error).toContain("ENOENT");
@@ -1133,14 +1145,14 @@ sleep 30
     await writeFile(streams, "not a directory", "utf8");
     setEnv("PI_MAX_WORKERS", "1");
 
-    const first = await executeTool("delegate", { task: "doomed", isolate: false });
+    const first = await executeTool("spawn_worker", { task: "doomed", isolate: false });
     const failed = await waitForRecord(cwd, first.details.workerId as string, "failed", 2_000);
     expect(failed.error).toContain("EEXIST");
     await rm(streams, { force: true });
     const fixture = await writeFixture(fixtureDir, "ok-worker.sh", SUCCESS_WORKER);
     setEnv("PI_WORKER_COMMAND", fixture);
 
-    const next = await executeTool("delegate", { task: "works", isolate: false, wait: true });
+    const next = await executeTool("spawn_worker", { task: "works", isolate: false, wait: true });
     expect(next.details.worker.status).toBe("completed");
   });
 
@@ -1151,7 +1163,7 @@ sleep 30
     await mkdir(join(streams, ".."), { recursive: true });
     await writeFile(streams, "not a directory", "utf8");
 
-    const started = await executeTool("delegate", { task: "doomed", isolate: false });
+    const started = await executeTool("spawn_worker", { task: "doomed", isolate: false });
     const id = started.details.workerId as string;
 
     const cancelled = await executeTool("workers", { action: "cancel", id });
@@ -1171,7 +1183,7 @@ sleep 30
     setEnv("PI_WORKER_COMMAND", fixture);
     const alloc = vi.spyOn(Buffer, "alloc");
     try {
-      const result = await executeTool("delegate", {
+      const result = await executeTool("spawn_worker", {
         task: "large spool",
         isolate: false,
         wait: true,
@@ -1223,14 +1235,14 @@ sleep 30
     const streams = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
     await mkdir(join(streams, ".."), { recursive: true });
     await writeFile(streams, "not a directory", "utf8");
-    const doomed = await executeTool("delegate", { task: "doomed", isolate: false });
+    const doomed = await executeTool("spawn_worker", { task: "doomed", isolate: false });
     const doomedId = doomed.details.workerId as string;
 
     // Restore the streams dir so the second worker spawns normally.
     await rm(streams, { force: true });
     const fixture = await writeFixture(fixtureDir, "slow-worker.sh", SLOW_WORKER);
     setEnv("PI_WORKER_COMMAND", fixture);
-    const live = await executeTool("delegate", { task: "long", isolate: false });
+    const live = await executeTool("spawn_worker", { task: "long", isolate: false });
     const liveId = live.details.workerId as string;
 
     await getEventHandler("session_shutdown")(
@@ -1251,7 +1263,7 @@ sleep 30
     const fixture = await writeFixture(fixtureDir, "ok-worker.sh", SUCCESS_WORKER);
     setEnv("PI_WORKER_COMMAND", fixture);
 
-    const started = await executeTool("delegate", {
+    const started = await executeTool("spawn_worker", {
       task: "add feature file",
       isolate: true,
       wait: true,
@@ -1265,7 +1277,7 @@ sleep 30
     // simulate its edits, then re-capture before collecting.
     const { writeFile: wf } = await import("node:fs/promises");
     await wf(join(worker.worktree as string, "FEATURE.md"), "feature\n");
-    const { captureWorktreePatch } = await import("../../extensions/agents/src/worktree.ts");
+    const { captureWorktreePatch } = await import("../../extensions/workers/src/worktree.ts");
     await captureWorktreePatch(worker.worktree as string, worker.patchPath as string);
 
     const collected = await executeTool("workers", { action: "collect", id });
@@ -1289,7 +1301,7 @@ sleep 30
     const fixture = await writeFixture(fixtureDir, "ok-worker.sh", SUCCESS_WORKER);
     setEnv("PI_WORKER_COMMAND", fixture);
 
-    const started = await executeTool("delegate", { task: "t", isolate: true, wait: true });
+    const started = await executeTool("spawn_worker", { task: "t", isolate: true, wait: true });
     const worker = started.details.worker;
     await rm(worker.patchPath as string, { force: true });
 
@@ -1307,11 +1319,11 @@ sleep 30
     const fixture = await writeFixture(fixtureDir, "ok-worker.sh", SUCCESS_WORKER);
     setEnv("PI_WORKER_COMMAND", fixture);
 
-    const started = await executeTool("delegate", { task: "t", isolate: true, wait: true });
+    const started = await executeTool("spawn_worker", { task: "t", isolate: true, wait: true });
     const worker = started.details.worker;
     const { writeFile: wf } = await import("node:fs/promises");
     await wf(join(worker.worktree as string, "X.md"), "x\n");
-    const { captureWorktreePatch } = await import("../../extensions/agents/src/worktree.ts");
+    const { captureWorktreePatch } = await import("../../extensions/workers/src/worktree.ts");
     await captureWorktreePatch(worker.worktree as string, worker.patchPath as string);
 
     await executeTool("workers", { action: "collect", id: worker.id });
@@ -1326,11 +1338,11 @@ sleep 30
     const fixture = await writeFixture(fixtureDir, "ok-worker.sh", SUCCESS_WORKER);
     setEnv("PI_WORKER_COMMAND", fixture);
 
-    const started = await executeTool("delegate", { task: "t", isolate: true, wait: true });
+    const started = await executeTool("spawn_worker", { task: "t", isolate: true, wait: true });
     const worker = started.details.worker;
     const { writeFile: wf } = await import("node:fs/promises");
     await wf(join(worker.worktree as string, "UNAPPLIED.md"), "unapplied\n");
-    const { captureWorktreePatch } = await import("../../extensions/agents/src/worktree.ts");
+    const { captureWorktreePatch } = await import("../../extensions/workers/src/worktree.ts");
     await captureWorktreePatch(worker.worktree as string, worker.patchPath as string);
 
     const collected = await executeTool("workers", {
@@ -1351,7 +1363,7 @@ sleep 30
     const fixture = await writeFixture(fixtureDir, "ok-worker.sh", SUCCESS_WORKER);
     setEnv("PI_WORKER_COMMAND", fixture);
 
-    const started = await executeTool("delegate", { task: "t", isolate: true, wait: true });
+    const started = await executeTool("spawn_worker", { task: "t", isolate: true, wait: true });
     const worker = started.details.worker;
     const patchPath = worker.patchPath as string;
     const { writeFile: wf } = await import("node:fs/promises");
@@ -1425,7 +1437,7 @@ sleep 30
       const fixture = await writeFixture(fixtureDir, "slow-worker.sh", SLOW_WORKER);
       setEnv("PI_WORKER_COMMAND", fixture);
 
-      await executeTool("delegate", { task: "t", isolate: false, name: "scout" });
+      await executeTool("spawn_worker", { task: "t", isolate: false, name: "scout" });
 
       const lastCall = mockCtx.ui.setWidget.mock.calls.at(-1) as unknown[];
       expect(lastCall[0]).toBe(STRIP_KEY_ABOVE);
@@ -1452,14 +1464,18 @@ sleep 30
     it("clears the widget when a fire-and-forget worker completes, without shutdown", async () => {
       // A gated worker: the running state is stable until the test releases
       // it, so neither assertion races the child's exit (an instantly-
-      // exiting worker can complete before the delegate path's publish, and
+      // exiting worker can complete before the spawn path's publish, and
       // then the strip is legitimately never published at all).
       const release = join(fixtureDir, "release-gate");
       setEnv("GATED_WORKER_RELEASE", release);
       const fixture = await writeFixture(fixtureDir, "gated-worker.sh", GATED_SUCCESS_WORKER);
       setEnv("PI_WORKER_COMMAND", fixture);
 
-      const started = await executeTool("delegate", { task: "t", isolate: false, name: "quick" });
+      const started = await executeTool("spawn_worker", {
+        task: "t",
+        isolate: false,
+        name: "quick",
+      });
       const id = started.details.workerId as string;
       // The widget is up while the worker runs (frozen-snapshot risk: rows
       // mutate in place, so a stale entry would show "completed" under a
@@ -1484,7 +1500,7 @@ sleep 30
       const fixture = await writeFixture(fixtureDir, "active-worker.sh", ACTIVE_WORKER);
       setEnv("PI_WORKER_COMMAND", fixture);
 
-      const started = await executeTool("delegate", { task: "read auth", isolate: false });
+      const started = await executeTool("spawn_worker", { task: "read auth", isolate: false });
       const id = started.details.workerId as string;
 
       // The spool projection captures the tool lifecycle and assistant text
@@ -1506,7 +1522,7 @@ sleep 30
 
       // Short name: the frame line is width-truncated, and a uuid-long id
       // would push the activity segment past the truncation point.
-      const started = await executeTool("delegate", {
+      const started = await executeTool("spawn_worker", {
         task: "t",
         isolate: false,
         name: "scout",
@@ -1530,7 +1546,7 @@ sleep 30
       const fixture = await writeFixture(fixtureDir, "tail-worker.sh", TAIL_WORKER);
       setEnv("PI_WORKER_COMMAND", fixture);
 
-      const started = await executeTool("delegate", {
+      const started = await executeTool("spawn_worker", {
         task: "t",
         isolate: false,
         wait: true,
@@ -1545,11 +1561,11 @@ sleep 30
       expect(text).toContain("■ finished completed");
     });
 
-    it("rolls up worker usage and publishes it on agents:state", async () => {
+    it("rolls up worker usage and publishes it on workers:state", async () => {
       const fixture = await writeFixture(fixtureDir, "usage-worker.sh", USAGE_WORKER);
       setEnv("PI_WORKER_COMMAND", fixture);
 
-      const started = await executeTool("delegate", {
+      const started = await executeTool("spawn_worker", {
         task: "t",
         isolate: false,
         wait: true,
@@ -1570,7 +1586,7 @@ sleep 30
       // The status payload aggregates across all records on the next publish.
       await executeTool("workers", { action: "list" });
       const stateEvents = mockPi.events.emit.mock.calls.filter(
-        ([event]) => event === "agents:state",
+        ([event]) => event === "workers:state",
       );
       const payload = stateEvents.at(-1)?.[1] as { running: number; workerCostUsd: number };
       expect(payload.workerCostUsd).toBeCloseTo(0.041);
@@ -1580,7 +1596,7 @@ sleep 30
       const fixture = await writeFixture(fixtureDir, "spool-cap.sh", SPOOL_CAP_WORKER);
       setEnv("PI_WORKER_COMMAND", fixture);
 
-      const started = await executeTool("delegate", {
+      const started = await executeTool("spawn_worker", {
         task: "t",
         isolate: false,
         wait: true,
@@ -1603,7 +1619,7 @@ sleep 30
       const fixture = await writeFixture(fixtureDir, "blocker-worker.sh", BLOCKER_RUNNING_WORKER);
       setEnv("PI_WORKER_COMMAND", fixture);
 
-      const started = await executeTool("delegate", { task: "stuck task", isolate: false });
+      const started = await executeTool("spawn_worker", { task: "stuck task", isolate: false });
       const id = started.details.workerId as string;
 
       // The spool poller ingests the marker into the live record.
@@ -1625,16 +1641,16 @@ sleep 30
       const fixture = await writeFixture(fixtureDir, "blocker-wake.sh", BLOCKER_RUNNING_WORKER);
       setEnv("PI_WORKER_COMMAND", fixture);
 
-      const started = await executeTool("delegate", { task: "stuck task", isolate: false });
+      const started = await executeTool("spawn_worker", { task: "stuck task", isolate: false });
       const id = started.details.workerId as string;
 
       await waitForWake(mockPi);
       const wakes = mockPi.sendMessage.mock.calls.filter(
-        ([message]) => (message as WakeMessageShape).customType === "agents:wake",
+        ([message]) => (message as WakeMessageShape).customType === "workers:wake",
       );
       expect(wakes).toHaveLength(1);
       const [message, options] = wakes[0] as unknown as [WakeMessageShape, WakeOptionsShape];
-      expect(message.details).toMatchObject({ source: "agents", trusted: true });
+      expect(message.details).toMatchObject({ source: "workers", trusted: true });
       expect(options.triggerTurn).toBe(true);
       const text = message.content[0].text;
       expect(text).toContain("reported a blocker");
@@ -1651,7 +1667,7 @@ sleep 30
       const fixture = await writeFixture(fixtureDir, "blocker-done.sh", BLOCKER_DONE_WORKER);
       setEnv("PI_WORKER_COMMAND", fixture);
 
-      const result = await executeTool("delegate", { task: "t", isolate: false, wait: true });
+      const result = await executeTool("spawn_worker", { task: "t", isolate: false, wait: true });
 
       const worker = result.details.worker as WorkerRecord;
       expect(worker.status).toBe("completed");
@@ -1667,7 +1683,7 @@ sleep 30
       const fixture = await writeFixture(fixtureDir, "blocker-tail.sh", BLOCKER_DONE_WORKER);
       setEnv("PI_WORKER_COMMAND", fixture);
 
-      const started = await executeTool("delegate", {
+      const started = await executeTool("spawn_worker", {
         task: "t",
         isolate: false,
         wait: true,
@@ -1733,7 +1749,7 @@ sleep 30
 
     expect(result.content[0].text).toContain("Worktree and branch discarded");
     expect(existsSync(wt.path)).toBe(false);
-    await expect(runGit(cwd, ["rev-parse", "--verify", "agents/w-wt"])).rejects.toThrow();
+    await expect(runGit(cwd, ["rev-parse", "--verify", "workers/w-wt"])).rejects.toThrow();
     expect(await loadWorker(cwd, "w-wt")).toBeUndefined();
   });
 
@@ -1770,7 +1786,7 @@ sleep 30
 
     expect(result.content[0].text).toContain("worktree");
     expect(existsSync(wt.path)).toBe(false);
-    await expect(runGit(cwd, ["rev-parse", "--verify", "agents/w-lost"])).rejects.toThrow();
+    await expect(runGit(cwd, ["rev-parse", "--verify", "workers/w-lost"])).rejects.toThrow();
   });
 
   it("workers remove tombstones a transcript-owned worker so it stays absent after reload", async () => {
@@ -1954,10 +1970,10 @@ sleep 30
       expect(vi.mocked(runGit).mock.calls.some((call) => call[1][0] === "worktree")).toBe(false);
     });
 
-    it("an isolated delegate without a setup hook refuses and burns nothing", async () => {
+    it("an isolated spawn without a setup hook refuses and burns nothing", async () => {
       fakeWorktreeGit();
 
-      const error = await executeTool("delegate", { task: "isolated task" }).then(
+      const error = await executeTool("spawn_worker", { task: "isolated task" }).then(
         () => null,
         (e: Error) => e,
       );
@@ -1981,7 +1997,7 @@ sleep 30
       );
       await chmod(join(cwd, CONFIG_DIR_NAME, "provision-worktree"), 0o755);
 
-      await expect(executeTool("delegate", { task: "isolated task" })).rejects.toThrow(
+      await expect(executeTool("spawn_worker", { task: "isolated task" })).rejects.toThrow(
         /provisioned: none \(sandbox policy missing/,
       );
       expect((await listRecordFiles(cwd)).length).toBe(0);
@@ -1999,7 +2015,7 @@ sleep 30
       const fixture = await writeFixture(fixtureDir, "v2-worker.sh", SUCCESS_WORKER);
       setEnv("PI_WORKER_COMMAND", fixture);
 
-      const started = await executeTool("delegate", { task: "t", isolate: true, wait: true });
+      const started = await executeTool("spawn_worker", { task: "t", isolate: true, wait: true });
       expect(started.details.worker.status).toBe("completed");
 
       const status = await execFileAsync(
@@ -2035,8 +2051,8 @@ sleep 30
         ),
       );
 
-      await expect(executeTool("delegate", { task: "isolated task" })).rejects.toThrow(
-        /provisioned: failed \(exit 1\): setup failed\. Log: .+\. Fix \.pi\/provision-worktree or the environment, then re-delegate\./,
+      await expect(executeTool("spawn_worker", { task: "isolated task" })).rejects.toThrow(
+        /provisioned: failed \(exit 1\): setup failed\. Log: .+\. Fix \.pi\/provision-worktree or the environment, then re-run spawn_worker./,
       );
 
       const records = await listRecordFiles(cwd);
@@ -2045,7 +2061,7 @@ sleep 30
       expect(record.status).toBe("failed");
       const wt = recordWorktree(record);
       expect(wt).toBe(join(cwd, CONFIG_DIR_NAME, "worktrees", record.id));
-      expect(record.branch).toBe(`agents/${record.id}`);
+      expect(record.branch).toBe(`workers/${record.id}`);
       expect(existsSync(wt)).toBe(true); // kept: remove/prune owns discarding it
       expect(record.provision).toMatchObject({ state: "failed" });
       expect(existsSync(spawnMarker)).toBe(false); // nothing spawned
@@ -2072,7 +2088,7 @@ sleep 30
         ),
       );
 
-      await expect(executeTool("delegate", { task: "isolated task" })).rejects.toThrow(
+      await expect(executeTool("spawn_worker", { task: "isolated task" })).rejects.toThrow(
         /provisioned: failed \(Sandbox dependencies not available: socat not installed\)/,
       );
       const records = await listRecordFiles(cwd);
@@ -2091,7 +2107,7 @@ sleep 30
         logPath: join(fixtureDir, "hook.log"),
       });
 
-      const error = await executeTool("delegate", { task: "isolated task" }).then(
+      const error = await executeTool("spawn_worker", { task: "isolated task" }).then(
         () => null,
         (e: Error) => e,
       );
@@ -2114,7 +2130,7 @@ sleep 30
         logPath: join(fixtureDir, "hook.log"),
       });
 
-      await expect(executeTool("delegate", { task: "isolated task" })).rejects.toThrow(
+      await expect(executeTool("spawn_worker", { task: "isolated task" })).rejects.toThrow(
         /provisioned: failed \(exit 9\)\. Log: .+\. Fix /,
       );
     });
@@ -2129,7 +2145,7 @@ sleep 30
       const fixture = await writeFixture(fixtureDir, "ok-worker.sh", SUCCESS_WORKER);
       setEnv("PI_WORKER_COMMAND", fixture);
 
-      const started = await executeTool("delegate", { task: "t", isolate: true, wait: true });
+      const started = await executeTool("spawn_worker", { task: "t", isolate: true, wait: true });
       expect(started.details.worker.status).toBe("completed");
 
       const status = await execFileAsync(
@@ -2156,7 +2172,7 @@ sleep 30
         logPath: join(fixtureDir, "hook.log"),
       });
 
-      await expect(executeTool("delegate", { task: "isolated task" })).rejects.toThrow(
+      await expect(executeTool("spawn_worker", { task: "isolated task" })).rejects.toThrow(
         /provisioned: failed \(exit 1\)/,
       );
 
@@ -2184,7 +2200,7 @@ sleep 30
         },
       );
 
-      await expect(executeTool("delegate", { task: "isolated task" })).rejects.toThrow(
+      await expect(executeTool("spawn_worker", { task: "isolated task" })).rejects.toThrow(
         "provisioned: busy (another provision is running); retry shortly.",
       );
 
@@ -2212,7 +2228,7 @@ sleep 30
       );
       setEnv("PI_MAX_WORKERS", "1");
 
-      const refusal = executeTool("delegate", { task: "isolated task" });
+      const refusal = executeTool("spawn_worker", { task: "isolated task" });
       await expect(refusal).rejects.toThrow(/dirty tree/);
       // The refusal names the blocker, so the parent needs no extra
       // diagnostic status call to find it.
@@ -2225,16 +2241,20 @@ sleep 30
       expect(existsSync(join(cwd, CONFIG_DIR_NAME, "worktrees"))).toBe(false);
       expect(existsSync(spawnMarker)).toBe(false);
 
-      // The slot was released: a next delegate works at the cap of 1.
-      const next = await executeTool("delegate", { task: "follow-up", isolate: false, wait: true });
+      // The slot was released: a next spawn works at the cap of 1.
+      const next = await executeTool("spawn_worker", {
+        task: "follow-up",
+        isolate: false,
+        wait: true,
+      });
       expect((next.details.worker as WorkerRecord).status).toBe("completed");
     });
 
-    it("a failed setup commit refuses the delegate before any slot, worktree, or record exists", async () => {
+    it("a failed setup commit refuses the spawn before any slot, worktree, or record exists", async () => {
       fakeWorktreeGit({ commitError: "pre-commit hook declined" });
       await writeProvisionConfig(cwd);
 
-      await expect(executeTool("delegate", { task: "isolated task" })).rejects.toThrow(
+      await expect(executeTool("spawn_worker", { task: "isolated task" })).rejects.toThrow(
         /provisioned: setup commit failed \(pre-commit hook declined\)\. Commit /,
       );
 
@@ -2244,7 +2264,7 @@ sleep 30
       expect(existsSync(join(cwd, CONFIG_DIR_NAME, "worktrees"))).toBe(false);
     });
 
-    it("a non-isolated delegate skips provisioning and never runs the hook", async () => {
+    it("a non-isolated spawn skips provisioning and never runs the hook", async () => {
       await writeProvisionConfig(cwd);
       const argsFile = join(fixtureDir, "skipped-args.txt");
       const rootFile = join(fixtureDir, "skipped-messenger-root.txt");
@@ -2255,7 +2275,11 @@ sleep 30
       );
       setEnv("PI_WORKER_COMMAND", fixture);
 
-      const result = await executeTool("delegate", { task: "say hi", isolate: false, wait: true });
+      const result = await executeTool("spawn_worker", {
+        task: "say hi",
+        isolate: false,
+        wait: true,
+      });
 
       expect(vi.mocked(runSetupHook)).not.toHaveBeenCalled();
       const worker = result.details.worker as WorkerRecord;
@@ -2269,7 +2293,7 @@ sleep 30
       expect(await readFile(rootFile, "utf8")).toBe(cwd);
     });
 
-    it("an isolated delegate carries the include paths, runs the setup hook, and commits setup files", async () => {
+    it("an isolated spawn carries the include paths, runs the setup hook, and commits setup files", async () => {
       fakeWorktreeGit();
       await writeProvisionConfig(cwd);
       await mkdir(join(cwd, "data"), { recursive: true });
@@ -2291,7 +2315,7 @@ sleep 30
         logPath: join(fixtureDir, "hook.log"),
       });
 
-      const started = await executeTool("delegate", { task: "build the widget" });
+      const started = await executeTool("spawn_worker", { task: "build the widget" });
 
       const id = started.details.workerId as string;
       const wt = join(cwd, CONFIG_DIR_NAME, "worktrees", id);
@@ -2351,7 +2375,7 @@ sleep 30
         };
       }
 
-      it("an already-aborted signal refuses the delegate before any preparation or spawn", async () => {
+      it("an already-aborted signal refuses the spawn before any preparation or spawn", async () => {
         const spawnMarker = join(fixtureDir, "aborted-refusal-marker");
         setEnv(
           "PI_WORKER_COMMAND",
@@ -2365,7 +2389,7 @@ sleep 30
         controller.abort();
 
         await expect(
-          executeTool("delegate", { task: "t", isolate: false, wait: true }, controller.signal),
+          executeTool("spawn_worker", { task: "t", isolate: false, wait: true }, controller.signal),
         ).rejects.toThrow(/abort/i);
 
         expect(existsSync(spawnMarker)).toBe(false); // refused before spawn
@@ -2373,7 +2397,7 @@ sleep 30
         expect(mockPi.appendEntry).not.toHaveBeenCalled();
       });
 
-      it("aborting a wait=true delegate during a blocked setup hook starts no worker, frees the slot, and leaves nothing behind", async () => {
+      it("aborting a wait=true spawn during a blocked setup hook starts no worker, frees the slot, and leaves nothing behind", async () => {
         fakeWorktreeGit();
         await writeProvisionConfig(cwd);
         const spawnMarker = join(fixtureDir, "abort-hook-spawn-marker");
@@ -2390,7 +2414,7 @@ sleep 30
 
         const controller = new AbortController();
         const pending = executeTool(
-          "delegate",
+          "spawn_worker",
           { task: "isolated task", wait: true },
           controller.signal,
         );
@@ -2414,12 +2438,12 @@ sleep 30
         const leftover = existsSync(worktrees) ? await readdir(worktrees) : [];
         expect(leftover.filter((entry) => !entry.endsWith(".git"))).toEqual([]);
 
-        // The reservation was freed: the next delegate fits at the cap of 1.
+        // The reservation was freed: the next spawn fits at the cap of 1.
         setEnv(
           "PI_WORKER_COMMAND",
           await writeFixture(fixtureDir, "after-abort.sh", SUCCESS_WORKER),
         );
-        const next = await executeTool("delegate", {
+        const next = await executeTool("spawn_worker", {
           task: "follow-up",
           isolate: false,
           wait: true,
@@ -2519,7 +2543,7 @@ sleep 30
 
         const controller = new AbortController();
         const pending = executeTool(
-          "delegate",
+          "spawn_worker",
           { task: "long task", isolate: false, wait: true },
           controller.signal,
         );
@@ -2540,7 +2564,7 @@ sleep 30
         );
         // A cancellation never wakes the parent.
         const wakeCall = mockPi.sendMessage.mock.calls.find(
-          ([message]) => (message as WakeMessageShape).customType === "agents:wake",
+          ([message]) => (message as WakeMessageShape).customType === "workers:wake",
         );
         expect(wakeCall).toBeUndefined();
       });
@@ -2548,7 +2572,7 @@ sleep 30
   });
 });
 
-describe("agents-units", () => {
+describe("workers-units", () => {
   it("extractAssistantText keeps the last assistant text", () => {
     let text = "";
     text = extractAssistantText("not json", text);
@@ -2574,7 +2598,7 @@ describe("agents-units", () => {
     const record = makeWorkerRecord();
 
     expect(
-      ingestStreamEvent('{"type":"agents_blocker","at":5,"reason":"a real blocker"}', record),
+      ingestStreamEvent('{"type":"workers_blocker","at":5,"reason":"a real blocker"}', record),
     ).toBe("blocker");
     expect(record.blocker).toEqual({ reason: "a real blocker", at: 5 });
 
@@ -2588,15 +2612,15 @@ describe("agents-units", () => {
     expect(ingestStreamEvent("not json", record)).toBeUndefined();
 
     // Reasons are re-sanitized defensively and the last report wins.
-    ingestStreamEvent('{"type":"agents_blocker","at":6,"reason":"line1\\nline2"}', record);
+    ingestStreamEvent('{"type":"workers_blocker","at":6,"reason":"line1\\nline2"}', record);
     expect(record.blocker).toEqual({ reason: "line1 line2", at: 6 });
-    ingestStreamEvent('{"type":"agents_blocker","at":7,"reason":"the final answer"}', record);
+    ingestStreamEvent('{"type":"workers_blocker","at":7,"reason":"the final answer"}', record);
     expect(record.blocker).toEqual({ reason: "the final answer", at: 7 });
   });
 
   it("isGitRepo detects git and non-git directories", async () => {
-    const gitDir = await mkdtemp(join(tmpdir(), "agents-git-"));
-    const plainDir = await mkdtemp(join(tmpdir(), "agents-plain-"));
+    const gitDir = await mkdtemp(join(tmpdir(), "workers-git-"));
+    const plainDir = await mkdtemp(join(tmpdir(), "workers-plain-"));
     try {
       await initGitRepo(gitDir);
       expect(await isGitRepo(gitDir)).toBe(true);
@@ -2623,7 +2647,7 @@ describe("agents-units", () => {
   });
 
   it("worktree lifecycle: create, capture patch, apply, remove", async () => {
-    const repo = await mkdtemp(join(tmpdir(), "agents-wt-"));
+    const repo = await mkdtemp(join(tmpdir(), "workers-wt-"));
     try {
       await initGitRepo(repo);
       const wt = await createWorktree(repo, "w-test");
@@ -2648,7 +2672,7 @@ describe("agents-units", () => {
   });
 
   it("captureWorktreePatch removes orphaned setup cache before staging worker changes", async () => {
-    const repo = await mkdtemp(join(tmpdir(), "agents-wt-orphan-cache-"));
+    const repo = await mkdtemp(join(tmpdir(), "workers-wt-orphan-cache-"));
     try {
       await initGitRepo(repo);
       // The tracked hook lives beside the scratch paths it may leave behind;
@@ -2692,7 +2716,7 @@ describe("agents-units", () => {
   });
 
   it("captureWorktreePatch captures committed and uncommitted changes since the worktree base", async () => {
-    const repo = await mkdtemp(join(tmpdir(), "agents-wt-committed-"));
+    const repo = await mkdtemp(join(tmpdir(), "workers-wt-committed-"));
     try {
       await initGitRepo(repo);
       const wt = await createWorktree(repo, "w-committed");
@@ -2723,7 +2747,7 @@ describe("agents-units", () => {
   });
 
   it("captureWorktreePatch excludes ignored worker cache artifacts but keeps source and tracked config changes", async () => {
-    const repo = await mkdtemp(join(tmpdir(), "agents-wt-cache-"));
+    const repo = await mkdtemp(join(tmpdir(), "workers-wt-cache-"));
     try {
       await initGitRepo(repo);
       // The project's ignore policy declares worker cache directories, and a
@@ -2780,7 +2804,7 @@ describe("agents-units", () => {
   });
 
   it("captureWorktreePatch stores binary changes as applicable binary patches", async () => {
-    const repo = await mkdtemp(join(tmpdir(), "agents-wt-binary-"));
+    const repo = await mkdtemp(join(tmpdir(), "workers-wt-binary-"));
     try {
       await initGitRepo(repo);
       const wt = await createWorktree(repo, "w-binary");
@@ -2801,7 +2825,7 @@ describe("agents-units", () => {
   });
 
   it("captureWorktreePatch refuses an unapplicable patch without storing it and keeps the worktree", async () => {
-    const repo = await mkdtemp(join(tmpdir(), "agents-wt-refuse-"));
+    const repo = await mkdtemp(join(tmpdir(), "workers-wt-refuse-"));
     try {
       await initGitRepo(repo);
       const wt = await createWorktree(repo, "w-drift");
@@ -2827,7 +2851,7 @@ describe("agents-units", () => {
   });
 
   it("createWorktree refuses a dirty tree", async () => {
-    const repo = await mkdtemp(join(tmpdir(), "agents-dirty-"));
+    const repo = await mkdtemp(join(tmpdir(), "workers-dirty-"));
     try {
       await initGitRepo(repo);
       await writeFile(join(repo, "README.md"), "# changed\n");
@@ -2838,7 +2862,7 @@ describe("agents-units", () => {
   });
 
   it("createWorktree names the blocking paths in the dirty-tree refusal", async () => {
-    const repo = await mkdtemp(join(tmpdir(), "agents-dirty-named-"));
+    const repo = await mkdtemp(join(tmpdir(), "workers-dirty-named-"));
     try {
       await initGitRepo(repo);
       await writeFile(join(repo, "README.md"), "# changed\n");
@@ -2860,7 +2884,7 @@ describe("agents-units", () => {
   });
 
   it("createWorktree names at most five blocking paths and counts the rest", async () => {
-    const repo = await mkdtemp(join(tmpdir(), "agents-dirty-many-"));
+    const repo = await mkdtemp(join(tmpdir(), "workers-dirty-many-"));
     try {
       await initGitRepo(repo);
       for (const name of ["a", "b", "c", "d", "e", "f", "g"]) {
@@ -2884,7 +2908,7 @@ describe("agents-units", () => {
   });
 
   it("createWorktree names real blockers but never untracked config-dir state", async () => {
-    const repo = await mkdtemp(join(tmpdir(), "agents-dirty-mixed-"));
+    const repo = await mkdtemp(join(tmpdir(), "workers-dirty-mixed-"));
     try {
       await initGitRepo(repo);
       // Messenger writes here in repos that do not gitignore the config dir.
@@ -2906,7 +2930,7 @@ describe("agents-units", () => {
   });
 
   it("createWorktree ignores untracked config-dir state", async () => {
-    const repo = await mkdtemp(join(tmpdir(), "agents-dirty-state-"));
+    const repo = await mkdtemp(join(tmpdir(), "workers-dirty-state-"));
     try {
       await initGitRepo(repo);
       // Messenger/missions/workers write here in repos that do not gitignore it.
@@ -2915,7 +2939,7 @@ describe("agents-units", () => {
 
       await expect(createWorktree(repo, "w-state")).resolves.toEqual({
         path: expect.stringContaining("w-state"),
-        branch: "agents/w-state",
+        branch: "workers/w-state",
       });
     } finally {
       await rm(repo, { recursive: true, force: true });
@@ -2923,7 +2947,7 @@ describe("agents-units", () => {
   });
 
   it("createWorktree still refuses untracked work files", async () => {
-    const repo = await mkdtemp(join(tmpdir(), "agents-dirty-src-"));
+    const repo = await mkdtemp(join(tmpdir(), "workers-dirty-src-"));
     try {
       await initGitRepo(repo);
       await writeFile(join(repo, "scratch.ts"), "export {};\n");
@@ -2934,7 +2958,7 @@ describe("agents-units", () => {
   });
 
   it("createWorktree refuses tracked modifications under the config dir", async () => {
-    const repo = await mkdtemp(join(tmpdir(), "agents-dirty-tracked-"));
+    const repo = await mkdtemp(join(tmpdir(), "workers-dirty-tracked-"));
     try {
       await mkdir(join(repo, CONFIG_DIR_NAME), { recursive: true });
       await writeFile(join(repo, CONFIG_DIR_NAME, "committed.json"), "{}\n");
@@ -2949,11 +2973,11 @@ describe("agents-units", () => {
   });
 });
 
-describe("agents-worker store (session-scoped)", () => {
+describe("worker store (session-scoped)", () => {
   let cwd: string;
 
   beforeEach(async () => {
-    cwd = await mkdtemp(join(tmpdir(), "agents-store-"));
+    cwd = await mkdtemp(join(tmpdir(), "workers-store-"));
     vi.mocked(withFileLock).mockClear();
   });
 
@@ -3338,7 +3362,7 @@ describe("agents-worker store (session-scoped)", () => {
 
     expect(pruned).toContain("w-old");
     expect(existsSync(wt.path)).toBe(false);
-    await expect(runGit(cwd, ["rev-parse", "--verify", "agents/w-old"])).rejects.toThrow();
+    await expect(runGit(cwd, ["rev-parse", "--verify", "workers/w-old"])).rejects.toThrow();
     expect(await loadWorker(cwd, "w-live")).toBeDefined();
   });
 
@@ -3444,7 +3468,7 @@ describe("agents-worker store (session-scoped)", () => {
         parentPid: 999_999_999,
         status: "failed",
         worktree: join(cwd, CONFIG_DIR_NAME, "worktrees", "w-orphan"),
-        branch: "agents/w-orphan",
+        branch: "workers/w-orphan",
         startedAt: Date.now(),
         endedAt: Date.now(),
       }),
@@ -3472,7 +3496,7 @@ describe("agents-worker store (session-scoped)", () => {
     await mkdir(spoolDir, { recursive: true });
     await writeFile(
       join(spoolDir, "w-salvage.jsonl"),
-      '{"type":"agents_start","at":1}\n{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"the salvaged report"}]}}\n',
+      '{"type":"workers_start","at":1}\n{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"the salvaged report"}]}}\n',
       "utf8",
     );
 
@@ -3483,7 +3507,7 @@ describe("agents-worker store (session-scoped)", () => {
     expect(finalized.patchPath).toBeDefined();
     // The end marker lands in the spool so later readers see terminal state.
     const spool = await readFile(join(spoolDir, "w-salvage.jsonl"), "utf8");
-    expect(spool).toContain('"type":"agents_end"');
+    expect(spool).toContain('"type":"workers_end"');
     // Idempotent: re-finalizing a terminal record changes nothing.
     const again = await finalizeWorker({ cwd, record: finalized });
     expect(again.status).toBe("completed");
@@ -3546,7 +3570,7 @@ describe("agents-worker store (session-scoped)", () => {
     const hugeReport = `{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"${"y".repeat(STREAM_TAIL_BYTES)} the whole report"}]}}\n`;
     await writeFile(
       join(spoolDir, "w-straddle.jsonl"),
-      `{"type":"agents_start","at":1}\n${hugeReport}`,
+      `{"type":"workers_start","at":1}\n${hugeReport}`,
       "utf8",
     );
 
@@ -3598,7 +3622,7 @@ describe("agents-worker store (session-scoped)", () => {
     const noise = `{"type":"tool_execution_start","toolName":"bash","args":{"command":"${"x".repeat(512)}"}}\n`;
     await writeFile(
       join(spoolDir, "w-marked-huge.jsonl"),
-      `${noise.repeat(Math.ceil((STREAM_TAIL_BYTES * 2) / noise.length))}{"type":"agents_end","at":2,"status":"timeout","error":"worker exceeded 30s timeout"}\n`,
+      `${noise.repeat(Math.ceil((STREAM_TAIL_BYTES * 2) / noise.length))}{"type":"workers_end","at":2,"status":"timeout","error":"worker exceeded 30s timeout"}\n`,
       "utf8",
     );
 
@@ -3616,7 +3640,7 @@ describe("agents-worker store (session-scoped)", () => {
       '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"tail report"}]}}\n';
     await writeFile(
       join(spoolDir, "w-cut.jsonl"),
-      `{"type":"agents_start","at":1}\n${noise}${report}`,
+      `{"type":"workers_start","at":1}\n${noise}${report}`,
       "utf8",
     );
 
@@ -3674,7 +3698,7 @@ describe("agents-worker store (session-scoped)", () => {
     await mkdir(spoolDir, { recursive: true });
     await writeFile(
       join(spoolDir, "w-marked.jsonl"),
-      '{"type":"agents_end","at":2,"status":"timeout","error":"worker exceeded 30s timeout"}\n',
+      '{"type":"workers_end","at":2,"status":"timeout","error":"worker exceeded 30s timeout"}\n',
       "utf8",
     );
 
@@ -3695,7 +3719,7 @@ describe("agents-worker store (session-scoped)", () => {
     await mkdir(spoolDir, { recursive: true });
     await writeFile(
       join(spoolDir, "w-blocked.jsonl"),
-      '{"type":"agents_blocker","at":9,"reason":"stuck on missing credentials"}\n{"type":"agents_end","at":10,"status":"timeout","error":"worker exceeded 30s timeout"}\n',
+      '{"type":"workers_blocker","at":9,"reason":"stuck on missing credentials"}\n{"type":"workers_end","at":10,"status":"timeout","error":"worker exceeded 30s timeout"}\n',
       "utf8",
     );
 
@@ -3707,7 +3731,7 @@ describe("agents-worker store (session-scoped)", () => {
   });
 });
 
-describe("agents-worker session scoping", () => {
+describe("worker session scoping", () => {
   let cwd: string;
   let fixtureDir: string;
   let mockPi: DeepMocked<ExtensionAPI>;
@@ -3733,14 +3757,14 @@ describe("agents-worker session scoping", () => {
 
   beforeEach(async () => {
     __resetWidgetStrip();
-    cwd = await mkdtemp(join(tmpdir(), "agents-scope-"));
-    fixtureDir = await mkdtemp(join(tmpdir(), "agents-scope-fixture-"));
+    cwd = await mkdtemp(join(tmpdir(), "workers-scope-"));
+    fixtureDir = await mkdtemp(join(tmpdir(), "workers-scope-fixture-"));
     mockPi = createMockPi() as DeepMocked<ExtensionAPI>;
     mockCtx = createMockContext();
     (mockCtx as { cwd: string }).cwd = cwd;
     setEnv("PI_WORKER_MODEL", "opencode-go/glm-5.3-flash");
     setEnv("PI_MAX_WORKERS", "1");
-    await agentsExtension(mockPi);
+    await workersExtension(mockPi);
   });
 
   afterEach(async () => {
@@ -3829,16 +3853,16 @@ describe("agents-worker session scoping", () => {
     );
 
     // Cap is 1 for THIS session; the foreign running worker must not consume it.
-    const started = await executeTool("delegate", { task: "t", isolate: false });
+    const started = await executeTool("spawn_worker", { task: "t", isolate: false });
     expect(started.details.workerId).toBeDefined();
     await executeTool("workers", { action: "cancel", id: started.details.workerId as string });
   });
 
-  it("a delegate persists the worker child pid on the record", async () => {
+  it("a spawn persists the worker child pid on the record", async () => {
     const fixture = await writeFixture(fixtureDir, "slow-worker.sh", SLOW_WORKER);
     setEnv("PI_WORKER_COMMAND", fixture);
 
-    const started = await executeTool("delegate", { task: "long", isolate: false });
+    const started = await executeTool("spawn_worker", { task: "long", isolate: false });
     const id = started.details.workerId as string;
 
     try {
@@ -3852,11 +3876,11 @@ describe("agents-worker session scoping", () => {
     }
   });
 
-  it("a delegate records the owning session on the worker", async () => {
+  it("a spawn records the owning session on the worker", async () => {
     const fixture = await writeFixture(fixtureDir, "ok-worker.sh", SUCCESS_WORKER);
     setEnv("PI_WORKER_COMMAND", fixture);
 
-    const started = await executeTool("delegate", { task: "t", isolate: false, wait: true });
+    const started = await executeTool("spawn_worker", { task: "t", isolate: false, wait: true });
     // wait=true returns the full record, not the started-response shape.
     const id = started.details.worker.id as string;
 
@@ -4027,7 +4051,7 @@ describe("agents-worker session scoping", () => {
     await mkdir(spoolDir, { recursive: true });
     await writeFile(
       join(spoolDir, "w-adopted.jsonl"),
-      '{"type":"agents_start","at":1}\n{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"adopted report"}]}}\n',
+      '{"type":"workers_start","at":1}\n{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"adopted report"}]}}\n',
       "utf8",
     );
 
@@ -4061,7 +4085,7 @@ describe("agents-worker session scoping", () => {
     const sleeper = execFile("sleep", ["30"]);
     const now = Date.now();
     // Original bound: 60s, already elapsed before adoption. Corresponds to
-    // a delegate with timeout_seconds: 60.
+    // a spawn_worker call with timeout_seconds: 60.
     const record = makeWorkerRecord({
       id: "w-expired",
       name: "expired",
@@ -4226,7 +4250,7 @@ describe("agents-worker session scoping", () => {
     await mkdir(spoolDir, { recursive: true });
     await writeFile(
       join(spoolDir, "w-adopt-expired.jsonl"),
-      '{"type":"agents_start","at":1}\n{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"expired report"}]}}\n',
+      '{"type":"workers_start","at":1}\n{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"expired report"}]}}\n',
       "utf8",
     );
 

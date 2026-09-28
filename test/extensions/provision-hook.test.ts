@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { runSetupHook, SetupHookCancelled } from "../../extensions/agents/src/provision/hook.ts";
 import { startWorkerSandbox } from "../../extensions/worker-sandbox/src/client.ts";
+import { runSetupHook, SetupHookCancelled } from "../../extensions/workers/src/provision/hook.ts";
 
 vi.mock("../../extensions/worker-sandbox/src/client.ts", () => ({
   startWorkerSandbox: vi.fn(),

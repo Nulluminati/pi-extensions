@@ -1,5 +1,5 @@
 /**
- * Agents Extension
+ * Workers Extension
  *
  * Multi-agent workflows: delegate bounded tasks to cheap-model worker Pi
  * sessions. Workers run `pi --mode json --no-session` as detached child
@@ -41,7 +41,7 @@ import {
   startDelegatedWorker,
   type WorkerSessionState,
 } from "./src/delegate.ts";
-import { AGENTS_STATE_EVENT, createWorkersWidget, WORKERS_WIDGET_KEY } from "./src/format.ts";
+import { createWorkersWidget, WORKERS_STATE_EVENT, WORKERS_WIDGET_KEY } from "./src/format.ts";
 import { assertWorkerId } from "./src/ids.ts";
 import { SetupHookCancelled } from "./src/provision/hook.ts";
 import {
@@ -72,11 +72,11 @@ import { discardWorktree, removeWorktree, worktreePath } from "./src/worktree.ts
 
 // --- Constants ---
 
-const WAKE_CUSTOM_TYPE = "agents:wake";
+const WAKE_CUSTOM_TYPE = "workers:wake";
 
 // --- Extension ---
 
-export default async function agentsExtension(pi: ExtensionAPI) {
+export default async function workersExtension(pi: ExtensionAPI) {
   const state: WorkerSessionState = {
     running: new Map<string, RunningWorker>(),
     branchWorkers: new Map<string, WorkerRecord>(),
@@ -125,7 +125,7 @@ export default async function agentsExtension(pi: ExtensionAPI) {
       onSettled: () => {
         if (shutDown) return;
         publish(ctx).catch((error) => {
-          console.error(`[agents] publish failed: ${(error as Error).message}`);
+          console.error(`[workers] publish failed: ${(error as Error).message}`);
         });
       },
     });
@@ -143,7 +143,7 @@ export default async function agentsExtension(pi: ExtensionAPI) {
         });
         if (shutDown) return;
         publish(ctx).catch((error) => {
-          console.error(`[agents] publish failed: ${(error as Error).message}`);
+          console.error(`[workers] publish failed: ${(error as Error).message}`);
         });
       });
     }, 2_000);
@@ -241,7 +241,7 @@ export default async function agentsExtension(pi: ExtensionAPI) {
         w.usage.cacheReadTokens +
         w.usage.cacheWriteTokens;
     }
-    pi.events.emit(AGENTS_STATE_EVENT, {
+    pi.events.emit(WORKERS_STATE_EVENT, {
       running: runningCount,
       workerCostUsd,
       workerTokens,
@@ -266,12 +266,12 @@ export default async function agentsExtension(pi: ExtensionAPI) {
               customType: WAKE_CUSTOM_TYPE,
               content: [{ type: "text", text: message }],
               display: false,
-              details: { source: "agents", trusted: true },
+              details: { source: "workers", trusted: true },
             },
             { triggerTurn: true, deliverAs: "steer" },
           );
         } catch (err) {
-          console.error(`[agents] wake failed: ${(err as Error).message}`);
+          console.error(`[workers] wake failed: ${(err as Error).message}`);
         }
       },
       notify(level, message) {
@@ -284,7 +284,7 @@ export default async function agentsExtension(pi: ExtensionAPI) {
       onChange() {
         if (shutDown) return;
         publish(ctx).catch((error) => {
-          console.error(`[agents] publish failed: ${(error as Error).message}`);
+          console.error(`[workers] publish failed: ${(error as Error).message}`);
         });
       },
       onActivity() {
@@ -294,7 +294,7 @@ export default async function agentsExtension(pi: ExtensionAPI) {
         activityRefreshTimer = setTimeout(() => {
           activityRefreshTimer = undefined;
           publish(ctx).catch((error) => {
-            console.error(`[agents] publish failed: ${(error as Error).message}`);
+            console.error(`[workers] publish failed: ${(error as Error).message}`);
           });
         }, 500);
       },
@@ -320,18 +320,18 @@ export default async function agentsExtension(pi: ExtensionAPI) {
     }
   }
 
-  // --- delegate tool ---
+  // --- spawn_worker tool ---
 
   pi.registerTool({
-    name: "delegate",
-    label: "Delegate Worker",
+    name: "spawn_worker",
+    label: "Spawn Worker",
     description:
-      "Hand a bounded, self-contained task to a cheap-model worker Pi session with built-in file and shell tools routed through the OS sandbox (worker-sandbox). The worker gets its own context and its own git worktree by default. Set read_only for investigation-only workers that inspect the current workspace and produce no patch. Use for parallelizable investigation and well-specified implementation work; keep design decisions, integration, and review in this session.",
+      "Spawn a cheap-model worker Pi session and hand it a bounded, self-contained task. The worker gets built-in file and shell tools routed through the OS sandbox (worker-sandbox), its own context, and its own git worktree by default. Set read_only for investigation-only workers that inspect the current workspace and produce no patch. Use for parallelizable investigation and well-specified implementation work; keep design decisions, integration, and review in this session.",
     promptGuidelines: [
-      "Use delegate when a task is separable and well-specified: scouting a subsystem, mechanical edits across files, or trying an approach in isolation. Write the task so a fresh session with no conversation history can succeed: goal, files, constraints, verification.",
+      "Use spawn_worker when a task is separable and well-specified: scouting a subsystem, mechanical edits across files, or trying an approach in isolation. Write the task so a fresh session with no conversation history can succeed: goal, files, constraints, verification.",
       "Do not delegate vague or judgment-heavy work; workers use the globally configured worker model. Escalate to the main session when a worker fails twice or the task turns ambiguous.",
-      "After delegating, do not block: you are woken when the worker exits. Read its report with workers (action=status). Apply an implementation worker's patch with action=collect; read_only workers produce no patch.",
-      "Worker slots free themselves: only a running worker holds a slot, and a worker in a terminal state (completed, failed, timeout, cancelled) consumes none — never cancel it. cancel stops a live process; remove deletes a terminal worker's record and artifacts; to relaunch, just delegate again.",
+      "After spawning, do not block: you are woken when the worker exits. Read its report with workers (action=status). Apply an implementation worker's patch with action=collect; read_only workers produce no patch.",
+      "Worker slots free themselves: only a running worker holds a slot, and a worker in a terminal state (completed, failed, timeout, cancelled) consumes none — never cancel it. cancel stops a live process; remove deletes a terminal worker's record and artifacts; to relaunch, just spawn_worker again.",
     ],
     parameters: DELEGATE_PARAMETERS,
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
@@ -354,7 +354,7 @@ export default async function agentsExtension(pi: ExtensionAPI) {
         // an abort during setup or running-record persistence cannot be lost.
         const cancel = () => {
           void runningWorker.cancel().catch((error) => {
-            console.error(`[agents] worker cancel failed: ${(error as Error).message}`);
+            console.error(`[workers] worker cancel failed: ${(error as Error).message}`);
           });
         };
         signal?.addEventListener("abort", cancel, { once: true });
@@ -386,7 +386,7 @@ export default async function agentsExtension(pi: ExtensionAPI) {
     name: "workers",
     label: "Workers",
     description:
-      "Manage delegated worker sessions: list this session's workers (optionally orphans left by ended sessions), read a worker's report (status), cancel a running worker, or collect an isolated worker's patch into the working tree (collect). Lifecycle: only running workers hold a delegate slot — workers in a terminal state consume none. cancel stops a live process; remove deletes a terminal worker's record, artifacts, and worktree; to relaunch, just delegate again.",
+      "Manage spawned worker sessions: list this session's workers (optionally orphans left by ended sessions), read a worker's report (status), cancel a running worker, or collect an isolated worker's patch into the working tree (collect). Lifecycle: only running workers hold a slot — workers in a terminal state consume none. cancel stops a live process; remove deletes a terminal worker's record, artifacts, and worktree; to relaunch, just spawn_worker again.",
     parameters: WORKERS_PARAMETERS,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       lastUi = ctx.ui;
@@ -455,7 +455,7 @@ export default async function agentsExtension(pi: ExtensionAPI) {
             content: [
               {
                 type: "text",
-                text: `Worker ${record.name} is already ${record.status}; its slot is free. Use action=remove to delete the record and artifacts, or delegate to start a new worker.`,
+                text: `Worker ${record.name} is already ${record.status}; its slot is free. Use action=remove to delete the record and artifacts, or spawn_worker to start a new worker.`,
               },
             ],
             details: { worker: record },
@@ -619,7 +619,7 @@ export default async function agentsExtension(pi: ExtensionAPI) {
       await excludeFromGit(ctx.cwd, `${projectStateRelative("worktrees")}/`);
       await excludeFromGit(ctx.cwd, projectStateRelative("provision-tmp-*"));
     } catch (error) {
-      console.error(`[agents] git exclude failed: ${(error as Error).message}`);
+      console.error(`[workers] git exclude failed: ${(error as Error).message}`);
     }
     // Janitor: terminalize dead leftovers (status inferred from their
     // spools), watch live orphans until they exit, and warn only about

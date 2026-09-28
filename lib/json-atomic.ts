@@ -9,7 +9,7 @@
  * the machine. (Directory entries are not fsynced, so a power loss can still
  * roll the rename itself back; the invariant is no torn content.)
  *
- * Consumers: messenger reservations, missions, autoresearch, the agents
+ * Consumers: messenger reservations, missions, autoresearch, the workers
  * worker registry, and presence shards.
  */
 

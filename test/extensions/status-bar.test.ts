@@ -2354,13 +2354,13 @@ describe("status-bar worker roll-up", () => {
       percent: 25,
     }));
     await enableBar(mockPi, mockCtx);
-    getEventsHandler(mockPi, "agents:state")(payload);
+    getEventsHandler(mockPi, "workers:state")(payload);
   }
 
-  it("subscribes to agents:state at load time", async () => {
+  it("subscribes to workers:state at load time", async () => {
     const mockPi = createMockPi();
     await statusBarExtension(mockPi);
-    expect(getEventsHandler(mockPi, "agents:state")).toBeDefined();
+    expect(getEventsHandler(mockPi, "workers:state")).toBeDefined();
   });
 
   it("renders the worker spend segment when spend exists", async () => {

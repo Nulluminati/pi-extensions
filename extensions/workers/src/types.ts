@@ -1,4 +1,4 @@
-/** Worker session types for the agents extension. */
+/** Worker session types for the workers extension. */
 
 import type { ThinkingLevel } from "pi";
 import type { WorkerBlocker } from "../../../lib/worker-blocker.ts";

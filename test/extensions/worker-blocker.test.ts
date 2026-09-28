@@ -75,7 +75,7 @@ describe("worker-blocker-extension", () => {
     expect(mockPi.registerTool).not.toHaveBeenCalled();
   });
 
-  it("appends a sanitized single-line agents_blocker marker to the spool", async () => {
+  it("appends a sanitized single-line workers_blocker marker to the spool", async () => {
     await workerBlockerExtension(mockPi);
 
     const result = await getTool().execute(

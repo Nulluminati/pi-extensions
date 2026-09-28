@@ -46,9 +46,9 @@ const STDERR_TAIL_BYTES = 4 * 1024;
 export const STREAM_TAIL_BYTES = 512 * 1024;
 
 /** Parent-appended markers in the raw spool (distinguishable from pi JSON
- *  events, which never use the `agents_` type prefix). */
+ *  events, which never use the `workers_` type prefix). */
 interface AgentSpoolMarker {
-  type: "agents_start" | "agents_end";
+  type: "workers_start" | "workers_end";
   at: number;
   task?: string;
   status?: WorkerRecord["status"];
@@ -261,7 +261,7 @@ function spoolEndStatus(lines: string[]): { status?: string; error?: string } {
     if (line === undefined) continue;
     try {
       const event = JSON.parse(line) as AgentSpoolMarker;
-      if (event.type === "agents_end") {
+      if (event.type === "workers_end") {
         return {
           ...(event.status !== undefined ? { status: event.status } : {}),
           ...(event.error !== undefined ? { error: event.error } : {}),
@@ -401,7 +401,7 @@ export async function finalizeWorker(options: FinalizeOptions): Promise<WorkerRe
   }
 
   await appendSpoolLine(cwd, record.id, {
-    type: "agents_end",
+    type: "workers_end",
     at: record.endedAt,
     status,
     ...((error !== undefined && summarizeStreamValue(error) !== undefined
@@ -413,7 +413,7 @@ export async function finalizeWorker(options: FinalizeOptions): Promise<WorkerRe
     try {
       await onRecord(record);
     } catch (err) {
-      console.error(`[agents] terminal record persistence failed: ${(err as Error).message}`);
+      console.error(`[workers] terminal record persistence failed: ${(err as Error).message}`);
       events?.notify(
         "error",
         `worker ${record.name} (${record.id}) finished but its record could not be persisted: ${(err as Error).message}`,
@@ -540,7 +540,7 @@ export function armAdoptedTimeout(
       // Enforcement must never surface as an unhandled rejection. A later
       // janitor sweep can recover a record that remains running on disk.
       console.error(
-        `[agents] adopted worker ${record.id} deadline enforcement failed: ${(error as Error).message}`,
+        `[workers] adopted worker ${record.id} deadline enforcement failed: ${(error as Error).message}`,
       );
     });
   }, remaining);
@@ -668,7 +668,7 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
     assertNotAborted();
     const taskSummary = summarizeStreamValue(options.task);
     await appendSpoolLine(options.cwd, options.workerId, {
-      type: "agents_start",
+      type: "workers_start",
       at: Date.now(),
       ...(taskSummary !== undefined ? { task: taskSummary } : {}),
     });
@@ -685,13 +685,13 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
           PI_WORKER: "1",
           PI_WORKER_READONLY: options.readOnly ? "1" : "0",
           // Stable messenger identity: the worker is addressable in the mesh
-          // by its agents-registry name instead of a generated themed name.
+          // by its workers-registry name instead of a generated themed name.
           PI_MESSENGER_NAME: options.name,
           // Shared registry and inbox; the child still uses its worktree cwd
           // for file tools and reservation path normalization.
           PI_MESSENGER_PROJECT_ROOT: options.cwd,
           // Blocker channel: the worker-side report_blocker tool appends
-          // agents_blocker markers to this spool; the poller below ingests
+          // workers_blocker markers to this spool; the poller below ingests
           // them and wakes this session once, ids and status words only.
           [WORKER_STREAM_ENV_VAR]: spoolFile,
         },

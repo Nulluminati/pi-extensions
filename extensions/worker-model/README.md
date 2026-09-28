@@ -1,6 +1,6 @@
 # Worker Model Extension
 
-Selects one global model for delegated worker sessions (`agents` extension). The selection is enforced for every worker and appears in the input bar. There is no hardcoded worker model: an unconfigured delegate fails with a descriptive error naming the config path.
+Selects one global model for delegated worker sessions (`workers` extension). The selection is enforced for every worker and appears in the input bar. There is no hardcoded worker model: an unconfigured spawn_worker fails with a descriptive error naming the config path.
 
 ## Usage
 
@@ -11,7 +11,7 @@ Selects one global model for delegated worker sessions (`agents` extension). The
 /worker-model status                       # show the current selection
 ```
 
-The agents extension resolves every delegate through `lib/worker-model.ts`. `PI_WORKER_MODEL` wins over the saved config; individual delegate calls cannot override either source. Worker thinking defaults to `high` when an older config has no level.
+The workers extension resolves every spawn_worker call through `lib/worker-model.ts`. `PI_WORKER_MODEL` wins over the saved config; individual spawn_worker calls cannot override either source. Worker thinking defaults to `high` when an older config has no level.
 
 ## How It Works
 

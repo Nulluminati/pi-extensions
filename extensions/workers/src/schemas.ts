@@ -1,4 +1,4 @@
-/** Tool parameter schemas for the agents extension. */
+/** Tool parameter schemas for the workers extension. */
 
 export const DELEGATE_PARAMETERS = {
   type: "object",
@@ -16,7 +16,7 @@ export const DELEGATE_PARAMETERS = {
       type: "array",
       items: { type: "string" },
       description:
-        "Extension names for the worker to load (resolution: this param, then $PI_WORKER_EXTENSIONS, then worker-extensions.json, then the default set). messenger and worker-sandbox are always loaded. Workflow extensions (agents, missions, autoresearch, goal) are forbidden in workers.",
+        "Extension names for the worker to load (resolution: this param, then $PI_WORKER_EXTENSIONS, then worker-extensions.json, then the default set). messenger and worker-sandbox are always loaded. Workflow extensions (workers, missions, autoresearch, goal) are forbidden in workers.",
     },
     isolate: {
       type: "boolean",
@@ -46,7 +46,7 @@ export const WORKERS_PARAMETERS = {
     action: {
       enum: ["list", "status", "tail", "cancel", "collect", "remove"],
       description:
-        "Worker registry operation. Lifecycle: only running workers hold a delegate slot — a worker in a terminal state (completed, failed, timeout, cancelled) consumes none; cancel signals a live process, remove is cleanup only, and a fresh delegate relaunches. tail: read the bounded stream tail of a running or finished worker (tool calls, assistant texts) without anything auto-delivering into the conversation. remove: delete a finished worker's record and artifacts (stream spool, patch) and discard its worktree and branch; on an id with no record but a leftover worktree, discards that worktree.",
+        "Worker registry operation. Lifecycle: only running workers hold a slot — a worker in a terminal state (completed, failed, timeout, cancelled) consumes none; cancel signals a live process, remove is cleanup only, and a fresh spawn_worker relaunches. tail: read the bounded stream tail of a running or finished worker (tool calls, assistant texts) without anything auto-delivering into the conversation. remove: delete a finished worker's record and artifacts (stream spool, patch) and discard its worktree and branch; on an id with no record but a leftover worktree, discards that worktree.",
     },
     id: {
       type: "string",

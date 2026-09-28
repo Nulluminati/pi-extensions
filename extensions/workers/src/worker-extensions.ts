@@ -40,11 +40,11 @@ export const DEFAULT_WORKER_EXTENSIONS = [
 ] as const;
 
 /**
- * Workflow extensions that must never load in a worker: agents would allow
+ * Workflow extensions that must never load in a worker: workers would allow
  * nested delegation, missions/autoresearch/goal would let a one-shot worker
  * mutate durable project records or run campaigns.
  */
-export const FORBIDDEN_WORKER_EXTENSIONS = ["agents", "missions", "autoresearch", "goal"] as const;
+export const FORBIDDEN_WORKER_EXTENSIONS = ["workers", "missions", "autoresearch", "goal"] as const;
 
 /** Coordination, blocker reporting, and sandbox extensions loaded by every
  *  worker. worker-sandbox pins last so its built-in tool overrides cannot be
@@ -59,7 +59,7 @@ export const REQUIRED_WORKER_EXTENSIONS = [
 /**
  * Extension names map to extensions/<name>/<name>.ts; names outside the
  * lowercase letters, digits, and hyphens convention are rejected before any
- * filesystem access, so traversal like "agents/../agents" cannot slip past
+ * filesystem access, so traversal like "workers/../workers" cannot slip past
  * the denylist or resolve an unintended entrypoint.
  */
 const WORKER_EXTENSION_NAME_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
@@ -176,7 +176,7 @@ function workerExtensionsConfigPath(env: NodeJS.ProcessEnv): string {
   return override || agentConfigPath("worker-extensions", defaultAgentDir());
 }
 
-// This module lives at <repo>/extensions/agents/src/, so two directory
+// This module lives at <repo>/extensions/workers/src/, so two directory
 // levels up is the repository's extensions/ directory.
 function defaultExtensionsRoot(): string {
   return fileURLToPath(new URL("../../", import.meta.url));

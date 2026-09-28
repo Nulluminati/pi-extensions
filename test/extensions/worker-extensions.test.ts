@@ -9,7 +9,7 @@ import {
   REQUIRED_WORKER_EXTENSIONS,
   resolveWorkerExtensions,
   WORKER_EXTENSIONS_ENV_VAR,
-} from "../../extensions/agents/src/worker-extensions.ts";
+} from "../../extensions/workers/src/worker-extensions.ts";
 
 describe("worker-extensions", () => {
   let root: string;
@@ -30,8 +30,8 @@ describe("worker-extensions", () => {
       mkdirSync(join(root, name), { recursive: true });
       writeFileSync(join(root, name, `${name}.ts`), "export default async () => {};");
     }
-    mkdirSync(join(root, "agents"), { recursive: true });
-    writeFileSync(join(root, "agents", "agents.ts"), "export default async () => {};");
+    mkdirSync(join(root, "workers"), { recursive: true });
+    writeFileSync(join(root, "workers", "workers.ts"), "export default async () => {};");
     setEnv(WORKER_EXTENSIONS_ENV_VAR, undefined);
   });
 
@@ -200,16 +200,16 @@ describe("worker-extensions", () => {
   });
 
   it("rejects path traversal names that would resolve a denylisted extension", () => {
-    // "agents/../agents" resolves to extensions/agents/agents.ts, defeating
+    // "workers/../workers" resolves to extensions/workers/workers.ts, defeating
     // the literal-name denylist check.
     expect(() =>
-      resolveWorkerExtensions(["agents/../agents"], {
+      resolveWorkerExtensions(["workers/../workers"], {
         extensionsRoot: root,
         configPath,
       }),
     ).toThrow(/Invalid worker extension name/);
     expect(() =>
-      resolveWorkerExtensions(["messenger", "../agents"], {
+      resolveWorkerExtensions(["messenger", "../workers"], {
         extensionsRoot: root,
         configPath,
       }),

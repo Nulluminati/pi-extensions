@@ -23,7 +23,7 @@ messenger (action=release)                        # drop your reservations
 
 - **Worker sessions cannot send mail or publish free-text status and reservation reasons**: a session spawned with `PI_WORKER=1` can receive mail but cannot send it. Its status and reservation reason accept only `working`, `blocked`, or `waiting`; status also accepts `""` to clear. Peer block messages show reservation reasons, so this rule keeps worker text out of that channel. Read worker output through `workers status`, `workers tail`, or `report_blocker`. Coordinate between workers through the parent.
 
-- Reservation enforcement covers the `edit` and `write` tools only; bash-based writes are not blocked. For strong isolation run workers in a sandbox or in worktrees (the `agents` extension does the latter).
+- Reservation enforcement covers the `edit` and `write` tools only; bash-based writes are not blocked. For strong isolation run workers in a sandbox or in worktrees (the `workers` extension does the latter).
 - Delivery happens when the agent is idle or at a turn boundary; mail arriving mid-turn waits until the agent settles. Workers run one-shot Pi processes. Send to a worker while it is running; mail sent after it exits remains in the mailbox, but that worker cannot read it.
 - A session resumed via `pi -c` re-adopts its claims within the 10-minute grace window; after that, claims held before the quit have expired and must be re-reserved.
 - Forking a session does NOT duplicate the identity: the fork detects its persisted name is held by another live process and atomically claims the next suffixed name (`name-2`, `name-3`, …) under the registry lock. The fork saves that suffix, so a later resume keeps its mailbox even after the original name becomes free. A name whose holding process is dead is reusable immediately; claims themselves survive with a 10-minute orphan grace window.
@@ -45,6 +45,6 @@ messenger (action=release)                        # drop your reservations
 | Variable | Description |
 |----------|-------------|
 | `PI_MESSENGER_NAME` | Selects the session name; a persisted collision suffix from that name wins on resume. A different name overrides the stored identity. Workers use this setting for predictable mailbox addresses. |
-| `PI_MESSENGER_PROJECT_ROOT` | Internal worker setting passed by the agents extension. Points at the absolute parent project root so workers in different worktrees share presence, mailboxes, and reservations. Invalid paths fail instead of using a worktree-local mailbox. Non-worker sessions ignore it. |
+| `PI_MESSENGER_PROJECT_ROOT` | Internal worker setting passed by the workers extension. Points at the absolute parent project root so workers in different worktrees share presence, mailboxes, and reservations. Invalid paths fail instead of using a worktree-local mailbox. Non-worker sessions ignore it. |
 
 State lives in the parent project's `.pi/messenger/` for spawned workers; other sessions use their own working directory.

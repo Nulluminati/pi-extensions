@@ -41,7 +41,6 @@ import {
   resolveWorkerModelConfigPath as resolveWorkerModelConfigPathLib,
 } from "../../lib/worker-model.ts";
 import {
-  AGENTS_STATE_EVENT,
   APPROVAL_MODE_EVENT,
   FLEX_EVENT,
   GOAL_STATE_EVENT,
@@ -50,6 +49,7 @@ import {
   STATUS_ICON,
   STATUS_KEY,
   TEXT_COLOR,
+  WORKERS_STATE_EVENT,
 } from "./src/constants.ts";
 import { getModelLabel, PolishedEditor } from "./src/editor.ts";
 import { buildFooterLines } from "./src/footer.ts";
@@ -172,11 +172,11 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     state.lastHandle?.requestRender();
   });
 
-  // Worker spend roll-up from the agents extension. Like unreadMail, this is
-  // event-owned state: the agents extension re-announces on its lifecycle
+  // Worker spend roll-up from the workers extension. Like unreadMail, this is
+  // event-owned state: the workers extension re-announces on its lifecycle
   // events, so no session-boundary reset.
   pi.events.on(
-    AGENTS_STATE_EVENT,
+    WORKERS_STATE_EVENT,
     (payload: { running: number; workerCostUsd?: number; workerTokens?: number }) => {
       state.workerCostUsd = payload.workerCostUsd ?? 0;
       state.workerTokens = payload.workerTokens ?? 0;

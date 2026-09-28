@@ -70,7 +70,7 @@ export interface State {
   // already fired.
   unreadMail: number;
   // Aggregated token/cost usage of the project's delegated workers
-  // (published on agents:state). Zero while no workers have run.
+  // (published on workers:state). Zero while no workers have run.
   workerCostUsd: number;
   workerTokens: number;
 }

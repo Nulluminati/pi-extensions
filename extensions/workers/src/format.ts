@@ -7,8 +7,8 @@ import type { WorkerRecord } from "./types.ts";
 
 // --- Constants ---
 
-export const WORKERS_WIDGET_KEY = "agents";
-export const AGENTS_STATE_EVENT = "agents:state";
+export const WORKERS_WIDGET_KEY = "workers";
+export const WORKERS_STATE_EVENT = "workers:state";
 
 /** How many workers the widget shows before collapsing the rest. */
 const MAX_WIDGET_WORKERS = 5;
@@ -138,7 +138,7 @@ interface RawSpoolEvent {
 }
 
 /** Human-readable lines from a raw child-written spool (pi JSON events plus
- *  agents_start/agents_end markers), newest last. Same visual language as
+ *  workers_start/workers_end markers), newest last. Same visual language as
  *  the legacy projection: ▸ started tool, ✓ finished tool, ✎ text,
  *  ▷ started, ■ finished. */
 export function formatRawStreamEntries(lines: string[]): string[] {
@@ -177,12 +177,12 @@ export function formatRawStreamEntries(lines: string[]): string[] {
         const streamed = summarizeStreamValue(text);
         if (streamed !== undefined) out.push(`${time}✎ ${streamed}`);
       }
-    } else if (event.type === "agents_start") {
+    } else if (event.type === "workers_start") {
       out.push(`${time}▷ started${typeof event.task === "string" ? ` ${event.task}` : ""}`);
     } else if (event.type === BLOCKER_MARKER_TYPE) {
       const reason = typeof event.reason === "string" ? ` ${event.reason}` : "";
       out.push(`${time}⚠ blocker${reason}`);
-    } else if (event.type === "agents_end") {
+    } else if (event.type === "workers_end") {
       const suffix =
         (typeof event.status === "string" ? ` ${event.status}` : "") +
         (typeof event.error === "string" ? ` — ${event.error}` : "");

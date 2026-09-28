@@ -10,7 +10,7 @@ Use `/approval-mode off` to skip Jev review for the rest of the main session. Ha
 
 ## Read-only workers
 
-`delegate` with `read_only: true` starts a report-only investigation worker in the current workspace. It has research tools, a read-only workspace sandbox, and the Jev command gate. A rejected or uncertain worker command blocks and appears in its report; workers cannot open approval dialogs. Writable workers keep their existing sandbox and the Jev command gate.
+`spawn_worker` with `read_only: true` starts a report-only investigation worker in the current workspace. It has research tools, a read-only workspace sandbox, and the Jev command gate. A rejected or uncertain worker command blocks and appears in its report; workers cannot open approval dialogs. Writable workers keep their existing sandbox and the Jev command gate.
 
 ## Configuration
 
