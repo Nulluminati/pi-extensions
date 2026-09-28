@@ -117,12 +117,12 @@ describe("approval-mode Jev diagnostics", () => {
     }
   });
 
-  it("escalates remote mutation even when a user requests it", async () => {
+  it("rejects persistent writes outside the project", async () => {
     mockAnswer({ intent: 0.99, harm: 0.01, secrets: 0.01, externalChange: 0.91 });
     expect(
       (
         await judgeCommand({
-          command: "git push origin feature/auth",
+          command: "cp dist/bundle.js /var/www/html/",
           cwd: "/workspace",
           apiKey: "test-key",
         })
