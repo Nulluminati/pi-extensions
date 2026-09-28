@@ -7,6 +7,7 @@
 
 import { resolve } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "pi";
+import { promptApproval } from "./src/dialog.ts";
 import { judgeCommand } from "./src/jev.ts";
 import { classifyCommand } from "./src/policy.ts";
 
@@ -122,10 +123,7 @@ export default async function approvalMode(pi: ExtensionAPI) {
     await previous;
     try {
       if (ctx.signal?.aborted) return { block: true, reason: "Approval cancelled." };
-      const choice = await ctx.ui.select(
-        `Warning: Jev ${result.decision === "reject" ? "rejected" : "could not confirm"} this command.\n${result.reason}\n\n${command}\n\nApprove this call only?`,
-        ["Approve once", "Block"],
-      );
+      const choice = await promptApproval(ctx, command, result.decision, result.reason);
       if (ctx.signal?.aborted || choice !== "Approve once") {
         return { block: true, reason: `Approval Mode blocked: ${result.reason}.` };
       }

@@ -10,6 +10,7 @@ import { access, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs
 import { dirname, join, resolve } from "node:path";
 import { runGit } from "../../../lib/git.ts";
 import { isProjectStatePath, projectStateDir } from "../../../lib/paths.ts";
+import { assertWorkerId } from "./ids.ts";
 import type { WorkerRecord } from "./types.ts";
 
 // --- Constants ---
@@ -30,11 +31,11 @@ export function worktreesDir(cwd: string): string {
 }
 
 export function worktreePath(cwd: string, workerId: string): string {
-  return join(worktreesDir(cwd), workerId);
+  return join(worktreesDir(cwd), assertWorkerId(workerId));
 }
 
 export function worktreeBranch(workerId: string): string {
-  return `agents/${workerId}`;
+  return `agents/${assertWorkerId(workerId)}`;
 }
 
 // --- Operations ---

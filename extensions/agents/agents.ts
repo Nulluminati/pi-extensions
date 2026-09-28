@@ -42,6 +42,7 @@ import {
   type WorkerSessionState,
 } from "./src/delegate.ts";
 import { AGENTS_STATE_EVENT, createWorkersWidget, WORKERS_WIDGET_KEY } from "./src/format.ts";
+import { assertWorkerId } from "./src/ids.ts";
 import { SetupHookCancelled } from "./src/provision/hook.ts";
 import {
   armAdoptedTimeout,
@@ -415,8 +416,9 @@ export default async function agentsExtension(pi: ExtensionAPI) {
         });
       }
 
-      const id = typeof params.id === "string" ? params.id.trim() : "";
-      if (!id) throw new Error(`workers ${String(action)} requires id.`);
+      const id = typeof params.id === "string" ? params.id : "";
+      if (!id.trim()) throw new Error(`workers ${String(action)} requires id.`);
+      assertWorkerId(id);
 
       const live = state.running.get(id)?.record;
       const record: WorkerRecord | undefined =

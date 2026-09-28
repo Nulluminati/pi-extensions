@@ -20,6 +20,7 @@ import { withFileLock } from "../../../lib/file-lock.ts";
 import { writeJsonAtomic } from "../../../lib/json-atomic.ts";
 import { projectStateDir } from "../../../lib/paths.ts";
 import { isProcessAlive } from "../../../lib/presence-shards.ts";
+import { assertWorkerId, isWorkerId } from "./ids.ts";
 import type { WorkerRecord } from "./types.ts";
 import { discardWorktree, worktreesDir } from "./worktree.ts";
 
@@ -41,11 +42,15 @@ export function recordsDir(cwd: string): string {
 }
 
 export function recordPath(cwd: string, workerId: string): string {
-  return join(recordsDir(cwd), `${workerId}.json`);
+  return join(recordsDir(cwd), `${assertWorkerId(workerId)}.json`);
 }
 
 export function patchesDir(cwd: string): string {
   return join(workersDir(cwd), "patches");
+}
+
+export function patchPath(cwd: string, workerId: string): string {
+  return join(patchesDir(cwd), `${assertWorkerId(workerId)}.diff`);
 }
 
 /** Per-worker stream projection (filtered event log for the tail action). */
@@ -54,13 +59,13 @@ export function streamsDir(cwd: string): string {
 }
 
 export function streamPath(cwd: string, workerId: string): string {
-  return join(streamsDir(cwd), `${workerId}.jsonl`);
+  return join(streamsDir(cwd), `${assertWorkerId(workerId)}.jsonl`);
 }
 
 /** Child stderr capture: written by the child itself (survives parent
  *  death), read for failure detail at finalization. */
 export function stderrLogPath(cwd: string, workerId: string): string {
-  return join(streamsDir(cwd), `${workerId}.stderr.log`);
+  return join(streamsDir(cwd), `${assertWorkerId(workerId)}.stderr.log`);
 }
 
 /** Nominal stream spool size. No writer enforces this cap: a chatty worker
@@ -73,7 +78,7 @@ export const STREAM_MAX_BYTES = 512 * 1024;
  *  record.json d'un worker étranger (l'owner n'écrit jamais via ce lock ;
  *  ses writes sont single-writer par construction). */
 function recordLockPath(cwd: string, workerId: string): string {
-  return join(recordsDir(cwd), `${workerId}.lock`);
+  return join(recordsDir(cwd), `${assertWorkerId(workerId)}.lock`);
 }
 
 /** Transcript custom entry type carrying worker records. */
@@ -100,7 +105,7 @@ function isWorkerRecord(value: unknown): value is WorkerRecord {
   return (
     typeof value === "object" &&
     value !== null &&
-    typeof (value as WorkerRecord).id === "string" &&
+    isWorkerId((value as WorkerRecord).id) &&
     typeof (value as WorkerRecord).status === "string"
   );
 }
@@ -145,10 +150,11 @@ export async function readRecordFile(
   cwd: string,
   workerId: string,
 ): Promise<WorkerRecord | undefined> {
+  assertWorkerId(workerId);
   try {
     const raw = await readFile(recordPath(cwd, workerId), "utf8");
     const parsed: unknown = JSON.parse(raw);
-    return isWorkerRecord(parsed) ? parsed : undefined;
+    return isWorkerRecord(parsed) && parsed.id === workerId ? parsed : undefined;
   } catch (error) {
     if (isNodeError(error) && (error.code === "ENOENT" || error.code === "ENOTDIR"))
       return undefined;
@@ -185,7 +191,9 @@ export async function listRecordFiles(cwd: string): Promise<WorkerRecord[]> {
   const records: WorkerRecord[] = [];
   for (const file of files) {
     if (!file.endsWith(".json")) continue;
-    const record = await readRecordFile(cwd, file.replace(/\.json$/, ""));
+    const id = file.replace(/\.json$/, "");
+    if (!isWorkerId(id)) continue;
+    const record = await readRecordFile(cwd, id);
     if (record) records.push(record);
   }
   return records;
@@ -368,7 +376,7 @@ export async function pruneWorkerArtifacts(cwd: string, now = Date.now()): Promi
     await unlink(recordPath(cwd, record.id)).catch(() => {});
     await unlink(streamPath(cwd, record.id)).catch(() => {});
     await unlink(stderrLogPath(cwd, record.id)).catch(() => {});
-    await unlink(join(patchesDir(cwd), `${record.id}.diff`)).catch(() => {});
+    await unlink(patchPath(cwd, record.id)).catch(() => {});
   }
   return pruned;
 }
@@ -459,7 +467,7 @@ export async function removeWorkerRecord(cwd: string, id: string): Promise<void>
   await unlink(recordPath(cwd, id)).catch(() => {});
   await unlink(streamPath(cwd, id)).catch(() => {});
   await unlink(stderrLogPath(cwd, id)).catch(() => {});
-  await unlink(join(patchesDir(cwd), `${id}.diff`)).catch(() => {});
+  await unlink(patchPath(cwd, id)).catch(() => {});
 }
 
 /** Convenience read for a single worker's artifact record. */

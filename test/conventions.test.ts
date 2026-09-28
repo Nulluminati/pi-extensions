@@ -9,7 +9,8 @@
  * `.pi/skills/...` — only real path segments are violations.
  */
 
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import * as ts from "typescript/unstable/ast";
 import { describe, expect, it } from "vitest";
@@ -34,7 +35,7 @@ function sourceFiles(dir: string, found: string[] = []): string[] {
       sourceFiles(path, found);
     } else if (
       entry.isFile() &&
-      entry.name.endsWith(".ts") &&
+      (entry.name.endsWith(".ts") || entry.name.endsWith(".mjs")) &&
       !entry.name.endsWith("_template.ts")
     ) {
       found.push(path);
@@ -45,8 +46,8 @@ function sourceFiles(dir: string, found: string[] = []): string[] {
 
 /**
  * Cheap pre-filter: only a file that mentions a risky token can violate, so
- * the TypeScript compiler server parses a handful of files instead of all
- * ~185. Comments make this over-inclusive, which is fine — the AST decides.
+ * the TypeScript compiler server parses a handful of source files. Comments
+ * make this over-inclusive, which is fine — the AST decides.
  */
 const RISKY_TOKEN = /\bhomedir\b|["'`]\.pi[/"'`]/;
 
@@ -78,6 +79,8 @@ describe("path conventions", () => {
   it("scans every extension and lib source file", () => {
     // Guards against a broken walk silently passing the suite.
     expect(files.length).toBeGreaterThan(150);
+    expect(files).toContain(join(ROOT, "extensions", "worker-sandbox", "src", "broker.mjs"));
+    expect(files).toContain(join(ROOT, "extensions", "worker-sandbox", "src", "tool-child.mjs"));
   });
 
   // The larger cap accommodates slow filesystem metadata walks without
@@ -90,6 +93,19 @@ describe("path conventions", () => {
       );
     expect(offenders).toEqual([]);
   }, 60_000);
+
+  it("parses a JavaScript source violation", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pi-conventions-"));
+    try {
+      const file = join(dir, "unsafe.mjs");
+      writeFileSync(file, 'import { homedir } from "node:os"; export const state = homedir();\n');
+      expect(conventionsViolations(file)).toContain(
+        "uses homedir(); global paths go through lib/paths.ts",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 
   it("pre-filters before paying for a parse", () => {
     // If this ever reaches the full file count the pre-filter has stopped

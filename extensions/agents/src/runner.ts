@@ -29,7 +29,7 @@ import {
 } from "../../../lib/worker-blocker.ts";
 import { SetupHookCancelled } from "./provision/hook.ts";
 import type { ProvisionStatus } from "./provision/types.ts";
-import { patchesDir, stderrLogPath, streamPath } from "./store.ts";
+import { stderrLogPath, streamPath, patchPath as workerPatchPath } from "./store.ts";
 import type { WorkerActivity, WorkerEvents, WorkerRecord } from "./types.ts";
 import { captureWorktreePatch } from "./worktree.ts";
 
@@ -384,7 +384,7 @@ export async function finalizeWorker(options: FinalizeOptions): Promise<WorkerRe
   else delete record.error;
 
   if (worktree !== undefined && (status === "completed" || status === "timeout")) {
-    const patchPath = join(patchesDir(cwd), `${record.id}.diff`);
+    const patchPath = workerPatchPath(cwd, record.id);
     try {
       await captureWorktreePatch(worktree.path, patchPath);
       record.patchPath = patchPath;
@@ -847,7 +847,7 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
       const timedOutError = `worker exceeded ${timeoutSeconds}s timeout`;
       void finish(
         cancelRequested ? "cancelled" : timedOut ? "timeout" : undefined,
-        timedOutError,
+        timedOut && !cancelRequested ? timedOutError : undefined,
       ).then(resolveDone);
     });
     child.on("error", (err) => {
@@ -876,6 +876,7 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
     clearInterval(ingestTimer);
     throw spawnError;
   }
+  if (child === undefined) void finish("failed", spawnError?.message).then(resolveDone);
   if (child !== undefined && child.pid !== undefined) record.pid = child.pid;
   return {
     record,

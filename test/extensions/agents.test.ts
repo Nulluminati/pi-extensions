@@ -41,10 +41,12 @@ import {
   loadWorker,
   loadWorkersFromBranch,
   migrateLegacyRegistry,
+  patchPath,
   persistWorkerRecord,
   persistWorkerRemoval,
   pruneStreams,
   pruneWorkerArtifacts,
+  recordPath,
   removeWorkerRecord,
   stderrLogPath,
   streamPath,
@@ -64,6 +66,8 @@ import {
   discardWorktree,
   isGitRepo,
   removeWorktree,
+  worktreeBranch,
+  worktreePath,
 } from "../../extensions/agents/src/worktree.ts";
 import { withFileLock } from "../../lib/file-lock.ts";
 import { cleanGitEnv, runGit } from "../../lib/git.ts";
@@ -560,6 +564,25 @@ ${SUCCESS_WORKER}`,
     expect(cancelled.details.worker.status).toBe("cancelled");
   });
 
+  it("workers cancel records cancellation instead of a timeout", async () => {
+    const fixture = await writeFixture(fixtureDir, "slow-worker.sh", SLOW_WORKER);
+    setEnv("PI_WORKER_COMMAND", fixture);
+    const started = await executeTool("delegate", { task: "long", isolate: false });
+    const id = started.details.workerId as string;
+
+    const cancelled = await executeTool("workers", { action: "cancel", id });
+    expect(cancelled.content[0].text).toContain("cancelled");
+    expect(cancelled.details.worker.status).toBe("cancelled");
+    expect(cancelled.details.worker.error).toBe("cancelled by user");
+    const saved = await loadWorker(cwd, id);
+    expect(saved?.status).toBe("cancelled");
+    expect(saved?.error).toBe("cancelled by user");
+    expect(mockCtx.ui.notify).not.toHaveBeenCalledWith(
+      expect.stringContaining("timed out"),
+      "warning",
+    );
+  });
+
   it("delegate fails with a descriptive error when no worker model is configured", async () => {
     setEnv("PI_WORKER_MODEL", undefined);
     // No worker-model.json config exists in the temp cwd's agent dir.
@@ -1033,6 +1056,21 @@ sleep 30
     expect(result.content[0].text).toContain("delegate to start a new worker");
   });
 
+  it("workers remove rejects traversal before touching another worker's worktree", async () => {
+    const victim = join(cwd, CONFIG_DIR_NAME, "worktrees", "w-victim");
+    await mkdir(victim, { recursive: true });
+    vi.mocked(runGit).mockClear();
+
+    await expect(
+      executeTool("workers", { action: "remove", id: "w-decoy/../w-victim" }),
+    ).rejects.toThrow(/Invalid worker id/);
+    expect(existsSync(victim)).toBe(true);
+    expect(runGit).not.toHaveBeenCalled();
+    await expect(executeTool("workers", { action: "status", id: "w-victim\n" })).rejects.toThrow(
+      /Invalid worker id/,
+    );
+  });
+
   it("a worker whose binary is missing persists and notifies the spawn error", async () => {
     setEnv("PI_WORKER_COMMAND", join(fixtureDir, "missing-binary.sh"));
 
@@ -1047,10 +1085,63 @@ sleep 30
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("ENOENT"), "error");
   });
 
-  it("workers cancel settles a worker whose spawn never produced a child", async () => {
+  it("a failed spawn settles completion without a cancel request", async () => {
+    const streams = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
+    await mkdir(join(streams, ".."), { recursive: true });
+    await writeFile(streams, "not a directory", "utf8");
+    const events = testEvents();
+    const onRecord = vi.fn((record: WorkerRecord) => writeRecordFile(cwd, record));
+    const running = await startWorker({
+      cwd,
+      task: "doomed",
+      model: "test-model",
+      thinkingLevel: "medium",
+      name: "doomed",
+      timeoutMs: 60_000,
+      workerId: "w-failed-spawn",
+      extensionPaths: [],
+      events,
+      onRecord,
+    });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const result = await Promise.race([
+        running.done,
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => reject(new Error("failed spawn did not settle")), 1_000);
+        }),
+      ]);
+      expect(result.status).toBe("failed");
+      expect(result.error).toContain("EEXIST");
+      expect((await loadWorker(cwd, result.id))?.status).toBe("failed");
+      expect(onRecord).toHaveBeenCalledWith(expect.objectContaining({ status: "failed" }));
+      expect(events.notify).toHaveBeenCalledWith("error", expect.stringContaining("EEXIST"));
+    } finally {
+      if (timer) clearTimeout(timer);
+      await running.cancel();
+    }
+  });
+
+  it("a failed spawn releases its worker slot without cancellation", async () => {
+    const streams = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
+    await mkdir(join(streams, ".."), { recursive: true });
+    await writeFile(streams, "not a directory", "utf8");
+    setEnv("PI_MAX_WORKERS", "1");
+
+    const first = await executeTool("delegate", { task: "doomed", isolate: false });
+    const failed = await waitForRecord(cwd, first.details.workerId as string, "failed", 2_000);
+    expect(failed.error).toContain("EEXIST");
+    await rm(streams, { force: true });
+    const fixture = await writeFixture(fixtureDir, "ok-worker.sh", SUCCESS_WORKER);
+    setEnv("PI_WORKER_COMMAND", fixture);
+
+    const next = await executeTool("delegate", { task: "works", isolate: false, wait: true });
+    expect(next.details.worker.status).toBe("completed");
+  });
+
+  it("workers cancel reports a worker whose spawn never produced a child", async () => {
     // The streams path as a regular file fails the runner's spool mkdir before
-    // spawn: no child process exists, so nothing finalizes the record and
-    // cancellation is the only path that must settle it.
+    // spawn. Completion marks the record failed; cancellation must preserve it.
     const streams = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
     await mkdir(join(streams, ".."), { recursive: true });
     await writeFile(streams, "not a directory", "utf8");
@@ -1123,7 +1214,7 @@ sleep 30
     expect(events.notify).not.toHaveBeenCalled();
   });
 
-  it("session_shutdown settles a failed-spawn worker and still cancels a live one", async () => {
+  it("session_shutdown preserves a failed-spawn record and cancels a live worker", async () => {
     const streams = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
     await mkdir(join(streams, ".."), { recursive: true });
     await writeFile(streams, "not a directory", "utf8");
@@ -3045,6 +3136,29 @@ describe("agents-worker store (session-scoped)", () => {
       expect.stringMatching(/records\/w-x\.lock$/),
       expect.any(Function),
     );
+  });
+
+  it("rejects invalid worker ids before constructing any artifact or worktree path", async () => {
+    const paths = [recordPath, streamPath, stderrLogPath, patchPath, worktreePath];
+    for (const id of [
+      "w-decoy/../w-victim",
+      "../w-victim",
+      "w-victim\\other",
+      "w-victim\n",
+      "/w-victim",
+    ]) {
+      for (const path of paths) expect(() => path(cwd, id)).toThrow(/Invalid worker id/);
+      expect(() => worktreeBranch(id)).toThrow(/Invalid worker id/);
+      await expect(loadWorker(cwd, id)).rejects.toThrow(/Invalid worker id/);
+    }
+    expect(worktreePath(cwd, "w-valid-123")).toContain("w-valid-123");
+  });
+
+  it("does not load an artifact record with another worker's id", async () => {
+    const path = recordPath(cwd, "w-requested");
+    await mkdir(join(path, ".."), { recursive: true });
+    await writeFile(path, JSON.stringify(makeWorkerRecord({ id: "w-victim" })), "utf8");
+    expect(await loadWorker(cwd, "w-requested")).toBeUndefined();
   });
 
   it("updateRecordFile throws for an unknown worker", async () => {

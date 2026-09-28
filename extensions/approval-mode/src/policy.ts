@@ -56,11 +56,12 @@ const KNOWN_SAFE = [
 
 /** These options invoke another program whose effects the outer command does not describe. */
 const EXECUTION_HOOKS = [
-  /\bgit\s+-c\s+(?:core\.(?:fsmonitor|sshcommand|hookspath)|alias\.[\w-]+)=/i,
+  /\bgit\s+-c\s+(?:core\.(?:fsmonitor|sshcommand|hookspath|pager)|gpg\.program|alias\.[\w-]+)=/i,
   /\bgit\s+ls-remote\b[^\n;&|]*--upload-pack(?:=|\s)/i,
   /\bsort\b[^\n;&|]*--compress-program(?:=|\s)/i,
   /\brg\b[^\n;&|]*--pre(?:=|\s)/i,
-  /\bfd\b[^\n;&|]*\s-[xX](?:\S*|\s)/i,
+  /\bfd\b[^\n;&|]*\s(?:-[xX](?:\S*|\s)|--exec(?:-batch)?(?:=|\s|$))/i,
+  /\bfind\b[^\n;&|]*\s-exec(?:dir)?(?:\s|$)/i,
 ];
 
 export function hasExecutionHook(command: string): boolean {

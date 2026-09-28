@@ -110,6 +110,12 @@ describe("approval-mode Jev diagnostics", () => {
       "sort --compress-program=./evil input",
       "rg --pre ./evil pattern",
       "fd -xnode payload",
+      "fd --exec node payload",
+      "fd --exec-batch node payload",
+      "find ./src -type f -exec node payload {} +",
+      "find ./src -type f -execdir node payload {} +",
+      "git -c core.pager=./evil log -1",
+      "git -c gpg.program=./evil commit -S -m test",
     ]) {
       expect(
         (await judgeCommand({ command, cwd: "/workspace", apiKey: "test-key" })).decision,
@@ -215,10 +221,34 @@ describe("approval-mode extension", () => {
     expect(body.state.cwd).toBe("/workspace/subdir");
   });
 
+  it("uses the framed dialog in TUI mode and keeps native selection in RPC mode", async () => {
+    vi.stubEnv("TYPESAFEAI_API_KEY", "test-key");
+    mockAnswer({ intent: 0.04, harm: 0.99, secrets: 0.01 });
+    const { handler, ctx } = await setup();
+    ctx.ui.custom.mockResolvedValue("Block");
+    ctx.ui.select.mockResolvedValue("Block");
+    expect(await handler({ toolName: "bash", input: { command: "npm test" } }, ctx)).toMatchObject({
+      block: true,
+    });
+    expect(ctx.ui.custom).toHaveBeenCalledWith(expect.any(Function));
+    expect(ctx.ui.select).not.toHaveBeenCalled();
+
+    ctx.mode = "rpc";
+    expect(await handler({ toolName: "bash", input: { command: "npm test" } }, ctx)).toMatchObject({
+      block: true,
+    });
+    expect(ctx.ui.select).toHaveBeenCalledWith(
+      expect.stringContaining("npm test"),
+      ["Approve once", "Block"],
+      expect.any(Object),
+    );
+  });
+
   it("asks before a rejected main-chat command and grants only that call", async () => {
     vi.stubEnv("TYPESAFEAI_API_KEY", "test-key");
     mockAnswer({ intent: 0.04, harm: 0.99, secrets: 0.01 });
     const { handler, ctx } = await setup();
+    ctx.mode = "rpc";
     ctx.ui.select.mockResolvedValueOnce("Approve once").mockResolvedValueOnce("Block");
     expect(
       await handler({ toolName: "bash", input: { command: "npm test" } }, ctx),
@@ -234,6 +264,7 @@ describe("approval-mode extension", () => {
     vi.stubEnv("TYPESAFEAI_API_KEY", "test-key");
     mockAnswer({ intent: 0.5, harm: 0.5, secrets: 0.5 });
     const { handler, ctx } = await setup();
+    ctx.mode = "rpc";
     ctx.ui.select.mockResolvedValue(undefined);
     expect(await handler({ toolName: "bash", input: { command: "npm test" } }, ctx)).toMatchObject({
       block: true,
