@@ -160,7 +160,7 @@ describe("worker-model-extension", () => {
     expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("not configured"), "error");
 
     const { saveWorkerModelConfig } = await import("../../lib/worker-model.ts");
-    saveWorkerModelConfig(
+    await saveWorkerModelConfig(
       { provider: "synthetic", model: "hf:zai-org/GLM-5.3-Flash", thinkingLevel: "high" },
       path,
     );

@@ -9,6 +9,7 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "pi";
+import { findNewestCustomEntry } from "../../../lib/session-utils.ts";
 
 // --- Types ---
 
@@ -31,12 +32,14 @@ function lastPersistedName(
   branch: Array<{ type?: string; customType?: string; data?: { name?: string } }>,
   customType: string,
 ): string | undefined {
-  for (const entry of [...branch].reverse()) {
-    if (entry.type === "custom" && entry.customType === customType && entry.data?.name) {
-      return entry.data.name;
-    }
-  }
-  return undefined;
+  const entry = findNewestCustomEntry(
+    branch,
+    customType,
+    (data) =>
+      typeof data === "object" && data !== null && Boolean((data as { name?: unknown }).name),
+  );
+  const data = entry?.data as { name?: string } | undefined;
+  return data?.name;
 }
 
 /**

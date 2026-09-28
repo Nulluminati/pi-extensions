@@ -8,6 +8,7 @@
 import { randomBytes } from "node:crypto";
 import { mkdir, readdir, readFile } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
+import { isNodeError } from "../../../lib/errors.ts";
 import { withFileLock } from "../../../lib/file-lock.ts";
 import { writeJsonAtomic } from "../../../lib/json-atomic.ts";
 import { projectStateDir } from "../../../lib/paths.ts";
@@ -109,10 +110,6 @@ function missionLockPath(cwd: string, id: string): string {
     cwd,
     join(missionsDir(cwd), ".locks", `${encodeURIComponent(validateMissionId(id))}.lock`),
   );
-}
-
-function isNodeError(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error && "code" in error;
 }
 
 export interface LockTimings {
@@ -235,8 +232,11 @@ export async function listMissionSummaries(cwd: string): Promise<MissionListResu
   let files: string[] = [];
   try {
     files = await readdir(missionsDir(cwd));
-  } catch {
-    return { summaries: [], skipped: [] };
+  } catch (error) {
+    // A directory that does not exist yet means no missions. Any other
+    // failure must surface instead of reporting an empty project.
+    if (isNodeError(error) && error.code === "ENOENT") return { summaries: [], skipped: [] };
+    throw new Error(`Cannot list mission files in ${missionsDir(cwd)}: ${String(error)}`);
   }
   const summaries: MissionSummary[] = [];
   const skipped: string[] = [];

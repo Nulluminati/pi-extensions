@@ -14,6 +14,7 @@
 
 import { readdir, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
+import { isNodeError } from "./errors.ts";
 import { writeJsonAtomic } from "./json-atomic.ts";
 
 // --- Types ---
@@ -48,10 +49,6 @@ export function isProcessAlive(pid: number): boolean {
 
 export function shardPath(dir: string, agentName: string): string {
   return join(dir, `${encodeURIComponent(agentName)}.json`);
-}
-
-function isNodeError(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error && "code" in error;
 }
 
 // --- JSON helpers ---

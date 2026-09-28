@@ -14,6 +14,7 @@ import { randomBytes } from "node:crypto";
 import { closeSync, mkdirSync, openSync, statSync, unlinkSync } from "node:fs";
 import { appendFile, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { isNodeError } from "../../../lib/errors.ts";
 import { withFileLock } from "../../../lib/file-lock.ts";
 import { writeJsonAtomic } from "../../../lib/json-atomic.ts";
 import { projectStateDir, projectStateRelative } from "../../../lib/paths.ts";
@@ -24,6 +25,7 @@ import {
   removeShard,
   writeShard,
 } from "../../../lib/presence-shards.ts";
+import { assertValidAgentName } from "./identity.ts";
 import type { Message, Presence, PresenceRegistry, ReservationMap } from "./types.ts";
 
 // --- Paths ---
@@ -88,10 +90,6 @@ export function inboxPath(cwd: string, name: string): string {
 }
 
 // --- Error helpers ---
-
-function isNodeError(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error && "code" in error;
-}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -206,8 +204,6 @@ export async function claimIdentity(
 
 // --- Mailbox ---
 
-const MAX_MAILBOX_NAME_LENGTH = 200;
-
 /**
  * 8 random bytes: markRead deletes every message matching an id it is given,
  * so a duplicate id would silently drop unread mail. Two bytes collided
@@ -216,18 +212,6 @@ const MAX_MAILBOX_NAME_LENGTH = 200;
  */
 export function generateMessageId(): string {
   return `msg-${Date.now().toString(36)}-${randomBytes(8).toString("hex")}`;
-}
-
-/**
- * Reject mailbox identities that cannot be a single path segment even after
- * percent-encoding (separators, NUL) or that are empty/absurdly long. Name
- * encoding alone keeps traversal inside the inbox; validation fails closed
- * at the address boundary instead of creating a mailbox nobody can read.
- */
-function assertValidMailboxName(name: string): void {
-  if (!name || name.length > MAX_MAILBOX_NAME_LENGTH || /[\\/\0]/.test(name)) {
-    throw new Error(`Invalid recipient mailbox name: ${JSON.stringify(name)}`);
-  }
 }
 
 /** Splits JSONL content into non-blank lines, keeping both the trimmed text
@@ -254,7 +238,10 @@ export async function sendMessage(
   from: string,
   text: string,
 ): Promise<Message> {
-  assertValidMailboxName(to);
+  // The address is an agent name: name encoding alone keeps traversal inside
+  // the inbox, so validation fails closed instead of creating a mailbox
+  // nobody can read.
+  assertValidAgentName(to);
   const message: Message = {
     id: generateMessageId(),
     from,

@@ -236,6 +236,16 @@ describe("worker-extensions", () => {
     ]);
   });
 
+  it("surfaces a worker-extensions config it cannot read", () => {
+    // A directory at the config path: readFileSync fails with EISDIR, not
+    // ENOENT. Falling back to the default set would hide a broken config.
+    mkdirSync(configPath, { recursive: true });
+
+    expect(() => resolveWorkerExtensions(undefined, { extensionsRoot: root, configPath })).toThrow(
+      /cannot read worker extensions config/i,
+    );
+  });
+
   it("rejects malformed config files and env values with descriptive errors", () => {
     writeFileSync(configPath, "{ not json");
     expect(() => resolveWorkerExtensions(undefined, { extensionsRoot: root, configPath })).toThrow(

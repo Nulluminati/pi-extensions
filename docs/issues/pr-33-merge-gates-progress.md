@@ -1,6 +1,6 @@
 # PR #33 merge-gate work
 
-- Status: four merge gates, finding 7, and majors 5, 6, 8 complete; cross-cutting themes and nits remain open
+- Status: four merge gates, finding 7, majors 5/6/8, and this session's cross-cutting themes complete; the docs/nit batch and remaining themes stay open
 - Source review: [pr-33-review-findings.md](pr-33-review-findings.md)
 - Scope: Approval Mode dialog, four reported merge gates, the worker-ID path escape, and majors 5, 6, 8.
 
@@ -15,7 +15,9 @@ Work in this order. Record the test result beside each item before marking it do
 7. [x] Finding 5 (voice TTS cache): build the sherpa engine per model instead of one unkeyed slot. A Kitten-to-Supertonic switch failed before the fix (one `createAsync` call, expected two) and passes after it. The full voice suite: 104/104.
 8. [x] Finding 6 (reservation data shape): validate the map and each claim on read, so valid JSON with a wrong shape fails closed instead of turning enforcement off. Eight invalid shapes covered; three targeted tests pass.
 9. [x] Finding 8 (neuralwatt README): add DeepSeek V4 Flash (Speed) and DeepSeek V4.1 Flash to the introduction, catalog table, and thinking-level table. The parity test passed after the update.
+10. [x] Cross-cutting dedup: one `isNodeError` in `lib/errors.ts` replaces eight copies, one `THINKING_LEVELS` in `lib/thinking-levels.ts` serves three consumers, `findNewestCustomEntry` in `lib/session-utils.ts` replaces two hand-rolled scans, worker-model config writes route through `writeJsonAtomic` with a `mode` option so the owner-only mode survives, and mailbox validation reuses `assertValidAgentName`. New tests: 4 errors, 3 thinking levels, 4 newest-entry.
+11. [x] Cross-cutting error swallowing: autoresearch pending clear, worker-extensions config read, worker-blocker spool mkdir, and the missions listing now swallow `ENOENT` only and surface every other code. Each fix had a failing-first test (EISDIR, EISDIR, EACCES, ENOTDIR).
 
-Verification: `npm run format` made no further changes. `npm run check` passed Biome, both typechecks, 26 extension validations, and 1,432 tests. The synthetic approval calibration passed 45/45 twice; it did not execute the example commands.
+Verification: `npm run format` made no further changes. `npm run check` passed Biome, both typechecks, 26 extension validations, and 1,449 tests. The synthetic approval calibration passed 45/45 twice; it did not execute the example commands.
 
-The cross-cutting themes and nits in the source review remain open after this pass.
+The docs and nit batch in the source review, plus the themes outside this share, remain open.

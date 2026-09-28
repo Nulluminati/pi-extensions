@@ -4,6 +4,7 @@
 
 import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { isNodeError } from "../../../lib/errors.ts";
 import { excludeFromGit } from "../../../lib/git.ts";
 import { writeJsonAtomic } from "../../../lib/json-atomic.ts";
 import { projectStateDir, projectStateRelative } from "../../../lib/paths.ts";
@@ -40,10 +41,6 @@ function isActiveConfig(value: unknown): value is AutoConfig {
     (c.direction === "lower" || c.direction === "higher") &&
     typeof c.measure === "string"
   );
-}
-
-function isNodeError(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error && "code" in error;
 }
 
 /** Read a state file, distinguishing "absent" from "broken": only ENOENT (or

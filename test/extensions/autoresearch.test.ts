@@ -9,9 +9,10 @@ import type { ExtensionAPI, ExtensionContext } from "pi";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import autoresearchExtension from "../../extensions/autoresearch/autoresearch.ts";
 import { CHECKS_TIMEOUT_MS, parseMetric } from "../../extensions/autoresearch/src/measure.ts";
+import { clearPending } from "../../extensions/autoresearch/src/pending.ts";
 import { AUTORESEARCH_PARAMETERS } from "../../extensions/autoresearch/src/schemas.ts";
 import { bestEntry, spreadScore } from "../../extensions/autoresearch/src/stats.ts";
-import { loadConfig, readLog } from "../../extensions/autoresearch/src/store.ts";
+import { autoDir, loadConfig, readLog } from "../../extensions/autoresearch/src/store.ts";
 import type { RunEntry } from "../../extensions/autoresearch/src/types.ts";
 import { cleanGitEnv } from "../../lib/git.ts";
 import { projectStateRelative } from "../../lib/paths.ts";
@@ -1031,6 +1032,19 @@ describe("autoresearch-extension", () => {
       await shutdown({ type: "session_shutdown", reason: "reload" }, mockCtx);
       expect(mockCtx.ui.setWidget).toHaveBeenLastCalledWith(STRIP_KEY_ABOVE, undefined);
     });
+  });
+  it("clearPending surfaces a pending file it cannot delete", async () => {
+    // A directory where pending.json belongs: unlink fails with EISDIR, not
+    // ENOENT. Only a missing file may be ignored.
+    const path = join(autoDir(cwd), "pending.json");
+    await mkdir(path, { recursive: true });
+
+    await expect(
+      clearPending(
+        { toolActivity: 0, lastSeenActivity: 0, continuationQueued: false, idleWakes: 0 },
+        cwd,
+      ),
+    ).rejects.toThrow(/could not be cleared/);
   });
 });
 

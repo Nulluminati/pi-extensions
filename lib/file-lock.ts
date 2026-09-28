@@ -30,6 +30,7 @@ import { randomBytes } from "node:crypto";
 import type { FileHandle } from "node:fs/promises";
 import { link, mkdir, open, readFile, rename, stat, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
+import { isNodeError } from "./errors.ts";
 
 // --- Constants ---
 
@@ -70,10 +71,6 @@ export interface FileLockOptions {
 }
 
 // --- Helpers ---
-
-function isNodeError(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error && "code" in error;
-}
 
 /** Best-effort liveness probe: signal 0 throws ESRCH for a dead pid and
  *  EPERM for a live one we cannot signal. */

@@ -20,6 +20,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { isNodeError } from "../../../lib/errors.ts";
 import { agentConfigPath } from "../../../lib/paths.ts";
 
 // --- Constants ---
@@ -146,8 +147,13 @@ function loadWorkerExtensionsConfig(configPath: string): string[] | undefined {
   let raw: string;
   try {
     raw = readFileSync(configPath, "utf8");
-  } catch {
-    return undefined; // No config: caller falls back to defaults.
+  } catch (error) {
+    // Only a config file that cannot exist means "not configured"; a
+    // failure to read an existing one must not fall back to the defaults.
+    if (isNodeError(error) && (error.code === "ENOENT" || error.code === "ENOTDIR")) {
+      return undefined;
+    }
+    throw new Error(`Cannot read worker extensions config ${configPath}: ${String(error)}`);
   }
   let parsed: unknown;
   try {

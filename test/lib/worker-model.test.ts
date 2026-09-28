@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -38,7 +38,7 @@ describe("worker-model", () => {
 
   it("resolves the environment model and default thinking instead of the saved config", async () => {
     setEnv(WORKER_MODEL_ENV_VAR, "opencode-go/glm-5.3-flash");
-    saveWorkerModelConfig(
+    await saveWorkerModelConfig(
       { provider: "synthetic", model: "hf:zai-org/GLM-5.3-Flash", thinkingLevel: "low" },
       configPath,
     );
@@ -53,7 +53,7 @@ describe("worker-model", () => {
   });
 
   it("resolves the saved model and thinking level when the environment is unset", async () => {
-    saveWorkerModelConfig(
+    await saveWorkerModelConfig(
       { provider: "synthetic", model: "hf:zai-org/GLM-5.3-Flash", thinkingLevel: "xhigh" },
       configPath,
     );
@@ -69,7 +69,7 @@ describe("worker-model", () => {
 
   it("environment variable wins over the config file", async () => {
     setEnv(WORKER_MODEL_ENV_VAR, "opencode-go/glm-5.3-flash");
-    saveWorkerModelConfig(
+    await saveWorkerModelConfig(
       { provider: "synthetic", model: "other", thinkingLevel: "low" },
       configPath,
     );
@@ -83,7 +83,7 @@ describe("worker-model", () => {
   });
 
   it("loads the config file when no environment variable is set", async () => {
-    saveWorkerModelConfig(
+    await saveWorkerModelConfig(
       { provider: "synthetic", model: "hf:zai-org/GLM-5.3-Flash", thinkingLevel: "medium" },
       configPath,
     );
@@ -114,7 +114,7 @@ describe("worker-model", () => {
   });
 
   it("round-trips through save and load", async () => {
-    saveWorkerModelConfig(
+    await saveWorkerModelConfig(
       { provider: "opencode-go", model: "glm-5.3-flash", thinkingLevel: "high" },
       configPath,
     );
@@ -163,7 +163,13 @@ describe("worker-model", () => {
 
   it("writes config atomically and creates parent directories", async () => {
     const nested = join(cwd, "deep", "dir", "worker-model.json");
-    saveWorkerModelConfig({ provider: "a", model: "b", thinkingLevel: "high" }, nested);
+    await saveWorkerModelConfig({ provider: "a", model: "b", thinkingLevel: "high" }, nested);
     expect(await readFile(nested, "utf8")).toContain('"provider": "a"');
+  });
+
+  it("keeps the config file owner-only readable", async () => {
+    await saveWorkerModelConfig({ provider: "a", model: "b", thinkingLevel: "high" }, configPath);
+
+    expect((await stat(configPath)).mode & 0o777).toBe(0o600);
   });
 });

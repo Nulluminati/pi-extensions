@@ -12,6 +12,7 @@
 import { exec as execCb } from "node:child_process";
 import { promisify } from "node:util";
 import type { AgentToolResult, ExtensionContext } from "pi";
+import { findNewestCustomEntry } from "../../../lib/session-utils.ts";
 import {
   formatMissionStatus,
   formatMissionSummaries,
@@ -116,13 +117,9 @@ export async function loadSessionActiveMission(
     customType?: string;
     data?: { id?: unknown };
   }>;
-  let id: string | undefined;
-  for (const entry of [...branch].reverse()) {
-    if (entry.type === "custom" && entry.customType === MISSION_ACTIVE_ENTRY_TYPE) {
-      id = typeof entry.data?.id === "string" ? entry.data.id : undefined;
-      break;
-    }
-  }
+  const entry = findNewestCustomEntry(branch, MISSION_ACTIVE_ENTRY_TYPE);
+  const data = entry?.data as { id?: unknown } | undefined;
+  const id = typeof data?.id === "string" ? data.id : undefined;
   if (!id) return undefined;
   try {
     return await loadMission(ctx.cwd, id);

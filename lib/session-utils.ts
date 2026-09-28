@@ -26,6 +26,13 @@ export interface ToolResultBlock {
 
 export type ContentBlock = TextBlock | ToolCallBlock | ToolResultBlock;
 
+/** Loose view of a session transcript entry: only the fields callers read. */
+export interface SessionEntry {
+  type?: string;
+  customType?: string;
+  data?: unknown;
+}
+
 // --- Helpers ---
 
 /**
@@ -67,4 +74,26 @@ export function extractToolResultBlocks(content: unknown): ToolResultBlock[] {
   return parseContentBlocks(content).filter(
     (block): block is ToolResultBlock => block.type === "toolResult",
   );
+}
+
+/**
+ * The newest custom entry carried under `customType`, or undefined.
+ *
+ * Transcript branches are append-only and oldest first, so the last match
+ * wins. `accept` lets a caller skip an entry whose payload is unusable and
+ * keep searching older ones instead of giving up at the newest match.
+ */
+export function findNewestCustomEntry(
+  branch: readonly SessionEntry[] | undefined,
+  customType: string,
+  accept?: (data: unknown) => boolean,
+): SessionEntry | undefined {
+  const entries = branch ?? [];
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (entry?.type !== "custom" || entry.customType !== customType) continue;
+    if (accept && !accept(entry.data)) continue;
+    return entry;
+  }
+  return undefined;
 }

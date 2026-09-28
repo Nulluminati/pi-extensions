@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "pi";
@@ -138,6 +138,23 @@ describe("worker-blocker-extension", () => {
     await expect(
       getTool().execute("call-1", { reason: "stuck" }, undefined, undefined, mockCtx),
     ).rejects.toThrow(/report_blocker could not reach the parent channel/);
+  });
+  it("surfaces a spool directory it cannot create instead of swallowing the mkdir error", async () => {
+    // The streams directory is missing under a read-only parent: mkdir fails
+    // with EACCES while appendFile would fail with ENOENT. Only ENOENT may be
+    // ignored, so the reported code must be EACCES.
+    const parent = join(root, "readonly");
+    await mkdir(parent, { recursive: true });
+    await chmod(parent, 0o555);
+    setEnv(WORKER_STREAM_ENV_VAR, join(parent, "streams", "w-1.jsonl"));
+    await workerBlockerExtension(mockPi);
+    try {
+      await expect(
+        getTool().execute("call-1", { reason: "stuck" }, undefined, undefined, mockCtx),
+      ).rejects.toThrow(/EACCES/);
+    } finally {
+      await chmod(parent, 0o755);
+    }
   });
 });
 

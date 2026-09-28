@@ -26,13 +26,13 @@ export function parseWorkerModelSpec(args: string): WorkerModelConfig | undefine
   };
 }
 
-export function applyWorkerConfig(
+export async function applyWorkerConfig(
   config: WorkerModelConfig,
   ctx: ExtensionCommandContext,
-): boolean {
+): Promise<boolean> {
   const configPath = resolveWorkerModelConfigPath();
   try {
-    saveWorkerModelConfig(config, configPath);
+    await saveWorkerModelConfig(config, configPath);
   } catch (error) {
     ctx.ui.notify(
       `Could not save global worker model config: ${error instanceof Error ? error.message : String(error)}`,
@@ -48,10 +48,10 @@ export function applyWorkerConfig(
   return true;
 }
 
-export function applyWorkerThinkingLevel(
+export async function applyWorkerThinkingLevel(
   thinkingLevel: ThinkingLevel,
   ctx: ExtensionCommandContext,
-): boolean {
+): Promise<boolean> {
   let current: WorkerModelConfig;
   try {
     current = loadWorkerModelConfig().config;

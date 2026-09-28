@@ -20,6 +20,7 @@
 import { appendFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { ExtensionAPI } from "pi";
+import { isNodeError } from "../../lib/errors.ts";
 import {
   BLOCKER_MARKER_TYPE,
   BLOCKER_REASON_MAX_CHARS,
@@ -75,7 +76,12 @@ export default async function workerBlockerExtension(pi: ExtensionAPI) {
       // marker line on the worker's own spool (atomic O_APPEND writes).
       const marker = `${JSON.stringify({ type: BLOCKER_MARKER_TYPE, at: Date.now(), reason })}\n`;
       try {
-        await mkdir(dirname(spoolPath), { recursive: true }).catch(() => {});
+        await mkdir(dirname(spoolPath), { recursive: true }).catch((error) => {
+          // The parent channel's directory is created on demand; only ENOENT
+          // can be ignored, because the append below reports the failure with
+          // more context. Every other failure (EACCES…) surfaces here.
+          if (!isNodeError(error) || error.code !== "ENOENT") throw error;
+        });
         await appendFile(spoolPath, marker, "utf8");
       } catch (err) {
         throw new Error(

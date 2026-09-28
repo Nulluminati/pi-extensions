@@ -16,6 +16,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readdir, readFile, rm, unlink } from "node:fs/promises";
 import { join } from "node:path";
+import { isNodeError } from "../../../lib/errors.ts";
 import { withFileLock } from "../../../lib/file-lock.ts";
 import { writeJsonAtomic } from "../../../lib/json-atomic.ts";
 import { projectStateDir } from "../../../lib/paths.ts";
@@ -134,10 +135,6 @@ export function loadWorkersFromBranch(branch: unknown[]): Map<string, WorkerReco
 }
 
 // --- Artifact record files (janitor metadata) ---
-
-function isNodeError(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error && "code" in error;
-}
 
 /** Write one worker's artifact metadata file. Single-writer: only the
  *  owning session writes its own records, except collect (locked). */

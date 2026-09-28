@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -31,6 +31,14 @@ describe("json-atomic", () => {
     await writeJsonAtomic(path, ["x"]);
 
     expect(JSON.parse(await readFile(path, "utf8"))).toEqual(["x"]);
+  });
+
+  it("writes the file with the requested mode", async () => {
+    const path = join(dir, "secret.json");
+
+    await writeJsonAtomic(path, { token: "x" }, { mode: 0o600 });
+
+    expect((await stat(path)).mode & 0o777).toBe(0o600);
   });
 
   it("replaces an existing file and leaves no temp files behind", async () => {

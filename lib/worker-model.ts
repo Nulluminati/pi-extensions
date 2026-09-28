@@ -8,12 +8,14 @@
  * child resolves its own auth.
  */
 
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { readFileSync } from "node:fs";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { ThinkingLevel } from "pi";
+import { isNodeError } from "./errors.ts";
+import { writeJsonAtomic } from "./json-atomic.ts";
 import { agentConfigPath } from "./paths.ts";
 import { parseSmallModelSpec } from "./small-model.ts";
+import { THINKING_LEVELS } from "./thinking-levels.ts";
 
 // --- Constants ---
 
@@ -21,16 +23,6 @@ export const WORKER_MODEL_ENV_VAR = "PI_WORKER_MODEL";
 export const WORKER_MODEL_THINKING_ENV_VAR = "PI_WORKER_MODEL_THINKING";
 export const WORKER_MODEL_CONFIG_ENV_VAR = "PI_WORKER_MODEL_CONFIG";
 export const DEFAULT_WORKER_THINKING_LEVEL: ThinkingLevel = "high";
-
-const THINKING_LEVELS = new Set<ThinkingLevel>([
-  "off",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-]);
 
 // --- Types ---
 
@@ -131,16 +123,11 @@ export function loadWorkerModelConfig(options: ConfigOptions = {}): {
   };
 }
 
-export function saveWorkerModelConfig(config: WorkerModelConfig, configPath: string): void {
-  mkdirSync(dirname(configPath), { recursive: true });
-  const temporaryPath = `${configPath}.${process.pid}.${Date.now()}.tmp`;
-  try {
-    writeFileSync(temporaryPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
-    renameSync(temporaryPath, configPath);
-  } catch (error) {
-    rmSync(temporaryPath, { force: true });
-    throw error;
-  }
+export async function saveWorkerModelConfig(
+  config: WorkerModelConfig,
+  configPath: string,
+): Promise<void> {
+  await writeJsonAtomic(configPath, config, { mode: 0o600 });
 }
 
 // --- Resolution ---
@@ -174,8 +161,4 @@ function parseThinkingLevel(value: unknown, source: string): ThinkingLevel {
   throw new Error(
     `Invalid ${source} value "${String(value)}". Expected off, minimal, low, medium, high, xhigh, or max.`,
   );
-}
-
-function isNodeError(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error && "code" in error;
 }

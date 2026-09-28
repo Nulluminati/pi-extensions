@@ -57,7 +57,7 @@ export default async function workerModelExtension(pi: ExtensionAPI) {
           );
           return;
         }
-        applyWorkerThinkingLevel(requestedLevel as ThinkingLevel, ctx);
+        await applyWorkerThinkingLevel(requestedLevel as ThinkingLevel, ctx);
         return;
       }
 
@@ -71,7 +71,7 @@ export default async function workerModelExtension(pi: ExtensionAPI) {
         }
         return;
       }
-      applyWorkerConfig(config, ctx);
+      await applyWorkerConfig(config, ctx);
     },
   });
 }

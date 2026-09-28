@@ -626,6 +626,15 @@ describe("missions-extension", () => {
     expect(skipped).toContain(shapeFile);
   });
 
+  it("listMissionSummaries surfaces a missions directory it cannot read", async () => {
+    // A file where the missions directory belongs: readdir fails with
+    // ENOTDIR, not ENOENT. An empty result would claim there are no missions.
+    await mkdir(join(cwd, CONFIG_DIR_NAME), { recursive: true });
+    await writeFile(missionsDir(cwd), "not a directory", "utf8");
+
+    await expect(listMissionSummaries(cwd)).rejects.toThrow(/cannot list mission files/i);
+  });
+
   it("generateMissionId produces unique ids for 1000 calls in one millisecond", () => {
     const spy = vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
     try {

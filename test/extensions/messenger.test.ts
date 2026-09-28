@@ -698,10 +698,10 @@ describe("messenger-extension", () => {
       /send requires text/,
     );
     await expect(executeTool({ action: "send", to: "../escape", text: "hi" })).rejects.toThrow(
-      /Invalid recipient mailbox name/,
+      /cannot be used as an agent name/,
     );
     await expect(executeTool({ action: "send", to: "has/slash", text: "hi" })).rejects.toThrow(
-      /Invalid recipient mailbox name/,
+      /cannot be used as an agent name/,
     );
   });
 
@@ -1452,8 +1452,12 @@ describe("messenger-store", () => {
   });
 
   it("sendMessage rejects a recipient name that would escape the inbox", async () => {
-    await expect(sendMessage(cwd, "../escape", "me", "hi")).rejects.toThrow(/recipient/i);
-    await expect(sendMessage(cwd, "..\\escape", "me", "hi")).rejects.toThrow(/recipient/i);
+    await expect(sendMessage(cwd, "../escape", "me", "hi")).rejects.toThrow(
+      /cannot be used as an agent name/,
+    );
+    await expect(sendMessage(cwd, "..\\escape", "me", "hi")).rejects.toThrow(
+      /cannot be used as an agent name/,
+    );
     expect(existsSync(join(cwd, CONFIG_DIR_NAME, "messenger", "escape.jsonl"))).toBe(false);
     expect(existsSync(join(cwd, CONFIG_DIR_NAME, "escape.jsonl"))).toBe(false);
   });

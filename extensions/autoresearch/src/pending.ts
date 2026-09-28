@@ -4,6 +4,7 @@
 
 import { readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
+import { isNodeError } from "../../../lib/errors.ts";
 import { writeJsonAtomic } from "../../../lib/json-atomic.ts";
 import { autoDir, readLog } from "./store.ts";
 import type { InstanceState, PendingMeasurement, RunEntry } from "./types.ts";
@@ -37,12 +38,7 @@ export async function loadPending(state: InstanceState, cwd: string): Promise<vo
   try {
     raw = await readFile(path, "utf8");
   } catch (error) {
-    if (
-      error instanceof Error &&
-      "code" in error &&
-      (error.code === "ENOENT" || error.code === "ENOTDIR")
-    )
-      return;
+    if (isNodeError(error) && (error.code === "ENOENT" || error.code === "ENOTDIR")) return;
     throw new Error(`autoresearch pending state ${path} is unreadable: ${String(error)}`);
   }
   let parsed: unknown;
@@ -86,5 +82,12 @@ export async function savePending(state: InstanceState, cwd: string): Promise<vo
 
 export async function clearPending(state: InstanceState, cwd: string): Promise<void> {
   state.pending = undefined;
-  await unlink(join(autoDir(cwd), PENDING_FILE)).catch(() => {});
+  const path = join(autoDir(cwd), PENDING_FILE);
+  await unlink(path).catch((error) => {
+    // A pending file that is already gone needs no clearing. Anything else
+    // (EISDIR, EACCES) must surface instead of claiming the state is clear.
+    if (!isNodeError(error) || error.code !== "ENOENT") {
+      throw new Error(`autoresearch pending state ${path} could not be cleared: ${String(error)}`);
+    }
+  });
 }
