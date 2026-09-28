@@ -226,6 +226,31 @@ describe("autoresearch-extension", () => {
     expect(await readFile(join(cwd, "code.txt"), "utf8")).toBe("foreign edit\n");
   });
 
+  it("keep does not stage project state created mid-campaign", async () => {
+    await initSession();
+    await writeFile(join(cwd, "metric.txt"), "90\n");
+
+    await executeTool({ action: "run", description: "experiment that makes state" });
+    // Infrastructure, not an experiment change: the sandbox policy file is
+    // project state under the config dir and must never enter a commit.
+    await writeFile(join(cwd, CONFIG_DIR_NAME, "sandbox.json"), "{}\n");
+    const log = await executeTool({
+      action: "log",
+      status: "keep",
+      description: "experiment that makes state",
+    });
+    expect(log.content[0].text).toContain("Kept (commit");
+
+    const shown = await execFileAsync(
+      "git",
+      ["show", "--pretty=", "--name-only", "HEAD"],
+      gitOpts(cwd),
+    );
+    const committed = shown.stdout.split("\n").filter(Boolean);
+    expect(committed).toContain("metric.txt");
+    expect(committed).not.toContain(join(CONFIG_DIR_NAME, "sandbox.json"));
+  });
+
   it("discard does not restore a tracked file that was dirty before the campaign", async () => {
     await initSession();
     await seedDirtyAtInit(cwd, ["code.txt"]);
@@ -406,6 +431,33 @@ describe("autoresearch-extension", () => {
     expect(log.content[0].text).toContain("Discarded");
     expect(await readFile(join(cwd, "code.txt"), "utf8")).toBe("v1\n");
     expect(existsSync(join(cwd, CONFIG_DIR_NAME, "autoresearch", "pending.json"))).toBe(false);
+  });
+
+  it("session start clears stale in-memory pending when the file is gone", async () => {
+    // Instance A holds a pending run in memory; another instance resolves it
+    // and removes pending.json from disk. A's next session_start must drop
+    // its stale copy, or A refuses every new run as "already pending".
+    await initSession();
+    await writeFile(join(cwd, "code.txt"), "stale pending edit\n");
+    await executeTool({ action: "run", description: "stale pending experiment" });
+    const pendingPath = join(cwd, CONFIG_DIR_NAME, "autoresearch", "pending.json");
+    expect(existsSync(pendingPath)).toBe(true);
+
+    // The other instance resolves the run and clears the file.
+    await writeFile(join(cwd, "code.txt"), "v1\n");
+    await rm(pendingPath);
+
+    await getEventHandler("session_start", mockPi)(
+      { type: "session_start", reason: "reload" },
+      mockCtx,
+    );
+
+    await expect(
+      executeTool({ action: "run", description: "fresh experiment" }),
+    ).resolves.toMatchObject({
+      content: [expect.objectContaining({ type: "text" })],
+    });
+    expect(existsSync(pendingPath)).toBe(true);
   });
 
   it("session shutdown clears the status line and lifecycle state", async () => {

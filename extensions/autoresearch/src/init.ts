@@ -17,6 +17,7 @@ import { clearPending, loadPending } from "./pending.ts";
 import {
   appendLog,
   archiveLog,
+  configFileExists,
   excludeAutoFromGit,
   loadConfig,
   nextRunNumber,
@@ -88,9 +89,11 @@ export async function initAction(
   }
   // Re-init must not erase an unreadable or corrupt pending experiment.
   await loadPending(state, cwd);
-  if (existing?.stopped) {
+  if (existing?.stopped || (await configFileExists(cwd))) {
     // A stop only deactivates the campaign; archive its log so the new
-    // campaign starts with a clean baseline and run numbering.
+    // campaign starts with a clean baseline and run numbering. A file that
+    // exists but reads as absent (foreign shape) gets the same treatment:
+    // the old log must never leak into the new campaign's baseline.
     await archiveLog(cwd);
   }
   const config: AutoConfig = {

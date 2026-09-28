@@ -19,8 +19,8 @@ import {
   loadUntrackedSnapshot,
   nextRunNumber,
   readLog,
-  saveConfig,
   saveUntrackedSnapshot,
+  stopConfig,
 } from "./store.ts";
 import type {
   AutoConfig,
@@ -162,11 +162,12 @@ export async function logAction(
 
   const summary = buildSummary(config, entries);
   let stopNote = "";
+  let stoppedNow = false;
   if (config.maxIterations !== undefined && summary.iterations >= config.maxIterations) {
-    config.stopped = true;
-    await saveConfig(cwd, config);
+    const stopped = (await stopConfig(cwd)) ?? { ...config, stopped: true };
+    stoppedNow = stopped.stopped === true;
     stopNote = ` Iteration cap (${config.maxIterations}) reached — the loop is now stopped.`;
-    publish(ctx, config, entries);
+    publish(ctx, stopped, entries);
   } else {
     publish(ctx, config, entries);
   }
@@ -181,6 +182,6 @@ export async function logAction(
         text: `${status === "keep" ? `Kept (commit ${commit})` : "Discarded (reverted)"}. ${formatSummary(summary, entries)}.${spreadNote}${stopNote}`,
       },
     ],
-    details: { entry, summary, stopped: config.stopped === true },
+    details: { entry, summary, stopped: stoppedNow },
   };
 }

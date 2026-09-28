@@ -10,6 +10,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import type { Dirent } from "node:fs";
 import { appendFile, mkdir, readdir, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
+import { isProcessAlive } from "../../../lib/presence-shards.ts";
 import { appendBuffer, slugify } from "./format.ts";
 import { createJob, finalizeJob, type JobRegistry } from "./registry.ts";
 import type { Job, JobEvents } from "./types.ts";
@@ -58,6 +59,12 @@ export async function pruneSpoolDir(
     }
     const path = join(spoolDir, entry.name);
     if (keep.has(path)) continue;
+    // A pid-stamped log whose owning process is alive is never a deletion
+    // candidate, for age or for the file cap: another session is still
+    // appending to it, and its registry is invisible here. Legacy names
+    // without the stamp keep the old age/count behavior.
+    const ownerPid = /^job-\d+-p(\d+)-/.exec(entry.name)?.[1];
+    if (ownerPid !== undefined && isProcessAlive(Number.parseInt(ownerPid, 10))) continue;
     try {
       logs.push({ path, mtimeMs: (await stat(path)).mtimeMs });
     } catch (error) {
@@ -106,7 +113,9 @@ export async function startBackgroundJob(options: StartBackgroundOptions): Promi
   const job = createJob(registry, { kind: "background", label, command });
 
   await mkdir(options.spoolDir, { recursive: true });
-  job.spoolPath = join(options.spoolDir, `job-${job.id}-${label}.log`);
+  // The owning pid in the name lets any session's prune recognize another
+  // live session's active log and never delete it (see pruneSpoolDir).
+  job.spoolPath = join(options.spoolDir, `job-${job.id}-p${process.pid}-${label}.log`);
   job.wakeOnPattern = options.wakeOnPattern;
   job.patternSource = options.patternSource;
 

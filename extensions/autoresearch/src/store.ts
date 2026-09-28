@@ -2,9 +2,10 @@
  * `.pi/autoresearch/` directory is excluded locally from git during init so keep/revert
  * cycles can never destroy the experiment record. */
 
-import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isNodeError } from "../../../lib/errors.ts";
+import { withFileLock } from "../../../lib/file-lock.ts";
 import { excludeFromGit } from "../../../lib/git.ts";
 import { writeJsonAtomic } from "../../../lib/json-atomic.ts";
 import { projectStateDir, projectStateRelative } from "../../../lib/paths.ts";
@@ -60,6 +61,44 @@ async function readStateFile(path: string): Promise<string | undefined> {
 
 export async function saveConfig(cwd: string, config: AutoConfig): Promise<void> {
   await writeJsonAtomic(configPath(cwd), config);
+}
+
+/** Lock sibling of config.json for read-modify-write cycles. */
+function configLockPath(cwd: string): string {
+  return `${configPath(cwd)}.lock`;
+}
+
+/**
+ * Stop the active campaign under the config lock, re-reading the file so
+ * two racing stoppers (a budget cap in one window, a stall stop in another)
+ * serialize instead of saving stale whole-file copies over each other.
+ * Returns the stopped config as written, or undefined when no valid config
+ * exists on disk (the caller decides its fallback).
+ */
+export async function stopConfig(cwd: string): Promise<AutoConfig | undefined> {
+  return withFileLock(configLockPath(cwd), async () => {
+    const config = await loadConfig(cwd);
+    if (!config || config.stopped) return config;
+    config.stopped = true;
+    await writeJsonAtomic(configPath(cwd), config);
+    return config;
+  });
+}
+
+/**
+ * True when a config.json file exists on disk, readable or not, valid or
+ * not. Re-init uses this to archive the previous log even when the old
+ * config is foreign-shaped (loadConfig reads that as absent), so a new
+ * campaign never inherits the previous campaign's log or baseline.
+ */
+export async function configFileExists(cwd: string): Promise<boolean> {
+  try {
+    await stat(configPath(cwd));
+    return true;
+  } catch (error) {
+    if (isNodeError(error) && (error.code === "ENOENT" || error.code === "ENOTDIR")) return false;
+    throw error;
+  }
 }
 
 export async function loadConfig(cwd: string): Promise<AutoConfig | undefined> {

@@ -601,8 +601,8 @@ export default async function agentsExtension(pi: ExtensionAPI) {
     // Terminalize dead leftovers BEFORE pruning: their spools are the
     // status-of-record for salvage.
     await finalizeStaleWorkers(ctx, new Set(state.branchWorkers.keys()));
-    // Rétention : artifacts des records terminaux au-delà de 7 jours sortis,
-    // puis spools orphelins. Spools of any still-running worker (branch or
+    // Retention: artifacts of terminal records past 7 days are removed,
+    // then orphaned spools. Spools of any still-running worker (branch or
     // record file) are protected — adoption may not have persisted its
     // record file yet.
     await pruneWorkerArtifacts(ctx.cwd);

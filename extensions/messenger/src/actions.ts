@@ -63,11 +63,11 @@ export async function runMessengerAction(
   }
 
   if (action === "send") {
-    // Limite de confiance : un worker ne pousse jamais du texte généré
-    // par un modèle dans une autre conversation (mail auto-délivré avec
-    // triggerTurn). La sortie d'un worker ne remonte au parent que par
-    // les surfaces en lecture du tool workers (status, tail, spool).
-    // Les workers REÇOivent du courrier ; ils ne l'envoient pas.
+    // Trust boundary: a worker never pushes model-generated text into
+    // another conversation (mail is auto-delivered with triggerTurn). A
+    // worker's output reaches the parent only through the read surfaces
+    // of the workers tool (status, tail, spool). Workers RECEIVE mail;
+    // they never send it.
     if (process.env.PI_WORKER === "1") {
       throw new Error(
         "send is disabled for worker sessions: worker output reaches the parent only through the workers tool (status, tail). A worker receives mail but never sends it.",
@@ -145,10 +145,10 @@ export async function runMessengerAction(
 
   if (action === "status") {
     const text = typeof params.status === "string" ? params.status.trim() : "";
-    // Même frontière de confiance que send : la ligne de présence d'un
-    // worker est rendue par le `messenger list` de chaque pair, donc un
-    // worker ne publie qu'une valeur bornée. Le texte libre reste réservé
-    // au parent. La chaîne vide est toujours permise (effacer le statut).
+    // Same trust boundary as send: a worker's presence line is rendered by
+    // every peer's messenger list, so a worker may publish only a bounded
+    // value. Free text stays reserved for the parent. The empty string is
+    // always allowed (clearing the status).
     if (
       process.env.PI_WORKER === "1" &&
       text !== "" &&

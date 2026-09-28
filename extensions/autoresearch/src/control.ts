@@ -7,7 +7,7 @@ import { projectStateRelative } from "../../../lib/paths.ts";
 import { buildSummary, formatSummary } from "./format.ts";
 import { discardExperiment } from "./measure.ts";
 import { clearPending, entriesAndPending, loadPending } from "./pending.ts";
-import { loadConfig, loadUntrackedSnapshot, readLog, saveConfig } from "./store.ts";
+import { loadConfig, loadUntrackedSnapshot, readLog, stopConfig } from "./store.ts";
 import type { AutoConfig, InstanceState, PublishFn } from "./types.ts";
 
 // --- Status action ---
@@ -50,9 +50,8 @@ export async function stopAction(
     await discardExperiment(cwd, await loadUntrackedSnapshot(cwd), config.dirtyAtInit);
     await clearPending(state, cwd);
   }
-  config.stopped = true;
-  await saveConfig(cwd, config);
-  publish(ctx, config, entries);
+  const stopped = (await stopConfig(cwd)) ?? { ...config, stopped: true };
+  publish(ctx, stopped, entries);
   return {
     content: [
       {

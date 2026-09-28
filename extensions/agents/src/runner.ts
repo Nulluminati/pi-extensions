@@ -16,7 +16,7 @@
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
-import { appendFile, mkdir, open, stat } from "node:fs/promises";
+import { appendFile, mkdir, open } from "node:fs/promises";
 import { join } from "node:path";
 import type { ThinkingLevel } from "pi";
 import { cleanGitEnv } from "../../../lib/git.ts";
@@ -612,7 +612,9 @@ export interface StartWorkerOptions {
 
 export interface RunningWorker {
   record: WorkerRecord;
-  child: ChildProcess;
+  /** Undefined when the spawn failed before a child existed; finalization
+   *  then settles `done` with the failure. */
+  child: ChildProcess | undefined;
   done: Promise<WorkerRecord>;
   cancel(): Promise<void>;
 }
@@ -827,11 +829,16 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
   // resolveDone is declared before the spawn so the wiring below can be
   // attached synchronously: a fast child can exit before the spawn IIFE's
   // handle-cleanup awaits resolve, and a listener attached only in .then
-  // would miss 'close' entirely (done would never settle).
-  let resolveDone!: (record: WorkerRecord) => void;
+  // would miss 'close' entirely (done would never settle). The Promise
+  // executor runs synchronously, so resolveDone is assigned before any
+  // caller can observe `done`.
+  let resolveDone: ((record: WorkerRecord) => void) | undefined;
   const done = new Promise<WorkerRecord>((resolve) => {
     resolveDone = resolve;
   });
+  function settle(record: WorkerRecord): void {
+    resolveDone?.(record);
+  }
 
   /** Attach exit/timeout wiring to the child. Synchronous, called directly
    *  after spawn returns — never after an await. */
@@ -848,14 +855,14 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
       void finish(
         cancelRequested ? "cancelled" : timedOut ? "timeout" : undefined,
         timedOut && !cancelRequested ? timedOutError : undefined,
-      ).then(resolveDone);
+      ).then(settle);
     });
     child.on("error", (err) => {
       clearTimeout(timer);
       // The error override reaches finalizeWorker before persistence and
       // notification, so the saved record, the notify, and the caller all
       // carry the same cause.
-      void finish("failed", err.message).then(resolveDone);
+      void finish("failed", err.message).then(settle);
     });
   }
 
@@ -876,11 +883,11 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
     clearInterval(ingestTimer);
     throw spawnError;
   }
-  if (child === undefined) void finish("failed", spawnError?.message).then(resolveDone);
+  if (child === undefined) void finish("failed", spawnError?.message).then(settle);
   if (child !== undefined && child.pid !== undefined) record.pid = child.pid;
   return {
     record,
-    child: child ?? ({} as ChildProcess),
+    child,
     done,
     cancel,
   };
@@ -890,6 +897,3 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
 function workerBinary(): string {
   return process.env.PI_WORKER_COMMAND?.trim() || "pi";
 }
-
-/** Unused stat import guard: kept for future offset persistence. */
-void stat;

@@ -179,6 +179,16 @@ async function provisionWorktree(
         const carry = await carryIncludedPaths(cwd, worktree.path);
         assertNotAborted(signal);
         detailParts.push(`carry ${carry.carried.length}`);
+        if (carry.skipped.length > 0) {
+          // A secret-shaped or vanished include vanishing silently would
+          // read as "everything carried": surface what was skipped and why.
+          const shown = carry.skipped
+            .slice(0, 5)
+            .map((skip) => `${skip.path} (${skip.reason})`)
+            .join(", ");
+          const more = carry.skipped.length > 5 ? `, +${carry.skipped.length - 5} more` : "";
+          detailParts.push(`carry skipped ${carry.skipped.length}: ${shown}${more}`);
+        }
         const run = await runSetupHook(worktree.path, SETUP_TIMEOUT_MS, signal);
         assertNotAborted(signal);
         if (run.exitCode !== 0) {

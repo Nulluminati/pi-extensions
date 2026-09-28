@@ -5,6 +5,7 @@ import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { cleanGitEnv, runGit } from "../../../lib/git.ts";
+import { isProjectStatePath } from "../../../lib/paths.ts";
 
 const execAsync = promisify(execCb);
 
@@ -188,7 +189,10 @@ export async function commitExperiment(
   const paths = [
     ...new Set([
       ...tracked.filter((p) => !preExisting.has(p)),
-      ...untracked.filter((p) => !baseline.has(p)),
+      // Project state created mid-campaign (.pi/...) is infrastructure, not
+      // an experiment change; init already exempts it from the clean-tree
+      // check, so a keep must not commit it either.
+      ...untracked.filter((p) => !baseline.has(p) && !isProjectStatePath(p)),
     ]),
   ];
   if (paths.length === 0) throw new Error("No experiment changes to commit.");

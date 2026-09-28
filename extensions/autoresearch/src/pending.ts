@@ -38,7 +38,13 @@ export async function loadPending(state: InstanceState, cwd: string): Promise<vo
   try {
     raw = await readFile(path, "utf8");
   } catch (error) {
-    if (isNodeError(error) && (error.code === "ENOENT" || error.code === "ENOTDIR")) return;
+    if (isNodeError(error) && (error.code === "ENOENT" || error.code === "ENOTDIR")) {
+      // Absent on disk means no pending run anywhere: drop any stale
+      // in-memory copy so this instance neither refuses `run` for a run
+      // another instance already resolved nor logs it twice.
+      state.pending = undefined;
+      return;
+    }
     throw new Error(`autoresearch pending state ${path} is unreadable: ${String(error)}`);
   }
   let parsed: unknown;

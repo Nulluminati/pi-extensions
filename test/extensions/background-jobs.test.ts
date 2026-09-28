@@ -308,8 +308,11 @@ describe("background-jobs-extension", () => {
 
       await vi.waitFor(async () => {
         const files = await readdir(join(spoolRoot, "background-jobs"));
-        expect(files).toContain("job-1-npm.log");
-        const text = await readFile(join(spoolRoot, "background-jobs", "job-1-npm.log"), "utf8");
+        expect(files).toContain(`job-1-p${process.pid}-npm.log`);
+        const text = await readFile(
+          join(spoolRoot, "background-jobs", `job-1-p${process.pid}-npm.log`),
+          "utf8",
+        );
         expect(text).toContain("spooled line");
       });
 
@@ -322,7 +325,7 @@ describe("background-jobs-extension", () => {
         id: 1,
         kind: "background",
         status: "completed",
-        spoolPath: expect.stringContaining("job-1-npm.log"),
+        spoolPath: expect.stringContaining(`job-1-p${process.pid}-npm.log`),
       });
     });
 
@@ -1098,6 +1101,26 @@ describe("spool retention", () => {
 
     expect(await pruneSpoolDir(dir, { keep: new Set([live]) })).toBe(0);
     expect(await readFile(live, "utf8")).toBe("live");
+  });
+
+  it("never deletes a pid-stamped log whose owning process is alive", async () => {
+    // Another session's active job: its registry is invisible here, but the
+    // pid stamp in the name proves the owner is live.
+    const other = await writeSpool(
+      `job-7-p${process.pid}-silent.log`,
+      "other session",
+      SPOOL_MAX_AGE_MS + 60_000,
+    );
+
+    expect(await pruneSpoolDir(dir)).toBe(0);
+    expect(await readFile(other, "utf8")).toBe("other session");
+  });
+
+  it("deletes a pid-stamped log whose owning process is dead", async () => {
+    const dead = await writeSpool("job-8-p999999999-dead.log", "dead", SPOOL_MAX_AGE_MS + 60_000);
+
+    expect(await pruneSpoolDir(dir)).toBe(1);
+    await expect(readFile(dead, "utf8")).rejects.toThrow();
   });
 
   it("caps the directory at maxFiles, dropping the oldest first", async () => {

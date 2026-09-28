@@ -4,7 +4,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "pi";
 import { projectStateRelative } from "../../../lib/paths.ts";
-import { loadConfig, readLog, saveConfig } from "./store.ts";
+import { loadConfig, readLog, stopConfig } from "./store.ts";
 import type { InstanceState, PublishFn } from "./types.ts";
 
 function buildContinuationPrompt(): string {
@@ -34,9 +34,8 @@ export async function handleAgentEnd(
   const entries = await readLog(ctx.cwd);
   const iterations = entries.filter((e) => e.status === "keep" || e.status === "discard").length;
   if (config.maxIterations !== undefined && iterations >= config.maxIterations) {
-    config.stopped = true;
-    await saveConfig(ctx.cwd, config);
-    publish(ctx, config, entries);
+    const stopped = (await stopConfig(ctx.cwd)) ?? { ...config, stopped: true };
+    publish(ctx, stopped, entries);
     if (ctx.hasUI) {
       ctx.ui.notify(
         `Autoresearch iteration cap (${config.maxIterations}) reached. Loop stopped.`,
@@ -58,9 +57,8 @@ export async function handleAgentEnd(
     state.idleWakes += 1;
   }
   if (state.idleWakes >= 2) {
-    config.stopped = true;
-    await saveConfig(ctx.cwd, config);
-    publish(ctx, config, entries);
+    const stopped = (await stopConfig(ctx.cwd)) ?? { ...config, stopped: true };
+    publish(ctx, stopped, entries);
     if (ctx.hasUI) {
       ctx.ui.notify(
         "Autoresearch stopped: no new experiments were logged after repeated prompts.",

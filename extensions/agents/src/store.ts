@@ -25,11 +25,11 @@ import { assertWorkerId, isWorkerId } from "./ids.ts";
 import type { WorkerRecord } from "./types.ts";
 import { discardWorktree, worktreesDir } from "./worktree.ts";
 
-// --- Rétention ---
+// --- Retention ---
 
-/** Durée de conservation des artifacts des records terminaux (comptée depuis
- *  endedAt) : record.json, stream et patch sont purgés au-delà. Les records
- *  running ne sont jamais prunés. */
+/** How long terminal-record artifacts are kept (counted from endedAt):
+ *  record.json, stream, and patch are purged past this age. Running
+ *  records are never pruned. */
 export const WORKER_RETENTION_MS = 7 * 24 * 60 * 60_000;
 
 // --- Paths ---

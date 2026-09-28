@@ -5,7 +5,7 @@ import { runGit } from "../../../../lib/git.ts";
 
 const INCLUDE_FILE = ".worktreeinclude";
 const SECRET_NAMES = [
-  /^\.env(?:\..*)?$/,
+  /^\.env(?:[.\w-]*)?$/, // .env, .env.local, .envrc, .envrc.local
   /\.pem$/,
   /\.key$/,
   /^id_rsa(?:\..*)?$/,
