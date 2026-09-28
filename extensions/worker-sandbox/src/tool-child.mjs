@@ -63,7 +63,7 @@ try {
       request.params,
       undefined,
       (value) => send({ type: "update", value }),
-      { cwd: request.cwd, model: request.model ? { input: request.model.input } : undefined },
+      { cwd: request.cwd },
     );
     send({ type: "result", value: result });
   } else {
