@@ -13,9 +13,9 @@
  *
  * Provider auth:
  *   - brave:     $BRAVE_API_KEY  (https://brave.com/search/api/)
- *   - synthetic: $SYNTHETIC_API_KEY, ~/.pi/agent/auth.json, or the synthetic
- *                provider's registered credentials (same resolution as the
- *                synthetic model provider extension).
+ *   - synthetic: $SYNTHETIC_API_KEY, $PI_CODING_AGENT_DIR/auth.json, or the
+ *                synthetic provider's registered credentials (same resolution
+ *                as the synthetic model provider extension).
  */
 
 import type { SelectItem } from "@earendil-works/pi-tui";

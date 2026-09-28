@@ -1,7 +1,6 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { agentConfigPath, cacheDir } from "../../../lib/paths.ts";
 import type { Context7Settings } from "./types.ts";
 
 interface Context7ConfigFile {
@@ -18,19 +17,14 @@ const DEFAULT_DOCS_TTL_HOURS = 24;
 
 // --- Config ---
 
-function getExtensionDir(): string {
-  return join(homedir(), ".pi", "agent", "extensions", "context7");
-}
-
 function normalizePositiveNumber(value: unknown, fallback: number): number {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return fallback;
   return value;
 }
 
 export async function loadSettings(): Promise<Context7Settings> {
-  const extensionDir = getExtensionDir();
-  const configPath = join(extensionDir, "config.json");
-  const cacheDir = join(extensionDir, "cache");
+  const configPath = agentConfigPath("context7");
+  const cachePath = cacheDir("context7");
 
   let config: Context7ConfigFile = {};
   let configError: string | undefined;
@@ -52,9 +46,8 @@ export async function loadSettings(): Promise<Context7Settings> {
   const docsTtlHours = normalizePositiveNumber(config.cache?.docsTtlHours, DEFAULT_DOCS_TTL_HOURS);
 
   return {
-    extensionDir,
     configPath,
-    cacheDir,
+    cacheDir: cachePath,
     apiKey,
     resolveTtlMs: resolveTtlHours * 60 * 60 * 1000,
     docsTtlMs: docsTtlHours * 60 * 60 * 1000,

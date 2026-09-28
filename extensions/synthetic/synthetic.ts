@@ -12,11 +12,12 @@
  *
  * Auth (choose one):
  *   1. SYNTHETIC_API_KEY environment variable
- *   2. ~/.pi/agent/auth.json: { "synthetic": { "type": "api_key", "key": "syn_..." } }
+ *   2. $PI_CODING_AGENT_DIR/auth.json (default ~/.pi/agent/auth.json): { "synthetic": { "type": "api_key", "key": "syn_..." } }
  *   3. CLI flag: pi --model synthetic/hf:zai-org/GLM-5.2 --api-key syn_...
  */
 
 import type { ExtensionAPI } from "pi";
+import { authPath } from "../../lib/paths.ts";
 import { getResolvedApiKey } from "./src/auth.ts";
 import { fetchCatalog, findMissingModels, MISSING_MODELS_MESSAGE } from "./src/catalog.ts";
 import { SYNTHETIC_API_BASE_URL } from "./src/constants.ts";
@@ -72,7 +73,7 @@ export default async function syntheticExtension(pi: ExtensionAPI) {
       const apiKey = await getResolvedApiKey(ctx);
       if (!apiKey) {
         ctx.ui.notify(
-          "Synthetic API key not configured. Set SYNTHETIC_API_KEY or add to ~/.pi/agent/auth.json.",
+          `Synthetic API key not configured. Set SYNTHETIC_API_KEY or add to ${authPath()}.`,
           "error",
         );
         return;

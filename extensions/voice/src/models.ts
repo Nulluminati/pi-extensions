@@ -7,14 +7,35 @@ import type { ModelDef, TtsModelDef } from "./types.ts";
 
 export const TTS_MODELS: TtsModelDef[] = [
   {
-    id: "kitten-nano-en-v0_1-fp16",
+    id: "kitten-nano-en-v0_8-int8",
     backend: "kitten",
-    dirName: "kitten-nano-en-v0_1-fp16",
+    dirName: "kitten-nano-en-v0_8-int8",
     displayName: "Kitten Nano",
-    description: "Kitten Nano English FP16 with eight local voices.",
-    files: ["model.fp16.onnx", "voices.bin", "tokens.txt", "espeak-ng-data"],
+    description: "Kitten Nano v0.8 English int8 with eight local voices.",
+    files: ["model.int8.onnx", "voices.bin", "tokens.txt", "espeak-ng-data"],
+    modelFile: "model.int8.onnx",
+    speakerCount: 8,
     downloadUrl:
-      "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kitten-nano-en-v0_1-fp16.tar.bz2",
+      "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kitten-nano-en-v0_8-int8.tar.bz2",
+  },
+  {
+    id: "supertonic-3-int8",
+    backend: "supertonic",
+    dirName: "sherpa-onnx-supertonic-3-tts-int8-2026-05-11",
+    displayName: "Supertonic 3",
+    description: "Supertonic 3 English int8 with ten local voices.",
+    files: [
+      "duration_predictor.int8.onnx",
+      "text_encoder.int8.onnx",
+      "vector_estimator.int8.onnx",
+      "vocoder.int8.onnx",
+      "tts.json",
+      "unicode_indexer.bin",
+      "voice.bin",
+    ],
+    speakerCount: 10,
+    downloadUrl:
+      "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-supertonic-3-tts-int8-2026-05-11.tar.bz2",
   },
   {
     id: "inflect-nano-v2-onnx",
@@ -37,6 +58,41 @@ export const TTS_MODELS: TtsModelDef[] = [
 ];
 
 export const MODELS: ModelDef[] = [
+  {
+    id: "moonshine-v2-base-en",
+    kind: "offline",
+    family: "moonshine-v2",
+    dirName: "sherpa-onnx-moonshine-base-en-quantized-2026-02-27",
+    displayName: "Moonshine v2 Base",
+    description:
+      "Moonshine v2 Base (English), int8. Newer and more accurate than v1, with punctuation.",
+    files: ["encoder_model.ort", "decoder_model_merged.ort", "tokens.txt"],
+    downloadUrl:
+      "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-moonshine-base-en-quantized-2026-02-27.tar.bz2",
+  },
+  {
+    id: "moonshine-v2-tiny-en",
+    kind: "offline",
+    family: "moonshine-v2",
+    dirName: "sherpa-onnx-moonshine-tiny-en-quantized-2026-02-27",
+    displayName: "Moonshine v2 Tiny",
+    description: "Moonshine v2 Tiny (English), int8. Fastest option with v2 accuracy.",
+    files: ["encoder_model.ort", "decoder_model_merged.ort", "tokens.txt"],
+    downloadUrl:
+      "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-moonshine-tiny-en-quantized-2026-02-27.tar.bz2",
+  },
+  {
+    id: "parakeet-tdt-0.6b-v2-int8",
+    kind: "offline",
+    family: "parakeet",
+    dirName: "sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8",
+    displayName: "Parakeet TDT 0.6B v2",
+    description:
+      "NVIDIA Parakeet TDT 0.6B v2 (English), int8. Highest accuracy, with punctuation. Large download.",
+    files: ["encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt"],
+    downloadUrl:
+      "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.tar.bz2",
+  },
   {
     id: "moonshine-base-int8",
     kind: "offline",
@@ -100,10 +156,11 @@ export function buildKittenConfig(
   numThreads: number,
 ): unknown {
   const dir = modelDirPath(modelsDir, model);
+  const modelFile = model.modelFile ?? "model.fp16.onnx";
   return {
     model: {
       kitten: {
-        model: join(dir, "model.fp16.onnx"),
+        model: join(dir, modelFile),
         voices: join(dir, "voices.bin"),
         tokens: join(dir, "tokens.txt"),
         dataDir: join(dir, "espeak-ng-data"),
@@ -114,6 +171,36 @@ export function buildKittenConfig(
     },
     maxNumSentences: 1,
   };
+}
+
+export function buildSupertonicConfig(
+  model: TtsModelDef,
+  modelsDir: string,
+  numThreads: number,
+): unknown {
+  const dir = modelDirPath(modelsDir, model);
+  return {
+    model: {
+      supertonic: {
+        durationPredictor: join(dir, "duration_predictor.int8.onnx"),
+        textEncoder: join(dir, "text_encoder.int8.onnx"),
+        vectorEstimator: join(dir, "vector_estimator.int8.onnx"),
+        vocoder: join(dir, "vocoder.int8.onnx"),
+        ttsJson: join(dir, "tts.json"),
+        unicodeIndexer: join(dir, "unicode_indexer.bin"),
+        voiceStyle: join(dir, "voice.bin"),
+      },
+      numThreads,
+      provider: "cpu",
+      debug: 0,
+    },
+  };
+}
+
+/** Build the sherpa TTS config for any sherpa-backed model (kitten or supertonic). */
+export function buildTtsConfig(model: TtsModelDef, modelsDir: string, numThreads: number): unknown {
+  if (model.backend === "supertonic") return buildSupertonicConfig(model, modelsDir, numThreads);
+  return buildKittenConfig(model, modelsDir, numThreads);
 }
 
 /** Build the config object for an OnlineRecognizer (streaming transducer). */
@@ -137,7 +224,7 @@ export function buildOnlineConfig(model: ModelDef, modelsDir: string, numThreads
   };
 }
 
-/** Build the config object for an OfflineRecognizer (Whisper or Moonshine). */
+/** Build the config object for an OfflineRecognizer (Whisper, Moonshine, or Parakeet). */
 export function buildOfflineConfig(
   model: ModelDef,
   modelsDir: string,
@@ -146,6 +233,42 @@ export function buildOfflineConfig(
   const dir = modelDirPath(modelsDir, model);
   const isInt8 = model.id.endsWith("-int8");
   const suffix = isInt8 ? ".int8" : "";
+  if (model.family === "moonshine-v2") {
+    // v2 exports merge the decoder into one file and drop the standalone
+    // preprocessor; the encoder consumes raw features directly.
+    return {
+      featConfig: { sampleRate: SAMPLE_RATE, featureDim: 80 },
+      modelConfig: {
+        moonshine: {
+          encoder: join(dir, "encoder_model.ort"),
+          mergedDecoder: join(dir, "decoder_model_merged.ort"),
+        },
+        tokens: join(dir, "tokens.txt"),
+        numThreads,
+        provider: "cpu",
+        debug: 0,
+      },
+    };
+  }
+  if (model.family === "parakeet") {
+    // NeMo Parakeet TDT exports use the generic transducer config with a
+    // modelType hint so sherpa-onnx applies the correct decoder.
+    return {
+      featConfig: { sampleRate: SAMPLE_RATE, featureDim: 80 },
+      modelConfig: {
+        transducer: {
+          encoder: join(dir, "encoder.int8.onnx"),
+          decoder: join(dir, "decoder.int8.onnx"),
+          joiner: join(dir, "joiner.int8.onnx"),
+        },
+        tokens: join(dir, "tokens.txt"),
+        modelType: "nemo_transducer",
+        numThreads,
+        provider: "cpu",
+        debug: 0,
+      },
+    };
+  }
   if (model.family === "moonshine") {
     return {
       featConfig: { sampleRate: SAMPLE_RATE, featureDim: 80 },

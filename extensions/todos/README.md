@@ -1,10 +1,10 @@
 # Todo List Extension
 
-A persistent todo list the agent manages with the `todo` tool. Items render as a ☐/☑ widget above the editor, survive reloads, and work in any session — no plan mode required.
+A persistent todo list the agent manages with the `todo` tool. Items render as a ☐/☑ widget above the editor, survive reloads, and work in any session.
 
 ## What It Does
 
-The agent calls the `todo` tool to build a checklist, then ticks items off as it works. The list shows live above the editor, so you always see what's done and what's left. The state is shared via `lib/todos.ts`, which is also what the plan extension uses: approving a plan replaces the list with the plan's steps, and checking the last item off completes the plan.
+The agent calls the `todo` tool to build a checklist, then ticks items off as it works. The list shows live above the editor, so you always see what's done and what's left. The state is shared via `lib/todos.ts`.
 
 ## Usage
 
@@ -57,6 +57,5 @@ None.
 
 - **State is per session.** The list is stored in the session file and reconstructed on reload, resume, and tree navigation. `/todos:clear` (or the `clear` action) dismisses it; `/todos:clear-completed` keeps open items.
 - **Widget numbers vs tool numbers.** The widget hides completed items, so item numbering there would drift from the store. The tool's own results always carry the authoritative 1-based list; the panel shows those same numbers.
-- **Yields to the recap.** Pi stacks aboveEditor widgets in insertion order; when session-recap publishes `recap:changed`, this extension re-inserts its widget so the recap renders above the todo box.
-- **Plan integration.** The plan extension replaces the list with the approved plan's steps when execution starts; it leaves the finished list in place when the plan completes. Nothing here depends on plan — the list works standalone.
+- **Yields to the recap.** Both widgets publish through the shared widget strip (`lib/widget-strip.ts`); the recap's priority (0) always places it above the todo box (30), with no re-insertion tricks.
 - **One widget owner.** Only this extension renders the `todos` widget; other extensions mutate the list through `lib/todos.ts` and the widget follows via the event bus.

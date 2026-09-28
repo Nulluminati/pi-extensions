@@ -4,7 +4,11 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["test/**/*.test.ts"],
-    setupFiles: ["./test/setup/pi-tui.ts", "./test/setup/pi-coding-agent.ts"],
+    setupFiles: [
+      "./test/setup/worker-env.ts",
+      "./test/setup/pi-tui.ts",
+      "./test/setup/pi-coding-agent.ts",
+    ],
     testTimeout: 10_000,
     coverage: {
       provider: "v8",

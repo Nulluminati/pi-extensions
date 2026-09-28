@@ -109,19 +109,22 @@ class MockLoader {
 
 /** Mock `SelectList` — records items/theme and drives selection via onSelect/onCancel. */
 class MockSelectList {
-  onSelect?: (item: { label: string; description?: string }) => void;
+  onSelect?: (item: { value?: string; label: string; description?: string }) => void;
   onCancel?: () => void;
-  onSelectionChange?: (item: { label: string; description?: string }) => void;
+  onSelectionChange?: (item: { value?: string; label: string; description?: string }) => void;
   invalidated = false;
+  private selectedIndex = 0;
   constructor(
-    public items: Array<{ label: string; description?: string }>,
+    public items: Array<{ value?: string; label: string; description?: string }>,
     public _maxVisible: number,
     public _theme: unknown,
   ) {}
   setFilter(_filter: string): void {}
-  setSelectedIndex(_index: number): void {}
-  getSelectedItem(): { label: string; description?: string } | null {
-    return this.items[0] ?? null;
+  setSelectedIndex(index: number): void {
+    this.selectedIndex = Math.max(0, Math.min(index, this.items.length - 1));
+  }
+  getSelectedItem(): { value?: string; label: string; description?: string } | null {
+    return this.items[this.selectedIndex] ?? null;
   }
   invalidate(): void {
     this.invalidated = true;
@@ -232,20 +235,29 @@ vi.mock("@earendil-works/pi-tui", () => ({
   },
   visibleWidth: (str: string): number => str.replace(ANSI_RE, "").length,
   wrapTextWithAnsi: (str: string, width: number): string[] => {
+    const safeWidth = Math.max(1, width);
     const stripped = str.replace(ANSI_RE, "");
-    if (stripped.length <= width) return [str];
+    if (stripped.length <= safeWidth) return [str];
     const words = str.split(/(\s+)/);
     const lines: string[] = [];
     let current = "";
     for (const chunk of words) {
       const test = current + chunk;
       const testWidth = test.replace(ANSI_RE, "").length;
-      if (testWidth > width && current) {
-        lines.push(current.trimEnd());
-        current = chunk.trimStart();
-      } else {
+      if (testWidth <= safeWidth) {
         current = test;
+        continue;
       }
+      if (current) {
+        lines.push(current.trimEnd());
+        current = "";
+      }
+      let remaining = chunk.trimStart();
+      while (remaining.replace(ANSI_RE, "").length > safeWidth) {
+        lines.push(remaining.slice(0, safeWidth));
+        remaining = remaining.slice(safeWidth);
+      }
+      current += remaining;
     }
     if (current.trim()) lines.push(current.trimEnd());
     return lines;

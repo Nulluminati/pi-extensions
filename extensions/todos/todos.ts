@@ -20,18 +20,13 @@ import {
   removeCompletedTodoItems,
   TODOS_CHANGED_EVENT,
 } from "../../lib/todos.ts";
+import { setStripWidget, WIDGET_PRIORITY_TODOS } from "../../lib/widget-strip.ts";
 import { showTodosPanel } from "./src/panel.ts";
 import { createTodosWidget } from "./src/widget.ts";
 
 // --- Constants ---
 
 const WIDGET_KEY = "todos";
-
-/** Wire name of the event session-recap publishes ("recap:changed") when its
- * widget appears or clears. The todos widget re-inserts itself in response so
- * pi renders it below the recap. Keep the literal in sync with
- * extensions/session-recap/src/constants.ts. */
-const RECAP_CHANGED_EVENT = "recap:changed";
 
 // --- Extension ---
 
@@ -42,16 +37,14 @@ export default async function todosExtension(pi: ExtensionAPI) {
 
   function updateWidget(ctx: ExtensionContext | undefined) {
     if (!ctx?.hasUI) return;
-    ctx.ui.setWidget(WIDGET_KEY, getTodoItems(pi).length > 0 ? createTodosWidget(pi) : undefined);
+    setStripWidget(ctx.ui, "aboveEditor", {
+      key: WIDGET_KEY,
+      priority: WIDGET_PRIORITY_TODOS,
+      factory: getTodoItems(pi).length > 0 ? createTodosWidget(pi) : undefined,
+    });
   }
 
   pi.events.on(TODOS_CHANGED_EVENT, () => {
-    updateWidget(uiCtx);
-  });
-
-  // Re-insert after the recap widget so the recap renders above this box
-  // (pi stacks aboveEditor widgets in insertion order).
-  pi.events.on(RECAP_CHANGED_EVENT, () => {
     updateWidget(uiCtx);
   });
 

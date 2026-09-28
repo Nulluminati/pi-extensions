@@ -7,7 +7,9 @@ import {
   FLEX_OFF_COLOR,
   FLEX_ON_COLOR,
   ICON_FLEX,
+  ICON_SMALL_MODEL,
   ICON_THINKING,
+  ICON_WORKER_MODEL,
   MODAL_PADDING_X,
   MODAL_PADDING_Y,
   THINKING_THEME_COLOR,
@@ -33,6 +35,7 @@ export function buildEditorMetaSegments(
   flex: { on: boolean; capable: boolean },
   smallModelLabel: string,
   theme: any,
+  workerModelLabel = "",
 ): string[] {
   const segments: string[] = [];
   if (modelLabel) segments.push(theme.fg("accent", modelLabel));
@@ -47,7 +50,15 @@ export function buildEditorMetaSegments(
     // The small model label sits after a dim "/" separator, grey to read as
     // subordinate to the main model.
     segments.push(theme.fg("dim", "/"));
-    segments.push(theme.fg("dim", smallModelLabel));
+    segments.push(theme.fg("dim", `${ICON_SMALL_MODEL} ${smallModelLabel}`));
+  }
+  if (workerModelLabel) {
+    // The worker model label sits next to the small model, same dim
+    // treatment: it configures delegated workers, not this session.
+    segments.push(theme.fg("dim", "/"));
+    // The filled robot-industrial glyph is wider than the outline one; an
+    // extra space keeps the icon-to-label gap visually consistent.
+    segments.push(theme.fg("dim", `${ICON_WORKER_MODEL}  ${workerModelLabel}`));
   }
   return segments;
 }
@@ -62,11 +73,11 @@ export interface EditorModalFrameInput {
   /** Pre-colored title string shown in the top border (model + thinking). */
   title: string;
   /** Pre-colored right-aligned label in the top border, opposite the title
-   * (for example "Plan Mode" while the plan extension is in plan mode). */
+   * (for example "Approval Mode off" while Jev review is disabled). */
   titleRight?: string;
   theme: any;
   /** Optional theme color name for the frame strokes; tints the whole frame
-   * (for example the warning color while the plan extension is in plan mode). */
+   * (for example the warning color while Jev review is disabled). */
   borderColor?: string;
 }
 
@@ -111,14 +122,51 @@ export function renderEditorModalFrame(input: EditorModalFrameInput): string[] {
  * keybindings, autocomplete, and history are inherited; only render() is
  * overridden to add the frame.
  */
+
+// --- Prompt history persistence ---
+
+/**
+ * The app stores prompt history per editor instance, and recreates the editor
+ * whenever the editor component is re-set (extension reload, /reload) — the
+ * swap carries only the current text, so the history buffer would reset. The
+ * store below mirrors submitted prompts by session (globalThis-keyed, so
+ * extension re-imports cannot lose it) and every new PolishedEditor replays
+ * only that session's entries into its own buffer on construction.
+ */
+const HISTORY_STORES_KEY = Symbol.for("status-bar.prompt-history-by-session");
+const HISTORY_LIMIT = 100;
+
+function promptHistoryStore(sessionId: string): string[] {
+  const g = globalThis as Record<symbol, unknown>;
+  let stores = g[HISTORY_STORES_KEY] as Map<string, string[]> | undefined;
+  if (!stores) {
+    stores = new Map();
+    g[HISTORY_STORES_KEY] = stores;
+  }
+  let store = stores.get(sessionId);
+  if (!store) {
+    store = [];
+    stores.set(sessionId, store);
+  }
+  return store;
+}
+
+function mirrorPrompt(sessionId: string, text: string): void {
+  const store = promptHistoryStore(sessionId);
+  if (store[0] !== text) store.unshift(text);
+  if (store.length > HISTORY_LIMIT) store.length = HISTORY_LIMIT;
+}
+
 export class PolishedEditor extends CustomEditor {
   private readonly uiTheme: any;
   private readonly getModelLabel: () => string;
   private readonly getSmallModelLabel: () => string;
+  private readonly getWorkerModelLabel: () => string;
   private readonly getThinkingLevel: () => string;
   private readonly getFlexState: () => { on: boolean; capable: boolean };
   private readonly getBorderColor: () => string | undefined;
   private readonly getTitleRight: () => string | undefined;
+  private readonly historySessionId: string;
 
   constructor(
     tui: any,
@@ -131,17 +179,33 @@ export class PolishedEditor extends CustomEditor {
     getFlexState: () => { on: boolean; capable: boolean },
     getBorderColor: () => string | undefined,
     getTitleRight: () => string | undefined,
+    getWorkerModelLabel?: () => string,
+    historySessionId = "default",
   ) {
     super(tui, theme, keybindings, { paddingX: 0 });
+    this.historySessionId = historySessionId;
+    // Restore prompts recorded by previous editor instances for this session
+    // (oldest first, so the newest entry lands at the top of the history buffer).
+    for (const entry of [...promptHistoryStore(historySessionId)].reverse()) {
+      super.addToHistory?.(entry);
+    }
     this.uiTheme = uiTheme;
     this.getModelLabel = getModelLabel;
     this.getSmallModelLabel = getSmallModelLabel;
+    this.getWorkerModelLabel = getWorkerModelLabel ?? (() => "");
     this.getThinkingLevel = getThinkingLevel;
     this.getFlexState = getFlexState;
     this.getBorderColor = getBorderColor;
     this.getTitleRight = getTitleRight;
     // The base editor's own borders are discarded by render(); the modal frame
     // supplies its own borderAccent border, so no borderColor override needed.
+  }
+
+  /** Mirror submitted prompts into the process-wide store for successors. */
+  override addToHistory(text: string): void {
+    super.addToHistory?.(text);
+    const trimmed = text.trim();
+    if (trimmed) mirrorPrompt(this.historySessionId, trimmed);
   }
 
   render(width: number): string[] {
@@ -172,6 +236,7 @@ export class PolishedEditor extends CustomEditor {
       this.getFlexState(),
       this.getSmallModelLabel(),
       this.uiTheme,
+      this.getWorkerModelLabel(),
     )
       .filter(Boolean)
       .join(EDITOR_META_SEPARATOR);

@@ -1,10 +1,9 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { agentConfigPath, cacheDir } from "../../../lib/paths.ts";
 import {
-  DEFAULT_CONFIG_SUBPATH,
   DEFAULT_MODEL_ID,
-  DEFAULT_MODELS_SUBDIR,
   DEFAULT_TTS_MODEL_ID,
   KITTEN_VOICES,
   MODELS_ENV_VAR,
@@ -16,13 +15,13 @@ import { MODELS, TTS_MODELS } from "./models.ts";
 export function resolveModelsDir(env: NodeJS.ProcessEnv): string {
   const fromEnv = env[MODELS_ENV_VAR];
   if (fromEnv?.trim()) return fromEnv;
-  return join(homedir(), DEFAULT_MODELS_SUBDIR);
+  return join(cacheDir("voice", env), "models");
 }
 
-export function resolveVoiceConfigPath(env: NodeJS.ProcessEnv, homeDir = homedir()): string {
+export function resolveVoiceConfigPath(env: NodeJS.ProcessEnv, agentDir = getAgentDir()): string {
   const fromEnv = env[VOICE_CONFIG_ENV_VAR];
   if (fromEnv?.trim()) return fromEnv.trim();
-  return join(homeDir, DEFAULT_CONFIG_SUBPATH);
+  return agentConfigPath("voice", agentDir);
 }
 
 function readVoiceConfig(configPath: string): Record<string, unknown> {
@@ -56,6 +55,13 @@ export function loadActiveModelId(configPath: string): string {
 
 export function loadActiveSpeakerId(configPath: string): number {
   const voice = readVoiceConfig(configPath).voice;
+  // Numeric voices are speaker indexes for models that expose several (e.g.
+  // Supertonic); validate against the active model's speaker count.
+  if (typeof voice === "number" && Number.isInteger(voice) && voice >= 0) {
+    const model = TTS_MODELS.find((entry) => entry.id === loadActiveTtsModelId(configPath));
+    const count = model?.speakerCount;
+    return count === undefined || voice < count ? voice : 0;
+  }
   if (typeof voice !== "string") return 0;
   const speakerId = KITTEN_VOICES.indexOf(voice as (typeof KITTEN_VOICES)[number]);
   return speakerId >= 0 ? speakerId : 0;
@@ -72,7 +78,7 @@ export function saveActiveModel(configPath: string, modelId: string): void {
   writeVoiceConfig(configPath, { dictationModel: modelId });
 }
 
-export function saveActiveVoice(configPath: string, voice: (typeof KITTEN_VOICES)[number]): void {
+export function saveActiveVoice(configPath: string, voice: string | number): void {
   writeVoiceConfig(configPath, { voice });
 }
 

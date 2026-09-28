@@ -1,4 +1,4 @@
-import { readdir } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import neuralwattExtension, {
@@ -39,16 +39,20 @@ function makeModel(id: string, provider = "neuralwatt") {
 const EXPECTED_MODEL_IDS = [
   "deepseek-ai/DeepSeek-V4-Flash",
   "deepseek-v4-flash",
+  "deepseek-v4-flash-speed",
+  "deepseek-v4.1-flash",
   "gemma-4-31b",
   "glm-5.2",
   "glm-5.2-fast",
   "glm-5.2-short",
   "glm-5.2-short-fast",
   "glm-5.3",
+  "glm-5.3-flash",
   "kimi-k2.7-code",
   "kimi-k2.7-code-fast",
   "kimi-k3",
   "kimi-k3-fast",
+  "qwen-3.8-27b",
   "qwen3.6-35b",
   "qwen3.6-35b-fast",
 ];
@@ -87,6 +91,27 @@ describe("neuralwatt-extension", () => {
     for (const id of EXPECTED_MODEL_IDS) {
       expect(ids, `static list missing ${id}`).toContain(id);
     }
+  });
+
+  it("documents the DeepSeek Speed and V4.1 models in the introduction and catalog tables", async () => {
+    const readme = await readFile(
+      resolve(import.meta.dirname, "../../extensions/neuralwatt/README.md"),
+      "utf8",
+    );
+    const introduction = readme.split("## Usage")[0];
+    const catalog = readme.split("### Static catalog")[1]?.split("### Startup staleness check")[0];
+    const thinking = readme.split("## Thinking levels")[1]?.split("## Pi APIs Used")[0];
+
+    expect(introduction).toContain("DeepSeek V4 Flash (Speed)");
+    expect(introduction).toContain("DeepSeek V4.1 Flash");
+    expect(catalog).toContain("| deepseek-v4-flash-speed | 1M | yes | — | $0.14 / $0.28 |");
+    expect(catalog).toContain("| deepseek-v4.1-flash | 1M | yes | yes | $0.15 / $0.60 |");
+    expect(thinking).toContain(
+      "| deepseek-v4-flash-speed | none | minimal | low | medium | high | max |",
+    );
+    expect(thinking).toContain(
+      "| deepseek-v4.1-flash | none | minimal | low | medium | high | xhigh |",
+    );
   });
 
   it("configures Gemma 4 from live metadata and probed reasoning behavior", () => {
@@ -142,6 +167,31 @@ describe("neuralwatt-extension", () => {
         cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 0 },
         contextWindow: 1048560,
         maxTokens: 65536,
+      }),
+    );
+  });
+
+  it("configures GLM-5.3 Flash and Qwen 3.8 27B from live metadata and probed reasoning behavior", () => {
+    const byId = Object.fromEntries(STATIC_MODELS.map((model) => [model.id, model]));
+
+    expect(byId["glm-5.3-flash"]).toEqual(
+      expect.objectContaining({
+        name: "GLM-5.3 Flash",
+        reasoning: true,
+        input: ["text", "image"],
+        cost: { input: 0.15, output: 0.5, cacheRead: 0.03, cacheWrite: 0 },
+        contextWindow: 1048560,
+        maxTokens: 65536,
+      }),
+    );
+    expect(byId["qwen-3.8-27b"]).toEqual(
+      expect.objectContaining({
+        name: "Qwen3.8 27B",
+        reasoning: true,
+        input: ["text", "image"],
+        cost: { input: 0.45, output: 3.2, cacheRead: 0.25, cacheWrite: 0 },
+        contextWindow: 262128,
+        maxTokens: 131072,
       }),
     );
   });
@@ -215,6 +265,28 @@ describe("neuralwatt-extension", () => {
       high: "high",
       xhigh: "xhigh",
     });
+    // deepseek-v4-flash-speed (2026-09 probe): same checkpoint as
+    // deepseek-v4-flash and also disableable, but the catalog aliases
+    // xhigh -> max, so xhigh maps to "max" like the GLM/Kimi full-enum models.
+    expect(byId["deepseek-v4-flash-speed"].thinkingLevelMap).toEqual({
+      off: "none",
+      minimal: "minimal",
+      low: "low",
+      medium: "medium",
+      high: "high",
+      xhigh: "max",
+    });
+    // deepseek-v4.1-flash (2026-09 probe): disableable, full enum accepted.
+    // The catalog aliases medium -> high and minimal -> low but keeps xhigh
+    // and max distinct, so identity through xhigh is correct.
+    expect(byId["deepseek-v4.1-flash"].thinkingLevelMap).toEqual({
+      off: "none",
+      minimal: "minimal",
+      low: "low",
+      medium: "medium",
+      high: "high",
+      xhigh: "xhigh",
+    });
     expect(byId["gemma-4-31b"].thinkingLevelMap).toEqual({
       off: "none",
       minimal: "minimal",
@@ -235,6 +307,17 @@ describe("neuralwatt-extension", () => {
     // none; the 2026-08 re-probe shows the full enum accepted with none
     // disabling thinking.
     expect(byId["qwen3.6-35b"].thinkingLevelMap).toEqual({
+      off: "none",
+      minimal: "minimal",
+      low: "low",
+      medium: "medium",
+      high: "high",
+      xhigh: "xhigh",
+    });
+    // qwen-3.8-27b (2026-09 probe): full enum accepted, none disables
+    // thinking. The catalog aliases max -> xhigh, so identity through xhigh is
+    // the real top level.
+    expect(byId["qwen-3.8-27b"].thinkingLevelMap).toEqual({
       off: "none",
       minimal: "minimal",
       low: "low",
@@ -286,6 +369,17 @@ describe("neuralwatt-extension", () => {
     // reasoning block even at `none`, so off is hidden. Accepts the full
     // enum incl. max, so xhigh -> "max" as on the other GLM entries.
     expect(byId["glm-5.3"].thinkingLevelMap).toEqual({
+      off: null,
+      minimal: "minimal",
+      low: "low",
+      medium: "medium",
+      high: "high",
+      xhigh: "max",
+    });
+    // glm-5.3-flash (2026-09 probe): same always-on behavior as glm-5.3 —
+    // reasoning block even at `none`, full enum accepted, so off is hidden and
+    // xhigh maps to "max" (the catalog aliases xhigh -> max).
+    expect(byId["glm-5.3-flash"].thinkingLevelMap).toEqual({
       off: null,
       minimal: "minimal",
       low: "low",

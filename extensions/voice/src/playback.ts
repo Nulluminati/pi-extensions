@@ -3,6 +3,7 @@ import { rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { encodePcm16Wave, hasTool } from "./audio.ts";
+import { SUPERTONIC_LANG, SUPERTONIC_NUM_STEPS } from "./constants.ts";
 import type { InflectTtsEngine } from "./inflect.ts";
 import type { OfflineTtsInstance, SpeechJob, TtsSherpa } from "./types.ts";
 
@@ -47,22 +48,18 @@ async function playWaveFile(
   }
 }
 
-export async function playKittenSpeech(
+async function playSherpaSpeech(
   sherpa: TtsSherpa,
   engine: OfflineTtsInstance,
   text: string,
-  speakerId: number,
   job: SpeechJob,
+  buildGenerationConfig: (sherpa: TtsSherpa) => unknown,
 ): Promise<void> {
   if (job.cancelled) return;
   const playerCommand = resolvePlaybackCommand();
   const audio = await engine.generateAsync({
     text,
-    generationConfig: new sherpa.GenerationConfig({
-      sid: speakerId,
-      speed: 1,
-      silenceScale: 0.2,
-    }),
+    generationConfig: buildGenerationConfig(sherpa),
     onProgress: () => !job.cancelled,
   });
   if (job.cancelled) return;
@@ -74,6 +71,49 @@ export async function playKittenSpeech(
   } finally {
     rmSync(wavPath, { force: true });
   }
+}
+
+export async function playKittenSpeech(
+  sherpa: TtsSherpa,
+  engine: OfflineTtsInstance,
+  text: string,
+  speakerId: number,
+  job: SpeechJob,
+): Promise<void> {
+  await playSherpaSpeech(
+    sherpa,
+    engine,
+    text,
+    job,
+    (s) =>
+      new s.GenerationConfig({
+        sid: speakerId,
+        speed: 1,
+        silenceScale: 0.2,
+      }),
+  );
+}
+
+export async function playSupertonicSpeech(
+  sherpa: TtsSherpa,
+  engine: OfflineTtsInstance,
+  text: string,
+  speakerId: number,
+  job: SpeechJob,
+): Promise<void> {
+  await playSherpaSpeech(
+    sherpa,
+    engine,
+    text,
+    job,
+    (s) =>
+      new s.GenerationConfig({
+        sid: speakerId,
+        numSteps: SUPERTONIC_NUM_STEPS,
+        speed: 1,
+        extra: { lang: SUPERTONIC_LANG },
+      }),
+  );
 }
 
 export async function playInflectSpeech(

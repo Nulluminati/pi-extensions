@@ -3,6 +3,7 @@ import {
   extractText,
   extractToolCallBlocks,
   extractToolResultBlocks,
+  findNewestCustomEntry,
   parseContentBlocks,
 } from "../../lib/session-utils.ts";
 
@@ -100,6 +101,55 @@ describe("session-utils", () => {
 
     it("returns empty array for content without tool results", () => {
       expect(extractToolResultBlocks([{ type: "text", text: "hello" }])).toHaveLength(0);
+    });
+  });
+
+  describe("findNewestCustomEntry", () => {
+    it("returns the newest matching custom entry", () => {
+      const branch = [
+        { type: "custom", customType: "session-name", data: { name: "older" } },
+        { type: "message" },
+        { type: "custom", customType: "other-type", data: { name: "unrelated" } },
+        { type: "custom", customType: "session-name", data: { name: "newest" } },
+      ];
+
+      expect(findNewestCustomEntry(branch, "session-name")?.data).toEqual({ name: "newest" });
+    });
+
+    it("keeps searching older entries when the caller rejects one", () => {
+      const branch = [
+        { type: "custom", customType: "session-name", data: { name: "older" } },
+        { type: "custom", customType: "session-name", data: {} },
+      ];
+
+      const entry = findNewestCustomEntry(
+        branch,
+        "session-name",
+        (data) =>
+          typeof data === "object" && data !== null && Boolean((data as { name?: unknown }).name),
+      );
+
+      expect(entry?.data).toEqual({ name: "older" });
+    });
+
+    it("returns undefined for an empty, missing, or non-matching branch", () => {
+      expect(findNewestCustomEntry([], "session-name")).toBeUndefined();
+      expect(findNewestCustomEntry(undefined, "session-name")).toBeUndefined();
+      expect(findNewestCustomEntry([{ type: "message" }], "session-name")).toBeUndefined();
+    });
+
+    it("leaves the branch order untouched", () => {
+      const branch = [
+        { type: "custom", customType: "session-name", data: { name: "first" } },
+        { type: "custom", customType: "session-name", data: { name: "second" } },
+      ];
+
+      findNewestCustomEntry(branch, "session-name");
+
+      expect(branch.map((entry) => (entry.data as { name: string }).name)).toEqual([
+        "first",
+        "second",
+      ]);
     });
   });
 });

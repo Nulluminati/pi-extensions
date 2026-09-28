@@ -153,6 +153,28 @@ pi.on("session_start", async (_event, ctx) => {
 
 **Example: `/goal`** — stores goal state via `appendEntry("goal-state", ...)` and reconstructs on session start.
 
+### State on disk (`lib/paths.ts`)
+
+Use when state must outlive the session but does not belong in the transcript — registries, caches, downloaded models, spooled output, project-scoped records.
+
+Every path goes through `lib/paths.ts`. Do not call `homedir()`, do not hardcode `.pi`, and never write state into the agent's `extensions/` directory — Pi treats it as an extension-discovery root (`extensions/*/index.ts`).
+
+| Resolver | Location | Use for |
+|----------|----------|---------|
+| `agentConfigPath(name)` | `<agentDir>/<name>.json` | Global config, sibling of Pi's own `settings.json` |
+| `agentStateDir(name)` | `<agentDir>/<name>/` | Global runtime state: logs, spools, locks |
+| `cacheDir(name)` | `$XDG_CACHE_HOME/pi-<name>/` (default `~/.cache/pi-<name>/`) | Regenerable cache and downloaded models |
+| `projectStateDir(cwd, name)` | `<cwd>/<CONFIG_DIR_NAME>/<name>/` | Project-scoped state (missions, messenger, workers, worktrees, autoresearch) |
+| `projectStateRelative(name)` | `<CONFIG_DIR_NAME>/<name>` | Git-exclude patterns |
+
+`isProjectStatePath(relativePath)` answers whether a project-relative path is extension state; use it in clean-tree and git-hygiene checks instead of prefix-matching `.pi` yourself. The agents extension uses it to keep untracked state from blocking worktree creation, and autoresearch uses it to ignore state in its clean-tree precondition. `authPath()` returns Pi's `auth.json` inside the agent dir for messages that point the user at it. `excludeFromGit(cwd, pattern)` (in `lib/git.ts`) appends to `.git/info/exclude` so project state never dirties `git status`; messenger, missions, and agents call it on `session_start`.
+
+`<agentDir>` is `getAgentDir()` and honors `PI_CODING_AGENT_DIR`; project paths use `CONFIG_DIR_NAME` so rebranded distributions resolve to their own config directory. Both are exported by `@earendil-works/pi-coding-agent`.
+
+`test/conventions.test.ts` fails on `homedir()` or a literal `.pi` path segment anywhere under `extensions/` or `lib/`, allowlisting only `lib/paths.ts` and pywal's cache in `tool-style` (which reads another tool's file).
+
+**Examples:** `/voice` and `/context7` (`agentConfigPath`, `cacheDir`), `/background-jobs` (`agentStateDir`, pruned on session start), `/missions`, `/messenger`, `/agents`, `/autoresearch` (`projectStateDir`). Ephemeral spills that need no retention go in `os.tmpdir()` with a `pi-<name>-` prefix (see `/web-search`).
+
 ### Module-level variables (avoid if possible)
 
 Module-level `let` is the weakest pattern — state leaks across tests and Pi instances. If you must use it, always clear on `session_start` or `session_shutdown`.

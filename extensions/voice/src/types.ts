@@ -4,7 +4,7 @@ import type { spawn } from "node:child_process";
 
 export type ModelKind = "online" | "offline";
 
-export type ModelFamily = "whisper" | "moonshine";
+export type ModelFamily = "whisper" | "moonshine" | "moonshine-v2" | "parakeet";
 
 export interface ModelDef {
   id: string;
@@ -122,7 +122,7 @@ export interface RecorderDeps {
   hasArecord: boolean;
 }
 
-export type TtsBackend = "kitten" | "inflect";
+export type TtsBackend = "kitten" | "inflect" | "supertonic";
 
 export interface TtsModelDef {
   id: string;
@@ -133,4 +133,8 @@ export interface TtsModelDef {
   downloadUrl?: string;
   repository?: string;
   displayName: string;
+  /** Kitten model file name; older exports use fp16, newer ones int8. */
+  modelFile?: string;
+  /** Number of selectable speakers; unset means the model has one fixed voice. */
+  speakerCount?: number;
 }

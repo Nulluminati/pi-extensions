@@ -7,7 +7,8 @@
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
-import { appendFile, mkdir } from "node:fs/promises";
+import type { Dirent } from "node:fs";
+import { appendFile, mkdir, readdir, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { appendBuffer, slugify } from "./format.ts";
 import { createJob, finalizeJob, type JobRegistry } from "./registry.ts";
@@ -15,6 +16,75 @@ import type { Job, JobEvents } from "./types.ts";
 
 export const CANCEL_GRACE_MS = 4_000; // SIGTERM grace before SIGKILL
 export const KILL_GRACE_MS = 2_000; // post-SIGKILL reap window before kill_failed
+
+/** Spool logs older than this are deleted when a session starts. */
+export const SPOOL_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+/** Newest spool logs kept regardless of age. */
+export const SPOOL_MAX_FILES = 200;
+
+export interface PruneSpoolOptions {
+  maxAgeMs?: number;
+  maxFiles?: number;
+  /** Spool paths belonging to live jobs; never deleted. */
+  keep?: ReadonlySet<string>;
+}
+
+/**
+ * Bound the spool directory: delete logs past the age limit, then the oldest
+ * files above the count cap. Live jobs' logs are always kept — a job that has
+ * produced no output recently would otherwise look abandoned and be deleted
+ * mid-run. Returns the number of files removed.
+ */
+export async function pruneSpoolDir(
+  spoolDir: string,
+  options: PruneSpoolOptions = {},
+): Promise<number> {
+  const maxAgeMs = options.maxAgeMs ?? SPOOL_MAX_AGE_MS;
+  const maxFiles = options.maxFiles ?? SPOOL_MAX_FILES;
+  const keep = options.keep ?? new Set<string>();
+
+  let entries: Dirent[];
+  try {
+    entries = await readdir(spoolDir, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return 0;
+    throw error;
+  }
+
+  const logs: Array<{ path: string; mtimeMs: number }> = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.startsWith("job-") || !entry.name.endsWith(".log")) {
+      continue;
+    }
+    const path = join(spoolDir, entry.name);
+    if (keep.has(path)) continue;
+    try {
+      logs.push({ path, mtimeMs: (await stat(path)).mtimeMs });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw error;
+    }
+  }
+
+  const now = Date.now();
+  const expired = logs.filter((log) => now - log.mtimeMs > maxAgeMs);
+  const expiredPaths = new Set(expired.map((log) => log.path));
+  const survivors = logs
+    .filter((log) => !expiredPaths.has(log.path))
+    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+
+  let deleted = 0;
+  for (const log of [...expired, ...survivors.slice(Math.max(0, maxFiles))]) {
+    try {
+      await unlink(log.path);
+      deleted += 1;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw error;
+    }
+  }
+  return deleted;
+}
 
 export interface StartBackgroundOptions {
   registry: JobRegistry;

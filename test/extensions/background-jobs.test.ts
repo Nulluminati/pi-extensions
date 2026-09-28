@@ -1,10 +1,16 @@
 import { EventEmitter } from "node:events";
-import { mkdtemp, readdir, readFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext } from "pi";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import backgroundJobsExtension from "../../extensions/background-jobs/background-jobs.ts";
+import {
+  pruneSpoolDir,
+  SPOOL_MAX_AGE_MS,
+  SPOOL_MAX_FILES,
+} from "../../extensions/background-jobs/src/runner.ts";
+import { __resetWidgetStrip, STRIP_KEY_ABOVE } from "../../lib/widget-strip.ts";
 import { createMockCommandContext } from "../mocks/context-mocks.ts";
 import type { DeepMocked } from "../mocks/mock-types.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
@@ -17,6 +23,7 @@ vi.mock("node:child_process", () => ({ spawn: spawnMock }));
 const agentDirRef = vi.hoisted(() => ({ dir: "/tmp/background-jobs-unset" }));
 vi.mock("@earendil-works/pi-coding-agent", () => ({
   getAgentDir: () => agentDirRef.dir,
+  CONFIG_DIR_NAME: ".pi",
 }));
 
 let spoolRoot = "/tmp/background-jobs-unset";
@@ -181,7 +188,7 @@ describe("background-jobs-extension", () => {
       await backgroundJobsExtension(mockPi);
       await startBackgroundJob(mockPi, mockCtx, { command: "npm test" });
 
-      const call = mockCtx.ui.setWidget.mock.calls.find((c) => c[0] === "background-jobs");
+      const call = mockCtx.ui.setWidget.mock.calls.find((c) => c[0] === STRIP_KEY_ABOVE);
       expect(call).toBeDefined();
       expect(typeof call?.[1]).toBe("function");
 
@@ -208,7 +215,7 @@ describe("background-jobs-extension", () => {
       }
 
       const calls = mockCtx.ui.setWidget.mock.calls.filter(
-        (call: unknown[]) => call[0] === "background-jobs",
+        (call: unknown[]) => call[0] === STRIP_KEY_ABOVE,
       );
       const call = calls[calls.length - 1];
       const factory = call?.[1] as (
@@ -245,7 +252,7 @@ describe("background-jobs-extension", () => {
         { triggerTurn: true, deliverAs: "steer" },
       );
       expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("exit 0"), "info");
-      expect(mockCtx.ui.setWidget).toHaveBeenLastCalledWith("background-jobs", undefined);
+      expect(mockCtx.ui.setWidget).toHaveBeenLastCalledWith(STRIP_KEY_ABOVE, undefined);
     });
 
     it("reports failure on non-zero exit", async () => {
@@ -1054,5 +1061,80 @@ describe("background-jobs-extension", () => {
       );
       expect(result.content[0].text).toContain("No background jobs");
     });
+  });
+});
+
+// --- Spool retention --------------------------------------------------------
+
+describe("spool retention", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    __resetWidgetStrip();
+    dir = await mkdtemp(join(tmpdir(), "background-jobs-prune-"));
+  });
+
+  async function writeSpool(name: string, content: string, ageMs = 0): Promise<string> {
+    const path = join(dir, name);
+    await writeFile(path, content, "utf8");
+    if (ageMs > 0) {
+      const when = new Date(Date.now() - ageMs);
+      await utimes(path, when, when);
+    }
+    return path;
+  }
+
+  it("deletes logs past the age limit and keeps fresh ones", async () => {
+    const old = await writeSpool("job-1-old.log", "old", SPOOL_MAX_AGE_MS + 60_000);
+    const fresh = await writeSpool("job-2-fresh.log", "fresh");
+
+    expect(await pruneSpoolDir(dir)).toBe(1);
+    await expect(readFile(old, "utf8")).rejects.toThrow();
+    expect(await readFile(fresh, "utf8")).toBe("fresh");
+  });
+
+  it("never deletes a live job's log", async () => {
+    const live = await writeSpool("job-1-live.log", "live", SPOOL_MAX_AGE_MS + 60_000);
+
+    expect(await pruneSpoolDir(dir, { keep: new Set([live]) })).toBe(0);
+    expect(await readFile(live, "utf8")).toBe("live");
+  });
+
+  it("caps the directory at maxFiles, dropping the oldest first", async () => {
+    const base = Date.now() - 60_000;
+    for (let i = 1; i <= 5; i += 1) {
+      const path = join(dir, `job-${i}-task.log`);
+      await writeFile(path, String(i), "utf8");
+      const when = new Date(base + i * 1_000);
+      await utimes(path, when, when);
+    }
+
+    expect(await pruneSpoolDir(dir, { maxFiles: 2 })).toBe(3);
+
+    const remaining = (await readdir(dir)).sort();
+    expect(remaining).toEqual(["job-4-task.log", "job-5-task.log"]);
+  });
+
+  it("leaves files that are not job logs alone", async () => {
+    await writeSpool("notes.txt", "keep me", SPOOL_MAX_AGE_MS + 60_000);
+    await writeSpool("job-1-old.log", "delete me", SPOOL_MAX_AGE_MS + 60_000);
+
+    expect(await pruneSpoolDir(dir)).toBe(1);
+    expect(await readdir(dir)).toEqual(["notes.txt"]);
+  });
+
+  it("returns zero when the spool directory does not exist yet", async () => {
+    expect(await pruneSpoolDir(join(dir, "missing"))).toBe(0);
+  });
+
+  it("applies the default file cap", async () => {
+    await Promise.all(
+      Array.from({ length: SPOOL_MAX_FILES + 1 }, (_, i) =>
+        writeFile(join(dir, `job-${i + 1}-task.log`), String(i), "utf8"),
+      ),
+    );
+
+    expect(await pruneSpoolDir(dir)).toBe(1);
+    expect((await readdir(dir)).length).toBe(SPOOL_MAX_FILES);
   });
 });

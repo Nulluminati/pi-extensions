@@ -37,11 +37,16 @@ import {
 import { loadSmallModelConfig, resolveSmallModelConfigPath } from "../../lib/small-model.ts";
 import { formatStatusLine } from "../../lib/ui-format.ts";
 import {
+  loadWorkerModelConfig,
+  resolveWorkerModelConfigPath as resolveWorkerModelConfigPathLib,
+} from "../../lib/worker-model.ts";
+import {
+  AGENTS_STATE_EVENT,
+  APPROVAL_MODE_EVENT,
   FLEX_EVENT,
   GOAL_STATE_EVENT,
-  GONDOLIN_VM_EVENT,
   ICON_COLOR,
-  PLAN_MODE_EVENT,
+  MESSENGER_STATE_EVENT,
   STATUS_ICON,
   STATUS_KEY,
   TEXT_COLOR,
@@ -51,12 +56,60 @@ import { buildFooterLines } from "./src/footer.ts";
 import { parseGitStatus } from "./src/git.ts";
 import type { State } from "./src/types.ts";
 
-export { ICON_COLOR, STATUS_ICON, TEXT_COLOR } from "./src/constants.ts";
+export {
+  ICON_COLOR,
+  ICON_SMALL_MODEL,
+  ICON_WORKER_MODEL,
+  STATUS_ICON,
+  TEXT_COLOR,
+} from "./src/constants.ts";
 export {
   buildEditorMetaSegments,
   type EditorModalFrameInput,
   renderEditorModalFrame,
 } from "./src/editor.ts";
+
+// --- Config file watching ---
+
+/** A live config-file watch: the directory watcher (undefined when the
+ *  directory could not be watched) plus the matching stop logic. */
+interface ConfigWatch {
+  watcher: FSWatcher | undefined;
+  stop: () => void;
+}
+
+/**
+ * Watch the directory containing `configPath`, filtered to its basename, and
+ * call `onStable` once 25ms after the last event (a single save often
+ * arrives as several). Shared by the small-model and worker-model watchers.
+ */
+function watchConfigFile(configPath: string, onStable: () => void): ConfigWatch {
+  let watcher: FSWatcher | undefined;
+  let debounce: ReturnType<typeof setTimeout> | undefined;
+  try {
+    watcher = watch(dirname(configPath), (_event, filename) => {
+      if (filename && filename.toString() !== basename(configPath)) return;
+      if (debounce) clearTimeout(debounce);
+      debounce = setTimeout(() => {
+        debounce = undefined;
+        onStable();
+      }, 25);
+    });
+  } catch {
+    watcher = undefined;
+  }
+  return {
+    watcher,
+    stop() {
+      if (debounce) {
+        clearTimeout(debounce);
+        debounce = undefined;
+      }
+      watcher?.close();
+      watcher = undefined;
+    },
+  };
+}
 
 // --- Extension ---
 
@@ -66,10 +119,10 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     turnCount: 0,
     thinkingLevel: "none",
     smallModelLabel: "",
+    workerModelLabel: "",
     goalRunning: false,
     goalIteration: 0,
     goalCap: null,
-    gondolinVm: null,
     gitBranch: null,
     gitStatus: null,
     tokenUsage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
@@ -77,13 +130,16 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     lastHandle: null,
     flexOn: false,
     flexCapable: false,
-    planModeActive: false,
+    approvalModeOff: false,
+    unreadMail: 0,
+    workerCostUsd: 0,
+    workerTokens: 0,
   };
 
   let getBranch: () => any[] = () => [];
   let currentCwd = "";
-  let smallModelWatcher: FSWatcher | undefined;
-  let smallModelWatchDebounce: ReturnType<typeof setTimeout> | undefined;
+  let smallModelWatch: ConfigWatch | undefined;
+  let workerModelWatch: ConfigWatch | undefined;
 
   // Track a running goal so the editor frame can show a "Goal" badge in its
   // top-right cell. Subscribed at load time rather than in session_start: the
@@ -102,6 +158,39 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
       editorRequestRender?.();
     },
   );
+
+  // Track unread messenger mail so line 1 can show an "✉ N" segment in its
+  // right block. Subscribed at load time rather than in session_start, for
+  // the same reason as the goal subscription above: the messenger extension
+  // publishes its state during its own session_start handler, which may run
+  // before this extension's session_start-scoped listeners exist, and the
+  // announcement would be missed on first load. Like goalRunning, unreadMail
+  // is not reset on session boundaries — the messenger re-announces on every
+  // session_start, and resetting here could clobber that announcement.
+  pi.events.on(MESSENGER_STATE_EVENT, (payload: { name: string | null; unread: number }) => {
+    state.unreadMail = payload.unread;
+    state.lastHandle?.requestRender();
+  });
+
+  // Worker spend roll-up from the agents extension. Like unreadMail, this is
+  // event-owned state: the agents extension re-announces on its lifecycle
+  // events, so no session-boundary reset.
+  pi.events.on(
+    AGENTS_STATE_EVENT,
+    (payload: { running: number; workerCostUsd?: number; workerTokens?: number }) => {
+      state.workerCostUsd = payload.workerCostUsd ?? 0;
+      state.workerTokens = payload.workerTokens ?? 0;
+      state.lastHandle?.requestRender();
+    },
+  );
+
+  // The approval gate announces its state on session_start. Subscribe before
+  // that event so the editor never misses the initial enabled state.
+  pi.events.on(APPROVAL_MODE_EVENT, (payload: { enabled: boolean }) => {
+    state.approvalModeOff = !payload.enabled;
+    state.lastHandle?.requestRender();
+    editorRequestRender?.();
+  });
 
   function setFooter(ctx: ExtensionCommandContext): void {
     if (!ctx.hasUI) return;
@@ -151,6 +240,10 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
   const editorLayerId = "status-bar";
   let editorRequestRender: (() => void) | undefined;
 
+  function editorHistorySessionId(ctx: ExtensionCommandContext): string {
+    return ctx.sessionManager.getSessionId();
+  }
+
   function installEditor(ctx: ExtensionCommandContext): void {
     if (!ctx.hasUI) return;
     const current = ctx.ui.getEditorComponent() as EditorFactory | undefined;
@@ -172,16 +265,18 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
           () => state.smallModelLabel,
           () => pi.getThinkingLevel() ?? "none",
           () => ({ on: state.flexOn, capable: state.flexCapable }),
-          () => (state.planModeActive ? "warning" : undefined),
+          () => (state.approvalModeOff ? "warning" : undefined),
           () => {
             const parts: string[] = [];
-            if (state.planModeActive) parts.push(ctx.ui.theme.fg("warning", "Plan Mode"));
+            if (state.approvalModeOff) parts.push(ctx.ui.theme.fg("warning", "Approval Mode off"));
             if (state.goalRunning) {
               const capLabel = state.goalCap && state.goalCap > 0 ? `/${state.goalCap}` : "";
               parts.push(ctx.ui.theme.fg("mdHeading", `Goal ${state.goalIteration}${capLabel}`));
             }
             return parts.length > 0 ? parts.join(ctx.ui.theme.fg("dim", " · ")) : undefined;
           },
+          () => state.workerModelLabel,
+          editorHistorySessionId(ctx),
         );
       },
     );
@@ -225,7 +320,7 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
   /**
    * Watch the global small-model config file so the editor title updates the
    * instant `/smallmodel` (or an external edit) changes it — without waiting
-   * for the next turn. Mirrors the small-model extension's own watcher.
+   * for the next turn.
    */
   function startSmallModelWatch(): void {
     stopSmallModelWatch();
@@ -235,29 +330,45 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     } catch {
       return;
     }
-    const configDirectory = dirname(configPath);
-    try {
-      smallModelWatcher = watch(configDirectory, (_event, filename) => {
-        if (filename && filename.toString() !== basename(configPath)) return;
-        if (smallModelWatchDebounce) clearTimeout(smallModelWatchDebounce);
-        smallModelWatchDebounce = setTimeout(() => {
-          smallModelWatchDebounce = undefined;
-          refreshSmallModel();
-          editorRequestRender?.();
-        }, 25);
-      });
-    } catch {
-      smallModelWatcher = undefined;
-    }
+    smallModelWatch = watchConfigFile(configPath, () => {
+      refreshSmallModel();
+      refreshWorkerModel();
+      editorRequestRender?.();
+    });
   }
 
   function stopSmallModelWatch(): void {
-    if (smallModelWatchDebounce) {
-      clearTimeout(smallModelWatchDebounce);
-      smallModelWatchDebounce = undefined;
+    smallModelWatch?.stop();
+    smallModelWatch = undefined;
+  }
+
+  function refreshWorkerModel(): void {
+    try {
+      const loaded = loadWorkerModelConfig();
+      state.workerModelLabel = `${loaded.config.provider}/${loaded.config.model}`;
+    } catch {
+      state.workerModelLabel = "";
     }
-    smallModelWatcher?.close();
-    smallModelWatcher = undefined;
+  }
+
+  /** Watch the global worker-model config file so its label stays live too. */
+  function startWorkerModelWatch(): void {
+    stopWorkerModelWatch();
+    let configPath: string;
+    try {
+      configPath = resolveWorkerModelConfigPathLib();
+    } catch {
+      return;
+    }
+    workerModelWatch = watchConfigFile(configPath, () => {
+      refreshWorkerModel();
+      editorRequestRender?.();
+    });
+  }
+
+  function stopWorkerModelWatch(): void {
+    workerModelWatch?.stop();
+    workerModelWatch = undefined;
   }
 
   function accumulateTokenUsage(): void {
@@ -322,6 +433,7 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     getBranch = () => ctx.sessionManager.getBranch();
     accumulateTokenUsage();
     refreshSmallModel();
+    refreshWorkerModel();
     refreshContextUsage(ctx as ExtensionCommandContext);
 
     // Install the UI components synchronously, before any async work, so the
@@ -367,41 +479,17 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
       editorRequestRender?.();
     });
 
-    // Tint the editor frame while the plan extension is in plan mode. The
-    // plan extension publishes on the pi.events bus (see plan:mode-change);
-    // re-render so the frame picks up the new border color immediately.
-    pi.events.on(PLAN_MODE_EVENT, (payload: { mode: string }) => {
-      state.planModeActive = payload.mode === "plan";
-      state.lastHandle?.requestRender();
-      editorRequestRender?.();
-    });
-
-    // Track the Gondolin sandbox VM so line 1 can show the workspace segment
-    // ("with WS <id>") after the working directory. The gondolin extension
-    // publishes on the pi.events bus (see gondolin:vm-state).
-    pi.events.on(
-      GONDOLIN_VM_EVENT,
-      (payload: { state: "starting" | "ready" | "stopping" | "stopped"; vmId?: string }) => {
-        state.gondolinVm =
-          payload.state === "stopped"
-            ? null
-            : {
-                state: payload.state,
-                ...(payload.vmId !== undefined ? { vmId: payload.vmId } : {}),
-              };
-        state.lastHandle?.requestRender();
-      },
-    );
-
     // Watch the small-model config so the editor title reflects `/smallmodel`
     // changes immediately rather than on the next turn.
     startSmallModelWatch();
+    startWorkerModelWatch();
 
     await refreshGitStatus();
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
     stopSmallModelWatch();
+    stopWorkerModelWatch();
     clearFooter(ctx as ExtensionCommandContext);
     restoreEditor(ctx as ExtensionCommandContext);
   });
@@ -409,6 +497,7 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
   pi.on("turn_start", async (_event, ctx) => {
     state.turnCount++;
     refreshSmallModel();
+    refreshWorkerModel();
     refreshContextUsage(ctx as ExtensionCommandContext);
     if (state.lastHandle) state.lastHandle.requestRender();
     editorRequestRender?.();
@@ -452,6 +541,9 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
         getBranch = () => ctx.sessionManager.getBranch();
         accumulateTokenUsage();
         refreshSmallModel();
+        refreshWorkerModel();
+        startSmallModelWatch();
+        startWorkerModelWatch();
         refreshContextUsage(ctx);
         await refreshGitStatus();
         setFooter(ctx);

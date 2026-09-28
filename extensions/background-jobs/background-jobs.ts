@@ -25,13 +25,13 @@
  * itself is in-memory and session-scoped.
  */
 
-import { join } from "node:path";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionUIContext } from "pi";
+import { agentStateDir } from "../../lib/paths.ts";
+import { setStripWidget, WIDGET_PRIORITY_JOBS } from "../../lib/widget-strip.ts";
 import { executeJobsAction, openJobsPanel } from "./src/jobs.ts";
 import { startMonitor } from "./src/monitor.ts";
 import { activeJobs, buildSnapshot, createRegistry, type JobRegistry } from "./src/registry.ts";
-import { cancelJob, startBackgroundJob } from "./src/runner.ts";
+import { cancelJob, pruneSpoolDir, startBackgroundJob } from "./src/runner.ts";
 import { BACKGROUND_PARAMETERS, JOBS_PARAMETERS, MONITOR_PARAMETERS } from "./src/schemas.ts";
 import type { JobEvents } from "./src/types.ts";
 import { createJobsWidget } from "./src/widget.ts";
@@ -65,18 +65,26 @@ export default async function backgroundJobsExtension(pi: ExtensionAPI) {
     }
   }
 
-  function refreshWidget(): void {
-    const ui = lastUi;
-    if (!ui?.setWidget) return;
+  function publishWidget(ui: ExtensionUIContext): void {
     const active = activeJobs(registry);
     try {
-      ui.setWidget(WIDGET_KEY, active.length > 0 ? createJobsWidget(registry) : undefined);
+      setStripWidget(ui, "aboveEditor", {
+        key: WIDGET_KEY,
+        priority: WIDGET_PRIORITY_JOBS,
+        factory: active.length > 0 ? createJobsWidget(registry) : undefined,
+      });
     } catch (err) {
       const message = (err as Error).message;
       if (!message.includes("stale")) {
         console.error(`[background-jobs] widget refresh failed: ${message}`);
       }
     }
+  }
+
+  function refreshWidget(): void {
+    const ui = lastUi;
+    if (!ui?.setWidget) return;
+    publishWidget(ui);
   }
 
   const events: JobEvents = {
@@ -105,7 +113,14 @@ export default async function backgroundJobsExtension(pi: ExtensionAPI) {
     },
   };
 
-  pi.on("session_start", async (_event, _ctx) => {
+  pi.on("session_start", async (_event, ctx) => {
+    // Retention runs against the pre-reset registry so logs for jobs that are
+    // still terminating are never deletion candidates.
+    const liveSpoolPaths = new Set(
+      activeJobs(registry)
+        .map((job) => job.spoolPath)
+        .filter((path): path is string => typeof path === "string"),
+    );
     // Fresh session state: clear stale timers and rebuild the registry.
     for (const job of activeJobs(registry)) {
       if (job.timer) clearTimeout(job.timer);
@@ -114,6 +129,16 @@ export default async function backgroundJobsExtension(pi: ExtensionAPI) {
     registry.nextId = 1;
     lastUi = undefined;
     shuttingDown = false;
+    // Re-publish the strip entry: pi clears widgets at the session boundary
+    // and the strip contract expects extensions to re-register on
+    // session_start. The registry is empty here, so the entry is removed
+    // (factory undefined) until a new job publishes it again.
+    if (ctx.hasUI) publishWidget(ctx.ui);
+    try {
+      await pruneSpoolDir(agentStateDir("background-jobs"), { keep: liveSpoolPaths });
+    } catch (error) {
+      console.error(`[background-jobs] spool prune failed: ${(error as Error).message}`);
+    }
   });
 
   pi.on("session_shutdown", async (_event, _ctx) => {
@@ -164,7 +189,7 @@ export default async function backgroundJobsExtension(pi: ExtensionAPI) {
         env: (params.env as Record<string, string> | undefined) ?? undefined,
         wakeOnPattern,
         patternSource: patternRaw,
-        spoolDir: join(getAgentDir(), "background-jobs"),
+        spoolDir: agentStateDir("background-jobs"),
         events,
       });
 

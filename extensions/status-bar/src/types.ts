@@ -39,20 +39,16 @@ export interface State {
   // meta line after a "/" separator, beside the main model. Empty when no
   // small model is configured.
   smallModelLabel: string;
+  workerModelLabel: string;
   // True while the goal extension has a running goal (status "active"),
   // published on the pi.events bus (see goal:state-change). Shown as a
-  // "Goal N/cap" badge in the editor frame's top-right cell, beside
-  // "Plan Mode" when both are active.
+  // "Goal N/cap" badge in the editor frame's top-right cell.
   goalRunning: boolean;
   // Iteration count and cap from the goal:state-change payload, shown in the
   // badge while the goal is running. goalIteration resets to 0 when no goal
   // is active; goalCap is null when unset and 0 means unlimited.
   goalIteration: number;
   goalCap: number | null;
-  // Gondolin sandbox VM state, published by the gondolin extension on the
-  // pi.events bus (see gondolin:vm-state). Shown as a "with WS <id>" segment
-  // on footer line 1 after the working directory; null when no VM exists.
-  gondolinVm: { state: "starting" | "ready" | "stopping"; vmId?: string } | null;
   gitBranch: string | null;
   gitStatus: GitStatus | null;
   tokenUsage: TokenUsage;
@@ -64,7 +60,17 @@ export interface State {
   // badge is shown solely on that. `flexOn` drives the on/off label.
   flexOn: boolean;
   flexCapable: boolean;
-  // True while the plan extension is in plan mode (see plan:mode-change on the
-  // pi.events bus); tints the editor frame with the warning color.
-  planModeActive: boolean;
+  // True while Jev review is off in the main session; shows the warning badge.
+  approvalModeOff: boolean;
+  // Unread messenger mail count, published by the messenger extension on the
+  // pi.events bus (see messenger:state). Shown as an "✉ N" segment in the
+  // line-1 right block while N > 0. Like goalRunning, it is not cleared on
+  // session boundaries: the messenger re-announces its state during its own
+  // session_start, and a reset here could clobber an announcement that has
+  // already fired.
+  unreadMail: number;
+  // Aggregated token/cost usage of the project's delegated workers
+  // (published on agents:state). Zero while no workers have run.
+  workerCostUsd: number;
+  workerTokens: number;
 }

@@ -187,6 +187,41 @@ describe("small-model-extension", () => {
     );
   });
 
+  it("changes only the thinking level with the thinking subcommand", async () => {
+    const path = configPath();
+    vi.stubEnv("PI_SMALL_MODEL_CONFIG", path);
+    vi.stubEnv("PI_SMALL_MODEL", "");
+    writeFileSync(
+      path,
+      JSON.stringify({
+        provider: "opencode-go",
+        model: "deepseek-flash",
+        thinkingLevel: "minimal",
+      }),
+    );
+    const pi = createMockPi();
+    const ctx = createMockCommandContext();
+    ctx.modelRegistry.find = vi.fn(() => ({
+      ...ctx.model,
+      provider: "opencode-go",
+      id: "deepseek-flash",
+      reasoning: true,
+    }));
+    await smallModelExtension(pi);
+
+    await getCommandHandler(pi, "smallmodel")("thinking high", ctx);
+
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
+      provider: "opencode-go",
+      model: "deepseek-flash",
+      thinkingLevel: "high",
+    });
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      "Global small model set to opencode-go/deepseek-flash (high).",
+      "info",
+    );
+  });
+
   it("rejects unavailable models without changing the config", async () => {
     const path = configPath();
     vi.stubEnv("PI_SMALL_MODEL_CONFIG", path);

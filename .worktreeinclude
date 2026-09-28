@@ -1,0 +1,3 @@
+# Paths matched by gitignore syntax are carried into every new worker worktree.
+tsconfig.tsbuildinfo
+tsconfig.test.tsbuildinfo

@@ -24,10 +24,10 @@
     "prepare": "husky",
     "format": "biome format --write .",
     "lint": "biome lint .",
-    "check": "biome check . && tsc --noEmit && tsc --noEmit -p tsconfig.test.json && npm run validate && npm run test",
+    "check": "biome check . && tsc --noEmit --incremental && tsc --noEmit --incremental -p tsconfig.test.json && npm run validate && npm run test",
     "check:ci": "biome ci . && tsc --noEmit && tsc --noEmit -p tsconfig.test.json && npm run validate && npm run test",
-    "validate": "tsx scripts/validate-all.ts",
-    "validate:one": "tsx scripts/validate-cli.ts",
+    "validate": "node --import tsx scripts/validate-all.ts",
+    "validate:one": "node --import tsx scripts/validate-cli.ts",
     "create": "tsx scripts/create-extension.ts",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
@@ -37,17 +37,25 @@
     "*.{ts,js,mjs,json,jsonc}": "biome check --write --no-errors-on-unmatched"
   },
   "dependencies": {
-    "@earendil-works/gondolin": "^0.12.0",
+    "@anthropic-ai/sandbox-runtime": "^0.0.77",
     "onnxruntime-node": "^1.27.0",
-    "sherpa-onnx-node": "^1.13.6"
+    "sherpa-onnx-node": "^1.13.8"
   },
   "overrides": {
     "onnxruntime-node": {
-      "adm-zip": "0.6.0"
+      "adm-zip": "0.6.1"
     }
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.11",
+    "@earendil-works/pi-ai": "^0.85.1",
+    "@earendil-works/pi-coding-agent": "^0.85.1",
+    "@earendil-works/pi-tui": "^0.85.1",
     "@types/node": "^26.4.0",
     "@vitest/coverage-v8": "^4.1.11",
     "husky": "^9.1.7",

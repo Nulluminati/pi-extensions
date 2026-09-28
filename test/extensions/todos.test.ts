@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import todosExtension from "../../extensions/todos/todos.ts";
 import { getTodoItems } from "../../lib/todos.ts";
+import { STRIP_KEY_ABOVE } from "../../lib/widget-strip.ts";
 import { createMockCommandContext } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
 import { getCommandHandler, getEventHandler } from "../mocks/test-helpers.ts";
@@ -378,10 +379,10 @@ describe("todos-extension", () => {
       await tool.execute("call-2", { action: "clear" }, undefined, undefined, mockCtx);
       onChanged?.();
 
-      expect(mockCtx.ui.setWidget).toHaveBeenLastCalledWith("todos", undefined);
+      expect(mockCtx.ui.setWidget).toHaveBeenLastCalledWith(STRIP_KEY_ABOVE, undefined);
     });
 
-    it("re-inserts the widget when the recap widget changes so the recap stays on top", async () => {
+    it("does not churn its widget when the recap appears (strip owns ordering)", async () => {
       const mockPi = createMockPi();
       const mockCtx = createMockCommandContext();
       await todosExtension(mockPi);
@@ -400,11 +401,13 @@ describe("todos-extension", () => {
       onChanged?.();
       mockCtx.ui.setWidget.mockClear();
 
-      const onRecapChanged = getEventHandler(mockPi.events, "recap:changed");
-      expect(onRecapChanged).toBeDefined();
-      onRecapChanged?.({ visible: true });
-
-      expect(mockCtx.ui.setWidget).toHaveBeenCalledWith("todos", expect.any(Function));
+      const onRecapChanged = mockPi.events.on.mock.calls.find(
+        ([event]) => event === "recap:changed",
+      );
+      // The strip owns ordering — no recap-driven churn listener, and recap
+      // events leave this widget untouched.
+      expect(onRecapChanged).toBeUndefined();
+      expect(mockCtx.ui.setWidget).not.toHaveBeenCalled();
     });
 
     it("reconstructs and renders persisted todos on session start", async () => {

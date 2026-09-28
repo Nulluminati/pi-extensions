@@ -1,19 +1,13 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { ExtensionContext, Model, ThinkingLevel } from "pi";
+import { isNodeError } from "./errors.ts";
+import { agentConfigPath } from "./paths.ts";
+import { THINKING_LEVELS } from "./thinking-levels.ts";
 
 const DEFAULT_THINKING_LEVEL: ThinkingLevel = "minimal";
 const OPENCODE_HOST = "opencode.ai";
-const THINKING_LEVELS = new Set<ThinkingLevel>([
-  "off",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-]);
 
 export const SMALL_MODEL_ENV_VAR = "PI_SMALL_MODEL";
 export const SMALL_MODEL_THINKING_ENV_VAR = "PI_SMALL_MODEL_THINKING";
@@ -61,7 +55,7 @@ export function resolveSmallModelConfigPath(
   agentDir = getAgentDir(),
 ): string {
   const override = env[SMALL_MODEL_CONFIG_ENV_VAR]?.trim();
-  return override || join(agentDir, "small-model.json");
+  return override || agentConfigPath("small-model", agentDir);
 }
 
 export function loadSmallModelConfig(options: ConfigOptions = {}): {
@@ -218,8 +212,4 @@ function parseThinkingLevel(value: unknown, source: string): ThinkingLevel {
 
 function thinkingLevelToReasoning(level: ThinkingLevel): string | undefined {
   return level === "off" ? "none" : level;
-}
-
-function isNodeError(error: unknown): error is NodeJS.ErrnoException {
-  return typeof error === "object" && error !== null && "code" in error;
 }

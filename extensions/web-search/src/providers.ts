@@ -1,4 +1,5 @@
 import type { ExtensionContext } from "pi";
+import { authPath } from "../../../lib/paths.ts";
 import {
   BRAVE_SEARCH_API_URL,
   PROVIDER_STATE_TYPE,
@@ -216,7 +217,7 @@ export const PROVIDERS: SearchProvider[] = [
     id: "synthetic",
     label: "Synthetic",
     description: "Zero-retention search built for coding agents (synthetic.new)",
-    authHint: "Set $SYNTHETIC_API_KEY or add synthetic to ~/.pi/agent/auth.json",
+    authHint: `Set $SYNTHETIC_API_KEY or add synthetic to ${authPath()}`,
     async isConfigured(ctx) {
       return Boolean(await getSyntheticApiKey(ctx));
     },

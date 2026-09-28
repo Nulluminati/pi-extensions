@@ -476,6 +476,7 @@ declare module "pi" {
     };
     agent_start: { type: "agent_start" };
     agent_end: { type: "agent_end"; messages: any[] };
+    agent_settled: { type: "agent_settled" };
     turn_start: { type: "turn_start"; turnIndex: number; timestamp: number };
     turn_end: { type: "turn_end"; turnIndex: number; message: any; toolResults: any[] };
     message_start: { type: "message_start"; message: any };
@@ -772,6 +773,7 @@ declare module "@earendil-works/pi-tui" {
 
 declare module "@earendil-works/pi-coding-agent" {
   export function getAgentDir(): string;
+  export const CONFIG_DIR_NAME: string;
   export function getSettingsListTheme(): any;
   export function estimateTokens(message: any): number;
   export const DEFAULT_COMPACTION_SETTINGS: {
@@ -1027,98 +1029,4 @@ declare module "@earendil-works/pi-coding-agent" {
     options?: { maxLines?: number },
   ): { content: string; truncated: boolean };
   export function truncateLine(line: string): { text: string; wasTruncated: boolean };
-}
-
-declare module "@earendil-works/gondolin" {
-  export type VirtualProvider = any;
-
-  export class RealFSProvider implements VirtualProvider {
-    readonly rootPath: string;
-    constructor(rootPath: string);
-    readonly readonly: boolean;
-    readonly supportsSymlinks: boolean;
-    readonly supportsWatch: boolean;
-  }
-
-  export class ReadonlyProvider implements VirtualProvider {
-    constructor(backend: VirtualProvider);
-    readonly readonly: boolean;
-    readonly supportsSymlinks: boolean;
-    readonly supportsWatch: boolean;
-  }
-
-  export class MemoryProvider implements VirtualProvider {
-    readonly readonly: boolean;
-    readonly supportsSymlinks: boolean;
-    readonly supportsWatch: boolean;
-    setReadOnly(): void;
-  }
-
-  export type VmFs = {
-    readFile(path: string, options?: { encoding?: string; signal?: AbortSignal }): Promise<string>;
-    writeFile(path: string, data: string | Buffer, options?: { encoding?: string }): Promise<void>;
-    mkdir(path: string, options?: { recursive?: boolean }): Promise<void>;
-    access(path: string, options?: { signal?: AbortSignal }): Promise<void>;
-    stat(path: string, options?: { signal?: AbortSignal }): Promise<any>;
-    listDir(path: string, options?: { signal?: AbortSignal }): Promise<string[]>;
-  };
-
-  export type ExecOptions = {
-    cwd?: string;
-    env?: Record<string, string>;
-    signal?: AbortSignal;
-    stdout?: "pipe" | "inherit" | "ignore";
-    stderr?: "pipe" | "inherit" | "ignore";
-    stdin?: boolean | string | Buffer | any;
-    pty?: boolean;
-    buffer?: boolean;
-    encoding?: BufferEncoding;
-    windowBytes?: number;
-  };
-
-  export type ExecResult = {
-    exitCode: number;
-    stdout: string;
-    stderr: string;
-    ok: boolean;
-  };
-
-  export type ExecProcess = Promise<ExecResult> & {
-    write(data: string | Buffer): void;
-    end(): void;
-    output(): AsyncIterable<{ data: string; stream: "stdout" | "stderr" }>;
-    attach(stdin: any, stdout: any, stderr: any): void;
-  };
-
-  export type VMOptions = {
-    sessionLabel?: string;
-    vfs?: {
-      mounts?: Record<string, VirtualProvider>;
-    };
-    sandbox?: any;
-    rootfs?: any;
-    autoStart?: boolean;
-    fetch?: any;
-    httpHooks?: any;
-    dns?: any;
-    ssh?: any;
-    maxHttpBodyBytes?: number;
-    maxHttpResponseBodyBytes?: number;
-    allowWebSockets?: boolean;
-    tcp?: any;
-    env?: any;
-    memory?: string;
-    cpus?: number;
-    startTimeoutMs?: number;
-    sessionLabel?: string;
-    debugLog?: any;
-  };
-
-  export class VM {
-    static create(options?: VMOptions): Promise<VM>;
-    readonly id: string;
-    readonly fs: VmFs;
-    exec(command: string | string[], options?: ExecOptions): ExecProcess;
-    close(): Promise<void>;
-  }
 }

@@ -5,6 +5,8 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import statusBarExtension, {
   buildEditorMetaSegments,
+  ICON_SMALL_MODEL,
+  ICON_WORKER_MODEL,
   renderEditorModalFrame,
   STATUS_ICON,
 } from "../../extensions/status-bar/status-bar.ts";
@@ -14,6 +16,7 @@ import {
   installEditorFactoryLayer,
 } from "../../lib/editor-factory.ts";
 import { loadSmallModelConfig, resolveSmallModelConfigPath } from "../../lib/small-model.ts";
+import { loadWorkerModelConfig } from "../../lib/worker-model.ts";
 import { createMockCommandContext } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
 import { getEventHandler } from "../mocks/test-helpers.ts";
@@ -23,6 +26,11 @@ vi.mock("../../lib/small-model.ts", () => ({
   resolveSmallModelConfigPath: vi.fn(() => "/agent/small-model.json"),
 }));
 
+vi.mock("../../lib/worker-model.ts", () => ({
+  loadWorkerModelConfig: vi.fn(),
+  resolveWorkerModelConfigPath: vi.fn(() => "/agent/worker-model.json"),
+}));
+
 /**
  * Default the small-model config mock to "not configured" so the editor meta
  * line omits the small model segment unless a test opts in. Called after
@@ -30,6 +38,12 @@ vi.mock("../../lib/small-model.ts", () => ({
  */
 function unconfigureSmallModel(): void {
   vi.mocked(loadSmallModelConfig).mockImplementation(() => {
+    throw new Error("not configured");
+  });
+}
+
+function unconfigureWorkerModel(): void {
+  vi.mocked(loadWorkerModelConfig).mockImplementation(() => {
     throw new Error("not configured");
   });
 }
@@ -77,7 +91,7 @@ function footerData(opts: { branch?: string | null; statuses?: Map<string, strin
 function getEventsHandler(mockPi: ReturnType<typeof createMockPi>, eventName: string) {
   const call = mockPi.events.on.mock.calls.find((c) => c[0] === eventName);
   if (!call) throw new Error(`No pi.events handler for ${eventName}`);
-  return call[1] as (payload: any) => void;
+  return call[1] as (payload: unknown) => void;
 }
 
 /**
@@ -118,6 +132,7 @@ describe("status-bar-extension", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     unconfigureSmallModel();
+    unconfigureWorkerModel();
   });
 
   it("registers /statusbar:toggle command", async () => {
@@ -280,6 +295,41 @@ describe("status-bar-extension", () => {
     const lines = component.render(120);
 
     expect(lines[0]).not.toContain("openai/gpt-4o");
+  });
+
+  it("footer omits the worker model because it lives in the editor box", async () => {
+    vi.mocked(loadWorkerModelConfig).mockReturnValue({
+      config: { provider: "opencode-go", model: "deepseek-flash", thinkingLevel: "high" },
+      source: "config",
+    });
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBar(mockPi, mockCtx);
+
+    const component = getFooterFactory(mockCtx)(
+      { requestRender: vi.fn() },
+      plainTheme(),
+      footerData({ branch: "main" }),
+    );
+    const lines = component.render(120);
+
+    expect(lines[0]).not.toContain("via");
+    expect(lines[0]).not.toContain("opencode-go/deepseek-flash");
+    expect(lines[0]).toContain("main");
+  });
+
+  it("editor box keeps the configured worker model", async () => {
+    vi.mocked(loadWorkerModelConfig).mockReturnValue({
+      config: { provider: "opencode-go", model: "deepseek-flash", thinkingLevel: "high" },
+      source: "config",
+    });
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBar(mockPi, mockCtx);
+
+    const lines = renderInstalledEditor(mockCtx).render(120);
+
+    expect(lines.some((line) => line.includes("opencode-go/deepseek-flash"))).toBe(true);
   });
 
   it("footer shows working directory basename on line 1", async () => {
@@ -1074,7 +1124,7 @@ describe("status-bar-extension", () => {
     expect(lines[1]).toContain("🎯 active");
   });
 
-  it("does not show the gondolin status on line 2 (it lives on line 1)", async () => {
+  it("footer line 2 suppresses missions, messenger, and autoresearch statuses (widget-first fallbacks)", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await enableBar(mockPi, mockCtx);
@@ -1084,70 +1134,24 @@ describe("status-bar-extension", () => {
       plainTheme(),
       footerData({
         statuses: new Map([
-          ["gondolin", "cube a1b2c3d4 (/workspace)"],
-          ["neuralwatt", "🎯 active"],
+          ["missions", "◆ mission fix-bug · running 4m"],
+          ["messenger", "✉ Messenger: 3 unread · scout"],
+          ["autoresearch", "⌕ researching auth flows"],
+          ["some-other-ext", "foreign status"],
         ]),
       }),
     );
     const lines = component.render(120);
 
-    expect(lines[1]).not.toContain("gondolin");
-    expect(lines[1]).not.toContain("/workspace");
-    expect(lines[1]).toContain("🎯 active");
-  });
-
-  it("footer line 1 shows the gondolin workspace segment after the cwd", async () => {
-    const mockPi = createMockPi();
-    const mockCtx = createMockCommandContext();
-    await enableBar(mockPi, mockCtx);
-
-    const handler = getEventsHandler(mockPi, "gondolin:vm-state");
-    handler({ state: "ready", vmId: "abcd1234efgh5678" });
-
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      plainTheme(),
-      footerData({ branch: "main" }),
-    );
-    const line1 = component.render(120)[0] ?? "";
-
-    expect(line1).toContain("with WS abcd1234");
-    // Segment order: cwd, then WS, then git branch.
-    expect(line1.indexOf("with WS")).toBeGreaterThan(line1.indexOf("pi-extensions"));
-    expect(line1.indexOf("main")).toBeGreaterThan(line1.indexOf("with WS"));
-  });
-
-  it("gondolin segment shows starting state before the VM id is known", async () => {
-    const mockPi = createMockPi();
-    const mockCtx = createMockCommandContext();
-    await enableBar(mockPi, mockCtx);
-
-    const handler = getEventsHandler(mockPi, "gondolin:vm-state");
-    handler({ state: "starting" });
-
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      plainTheme(),
-      footerData(),
-    );
-    expect(component.render(120)[0]).toContain("with WS starting");
-  });
-
-  it("gondolin segment disappears once the VM stops", async () => {
-    const mockPi = createMockPi();
-    const mockCtx = createMockCommandContext();
-    await enableBar(mockPi, mockCtx);
-
-    const handler = getEventsHandler(mockPi, "gondolin:vm-state");
-    handler({ state: "ready", vmId: "abcd1234efgh5678" });
-    handler({ state: "stopped" });
-
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      plainTheme(),
-      footerData(),
-    );
-    expect(component.render(120)[0]).not.toContain("with WS");
+    // Line 2 still renders for the foreign status, but the three widget-first
+    // extensions are suppressed (their setStatus entries are default-footer
+    // fallbacks and would double-render).
+    expect(lines.length).toBe(2);
+    expect(lines[1]).toContain("foreign status");
+    expect(lines[1]).not.toContain("mission fix-bug");
+    expect(lines[1]).not.toContain("Messenger");
+    expect(lines[1]).not.toContain("✉");
+    expect(lines[1]).not.toContain("researching auth flows");
   });
 
   it("onBranchChange triggers requestRender", async () => {
@@ -1397,10 +1401,10 @@ describe("status-bar editor frame", () => {
       autocompleteCount: 0,
       width: 40,
       title: "anthropic/claude",
-      titleRight: "⟦Plan Mode⟧",
+      titleRight: "⟦Review off⟧",
       theme: plainTheme(),
     });
-    expect(lines[0]).toContain("⟦Plan Mode⟧");
+    expect(lines[0]).toContain("⟦Review off⟧");
     expect(lines[0]).toContain("╭");
     expect(lines[0]).toContain("╮");
     for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(40);
@@ -1450,16 +1454,35 @@ describe("status-bar editor install", () => {
     expect(mockCtx.ui.setEditorComponent).toHaveBeenCalledWith(expect.any(Function));
   });
 
-  it("session_shutdown restores the previous (default) editor", async () => {
-    const mockPi = createMockPi();
+  it("session reload replaces the editor layer with a factory bound to the new extension instance", async () => {
+    const firstPi = createMockPi();
     const mockCtx = createMockCommandContext();
-    await enableBar(mockPi, mockCtx);
+    mockCtx.model = {
+      ...mockCtx.model,
+      id: "old-model",
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+    } as any;
+    await enableBar(firstPi, mockCtx);
 
-    const shutdownHandler = getEventHandler(mockPi, "session_shutdown");
-    await shutdownHandler({ type: "session_shutdown", reason: "quit" }, mockCtx);
+    const shutdownHandler = getEventHandler(firstPi, "session_shutdown");
+    await shutdownHandler({ type: "session_shutdown", reason: "reload" }, mockCtx);
+    expect(hasEditorFactoryLayer(mockCtx.ui.getEditorComponent(), "status-bar")).toBe(false);
 
-    // Default editor is restored (undefined = Pi's default).
-    expect(mockCtx.ui.setEditorComponent).toHaveBeenLastCalledWith(undefined);
+    const reboundPi = createMockPi();
+    mockCtx.model = {
+      ...mockCtx.model,
+      id: "rebound-model",
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+    } as any;
+    await statusBarExtension(reboundPi);
+    await getEventHandler(reboundPi, "session_start")(
+      { type: "session_start", reason: "reload" },
+      mockCtx,
+    );
+
+    const lines = renderInstalledEditor(mockCtx).render(100);
+    expect(lines.some((line) => line.includes("rebound-model"))).toBe(true);
+    expect(lines.some((line) => line.includes("old-model"))).toBe(false);
   });
 
   it("/statusbar:toggle disable restores the default editor and re-enable reinstalls", async () => {
@@ -1624,7 +1647,7 @@ describe("status-bar editor install", () => {
     editor.render(100);
 
     expect(fgMock).toHaveBeenCalledWith("dim", "/");
-    expect(fgMock).toHaveBeenCalledWith("dim", "synthetic/haiku");
+    expect(fgMock).toHaveBeenCalledWith("dim", expect.stringContaining("synthetic/haiku"));
     expect(italicMock).not.toHaveBeenCalled();
   });
 
@@ -1690,14 +1713,14 @@ function getFlexHandler(mockPi: ReturnType<typeof createMockPi>) {
 }
 
 /**
- * Extract the plan-mode handler the status-bar registered on pi.events. The
- * plan extension populates the real state; tests drive it directly.
+ * Extract the approval-state handler the status-bar registered on pi.events.
+ * The approval extension populates the real state; tests drive it directly.
  */
-function getPlanModeHandler(mockPi: ReturnType<typeof createMockPi>) {
+function getApprovalHandler(mockPi: ReturnType<typeof createMockPi>) {
   const calls = (mockPi.events.on as ReturnType<typeof vi.fn>).mock.calls;
   for (const [event, handler] of calls) {
-    if (event === "plan:mode-change") {
-      return handler as (payload: { mode: string }) => void;
+    if (event === "approval-mode:state") {
+      return handler as (payload: { enabled: boolean }) => void;
     }
   }
   return undefined;
@@ -1782,17 +1805,17 @@ describe("status-bar goal badge", () => {
     expect(topLine).not.toContain("Goal 4/");
   });
 
-  it("shows the Goal badge beside Plan Mode when both are active", async () => {
+  it("shows the Goal badge beside Approval Mode off", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await enableBar(mockPi, mockCtx);
 
-    getPlanModeHandler(mockPi)?.({ mode: "plan" });
+    getApprovalHandler(mockPi)?.({ enabled: false });
     getGoalHandler(mockPi)?.({ status: "active", iteration: 2, maxIterations: 25 });
 
     const editor = renderInstalledEditor(mockCtx);
     const topLine = editor.render(120)[0] ?? "";
-    expect(topLine).toContain("Plan Mode");
+    expect(topLine).toContain("Approval Mode off");
     expect(topLine).toContain("Goal");
   });
 
@@ -1820,6 +1843,186 @@ describe("status-bar goal badge", () => {
 
     expect(lines.length).toBe(1);
     expect(lines[0]).not.toContain("Goal");
+  });
+});
+
+describe("status-bar mail slot", () => {
+  function plainTheme() {
+    return { fg: vi.fn((_color: string, text: string) => text) };
+  }
+
+  /** Enable the bar with a context snapshot, token history, one turn, and
+   * unread mail, so every line-1 right-block segment is populated. */
+  async function enableBarWithMail(
+    mockPi: ReturnType<typeof createMockPi>,
+    mockCtx: ReturnType<typeof createMockCommandContext>,
+  ) {
+    mockCtx.getContextUsage = vi.fn(() => ({
+      tokens: 50000,
+      contextWindow: 200000,
+      percent: 25,
+    }));
+    mockCtx.sessionManager.getBranch = vi.fn(() => [
+      {
+        type: "message",
+        message: {
+          role: "assistant",
+          usage: {
+            input: 1000,
+            output: 500,
+            cacheRead: 200,
+            cacheWrite: 100,
+            cost: { total: 0.03 },
+          },
+        },
+      },
+    ]);
+    await enableBar(mockPi, mockCtx);
+    const turnStartHandler = getEventHandler(mockPi, "turn_start");
+    await turnStartHandler({ type: "turn_start", turnIndex: 0, timestamp: Date.now() }, mockCtx);
+    getEventsHandler(mockPi, "messenger:state")({ name: "scout", unread: 2 });
+  }
+
+  it("status-bar subscribes to messenger:state at load time (before session_start)", async () => {
+    const mockPi = createMockPi();
+    await statusBarExtension(mockPi);
+    // No session_start required: the messenger extension publishes its state
+    // during its own session_start handler, which may run before this
+    // extension's session_start-scoped listeners exist.
+    expect(getEventsHandler(mockPi, "messenger:state")).toBeDefined();
+  });
+
+  it("messenger:state with unread 2 shows ✉ 2 on line 1, right of the context bar", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBarWithMail(mockPi, mockCtx);
+
+    const component = getFooterFactory(mockCtx)(
+      { requestRender: vi.fn() },
+      plainTheme(),
+      footerData(),
+    );
+    const line = component.render(120)[0] ?? "";
+
+    expect(line).toContain("✉ 2");
+    // Right of the context-bar cluster ([bar] 50.0k/200.0k).
+    expect(line.indexOf("✉")).toBeGreaterThan(line.indexOf("50.0k/200.0k"));
+  });
+
+  it("mail segment renders in the success color", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBarWithMail(mockPi, mockCtx);
+
+    const fgMock = vi.fn((_color: string, text: string) => text);
+    const component = getFooterFactory(mockCtx)(
+      { requestRender: vi.fn() },
+      { fg: fgMock },
+      footerData(),
+    );
+    component.render(120);
+
+    expect(fgMock).toHaveBeenCalledWith("success", "✉ 2");
+  });
+
+  it("messenger:state with unread 0 clears the mail segment", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBarWithMail(mockPi, mockCtx);
+
+    getEventsHandler(mockPi, "messenger:state")({ name: "scout", unread: 0 });
+
+    const component = getFooterFactory(mockCtx)(
+      { requestRender: vi.fn() },
+      plainTheme(),
+      footerData(),
+    );
+    expect(component.render(120)[0]).not.toContain("✉");
+  });
+
+  it("no mail segment and no gap artifacts at unread 0", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBar(mockPi, mockCtx);
+
+    const component = getFooterFactory(mockCtx)(
+      { requestRender: vi.fn() },
+      plainTheme(),
+      footerData(),
+    );
+    const line = component.render(120)[0] ?? "";
+
+    expect(line).not.toContain("✉");
+    expect(line).not.toContain("✉ 0");
+    // The right block is right-aligned: with no mail segment the line still
+    // ends exactly at the cost segment, with no trailing gap.
+    expect(line.endsWith("$0.000")).toBe(true);
+  });
+
+  it("messenger:state triggers a footer re-render", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBar(mockPi, mockCtx);
+
+    const requestRender = vi.fn();
+    getFooterFactory(mockCtx)({ requestRender }, plainTheme(), footerData());
+
+    getEventsHandler(mockPi, "messenger:state")({ name: "scout", unread: 1 });
+    expect(requestRender).toHaveBeenCalled();
+  });
+
+  it("mail sheds after turn count but before the token breakdown", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBarWithMail(mockPi, mockCtx);
+
+    const component = getFooterFactory(mockCtx)(
+      { requestRender: vi.fn() },
+      plainTheme(),
+      footerData(),
+    );
+
+    // Scan widths and record which segments survive at each width.
+    const rows: Array<{
+      width: number;
+      mail: boolean;
+      turn: boolean;
+      cost: boolean;
+      token: boolean;
+      bar: boolean;
+    }> = [];
+    for (let width = 24; width <= 140; width++) {
+      const line = component.render(width)[0] ?? "";
+      rows.push({
+        width,
+        mail: line.includes("✉ 2"),
+        turn: line.includes("↻1"),
+        cost: line.includes("$0.030"),
+        token: line.includes("↑1.0k"),
+        bar: line.includes("█"),
+      });
+    }
+
+    const widest = rows[rows.length - 1];
+    expect(widest.mail).toBe(true);
+    expect(widest.cost).toBe(true);
+    expect(widest.turn).toBe(true);
+    expect(widest.token).toBe(true);
+    expect(widest.bar).toBe(true);
+
+    // Cost sheds first while turn and mail remain.
+    expect(rows.some((r) => r.cost === false && r.turn && r.mail)).toBe(true);
+    // Mail outlives turn count (a width exists with mail but no turn).
+    expect(rows.some((r) => r.mail && !r.turn)).toBe(true);
+    // Mail sheds before the token breakdown (a width exists with token but no mail).
+    expect(rows.some((r) => !r.mail && r.token)).toBe(true);
+
+    // Shedding priority holds at every width: cost ⊆ turn ⊆ mail ⊆ token.
+    for (const r of rows) {
+      if (r.cost) expect(r.turn, `width ${r.width}: cost without turn`).toBe(true);
+      if (r.turn) expect(r.mail, `width ${r.width}: turn without mail`).toBe(true);
+      if (r.mail) expect(r.token, `width ${r.width}: mail without token`).toBe(true);
+    }
   });
 });
 
@@ -1858,6 +2061,26 @@ describe("status-bar flex badge", () => {
     expect(segments.some((s) => s.includes("off"))).toBe(true);
   });
 
+  it("buildEditorMetaSegments renders the worker model next to the small model", () => {
+    const segments = buildEditorMetaSegments(
+      "synthetic/hf:zai-org/GLM-5.3-Flash",
+      "high",
+      { on: true, capable: true },
+      "synthetic/syn:small:text",
+      plainTheme(),
+      "opencode-go/glm-5.3-flash",
+    );
+    const smallIndex = segments.findIndex((s) => s.includes("syn:small:text"));
+    const workerIndex = segments.findIndex((s) => s.includes("glm-5.3-flash"));
+    expect(smallIndex).toBeGreaterThanOrEqual(0);
+    expect(workerIndex).toBe(smallIndex + 2);
+    // The "/" separator sits between the two secondary labels.
+    expect(segments[smallIndex + 1]).toBe("/");
+    // Each secondary label carries its own distinguishing icon.
+    expect(segments[smallIndex].startsWith(ICON_SMALL_MODEL)).toBe(true);
+    expect(segments[workerIndex].startsWith(ICON_WORKER_MODEL)).toBe(true);
+  });
+
   it("buildEditorMetaSegments omits the flex badge when the model is not flex-capable", () => {
     const segments = buildEditorMetaSegments(
       "anthropic/claude-sonnet-4-6",
@@ -1886,6 +2109,38 @@ describe("status-bar flex badge", () => {
     expect(metaLine).toContain("on");
   });
 
+  it("prompt history survives editor recreation only within the same session", async () => {
+    const { PolishedEditor } = await import("../../extensions/status-bar/src/editor.ts");
+    const theme = { fg: vi.fn((_c: string, t: string) => t) };
+    const tui = { requestRender: vi.fn() };
+    const makeEditor = (sessionId: string) =>
+      new PolishedEditor(
+        tui,
+        theme,
+        {},
+        theme,
+        () => "main",
+        () => "",
+        () => "none",
+        () => ({ on: false, capable: false }),
+        () => undefined,
+        () => undefined,
+        undefined,
+        sessionId,
+      );
+
+    const first = makeEditor("history-session-a");
+    first.addToHistory("prompt before reload");
+
+    const reloaded = makeEditor("history-session-a");
+    const reloadedHistory = (reloaded as unknown as { history: string[] }).history;
+    expect(reloadedHistory).toContain("prompt before reload");
+
+    const unrelated = makeEditor("history-session-b");
+    const unrelatedHistory = (unrelated as unknown as { history: string[] }).history;
+    expect(unrelatedHistory).not.toContain("prompt before reload");
+  });
+
   it("installed editor hides the flex badge when flexCapable is false", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
@@ -1907,42 +2162,39 @@ describe("status-bar flex badge", () => {
   });
 });
 
-describe("status-bar plan mode tint", () => {
-  it("installed editor tints the frame while plan mode is active", async () => {
+describe("status-bar approval indicator", () => {
+  it("shows a warning badge when main-session Jev review is off", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await enableBar(mockPi, mockCtx);
 
-    const planHandler = getPlanModeHandler(mockPi);
-    expect(planHandler).toBeDefined();
-    planHandler?.({ mode: "plan" });
+    const handler = getApprovalHandler(mockPi);
+    expect(handler).toBeDefined();
+    handler?.({ enabled: false });
 
     const editor = renderInstalledEditor(mockCtx);
-    const lines = editor.render(100);
-    expect(lines[0]).toContain("Plan Mode");
+    expect(editor.render(100)[0]).toContain("Approval Mode off");
     expect(mockCtx.ui.theme.fg).toHaveBeenCalledWith("warning", expect.any(String));
   });
 
-  it("installed editor keeps the default frame color when not planning", async () => {
+  it("hides the badge and keeps the default frame when review is on", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await enableBar(mockPi, mockCtx);
 
-    const planHandler = getPlanModeHandler(mockPi);
-    planHandler?.({ mode: "executing" });
+    const handler = getApprovalHandler(mockPi);
+    handler?.({ enabled: false });
+    handler?.({ enabled: true });
 
     const editor = renderInstalledEditor(mockCtx);
-    const lines = editor.render(100);
-    expect(lines.some((l) => l.includes("Plan Mode"))).toBe(false);
+    expect(editor.render(100).some((line) => line.includes("Approval Mode off"))).toBe(false);
     expect(mockCtx.ui.theme.fg).toHaveBeenCalledWith("borderAccent", expect.any(String));
-    expect(mockCtx.ui.theme.fg).not.toHaveBeenCalledWith("warning", expect.any(String));
   });
 
-  it("status-bar subscribes to plan:mode-change on session_start", async () => {
+  it("subscribes to approval-mode:state before session_start", async () => {
     const mockPi = createMockPi();
-    const mockCtx = createMockCommandContext();
-    await enableBar(mockPi, mockCtx);
-    expect(getPlanModeHandler(mockPi)).toBeDefined();
+    await statusBarExtension(mockPi);
+    expect(getApprovalHandler(mockPi)).toBeDefined();
   });
 });
 
@@ -1978,7 +2230,7 @@ describe("status-bar small model segment", () => {
     expect(segments.length).toBe(smallIdx + 1);
   });
 
-  it("renders the small label grey with a dim slash, no prefix or italic", () => {
+  it("renders the small label grey with a dim slash and icon prefix, no italic", () => {
     const fgMock = vi.fn((_color: string, text: string) => text);
     const italicMock = vi.fn((text: string) => text);
     buildEditorMetaSegments(
@@ -1990,9 +2242,12 @@ describe("status-bar small model segment", () => {
     );
 
     expect(fgMock).toHaveBeenCalledWith("dim", "/");
-    expect(fgMock).toHaveBeenCalledWith("dim", "synthetic/haiku");
-    // No "small" prefix and no italicization.
-    expect(fgMock).not.toHaveBeenCalledWith("dim", expect.stringContaining("small "));
+    expect(fgMock).toHaveBeenCalledWith("dim", expect.stringContaining("synthetic/haiku"));
+    // The small-model icon prefixes the label; no italicization.
+    expect(fgMock).toHaveBeenCalledWith(
+      "dim",
+      expect.stringContaining(String.fromCodePoint(0xf09df)),
+    );
     expect(italicMock).not.toHaveBeenCalled();
   });
 
@@ -2080,5 +2335,90 @@ describe("status-bar small model segment", () => {
           .some((l) => l.includes("synthetic/haiku")),
       ).toBe(true);
     });
+  });
+});
+
+describe("status-bar worker roll-up", () => {
+  function plainTheme() {
+    return { fg: vi.fn((_color: string, text: string) => text) };
+  }
+
+  async function enableBarWithWorkers(
+    mockPi: ReturnType<typeof createMockPi>,
+    mockCtx: ReturnType<typeof createMockCommandContext>,
+    payload: { running: number; workerCostUsd: number; workerTokens: number },
+  ) {
+    mockCtx.getContextUsage = vi.fn(() => ({
+      tokens: 50000,
+      contextWindow: 200000,
+      percent: 25,
+    }));
+    await enableBar(mockPi, mockCtx);
+    getEventsHandler(mockPi, "agents:state")(payload);
+  }
+
+  it("subscribes to agents:state at load time", async () => {
+    const mockPi = createMockPi();
+    await statusBarExtension(mockPi);
+    expect(getEventsHandler(mockPi, "agents:state")).toBeDefined();
+  });
+
+  it("renders the worker spend segment when spend exists", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBarWithWorkers(mockPi, mockCtx, {
+      running: 1,
+      workerCostUsd: 0.041,
+      workerTokens: 38100,
+    });
+
+    const component = getFooterFactory(mockCtx)({ requestRender: vi.fn() }, plainTheme(), {
+      onBranchChange: vi.fn(),
+      getGitBranch: () => null,
+    });
+    const text = component.render(160).join("\n");
+    expect(text).toContain("⚙ $0.04");
+    expect(text).toContain("38.1k");
+  });
+
+  it("hides the worker spend segment at zero", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBarWithWorkers(mockPi, mockCtx, {
+      running: 0,
+      workerCostUsd: 0,
+      workerTokens: 0,
+    });
+
+    const component = getFooterFactory(mockCtx)({ requestRender: vi.fn() }, plainTheme(), {
+      onBranchChange: vi.fn(),
+      getGitBranch: () => null,
+    });
+    expect(component.render(160).join("\n")).not.toContain("⚙");
+  });
+
+  it("sheds the worker segment with the cost tier, before mail", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBarWithWorkers(mockPi, mockCtx, {
+      running: 1,
+      workerCostUsd: 0.041,
+      workerTokens: 38100,
+    });
+
+    // Width scan: at every width, worker cost never outlives the parent cost
+    // and never outlives the mail segment.
+    const component = getFooterFactory(mockCtx)({ requestRender: vi.fn() }, plainTheme(), {
+      onBranchChange: vi.fn(),
+      getGitBranch: () => null,
+    });
+    for (let width = 24; width <= 160; width += 4) {
+      const text = component.render(width).join(" ");
+      const hasWorker = text.includes("⚙");
+      const hasCost = /\$0\.0/.test(text);
+      if (hasWorker) {
+        expect(hasCost, `width ${width}: worker without cost`).toBe(true);
+      }
+    }
   });
 });

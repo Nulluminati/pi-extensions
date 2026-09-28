@@ -30,6 +30,21 @@ export const ICON_THINKING = String.fromCodePoint(0xf09d1);
 // Lightning bolt marks the Neuralwatt flex pricing tier, shown next to the
 // thinking level in the editor meta line when the selected model is flex-capable.
 export const ICON_FLEX = "⚡";
+
+// Envelope marking unread messenger mail in the line-1 right block. The glyph
+// matches the messenger extension's own status icon; defined here (not
+// imported) so the status-bar extension stays self-contained.
+export const ICON_MAIL = "✉";
+
+// ⚙ marks the delegated-worker spend roll-up (see agents:state).
+export const ICON_WORKER = "⚙";
+export const WORKER_COLOR = "accent";
+
+export const MAIL_COLOR = "success";
+
+// Glyphs specified by Zero Cool.
+export const ICON_SMALL_MODEL = "󰧟";
+export const ICON_WORKER_MODEL = String.fromCodePoint(0xf52e); // nf-md-robot-industrial
 export const FLEX_ON_COLOR = "success"; // green — the discounted tier is active
 export const FLEX_OFF_COLOR = "dim";
 export const ICON_TURN = "↻";
@@ -109,21 +124,31 @@ export const GOAL_STATUS_KEY = "goal";
 export const GOAL_STATE_EVENT = "goal:state-change";
 
 /**
- * Status key the gondolin extension publishes under. Suppressed from footer
- * line 2 because the workspace segment is shown on line 1 instead (see
- * GONDOLIN_VM_EVENT); the setStatus entry remains the fallback for the
- * default footer when the status bar is disabled.
+ * Status keys the missions, messenger, and autoresearch extensions publish
+ * under. All three are moving widget-first: their live state renders in
+ * dedicated widgets, so their setStatus entries are only fallbacks for the
+ * default footer when the status bar is disabled. Showing them on line 2
+ * would double-render, so they are suppressed alongside STATUS_KEY,
+ * SMALL_MODEL_STATUS_KEY, and GOAL_STATUS_KEY. The messenger's unread count
+ * reaches the footer through the messenger:state event instead (see
+ * MESSENGER_STATE_EVENT).
  */
-export const GONDOLIN_STATUS_KEY = "gondolin";
+export const MISSIONS_STATUS_KEY = "missions";
+
+export const MESSENGER_STATUS_KEY = "messenger";
+
+export const APPROVAL_STATUS_KEY = "approval-mode";
+
+export const AUTORESEARCH_STATUS_KEY = "autoresearch";
 
 /**
- * Event the gondolin extension emits on pi.events when the sandbox VM state
- * changes (starting / ready / stopping / stopped). The footer renders a
- * workspace segment on line 1 from it. Defined here (not imported) so the
- * status-bar extension stays self-contained; the gondolin extension owns the
+ * Event the messenger extension emits on pi.events whenever its identity and
+ * unread-mail state change (payload: { name, unread }). The footer renders an
+ * "✉ N" mail segment on line 1 from it. Defined here (not imported) so the
+ * status-bar extension stays self-contained; the messenger extension owns the
  * contract and emits the same string.
  */
-export const GONDOLIN_VM_EVENT = "gondolin:vm-state";
+export const MESSENGER_STATE_EVENT = "messenger:state";
 
 /**
  * Event the Neuralwatt extension emits on pi.events to publish flex state for
@@ -134,9 +159,13 @@ export const GONDOLIN_VM_EVENT = "gondolin:vm-state";
 export const FLEX_EVENT = "neuralwatt:flex-change";
 
 /**
- * Event the plan extension emits on pi.events when plan mode changes. Used to
- * tint the editor frame while planning. Defined here (not imported) so the
- * status-bar extension stays self-contained; the plan extension owns the
- * contract and emits the same string.
+ * Event the approval-mode extension emits on pi.events when Jev review changes.
+ * The editor shows a warning badge only while main-session review is off.
+ * This mirror keeps the status-bar extension self-contained.
  */
-export const PLAN_MODE_EVENT = "plan:mode-change";
+export const APPROVAL_MODE_EVENT = "approval-mode:state";
+
+/** Wire name of the event the agents extension publishes on worker
+ *  lifecycle changes (see extensions/agents). Payload:
+ *  { running, workerCostUsd, workerTokens }. */
+export const AGENTS_STATE_EVENT = "agents:state";

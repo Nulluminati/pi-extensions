@@ -7,6 +7,17 @@ auth.json
 settings.json
 TODO.md
 
+# Pi extension runtime state (per-project, never committed)
+.pi/autoresearch/
+.pi/messenger/
+.pi/missions/
+.pi/workers/
+.pi/worktrees/
+
+# Package-manager caches that worker sessions create inside worktrees;
+# capture stages untracked files only where ignore policy permits them
+.npm-cache/
+
 # Claude Code local state
 .claude/settings.local.json
 .claude/plans/

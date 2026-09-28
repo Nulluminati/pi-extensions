@@ -1,7 +1,7 @@
 /** Widget rendering for background jobs: pure line building plus the framed
  * editor-widget factory, styled like the todos widget. */
 
-import { renderModalFrame } from "../../../lib/tui-frame.ts";
+import { createFramedWidget, type FramedWidgetFactory } from "../../../lib/framed-widget.ts";
 import { activeJobs, type JobRegistry } from "./registry.ts";
 
 /** How many jobs the widget shows before collapsing the rest. */
@@ -46,25 +46,10 @@ export function buildWidgetLines(
  * Editor-widget factory: the active jobs in a framed box above the editor,
  * the same border language as the todos panel.
  */
-export function createJobsWidget(registry: JobRegistry) {
-  return (_tui: unknown, theme: WidgetTheme) => {
-    let cachedWidth: number | undefined;
-    let cachedLines: string[] | undefined;
-    return {
-      render(width: number): string[] {
-        if (cachedLines && cachedWidth === width) return cachedLines;
-        cachedLines = renderModalFrame(theme, width, buildWidgetLines(theme, registry), {
-          title: WIDGET_TITLE,
-          titleRight: buildProgressLabel(activeJobs(registry).length),
-          paddingY: 0,
-        });
-        cachedWidth = width;
-        return cachedLines;
-      },
-      invalidate(): void {
-        cachedWidth = undefined;
-        cachedLines = undefined;
-      },
-    };
-  };
+export function createJobsWidget(registry: JobRegistry): FramedWidgetFactory {
+  return createFramedWidget({
+    title: WIDGET_TITLE,
+    titleRight: () => buildProgressLabel(activeJobs(registry).length),
+    getBodyLines: (theme) => buildWidgetLines(theme, registry),
+  });
 }

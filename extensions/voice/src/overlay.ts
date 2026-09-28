@@ -15,7 +15,7 @@ import {
 } from "./constants.ts";
 import { getModel, modelIsDownloaded } from "./models.ts";
 import { loadSherpa } from "./native.ts";
-import { resolveVadModel, SttEngine } from "./transcription.ts";
+import { maxDecodeSec, resolveVadModel, SttEngine } from "./transcription.ts";
 import type { RecorderDeps, SherpaOnnx, VadInstance } from "./types.ts";
 
 // --- Streaming voice command (overlay with live transcript) ---
@@ -158,7 +158,9 @@ export async function runVoiceOverlay(
           minSilenceDuration: VAD_SILENCE_DURATION,
           minSpeechDuration: VAD_SPEECH_DURATION,
           windowSize: VAD_WINDOW_SIZE,
-          maxSpeechDuration: VAD_MAX_SPEECH_DURATION,
+          // Moonshine v2 needs short segments so no decode exceeds its length
+          // cap; other models keep the default.
+          maxSpeechDuration: maxDecodeSec(model) ?? VAD_MAX_SPEECH_DURATION,
         },
         sampleRate: SAMPLE_RATE,
         numThreads: 1,

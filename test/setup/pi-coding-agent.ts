@@ -9,6 +9,17 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
   class CustomEditor {
     borderColor?: ((str: string) => string) | undefined;
     focused = false;
+    // Mirrors the base Editor's prompt history (newest first, cap 100,
+    // consecutive duplicates skipped) so editor-swap and history tests run
+    // against the real semantics.
+    history: string[] = [];
+    addToHistory(text: string): void {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      if (this.history[0] === trimmed) return;
+      this.history.unshift(trimmed);
+      if (this.history.length > 100) this.history.length = 100;
+    }
     // Minimal base-editor output: top border, one content line, bottom
     // border. Enough for PolishedEditor.render to run its framing logic so
     // tests can assert the model/thinking metadata line is produced.
@@ -63,7 +74,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
   class CustomMessageComponent extends RenderedComponent {}
   // Mirrors pi's chars/4 heuristic (see estimateTokens in the real package):
   // text blocks count chars/4, images count as 4800 chars each.
-  const estimateTokens = vi.fn((message: any) => {
+  const estimateTokens = vi.fn((message: { content?: unknown }) => {
     let chars = 0;
     const content = message?.content;
     if (typeof content === "string") {
@@ -86,6 +97,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
     DynamicBorder,
     Theme,
     ToolExecutionComponent,
+    CONFIG_DIR_NAME: ".pi",
     DEFAULT_COMPACTION_SETTINGS: {
       enabled: true,
       reserveTokens: 16384,

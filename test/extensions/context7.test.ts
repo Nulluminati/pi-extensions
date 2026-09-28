@@ -102,7 +102,7 @@ function mockFetchInvalidJson() {
   });
 }
 
-const CACHE_DIR = "/home/test/.pi/agent/extensions/context7/cache";
+const CACHE_DIR = "/home/test/.cache/pi-context7";
 
 function setupFreshResolveCache(
   libraryName: string,
@@ -210,6 +210,9 @@ describe("context7-extension", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     vi.unstubAllEnvs();
+    // The host shell may set XDG_CACHE_HOME; pin it so the cache root is the
+    // mocked home's ~/.cache regardless of where tests run.
+    vi.stubEnv("XDG_CACHE_HOME", "");
     vi.mocked(existsSync).mockReturnValue(false);
     vi.mocked(readFile).mockRejectedValue(new Error("ENOENT"));
   });

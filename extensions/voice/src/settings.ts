@@ -38,11 +38,21 @@ function modelSettingValue(modelsDir: string, model: ModelDef | TtsModelDef): st
   return `${model.displayName} · ${status}`;
 }
 
-function speakerSettingValue(speakerId: number): string {
-  const voice = KITTEN_VOICES[speakerId] ?? KITTEN_VOICES[0];
-  const match = voice.match(/expr-voice-(\d)-([mf])/);
-  if (!match) return voice;
-  return `Voice ${match[1]} · ${match[2] === "m" ? "Masculine" : "Feminine"}`;
+function speakerSettingValue(model: TtsModelDef, speakerId: number): string {
+  if (model.backend === "kitten") {
+    const voice = KITTEN_VOICES[speakerId] ?? KITTEN_VOICES[0];
+    const match = voice.match(/expr-voice-(\d)-([mf])/);
+    if (!match) return voice;
+    return `Voice ${match[1]} · ${match[2] === "m" ? "Masculine" : "Feminine"}`;
+  }
+  const count = model.speakerCount ?? 1;
+  return `Voice ${Math.min(speakerId, count - 1) + 1}`;
+}
+
+/** Selectable speaker indexes for a model; empty means one fixed voice. */
+function speakerIdsFor(model: TtsModelDef): number[] {
+  if (model.backend === "kitten") return KITTEN_VOICES.map((_, speakerId) => speakerId);
+  return Array.from({ length: model.speakerCount ?? 0 }, (_, speakerId) => speakerId);
 }
 
 export async function runVoiceSettings(
@@ -69,15 +79,17 @@ export async function runVoiceSettings(
   const speechValues = new Map(
     TTS_MODELS.map((model) => [modelSettingValue(modelsDir, model), model] as const),
   );
-  const speakerValues = new Map(
-    KITTEN_VOICES.map((_, speakerId) => [speakerSettingValue(speakerId), speakerId] as const),
-  );
   const activeModel = getModel(activeModelId) ?? MODELS[0];
   const activeTtsModel = TTS_MODELS.find((model) => model.id === activeTtsModelId) ?? TTS_MODELS[0];
   if (!activeModel || !activeTtsModel) {
     ctx.ui.notify("Voice model registry is empty.", "error");
     return;
   }
+  const speakerValues = new Map(
+    speakerIdsFor(activeTtsModel).map(
+      (speakerId) => [speakerSettingValue(activeTtsModel, speakerId), speakerId] as const,
+    ),
+  );
   const activeModelValue = modelSettingValue(modelsDir, activeModel);
   const activeTtsModelValue = modelSettingValue(modelsDir, activeTtsModel);
   const selectableDictationValues = MODELS.filter((model) =>
@@ -93,17 +105,18 @@ export async function runVoiceSettings(
     selectableSpeechValues.unshift(activeTtsModelValue);
   }
 
+  const speakerIds = speakerIdsFor(activeTtsModel);
   const voiceItem: SettingItem = {
     id: "voice",
     label: "Local voice",
     description:
-      activeTtsModel.backend === "kitten"
-        ? "Kitten provides eight local voices."
+      speakerIds.length > 0
+        ? `${activeTtsModel.displayName} provides ${speakerIds.length} local voices.`
         : `${activeTtsModel.displayName} uses one fixed voice.`,
     currentValue:
-      activeTtsModel.backend === "kitten" ? speakerSettingValue(activeSpeakerId) : "Fixed voice",
+      speakerIds.length > 0 ? speakerSettingValue(activeTtsModel, activeSpeakerId) : "Fixed voice",
   };
-  if (activeTtsModel.backend === "kitten") voiceItem.values = [...speakerValues.keys()];
+  if (speakerIds.length > 0) voiceItem.values = [...speakerValues.keys()];
 
   const items: SettingItem[] = [
     {
@@ -207,10 +220,13 @@ export async function runVoiceSettings(
               return;
             }
             activeTtsModelId = model.id;
-            if (model.backend === "kitten") {
-              voiceItem.currentValue = speakerSettingValue(activeSpeakerId);
-              voiceItem.values = [...speakerValues.keys()];
-              voiceItem.description = "Kitten provides eight local voices.";
+            const nextSpeakerIds = speakerIdsFor(model);
+            if (nextSpeakerIds.length > 0) {
+              voiceItem.currentValue = speakerSettingValue(model, activeSpeakerId);
+              voiceItem.values = nextSpeakerIds.map((speakerId) =>
+                speakerSettingValue(model, speakerId),
+              );
+              voiceItem.description = `${model.displayName} provides ${nextSpeakerIds.length} local voices.`;
             } else {
               voiceItem.currentValue = "Fixed voice";
               delete voiceItem.values;
@@ -221,7 +237,7 @@ export async function runVoiceSettings(
           }
 
           if (id !== "voice") return;
-          const previousValue = speakerSettingValue(activeSpeakerId);
+          const previousValue = speakerSettingValue(activeTtsModel, activeSpeakerId);
           const speakerId = speakerValues.get(newValue);
           if (speakerId === undefined) {
             settingsList.updateValue(id, previousValue);

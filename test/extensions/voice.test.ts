@@ -1,16 +1,20 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readdir } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { completeSimple } from "@earendil-works/pi-ai";
 import { isKittyProtocolActive } from "@earendil-works/pi-tui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { loadActiveSpeakerId } from "../../extensions/voice/src/config.ts";
+import type { SherpaOnnx } from "../../extensions/voice/src/types.ts";
 import voiceExtension, {
   addHoldToVoice,
   buildInflectPhonemeText,
   buildKittenConfig,
   buildOfflineConfig,
   buildSpokenSummaryPrompt,
+  buildSupertonicConfig,
+  buildTtsConfig,
   cleanTextForSpeech,
   createInflectGaussianSamples,
   encodePcm16Wave,
@@ -25,7 +29,9 @@ import voiceExtension, {
   resolveVoiceConfigPath,
   runVoiceSettings,
   runVoiceSpeak,
+  SttEngine,
   splitInflectText,
+  splitSamples,
   stripRepetitionLoop,
   summarizeForSpeech,
   TTS_MODELS,
@@ -42,6 +48,33 @@ import { getCommandHandler, getEventHandler } from "../mocks/test-helpers.ts";
 
 vi.mock("@earendil-works/pi-ai", () => ({
   completeSimple: vi.fn(),
+}));
+
+/** Sherpa fake: records every OfflineTts engine config, so a test can assert
+ *  which model each engine was built from. The native addon loads through
+ *  createRequire, so the ESM module seam is the interception point. */
+const sherpaHarness = vi.hoisted(() => {
+  const configs: unknown[] = [];
+  const createAsync = vi.fn(async (config: unknown) => {
+    configs.push(config);
+    return {
+      generateAsync: async (): Promise<never> => {
+        throw new Error("test playback suppressed");
+      },
+    };
+  });
+  return { configs, createAsync };
+});
+
+vi.mock("../../extensions/voice/src/native.ts", () => ({
+  loadSherpa: () => ({
+    OfflineTts: { createAsync: sherpaHarness.createAsync },
+    GenerationConfig: class GenerationConfig {
+      constructor(_options: unknown) {}
+    },
+    writeWave: () => {},
+  }),
+  loadOnnxRuntime: () => ({}),
 }));
 
 beforeEach(() => {
@@ -824,6 +857,38 @@ describe("voice-extension", () => {
       expect(speak).toHaveBeenCalledWith("Inflect response.", 0);
     });
 
+    it("accepts a downloaded Supertonic model for speech", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "pi-voice-supertonic-"));
+      const modelDir = join(dir, "sherpa-onnx-supertonic-3-tts-int8-2026-05-11");
+      mkdirSync(modelDir);
+      for (const file of [
+        "duration_predictor.int8.onnx",
+        "text_encoder.int8.onnx",
+        "vector_estimator.int8.onnx",
+        "vocoder.int8.onnx",
+        "tts.json",
+        "unicode_indexer.bin",
+        "voice.bin",
+      ]) {
+        writeFileSync(join(modelDir, file), "stub");
+      }
+      const ctx = createMockCommandContext();
+      ctx.sessionManager.getBranch = vi.fn(() => [
+        { type: "message", message: { role: "assistant", content: "Supertonic response." } },
+      ]);
+      const speak = vi.fn(async () => {});
+
+      await runVoiceSpeak("full", ctx, {
+        modelsDir: dir,
+        ttsModelId: "supertonic-3-int8",
+        summarize: vi.fn(),
+        speak,
+        speakerId: 3,
+      });
+
+      expect(speak).toHaveBeenCalledWith("Supertonic response.", 3);
+    });
+
     it("reports when there is no assistant message to speak", async () => {
       const ctx = createMockCommandContext();
       await runVoiceSpeak("", ctx, {
@@ -851,13 +916,37 @@ describe("voice-extension", () => {
   });
 
   describe("TTS model registry", () => {
-    it("includes Kitten Nano with its required files and download URL", () => {
+    it("includes Kitten Nano v0.8 with its required files and download URL", () => {
       expect(TTS_MODELS).toContainEqual(
         expect.objectContaining({
-          id: "kitten-nano-en-v0_1-fp16",
+          id: "kitten-nano-en-v0_8-int8",
           backend: "kitten",
-          files: expect.arrayContaining(["model.fp16.onnx", "voices.bin", "tokens.txt"]),
-          downloadUrl: expect.stringContaining("kitten-nano-en-v0_1-fp16.tar.bz2"),
+          files: expect.arrayContaining(["model.int8.onnx", "voices.bin", "tokens.txt"]),
+          modelFile: "model.int8.onnx",
+          speakerCount: 8,
+          downloadUrl: expect.stringContaining("kitten-nano-en-v0_8-int8.tar.bz2"),
+        }),
+      );
+    });
+
+    it("includes Supertonic 3 with ten voices and its multi-file layout", () => {
+      expect(TTS_MODELS).toContainEqual(
+        expect.objectContaining({
+          id: "supertonic-3-int8",
+          backend: "supertonic",
+          files: expect.arrayContaining([
+            "duration_predictor.int8.onnx",
+            "text_encoder.int8.onnx",
+            "vector_estimator.int8.onnx",
+            "vocoder.int8.onnx",
+            "tts.json",
+            "unicode_indexer.bin",
+            "voice.bin",
+          ]),
+          speakerCount: 10,
+          downloadUrl: expect.stringContaining(
+            "sherpa-onnx-supertonic-3-tts-int8-2026-05-11.tar.bz2",
+          ),
         }),
       );
     });
@@ -882,19 +971,50 @@ describe("voice-extension", () => {
     });
 
     it("builds a sherpa Kitten configuration", () => {
-      const config = buildKittenConfig(TTS_MODELS[0]!, "/models", 4) as {
+      const kitten = TTS_MODELS.find((model) => model.backend === "kitten");
+      if (!kitten) throw new Error("Missing kitten model");
+      const config = buildKittenConfig(kitten, "/models", 4) as {
         model: {
           kitten: { model: string; voices: string; tokens: string; dataDir: string };
           numThreads: number;
           provider: string;
         };
       };
-      expect(config.model.kitten.model).toBe("/models/kitten-nano-en-v0_1-fp16/model.fp16.onnx");
+      expect(config.model.kitten.model).toBe("/models/kitten-nano-en-v0_8-int8/model.int8.onnx");
       expect(config.model.kitten.voices).toContain("voices.bin");
       expect(config.model.kitten.tokens).toContain("tokens.txt");
       expect(config.model.kitten.dataDir).toContain("espeak-ng-data");
       expect(config.model.numThreads).toBe(4);
       expect(config.model.provider).toBe("cpu");
+    });
+
+    it("builds a sherpa Supertonic configuration", () => {
+      const supertonic = TTS_MODELS.find((model) => model.backend === "supertonic");
+      if (!supertonic) throw new Error("Missing supertonic model");
+      const config = buildSupertonicConfig(supertonic, "/models", 4) as {
+        model: {
+          supertonic: Record<string, string>;
+          numThreads: number;
+          provider: string;
+        };
+      };
+      expect(config.model.supertonic.durationPredictor).toBe(
+        "/models/sherpa-onnx-supertonic-3-tts-int8-2026-05-11/duration_predictor.int8.onnx",
+      );
+      expect(config.model.supertonic.ttsJson).toContain("tts.json");
+      expect(config.model.supertonic.voiceStyle).toContain("voice.bin");
+      expect(config.model.numThreads).toBe(4);
+      expect(config.model.provider).toBe("cpu");
+    });
+
+    it("buildTtsConfig dispatches by backend", () => {
+      const kitten = TTS_MODELS.find((model) => model.backend === "kitten");
+      const supertonic = TTS_MODELS.find((model) => model.backend === "supertonic");
+      if (!kitten || !supertonic) throw new Error("Missing TTS models");
+      expect(buildTtsConfig(kitten, "/models", 2)).toEqual(buildKittenConfig(kitten, "/models", 2));
+      expect(buildTtsConfig(supertonic, "/models", 2)).toEqual(
+        buildSupertonicConfig(supertonic, "/models", 2),
+      );
     });
   });
 
@@ -959,13 +1079,17 @@ describe("voice-extension", () => {
 
   describe("model registry + downloads", () => {
     it("getModel returns registered models", () => {
+      expect(getModel("moonshine-v2-base-en")?.kind).toBe("offline");
       expect(getModel("moonshine-base-int8")?.kind).toBe("offline");
       expect(getModel("whisper-tiny-en-int8")?.kind).toBe("offline");
       expect(getModel("does-not-exist")).toBeUndefined();
     });
 
-    it("includes Moonshine Base, Whisper Tiny, and Whisper Small int8", () => {
+    it("includes Moonshine v2, Parakeet, and the legacy models", () => {
       expect(MODELS.map((model) => model.id)).toEqual([
+        "moonshine-v2-base-en",
+        "moonshine-v2-tiny-en",
+        "parakeet-tdt-0.6b-v2-int8",
         "moonshine-base-int8",
         "whisper-tiny-en-int8",
         "whisper-small-en-int8",
@@ -989,6 +1113,125 @@ describe("voice-extension", () => {
     });
   });
 
+  describe("moonshine v2 length cap", () => {
+    // sherpa-onnx 1.13.8 returns empty transcripts for Moonshine v2 decodes
+    // longer than ~9.2s; the engine must chunk audio below that.
+    const MAX_SEC = 9;
+
+    function chunkingFakeSherpa(text: string, sampleRate = 16000) {
+      const decodeLengths: number[] = [];
+      const vadConfigs: number[] = [];
+      const stream = {
+        acceptWaveform: (waveform: { samples: Float32Array }) => {
+          decodeLengths.push(waveform.samples.length);
+        },
+      };
+      const fake = {
+        decodeLengths,
+        vadConfigs,
+        readWave: () => ({ samples: new Float32Array(sampleRate * 12), sampleRate }),
+        writeWave: () => {},
+        Vad: class {
+          constructor(config: { sileroVad: { maxSpeechDuration: number } }) {
+            vadConfigs.push(config.sileroVad.maxSpeechDuration);
+          }
+          acceptWaveform() {}
+          isEmpty() {
+            return true;
+          }
+          front() {
+            return { start: 0, samples: new Float32Array(0) };
+          }
+          pop() {}
+          flush() {}
+        },
+        OnlineRecognizer: class {
+          createStream() {
+            return stream;
+          }
+          isReady() {
+            return false;
+          }
+          decode() {}
+          getResult() {
+            return { text };
+          }
+        },
+        OfflineRecognizer: class {
+          createStream() {
+            return stream;
+          }
+          decode() {}
+          getResult() {
+            return { text };
+          }
+        },
+      };
+      return {
+        fake,
+        asSherpa: () => fake as unknown as SherpaOnnx,
+      };
+    }
+
+    it("splitSamples keeps short audio as one chunk", () => {
+      const samples = new Float32Array(16000 * 5);
+      expect(splitSamples(samples, 16000, MAX_SEC)).toEqual([samples]);
+    });
+
+    it("splitSamples splits long audio into capped chunks", () => {
+      const samples = new Float32Array(16000 * 25);
+      const chunks = splitSamples(samples, 16000, MAX_SEC);
+      expect(chunks.length).toBe(3);
+      for (const chunk of chunks) {
+        expect(chunk.length).toBeLessThanOrEqual(MAX_SEC * 16000);
+      }
+      const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+      expect(total).toBe(samples.length);
+    });
+
+    it("SttEngine chunks long moonshine v2 input below the cap", () => {
+      const model = getModel("moonshine-v2-base-en");
+      if (!model) throw new Error("Missing moonshine v2 model");
+      const { fake, asSherpa } = chunkingFakeSherpa("chunk text");
+      const engine = new SttEngine(asSherpa(), model, "/models", 2);
+
+      const text = engine.recognize(new Float32Array(16000 * 12), 16000);
+
+      expect(text).toBe("chunk text chunk text");
+      expect(fake.decodeLengths.length).toBe(2);
+      for (const length of fake.decodeLengths) {
+        expect(length).toBeLessThanOrEqual(MAX_SEC * 16000);
+      }
+    });
+
+    it("SttEngine does not chunk models without a cap", () => {
+      const model = getModel("whisper-tiny-en-int8");
+      if (!model) throw new Error("Missing whisper model");
+      const { fake, asSherpa } = chunkingFakeSherpa("whole text");
+      const engine = new SttEngine(asSherpa(), model, "/models", 2);
+
+      const text = engine.recognize(new Float32Array(16000 * 12), 16000);
+
+      expect(text).toBe("whole text");
+      expect(fake.decodeLengths.length).toBe(1);
+      expect(fake.decodeLengths[0]).toBe(16000 * 12);
+    });
+
+    it("transcribeFile uses the capped VAD duration for moonshine v2", () => {
+      const model = getModel("moonshine-v2-base-en");
+      if (!model) throw new Error("Missing moonshine v2 model");
+      const capped = chunkingFakeSherpa("text");
+      transcribeFile(capped.asSherpa(), model, "/models-without-vad", "/audio.wav");
+      expect(capped.fake.vadConfigs).toEqual([]); // no VAD model in dir, so none built
+
+      const sherpa = chunkingFakeSherpa("text");
+      const dir = mkdtempSync(join(tmpdir(), "pi-voice-vad-"));
+      writeFileSync(join(dir, "silero_vad.onnx"), "stub");
+      transcribeFile(sherpa.asSherpa(), model, dir, "/audio.wav");
+      expect(sherpa.fake.vadConfigs).toEqual([MAX_SEC]);
+    });
+  });
+
   describe("resolveModelsDir", () => {
     it("uses PI_VOICE_MODELS when set", () => {
       expect(resolveModelsDir({ PI_VOICE_MODELS: "/custom/path" })).toBe("/custom/path");
@@ -999,15 +1242,41 @@ describe("voice-extension", () => {
     });
 
     it("falls back to ~/.cache/pi-voice/models when unset", () => {
-      const dir = resolveModelsDir({});
-      expect(dir.endsWith(join(".cache", "pi-voice", "models"))).toBe(true);
+      expect(resolveModelsDir({})).toBe(join(homedir(), ".cache", "pi-voice", "models"));
+    });
+
+    it("honors XDG_CACHE_HOME when set", () => {
+      expect(resolveModelsDir({ XDG_CACHE_HOME: "/xdg" })).toBe("/xdg/pi-voice/models");
+    });
+  });
+
+  describe("speaker persistence", () => {
+    it("restores a numeric Supertonic speaker index within range", () => {
+      const configPath = join(mkdtempSync(join(tmpdir(), "pi-voice-speaker-")), "config.json");
+      writeFileSync(configPath, JSON.stringify({ ttsModel: "supertonic-3-int8", voice: 3 }));
+      expect(loadActiveSpeakerId(configPath)).toBe(3);
+    });
+
+    it("clamps an out-of-range numeric speaker index to the first voice", () => {
+      const configPath = join(mkdtempSync(join(tmpdir(), "pi-voice-speaker-")), "config.json");
+      writeFileSync(configPath, JSON.stringify({ ttsModel: "supertonic-3-int8", voice: 42 }));
+      expect(loadActiveSpeakerId(configPath)).toBe(0);
+    });
+
+    it("still restores named Kitten voices", () => {
+      const configPath = join(mkdtempSync(join(tmpdir(), "pi-voice-speaker-")), "config.json");
+      writeFileSync(
+        configPath,
+        JSON.stringify({ ttsModel: "kitten-nano-en-v0_8-int8", voice: "expr-voice-4-f" }),
+      );
+      expect(loadActiveSpeakerId(configPath)).toBe(5);
     });
   });
 
   describe("resolveVoiceConfigPath", () => {
-    it("uses the global Pi extension config directory by default", () => {
-      expect(resolveVoiceConfigPath({}, "/home/zero")).toBe(
-        "/home/zero/.pi/agent/extensions/voice/config.json",
+    it("uses the global Pi agent directory by default", () => {
+      expect(resolveVoiceConfigPath({}, "/home/zero/.pi/agent")).toBe(
+        "/home/zero/.pi/agent/voice.json",
       );
     });
 
@@ -1065,6 +1334,38 @@ describe("voice-extension", () => {
       expect(config.modelConfig.moonshine.cachedDecoder).toContain("cached_decode.int8.onnx");
       expect(config.modelConfig.tokens).toContain("tokens.txt");
       expect(config.modelConfig.whisper).toBeUndefined();
+    });
+
+    it("buildOfflineConfig uses the merged decoder for Moonshine v2 models", () => {
+      const model = getModel("moonshine-v2-base-en");
+      if (!model) throw new Error("Missing moonshine v2 model");
+      const config = buildOfflineConfig(model, "/m", 2) as {
+        modelConfig: {
+          moonshine: { encoder: string; mergedDecoder: string; preprocessor?: string };
+          tokens: string;
+        };
+      };
+      expect(config.modelConfig.moonshine.encoder).toContain("encoder_model.ort");
+      expect(config.modelConfig.moonshine.mergedDecoder).toContain("decoder_model_merged.ort");
+      expect(config.modelConfig.moonshine.preprocessor).toBeUndefined();
+      expect(config.modelConfig.tokens).toContain("tokens.txt");
+    });
+
+    it("buildOfflineConfig builds a NeMo transducer config for Parakeet", () => {
+      const model = getModel("parakeet-tdt-0.6b-v2-int8");
+      if (!model) throw new Error("Missing parakeet model");
+      const config = buildOfflineConfig(model, "/m", 2) as {
+        modelConfig: {
+          transducer: { encoder: string; decoder: string; joiner: string };
+          modelType: string;
+          tokens: string;
+        };
+      };
+      expect(config.modelConfig.transducer.encoder).toContain("encoder.int8.onnx");
+      expect(config.modelConfig.transducer.decoder).toContain("decoder.int8.onnx");
+      expect(config.modelConfig.transducer.joiner).toContain("joiner.int8.onnx");
+      expect(config.modelConfig.modelType).toBe("nemo_transducer");
+      expect(config.modelConfig.tokens).toContain("tokens.txt");
     });
   });
 
@@ -1180,7 +1481,7 @@ describe("voice-extension", () => {
       await runVoiceSettings("", ctx, {
         modelsDir,
         activeModelId: "moonshine-base-int8",
-        activeTtsModelId: "kitten-nano-en-v0_1-fp16",
+        activeTtsModelId: "kitten-nano-en-v0_8-int8",
         activeSpeakerId: 0,
         recorder: { hasFfmpeg: true, hasArecord: false },
         playbackReady: false,
@@ -1238,7 +1539,7 @@ describe("voice-extension", () => {
       await runVoiceSettings("", ctx, {
         modelsDir,
         activeModelId: "moonshine-base-int8",
-        activeTtsModelId: "kitten-nano-en-v0_1-fp16",
+        activeTtsModelId: "kitten-nano-en-v0_8-int8",
         activeSpeakerId: 0,
         recorder: { hasFfmpeg: true, hasArecord: false },
         playbackReady: true,
@@ -1251,11 +1552,14 @@ describe("voice-extension", () => {
       component?.handleInput?.("\r");
       component?.handleInput?.("\x1b[B");
       component?.handleInput?.("\r");
+      component?.handleInput?.("\r");
       component?.handleInput?.("\x1b[B");
       component?.handleInput?.("\r");
 
       expect(onModelSelect).toHaveBeenCalledWith("whisper-tiny-en-int8");
-      expect(onTtsModelSelect).toHaveBeenCalledWith("inflect-nano-v2-onnx");
+      // Kitten cycles to Supertonic, then to Inflect's fixed voice.
+      expect(onTtsModelSelect).toHaveBeenNthCalledWith(1, "supertonic-3-int8");
+      expect(onTtsModelSelect).toHaveBeenNthCalledWith(2, "inflect-nano-v2-onnx");
       expect(onSpeakerSelect).not.toHaveBeenCalled();
       expect(component?.render(72).join("\n")).toContain("Fixed voice");
     });
@@ -1271,8 +1575,8 @@ describe("voice-extension", () => {
 
       await runVoiceSettings("", ctx, {
         modelsDir,
-        activeModelId: "moonshine-base-int8",
-        activeTtsModelId: "kitten-nano-en-v0_1-fp16",
+        activeModelId: "moonshine-v2-base-en",
+        activeTtsModelId: "kitten-nano-en-v0_8-int8",
         activeSpeakerId: 0,
         recorder: { hasFfmpeg: true, hasArecord: false },
         playbackReady: true,
@@ -1284,7 +1588,7 @@ describe("voice-extension", () => {
       const component = getComponent();
       component.handleInput?.("\r");
 
-      expect(onModelSelect).toHaveBeenCalledWith("whisper-small-en-int8");
+      expect(onModelSelect).toHaveBeenCalledWith("parakeet-tdt-0.6b-v2-int8");
     });
 
     it("rejects a missing model and restores the previous selection", async () => {
@@ -1302,7 +1606,7 @@ describe("voice-extension", () => {
       await runVoiceSettings("", ctx, {
         modelsDir,
         activeModelId: "moonshine-base-int8",
-        activeTtsModelId: "kitten-nano-en-v0_1-fp16",
+        activeTtsModelId: "kitten-nano-en-v0_8-int8",
         activeSpeakerId: 0,
         recorder: { hasFfmpeg: false, hasArecord: false },
         playbackReady: false,
@@ -1319,6 +1623,38 @@ describe("voice-extension", () => {
         "error",
       );
       expect(component?.render(72).join("\n")).toContain("Moonshine Base · Missing");
+    });
+
+    it("cycles Supertonic voices by speaker index", async () => {
+      const modelsDir = createDownloadedVoiceModels();
+      const ctx = createMockCommandContext();
+      const onSpeakerSelect = vi.fn();
+      const getComponent = captureCustomComponent(ctx);
+
+      await runVoiceSettings("", ctx, {
+        modelsDir,
+        activeModelId: "moonshine-v2-base-en",
+        activeTtsModelId: "supertonic-3-int8",
+        activeSpeakerId: 0,
+        recorder: { hasFfmpeg: true, hasArecord: false },
+        playbackReady: true,
+        source: "default",
+        onModelSelect: vi.fn(),
+        onTtsModelSelect: vi.fn(),
+        onSpeakerSelect,
+      });
+      const component = getComponent();
+      const rendered = component.render(72).join("\n");
+      expect(rendered).toContain("Speech model  Supertonic 3 · Ready");
+      expect(rendered).toContain("Local voice  Voice 1");
+
+      // Move down to the voice row and cycle to the second speaker.
+      component.handleInput?.("\x1b[B");
+      component.handleInput?.("\x1b[B");
+      component.handleInput?.("\r");
+
+      expect(onSpeakerSelect).toHaveBeenCalledWith(1);
+      expect(component.render(72).join("\n")).toContain("Voice 2");
     });
 
     it("requires TUI mode", async () => {
@@ -1385,6 +1721,8 @@ describe("voice-extension", () => {
       firstComponent.handleInput?.("\x1b[B");
       firstComponent.handleInput?.("\r");
       firstComponent.handleInput?.("\x1b[A");
+      // Kitten cycles through Supertonic before reaching Inflect.
+      firstComponent.handleInput?.("\r");
       firstComponent.handleInput?.("\r");
       firstComponent.handleInput?.("\x1b[A");
       firstComponent.handleInput?.("\r");
@@ -1392,7 +1730,7 @@ describe("voice-extension", () => {
       expect(JSON.parse(readFileSync(configPath, "utf8"))).toEqual({
         voice: "expr-voice-2-f",
         ttsModel: "inflect-nano-v2-onnx",
-        dictationModel: "whisper-tiny-en-int8",
+        dictationModel: "moonshine-v2-tiny-en",
       });
 
       const restartedPi = createMockPi();
@@ -1404,7 +1742,7 @@ describe("voice-extension", () => {
       await restartedHandler("", restartedCtx);
 
       const rendered = getRestartedComponent().render(72).join("\n");
-      expect(rendered).toContain("Whisper Tiny · Ready");
+      expect(rendered).toContain("Moonshine v2 Tiny · Ready");
       expect(rendered).toContain("Inflect Nano v2 · Ready");
       expect(rendered).toContain("Fixed voice");
     });
@@ -1433,7 +1771,7 @@ describe("voice-extension", () => {
       await handler("", ctx);
 
       const rendered = getComponent().render(72).join("\n");
-      expect(rendered).toContain("Moonshine Base · Missing");
+      expect(rendered).toContain("Moonshine v2 Base · Missing");
       expect(rendered).toContain("Kitten Nano · Missing");
       expect(rendered).toContain("Voice 2 · Masculine");
     });
@@ -1468,6 +1806,51 @@ describe("voice-extension", () => {
       const names = mockPi.registerCommand.mock.calls.map((call: unknown[]) => call[0]);
 
       expect(names).not.toContain("voice-summary-model");
+    });
+
+    it("rebuilds the sherpa speech engine after switching speech models", async () => {
+      sherpaHarness.configs.length = 0;
+      sherpaHarness.createAsync.mockClear();
+      const modelsDir = createDownloadedVoiceModels();
+      vi.stubEnv("PI_VOICE_MODELS", modelsDir);
+      vi.stubEnv(
+        "PI_VOICE_CONFIG",
+        join(mkdtempSync(join(tmpdir(), "pi-voice-config-")), "config.json"),
+      );
+      const mockPi = createMockPi();
+      await voiceExtension(mockPi);
+      const ctx = createMockCommandContext();
+      ctx.sessionManager.getBranch = vi.fn(() => [
+        { type: "message", message: { role: "assistant", content: "Hello world." } },
+      ]);
+
+      // First speak uses the default Kitten model.
+      await getCommandHandler(mockPi, "voice:speak")("full", ctx);
+      await vi.waitFor(() => expect(sherpaHarness.createAsync).toHaveBeenCalledTimes(1));
+      expect(sherpaHarness.configs[0]).toMatchObject({ model: { kitten: expect.anything() } });
+
+      // Switch the speech-model row to Supertonic 3.
+      let component: { handleInput?(data: string): void } | undefined;
+      ctx.ui.custom = vi.fn(async (factory) => {
+        component = await factory(
+          { requestRender: vi.fn() },
+          { fg: (_color: string, text: string) => text, bold: (text: string) => text },
+          {},
+          vi.fn(),
+        );
+        return undefined;
+      });
+      await getCommandHandler(mockPi, "voice:settings")("", ctx);
+      component?.handleInput?.("\x1b[B");
+      component?.handleInput?.("\r");
+
+      // The second speak must get an engine built for Supertonic, not reuse
+      // the cached Kitten engine.
+      await getCommandHandler(mockPi, "voice:speak")("full", ctx);
+      await vi.waitFor(() => expect(sherpaHarness.createAsync).toHaveBeenCalledTimes(2));
+      expect(sherpaHarness.configs[1]).toMatchObject({
+        model: { supertonic: expect.anything() },
+      });
     });
 
     it("/voice:stop reports when playback is already idle", async () => {
@@ -1570,7 +1953,7 @@ function createDownloadedTtsModel(): string {
 function createDownloadedVoiceModels(includeDefaultDictationModel = true): string {
   const dir = mkdtempSync(join(tmpdir(), "pi-voice-models-"));
   for (const model of [...MODELS, ...TTS_MODELS]) {
-    if (!includeDefaultDictationModel && model.id === "moonshine-base-int8") continue;
+    if (!includeDefaultDictationModel && model.id === "moonshine-v2-base-en") continue;
     mkdirSync(join(dir, model.dirName), { recursive: true });
     for (const file of model.files) {
       const path = join(dir, model.dirName, file);
