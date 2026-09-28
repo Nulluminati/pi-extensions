@@ -147,6 +147,11 @@ exit 0
 const NOISY_FAILING_WORKER =
   "#!/bin/sh\necho 'line one failure' >&2\necho 'line two failure' >&2\necho 'line three failure' >&2\nexit 3\n";
 const SLOW_WORKER = "#!/bin/sh\nsleep 30\n";
+/** Runs the success report only after the release file appears, so a test
+ *  controls completion timing instead of racing the parent's publish. */
+const GATED_SUCCESS_WORKER = `#!/bin/sh
+while [ ! -f "$GATED_WORKER_RELEASE" ]; do sleep 0.05; done
+${SUCCESS_WORKER}`;
 const BLOCKER_REASON = "this VM has no node_modules and no parent checkout";
 const BLOCKER_RUNNING_WORKER = `#!/bin/sh
 printf '%s\n' '{"type":"agents_blocker","at":123,"reason":"${BLOCKER_REASON}"}' >> "$PI_WORKER_STREAM"
@@ -1445,7 +1450,13 @@ sleep 30
     });
 
     it("clears the widget when a fire-and-forget worker completes, without shutdown", async () => {
-      const fixture = await writeFixture(fixtureDir, "ok-worker.sh", SUCCESS_WORKER);
+      // A gated worker: the running state is stable until the test releases
+      // it, so neither assertion races the child's exit (an instantly-
+      // exiting worker can complete before the delegate path's publish, and
+      // then the strip is legitimately never published at all).
+      const release = join(fixtureDir, "release-gate");
+      setEnv("GATED_WORKER_RELEASE", release);
+      const fixture = await writeFixture(fixtureDir, "gated-worker.sh", GATED_SUCCESS_WORKER);
       setEnv("PI_WORKER_COMMAND", fixture);
 
       const started = await executeTool("delegate", { task: "t", isolate: false, name: "quick" });
@@ -1455,9 +1466,11 @@ sleep 30
       // "1 running" header).
       expect(renderLastWidget().join("\n")).toContain('"quick" running');
 
+      // Release the worker; it completes and the fire-and-forget done
+      // handler must republish: last strip call is the clear, with no
+      // session_shutdown in between.
+      await writeFile(release, "go\n");
       await waitForRecord(cwd, id, "completed");
-      // The fire-and-forget done handler must republish: last strip call is
-      // the clear, with no session_shutdown in between.
       await vi.waitFor(() => {
         expect(mockCtx.ui.setWidget).toHaveBeenLastCalledWith(STRIP_KEY_ABOVE, undefined);
       });
