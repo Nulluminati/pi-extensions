@@ -1,4 +1,4 @@
-import { readdir } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import neuralwattExtension, {
@@ -91,6 +91,27 @@ describe("neuralwatt-extension", () => {
     for (const id of EXPECTED_MODEL_IDS) {
       expect(ids, `static list missing ${id}`).toContain(id);
     }
+  });
+
+  it("documents the DeepSeek Speed and V4.1 models in the introduction and catalog tables", async () => {
+    const readme = await readFile(
+      resolve(import.meta.dirname, "../../extensions/neuralwatt/README.md"),
+      "utf8",
+    );
+    const introduction = readme.split("## Usage")[0];
+    const catalog = readme.split("### Static catalog")[1]?.split("### Startup staleness check")[0];
+    const thinking = readme.split("## Thinking levels")[1]?.split("## Pi APIs Used")[0];
+
+    expect(introduction).toContain("DeepSeek V4 Flash (Speed)");
+    expect(introduction).toContain("DeepSeek V4.1 Flash");
+    expect(catalog).toContain("| deepseek-v4-flash-speed | 1M | yes | — | $0.14 / $0.28 |");
+    expect(catalog).toContain("| deepseek-v4.1-flash | 1M | yes | yes | $0.15 / $0.60 |");
+    expect(thinking).toContain(
+      "| deepseek-v4-flash-speed | none | minimal | low | medium | high | max |",
+    );
+    expect(thinking).toContain(
+      "| deepseek-v4.1-flash | none | minimal | low | medium | high | xhigh |",
+    );
   });
 
   it("configures Gemma 4 from live metadata and probed reasoning behavior", () => {

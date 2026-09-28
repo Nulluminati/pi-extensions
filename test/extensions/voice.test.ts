@@ -50,6 +50,33 @@ vi.mock("@earendil-works/pi-ai", () => ({
   completeSimple: vi.fn(),
 }));
 
+/** Sherpa fake: records every OfflineTts engine config, so a test can assert
+ *  which model each engine was built from. The native addon loads through
+ *  createRequire, so the ESM module seam is the interception point. */
+const sherpaHarness = vi.hoisted(() => {
+  const configs: unknown[] = [];
+  const createAsync = vi.fn(async (config: unknown) => {
+    configs.push(config);
+    return {
+      generateAsync: async (): Promise<never> => {
+        throw new Error("test playback suppressed");
+      },
+    };
+  });
+  return { configs, createAsync };
+});
+
+vi.mock("../../extensions/voice/src/native.ts", () => ({
+  loadSherpa: () => ({
+    OfflineTts: { createAsync: sherpaHarness.createAsync },
+    GenerationConfig: class GenerationConfig {
+      constructor(_options: unknown) {}
+    },
+    writeWave: () => {},
+  }),
+  loadOnnxRuntime: () => ({}),
+}));
+
 beforeEach(() => {
   vi.stubEnv("PI_SMALL_MODEL", "test-provider/test-model");
   vi.stubEnv("PI_SMALL_MODEL_THINKING", "minimal");
@@ -1779,6 +1806,51 @@ describe("voice-extension", () => {
       const names = mockPi.registerCommand.mock.calls.map((call: unknown[]) => call[0]);
 
       expect(names).not.toContain("voice-summary-model");
+    });
+
+    it("rebuilds the sherpa speech engine after switching speech models", async () => {
+      sherpaHarness.configs.length = 0;
+      sherpaHarness.createAsync.mockClear();
+      const modelsDir = createDownloadedVoiceModels();
+      vi.stubEnv("PI_VOICE_MODELS", modelsDir);
+      vi.stubEnv(
+        "PI_VOICE_CONFIG",
+        join(mkdtempSync(join(tmpdir(), "pi-voice-config-")), "config.json"),
+      );
+      const mockPi = createMockPi();
+      await voiceExtension(mockPi);
+      const ctx = createMockCommandContext();
+      ctx.sessionManager.getBranch = vi.fn(() => [
+        { type: "message", message: { role: "assistant", content: "Hello world." } },
+      ]);
+
+      // First speak uses the default Kitten model.
+      await getCommandHandler(mockPi, "voice:speak")("full", ctx);
+      await vi.waitFor(() => expect(sherpaHarness.createAsync).toHaveBeenCalledTimes(1));
+      expect(sherpaHarness.configs[0]).toMatchObject({ model: { kitten: expect.anything() } });
+
+      // Switch the speech-model row to Supertonic 3.
+      let component: { handleInput?(data: string): void } | undefined;
+      ctx.ui.custom = vi.fn(async (factory) => {
+        component = await factory(
+          { requestRender: vi.fn() },
+          { fg: (_color: string, text: string) => text, bold: (text: string) => text },
+          {},
+          vi.fn(),
+        );
+        return undefined;
+      });
+      await getCommandHandler(mockPi, "voice:settings")("", ctx);
+      component?.handleInput?.("\x1b[B");
+      component?.handleInput?.("\r");
+
+      // The second speak must get an engine built for Supertonic, not reuse
+      // the cached Kitten engine.
+      await getCommandHandler(mockPi, "voice:speak")("full", ctx);
+      await vi.waitFor(() => expect(sherpaHarness.createAsync).toHaveBeenCalledTimes(2));
+      expect(sherpaHarness.configs[1]).toMatchObject({
+        model: { supertonic: expect.anything() },
+      });
     });
 
     it("/voice:stop reports when playback is already idle", async () => {

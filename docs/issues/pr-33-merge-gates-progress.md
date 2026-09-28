@@ -1,8 +1,8 @@
 # PR #33 merge-gate work
 
-- Status: six merge gates complete; other review findings remain open
+- Status: four merge gates, finding 7, and majors 5, 6, 8 complete; cross-cutting themes and nits remain open
 - Source review: [pr-33-review-findings.md](pr-33-review-findings.md)
-- Scope: Approval Mode dialog, four reported merge gates, and the worker-ID path escape promoted from the majors.
+- Scope: Approval Mode dialog, four reported merge gates, the worker-ID path escape, and majors 5, 6, 8.
 
 Work in this order. Record the test result beside each item before marking it done.
 
@@ -12,7 +12,10 @@ Work in this order. Record the test result beside each item before marking it do
 4. [x] Finding 3 (cancellation): save `cancelled by user` for a cancelled worker and keep timeout errors for actual timeouts. Both targeted tests pass; the response and saved record agree.
 5. [x] Finding 4 (sandbox boundary): four tests run the real broker and tool child with a stub sandbox manager. They cover framing, binary output, errors, timeout, cancellation, and child process-group kills. Five convention tests now include `.mjs` and parse a JavaScript violation. The stub does not test actual sandbox enforcement.
 6. [x] Finding 7 (worker ID): validate raw IDs at the tool entry and each artifact or worktree path. Six targeted tests pass, including the record-missing removal path and a trailing-newline ID. A mismatched record ID is ignored.
+7. [x] Finding 5 (voice TTS cache): build the sherpa engine per model instead of one unkeyed slot. A Kitten-to-Supertonic switch failed before the fix (one `createAsync` call, expected two) and passes after it. The full voice suite: 104/104.
+8. [x] Finding 6 (reservation data shape): validate the map and each claim on read, so valid JSON with a wrong shape fails closed instead of turning enforcement off. Eight invalid shapes covered; three targeted tests pass.
+9. [x] Finding 8 (neuralwatt README): add DeepSeek V4 Flash (Speed) and DeepSeek V4.1 Flash to the introduction, catalog table, and thinking-level table. The parity test passed after the update.
 
-Verification: `npm run format` made no further changes. `npm run check` passed Biome, both typechecks, 26 extension validations, and 1,429 tests. The synthetic approval calibration passed 45/45 twice; it did not execute the example commands.
+Verification: `npm run format` made no further changes. `npm run check` passed Biome, both typechecks, 26 extension validations, and 1,432 tests. The synthetic approval calibration passed 45/45 twice; it did not execute the example commands.
 
-The other findings in the source review remain open after this first pass.
+The cross-cutting themes and nits in the source review remain open after this pass.

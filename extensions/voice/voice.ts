@@ -128,7 +128,7 @@ export default async function voiceExtension(pi: ExtensionAPI) {
   let activeTtsModelId = loadActiveTtsModelId(voiceConfigPath);
   let speechJob: SpeechJob | null = null;
   let ttsSherpa: (SherpaOnnx & TtsSherpa) | null = null;
-  let ttsEnginePromise: Promise<OfflineTtsInstance> | null = null;
+  const ttsEnginePromises = new Map<string, Promise<OfflineTtsInstance>>();
   let onnxRuntime: OnnxRuntime | null = null;
   const inflectEnginePromises = new Map<string, Promise<InflectTtsEngineType>>();
 
@@ -159,11 +159,16 @@ export default async function voiceExtension(pi: ExtensionAPI) {
       throw new Error(`Model ${model.id} does not use the sherpa speech engine.`);
     }
     ttsSherpa ??= loadSherpa() as SherpaOnnx & TtsSherpa;
-    ttsEnginePromise ??= ttsSherpa.OfflineTts.createAsync(buildTtsConfig(model, modelsDir, 4));
+    const key = modelDirPath(modelsDir, model);
+    let enginePromise = ttsEnginePromises.get(key);
+    if (!enginePromise) {
+      enginePromise = ttsSherpa.OfflineTts.createAsync(buildTtsConfig(model, modelsDir, 4));
+      ttsEnginePromises.set(key, enginePromise);
+    }
     try {
-      return { sherpa: ttsSherpa, engine: await ttsEnginePromise };
+      return { sherpa: ttsSherpa, engine: await enginePromise };
     } catch (error) {
-      ttsEnginePromise = null;
+      ttsEnginePromises.delete(key);
       throw error;
     }
   }

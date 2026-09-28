@@ -947,6 +947,31 @@ describe("messenger-store", () => {
     expect(await readFile(path, "utf8")).toBe("{not json");
   });
 
+  it("loadReservations rejects valid JSON with an invalid map or claim shape", async () => {
+    const path = join(cwd, CONFIG_DIR_NAME, "messenger", "reservations.json");
+    await mkdir(join(path, ".."), { recursive: true });
+    const invalid = [
+      [],
+      null,
+      { "src/held": null },
+      { "src/held": {} },
+      { "src/held": { owner: 42, at: 1 } },
+      { "src/held": { owner: "owner", at: "1" } },
+      { "src/held": { owner: "owner", at: 1, pid: "123" } },
+      { "src/held": { owner: "owner", at: 1, reason: null } },
+    ];
+
+    for (const value of invalid) {
+      const raw = JSON.stringify(value);
+      await writeFile(path, raw, "utf8");
+      await expect(loadReservations(cwd)).rejects.toThrow(/reservations\.json.*invalid shape/i);
+      await expect(reserve(cwd, "other", ["src/new"])).rejects.toThrow(
+        /reservations\.json.*invalid shape/i,
+      );
+      expect(await readFile(path, "utf8")).toBe(raw);
+    }
+  });
+
   it("findBlockingReservation covers directories by boundary", async () => {
     await reserve(cwd, "owner", ["src/auth"]);
     const reservations = await loadReservations(cwd);

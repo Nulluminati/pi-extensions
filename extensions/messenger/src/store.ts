@@ -399,6 +399,26 @@ export async function loadReservations(cwd: string): Promise<ReservationMap> {
   return withFileLock(reservationsLockPath(cwd), () => loadReservationsUnlocked(cwd));
 }
 
+function isReservationMap(value: unknown): value is ReservationMap {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  if (Object.getPrototypeOf(value) !== Object.prototype) return false;
+  return Object.values(value).every((entry) => {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return false;
+    const claim = entry as Record<string, unknown>;
+    return (
+      typeof claim.owner === "string" &&
+      claim.owner.length > 0 &&
+      typeof claim.at === "number" &&
+      Number.isFinite(claim.at) &&
+      (claim.pid === undefined ||
+        (typeof claim.pid === "number" && Number.isInteger(claim.pid) && claim.pid > 0)) &&
+      (claim.orphanedAt === undefined ||
+        (typeof claim.orphanedAt === "number" && Number.isFinite(claim.orphanedAt))) &&
+      (claim.reason === undefined || typeof claim.reason === "string")
+    );
+  });
+}
+
 /**
  * Read the reservations map. A missing file is an empty map; a corrupt file
  * or failed read throws naming the path, so callers fail loudly instead of
@@ -414,11 +434,16 @@ async function readReservations(cwd: string): Promise<ReservationMap> {
     if (isNodeError(error) && error.code === "ENOENT") return {};
     throw new Error(`Cannot read messenger reservations at ${path}: ${errorMessage(error)}`);
   }
+  let parsed: unknown;
   try {
-    return JSON.parse(raw) as ReservationMap;
+    parsed = JSON.parse(raw);
   } catch (error) {
     throw new Error(`Messenger reservations file at ${path} is corrupt: ${errorMessage(error)}`);
   }
+  if (!isReservationMap(parsed)) {
+    throw new Error(`Messenger reservations file at ${path} has an invalid shape`);
+  }
+  return parsed;
 }
 
 async function loadReservationsUnlocked(cwd: string): Promise<ReservationMap> {
