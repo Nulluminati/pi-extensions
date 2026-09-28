@@ -1,6 +1,6 @@
 # PR #33 merge-gate work
 
-- Status: four merge gates, finding 7, majors 5/6/8, and this session's cross-cutting themes complete; the docs/nit batch and remaining themes stay open
+- Status: four merge gates, finding 7, majors 5/6/8, this session's cross-cutting themes, and two worker-sandbox behavior nits complete; the remaining nits and themes stay open
 - Source review: [pr-33-review-findings.md](pr-33-review-findings.md)
 - Scope: Approval Mode dialog, four reported merge gates, the worker-ID path escape, and majors 5, 6, 8.
 
@@ -17,7 +17,8 @@ Work in this order. Record the test result beside each item before marking it do
 9. [x] Finding 8 (neuralwatt README): add DeepSeek V4 Flash (Speed) and DeepSeek V4.1 Flash to the introduction, catalog table, and thinking-level table. The parity test passed after the update.
 10. [x] Cross-cutting dedup: one `isNodeError` in `lib/errors.ts` replaces eight copies, one `THINKING_LEVELS` in `lib/thinking-levels.ts` serves three consumers, `findNewestCustomEntry` in `lib/session-utils.ts` replaces two hand-rolled scans, worker-model config writes route through `writeJsonAtomic` with a `mode` option so the owner-only mode survives, and mailbox validation reuses `assertValidAgentName`. New tests: 4 errors, 3 thinking levels, 4 newest-entry.
 11. [x] Cross-cutting error swallowing: autoresearch pending clear, worker-extensions config read, worker-blocker spool mkdir, and the missions listing now swallow `ENOENT` only and surface every other code. Each fix had a failing-first test (EISDIR, EISDIR, EACCES, ENOTDIR).
+12. [x] Worker-sandbox nits: the `user_bash` environment now crosses the client and the tool child, with the sandbox-owned `HOME`, `TMPDIR`, and cache root kept under sandbox control. A cancel that arrives while the sandbox wrapper is still being built is remembered and kills the child instead of being dropped. Four tests failed before the fix and pass after it.
 
-Verification: `npm run format` made no further changes. `npm run check` passed Biome, both typechecks, 26 extension validations, and 1,449 tests. The synthetic approval calibration passed 45/45 twice; it did not execute the example commands.
+Verification: `npm run format` made no further changes. `npm run check` passed Biome, both typechecks, 26 extension validations, and 1,452 tests. The synthetic approval calibration passed 45/45 twice; it did not execute the example commands.
 
 The docs and nit batch in the source review, plus the themes outside this share, remain open.

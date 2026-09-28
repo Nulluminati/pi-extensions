@@ -156,9 +156,15 @@ class BrokerClient implements WorkerSandboxClient {
       env?: NodeJS.ProcessEnv;
     },
   ): Promise<{ exitCode: number | null }> {
-    return (await this.request({ type: "shell", command, timeout: options.timeout }, options)) as {
-      exitCode: number | null;
-    };
+    return (await this.request(
+      {
+        type: "shell",
+        command,
+        timeout: options.timeout,
+        ...(options.env ? { env: options.env } : {}),
+      },
+      options,
+    )) as { exitCode: number | null };
   }
 
   async close(): Promise<void> {

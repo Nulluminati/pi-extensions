@@ -8,6 +8,11 @@ import { worktreeGitCommonDir } from "./git-metadata.mjs";
 
 const helper = fileURLToPath(new URL("./tool-child.mjs", import.meta.url));
 const running = new Map();
+/** Request ids whose cancel arrived before a child existed for them. The
+ *  cancel handler only knows ids already spawned, so a cancel that lands
+ *  while the sandbox wrapper is still being built is remembered here and
+ *  consumed as soon as the child is ready. */
+const cancelled = new Set();
 let ready = false;
 let cwd;
 let policy;
@@ -173,6 +178,12 @@ async function execute(request) {
     if (!done) finish({ type: "error", error: `Worker sandbox tool exited (${code}): ${stderr.trim()}` });
   });
   child.stdin?.on("error", (error) => finish({ type: "error", error: error.message }));
+  if (cancelled.delete(id)) {
+    // The cancel landed before this child existed; it must not run.
+    stop(child);
+    finish({ type: "error", error: "Operation cancelled" });
+    return;
+  }
   child.stdin?.end(JSON.stringify({ ...request, cwd }));
 }
 
@@ -198,6 +209,7 @@ try {
     } else if (request.type === "cancel") {
       const child = running.get(request.id);
       if (child) stop(child);
+      else cancelled.add(request.id);
     } else if (request.type === "tool" || request.type === "shell") {
       void execute(request).catch((error) => {
         send({ type: "error", id: request.id, error: error instanceof Error ? error.message : String(error) });

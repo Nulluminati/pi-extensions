@@ -7,6 +7,12 @@ export const SandboxManager = {
     }
   },
   async wrapWithSandboxArgv() {
+    // Test hook: slow the wrap so a cancel can arrive while it is pending,
+    // which is the window the broker must not drop.
+    const delay = Number(process.env.PI_TEST_WRAP_DELAY_MS ?? "0");
+    if (Number.isFinite(delay) && delay > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
     return {
       argv: [
         process.execPath,

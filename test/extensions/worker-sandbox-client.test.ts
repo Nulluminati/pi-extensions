@@ -61,10 +61,19 @@ describe("worker sandbox broker client", () => {
     vi.mocked(spawn).mockReturnValue(child as never);
     const client = await startWorkerSandbox("/worktree");
     const onData = vi.fn();
-    expect(await client.runShell("printf safe", { cwd: "/worktree", onData })).toEqual({
-      exitCode: 0,
-    });
+    expect(
+      await client.runShell("printf safe", {
+        cwd: "/worktree",
+        onData,
+        env: { PI_TEST_SHELL_VAR: "hello" },
+      }),
+    ).toEqual({ exitCode: 0 });
     expect(onData).toHaveBeenCalledWith(Buffer.from([0, 255]));
+    // BashOperations.exec carries an env for the command; the broker payload
+    // must not drop it.
+    expect(requests.find((request) => request.type === "shell")).toMatchObject({
+      env: { PI_TEST_SHELL_VAR: "hello" },
+    });
     const controller = new AbortController();
     controller.abort();
     await expect(

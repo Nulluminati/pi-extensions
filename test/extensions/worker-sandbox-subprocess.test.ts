@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const BROKER = fileURLToPath(
   new URL("../../extensions/worker-sandbox/src/broker.mjs", import.meta.url),
@@ -37,6 +37,7 @@ describe.skipIf(process.platform !== "linux" && process.platform !== "darwin")(
 
     afterEach(async () => {
       for (const broker of brokers) await broker.close();
+      vi.unstubAllEnvs();
       await rm(cwd, { recursive: true, force: true });
     });
 
@@ -144,6 +145,59 @@ describe.skipIf(process.platform !== "linux" && process.platform !== "darwin")(
         type: "fatal",
         error: "test sandbox initialization failed",
       });
+    });
+
+    it("passes the request environment to the sandboxed shell command", async () => {
+      const broker = await start();
+
+      broker.send({
+        type: "shell",
+        id: 30,
+        command: "print-env",
+        env: { PI_TEST_SANDBOX_VAR: "hello" },
+      });
+
+      expect(await broker.next((reply) => reply.id === 30 && reply.type === "result")).toEqual({
+        type: "result",
+        id: 30,
+        value: { exitCode: 0, stdout: "hello", stderr: "" },
+      });
+    });
+
+    it("keeps the sandbox home when the request environment overrides HOME", async () => {
+      const broker = await start();
+
+      broker.send({
+        type: "shell",
+        id: 31,
+        command: "print-home",
+        env: { HOME: "/attacker-home" },
+      });
+
+      const reply = await broker.next((entry) => entry.id === 31 && entry.type === "result");
+      const home = (reply.value as { stdout: string }).stdout;
+      expect(home).not.toBe("missing");
+      expect(home).not.toBe("/attacker-home");
+    });
+
+    it("kills a request cancelled while the sandbox wrapper is still being built", async () => {
+      vi.stubEnv("PI_TEST_WRAP_DELAY_MS", "400");
+      const broker = await start();
+
+      broker.send({ type: "tool", id: 32, name: "read", params: { mode: "hang" } });
+      broker.send({ type: "cancel", id: 32 });
+
+      expect(await broker.next((reply) => reply.id === 32 && reply.type === "error")).toMatchObject(
+        {
+          error: expect.stringContaining("cancelled"),
+        },
+      );
+
+      // The broker keeps serving the next request.
+      broker.send({ type: "tool", id: 33, name: "read", params: { path: "after-cancel" } });
+      expect(
+        await broker.next((reply) => reply.id === 33 && reply.type === "result"),
+      ).toMatchObject({ value: { content: [{ text: "read:after-cancel" }] } });
     });
   },
 );

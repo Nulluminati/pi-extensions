@@ -30,7 +30,17 @@ export const createLsTool = makeTool("ls");
 
 export function createLocalBashOperations() {
   return {
-    async exec(_command, _cwd, options) {
+    async exec(command, _cwd, options) {
+      if (command === "print-env") {
+        return {
+          exitCode: 0,
+          stdout: String(options.env?.PI_TEST_SANDBOX_VAR ?? "missing"),
+          stderr: "",
+        };
+      }
+      if (command === "print-home") {
+        return { exitCode: 0, stdout: String(options.env?.HOME ?? "missing"), stderr: "" };
+      }
       options.onData(Buffer.from([0, 255]));
       return { exitCode: 0, stdout: "stub", stderr: "" };
     },
