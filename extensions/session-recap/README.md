@@ -31,7 +31,7 @@ The extension generates recaps automatically in three scenarios:
 ### Recap generation
 
 1. **Context extraction** — Reads the session branch and builds a text transcript from the last user message onward. Includes user text, assistant text, tool calls (with truncated arguments), and tool results.
-2. **Meaningful activity check** — Only generates a recap if the transcript contains at least 30 assistant words or 1+ tool call after the last user message. This prevents empty/empty-looking recaps.
+2. **Meaningful activity check** — Only generates a recap if the transcript contains at least 50 assistant words or 1+ tool call after the last user message. This prevents empty/empty-looking recaps.
 3. **LLM call** — Uses `completeSimple()` from `@earendil-works/pi-ai` with a dedicated system prompt ("You write terse, concrete session recaps for a coding agent UI."). The prompt instructs the model to produce exactly one line in the format: `recap: <what happened, past tense, concrete>. Next: <one-line next step>.`
 4. **Display** — The recap is published through the shared widget strip (`setStripWidget` with `WIDGET_PRIORITY_RECAP`), which pins it above the other strip widgets (workers, jobs, todos, missions, autoresearch). A `recap:changed` event is still emitted on the shared `pi.events` bus for external consumers.
 
@@ -54,7 +54,7 @@ If focus-out occurs while the agent is actively running (and `--recap-during-act
 - **User input** — Clears any displayed recap and cancels pending idle timers and active LLM requests
 - **Turn start** — Cancels idle timers and active LLM requests
 - **Agent start** — Clears displayed recap and cancels pending work
-- **Branch navigation** — If the session leaf changes during recap generation, the result is discarded
+- **Branch navigation** — If the last message entry changes during recap generation, the result is discarded
 
 ### Per-instance state (WeakMap)
 
@@ -72,11 +72,12 @@ All state is stored in a `WeakMap<ExtensionAPI, RecapState>` with the following 
 | `focusedOutAt` | Timestamp of the last focus-out event |
 | `pendingRecap` | A recap drafted during focus-out, waiting to be shown on focus-in |
 | `lastDraftedLeafId` | The session leaf ID when the last recap was drafted (prevents duplicate recaps) |
+| `autoDismissTimer` | `setTimeout` handle that auto-dismisses the visible recap after 120 seconds |
 
 ## Key Design Decisions
 
 - **One-line format** — The recap is intentionally terse (~220 chars max). It's meant to orient you, not replace reading the scrollback.
-- **Widget, not notification** — The recap uses `setWidget()` with `placement: "aboveEditor"` so it's visible but unobtrusive. It clears automatically on the next user input.
+- **Widget, not notification** — The recap publishes through the shared widget strip (`setStripWidget`) so it sits above the editor, visible but unobtrusive. It clears on the next user input, or auto-dismisses after 120 seconds.
 - **AbortController for LLM calls** — If a new recap request starts before the old one finishes, the old one is aborted. This prevents stale recaps from appearing. Exception: automatic triggers (idle, focus) never abort an in-flight `/recap` — slash commands run before the `input` event, so the idle timer can still be armed when `/recap` starts.
 - **`completeSimple()`** — Uses the simpler API instead of `complete()` because recaps don't need streaming, tool calls, or complex payload construction.
 - **Cache retention: "none"** — Recaps are ephemeral and should not be cached by the provider.

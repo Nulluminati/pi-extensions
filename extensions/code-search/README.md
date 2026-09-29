@@ -47,7 +47,7 @@ Results are grouped by repository, ranked by match count, and include the matchi
 1. **Validation** — Empty queries and oversize parameters are rejected with structured error results. Multi-term queries where any term contains parentheses are rejected with guidance: Sourcegraph's public API silently returns zero matches for them, and a false negative is worse than an error. Single parenthesized terms (e.g., `MarshalJSON()`) and quoted phrases work fine. The `max_results` value is clamped to 1–50 (default 10).
 2. **URL build** — The query plus any active filters are compiled into a single Sourcegraph query string: `context:global <query> lang:<language> repo:^github\.com/<owner/repo>$ file:<path> count:<N> timeout:15s`, with `display=<N>` as a URL parameter. The default is Sourcegraph's standard mode where terms are ANDed and quoted phrases match exactly.
 3. **Fetch** — A 60-second timeout aborts the request if the API is slow. The caller signal is wired into the same abort controller.
-4. **Stream parse** — Sourcegraph answers with server-sent events. The client reads the full body once the stream terminates (`done`) and parses `matches`, `filters`, `progress`, and `error` events in one pass. Stream-level errors surface as readable tool errors.
+4. **Stream parse** — Sourcegraph answers with server-sent events. The client reads until the terminal `done` event, then cancels the connection (waiting for the body to end hangs on Bun) and parses `matches`, `filters`, `progress`, and `error` events in one pass. Stream-level errors surface as readable tool errors.
 5. **Normalize** — Each match's `repository` (`github.com/owner/repo`) is stripped to `owner/repo`; `lineMatches` provide both the line numbers and the snippet text; the API's `language` field tags fenced code blocks.
 6. **Group and rank** — Matches are grouped by repository; the result list is sorted by total match count, descending.
 7. **Cache** — Identical repeat queries within 60 seconds (up to 20 entries, per Pi instance) are served from an in-memory cache without refetching. Errors are never cached, so retries always hit the network.
@@ -56,7 +56,7 @@ Results are grouped by repository, ranked by match count, and include the matchi
 
 The tool registers a `renderResult` callback that draws one of four states to the TUI:
 
-- **In progress** — a dim "searching" line with a magnifying glass
+- **In progress** — a warning "searching" line with a magnifying glass
 - **Collapsed** — `🔍 Code search: "query" — 1,234 matches in 17 repos (10 shown)` in the success hue
 - **Expanded** — a short list of the top repositories, plus a "… and N more" tail
 - **Error** — the error message in the error hue, prefixed with an X
@@ -67,7 +67,7 @@ The tool registers a `renderResult` callback that draws one of four states to th
 - **Standard mode only** — Sourcegraph's regexp mode (`patternType=regexp`) silently returns false zeros for plausible patterns on the public instance (e.g., `MarshalJSON\s` matched nothing while `func\s` matched 230), and parentheses break several standard-mode shapes: multi-term queries with a paren term return order-dependent zeros, and quoted phrases with parens false-zero even when the phrase is verbatim in an indexed file. The tool stays in standard mode and rejects every unreliable paren shape client-side; parens are allowed only in a single unquoted term.
 - **No API key** — Sourcegraph's public code search is unauthenticated. Anyone can use the tool without provisioning credentials.
 - **No MCP** — The extension is a direct HTTP client. There is no stdio bridge, no subprocess, no extra layer to debug.
-- **Whole-body SSE parsing** — The stream is read to completion (`done` always terminates it after `count:` results) and parsed in one pass instead of incrementally, keeping the parser synchronous and testable.
+- **Single-pass SSE parsing** — The client reads until the terminal `done` event, then cancels the connection (the server may keep the body open) and parses the events in one pass instead of incrementally, keeping the parser synchronous and testable.
 - **Structured error results** — Every failure path returns `{ content, details: { isError: true } }` so the agent can read the error without exception unwrapping.
 - **Bounded expansion** — The expanded TUI preview only lists the first 5 repositories; the full result is still in the tool's content for the LLM to read.
 - **Caller signal plumbed through** — The AbortSignal from Pi is wired into the fetch's internal controller, so cancelling an agent turn also cancels the in-flight HTTP request.

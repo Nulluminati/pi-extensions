@@ -33,6 +33,8 @@ The command writes:
 ~/.pi/agent/small-model.json
 ```
 
+The path resolves through Pi's agent directory (`agentConfigPath`), so it follows `PI_CODING_AGENT_DIR`; `~/.pi/agent` is only the default.
+
 Example:
 
 ```json

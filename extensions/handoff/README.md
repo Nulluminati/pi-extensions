@@ -75,3 +75,5 @@ While the summary is generating, a framed modal (`ctx.ui.custom`, the same `rend
 ## Configuration
 
 Set the shared model with `/smallmodel`. Handoff stops with an error if that model is missing or unauthenticated; it does not fall back to the active chat model.
+
+Two environment variables also apply when handoff resolves the small model: `PI_SMALL_MODEL` overrides the model as `provider/model-id`, and `PI_SMALL_MODEL_THINKING` overrides its reasoning level.

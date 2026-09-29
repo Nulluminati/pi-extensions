@@ -150,9 +150,9 @@ Model engines are loaded on first use and cached. This keeps them out of Pi's st
 
 Kitten Nano v0.8 is a 15M-parameter model that produces noticeably more natural speech than the previous v0.1 release while shipping smaller. Supertonic 3 is a 99M-parameter model with ten speakers; its upstream release covers 31 languages, but this extension generates English only. It needs roughly 500 MB of RAM at synthesis time, and its upstream repository is no longer maintained (the weights remain available). The Inflect measurements used the extension's inference path on the development machine: Nano generated 2.06 seconds of audio in 0.29 seconds; Micro generated 2.16 seconds in 0.50 seconds.
 
-Inflect's official ONNX export uses a duration graph and a decode graph. The extension runs both through ONNX Runtime, uses eSpeak-ng for English phonemes, and joins long text at punctuation-aware boundaries. Inflect models have fixed voices, so the voice row in `/voice` becomes read-only while either one is active.
+Inflect's official ONNX export uses a duration graph and a decode graph. The extension runs both through ONNX Runtime, uses eSpeak-ng for English phonemes, and joins long text at punctuation-aware boundaries. Inflect models have fixed voices, so the voice row in `/voice:settings` becomes read-only while either one is active.
 
-Use `/voice` to switch models. The default remains Kitten Nano.
+Use `/voice:settings` to switch models. The default remains Kitten Nano.
 ## Local voices
 
 Kitten Nano provides eight speaker choices:
@@ -168,7 +168,7 @@ Kitten Nano provides eight speaker choices:
 | `expr-voice-5-m` | Voice 5, masculine |
 | `expr-voice-5-f` | Voice 5, feminine |
 
-The default is `expr-voice-2-m`. Use the local voice row in `/voice` to choose another speaker. These choices apply to Kitten Nano. Supertonic 3 exposes ten voices addressed by index (`Voice 1` through `Voice 10`); both Inflect models have fixed voices.
+The default is `expr-voice-2-m`. Use the local voice row in `/voice:settings` to choose another speaker. These choices apply to Kitten Nano. Supertonic 3 exposes ten voices addressed by index (`Voice 1` through `Voice 10`); both Inflect models have fixed voices.
 
 ## Transcription models
 
@@ -181,13 +181,13 @@ The default is `expr-voice-2-m`. Use the local voice row in `/voice` to choose a
 | `whisper-tiny-en-int8` | Small general-purpose English model. |
 | `whisper-small-en-int8` | More accurate than Tiny, with higher CPU and memory use. |
 
-The dictation model row in `/voice` marks each choice as `Ready` or `Missing` and refuses to activate incomplete downloads.
+The dictation model row in `/voice:settings` marks each choice as `Ready` or `Missing` and refuses to activate incomplete downloads.
 
 ## Configuration
 
 ### Voice preferences
 
-`/voice` saves the dictation model, speech model, and selected Kitten voice in:
+`/voice:settings` saves the dictation model, speech model, and selected Kitten voice in:
 
 ```text
 ~/.pi/agent/voice.json
@@ -271,7 +271,7 @@ Run `pactl list short sources`, set `PI_VOICE_SOURCE` to the desired source, and
 
 ### A model is reported as missing
 
-Open `/voice` and compare the reported status with the expected extraction directory under `$PI_VOICE_MODELS`. The extension checks every required model file before activation.
+Open `/voice:settings` and compare the reported status with the expected extraction directory under `$PI_VOICE_MODELS`. The extension checks every required model file before activation.
 
 ### Spoken summaries fail before playback
 
@@ -288,7 +288,7 @@ Run `/smallmodel` and choose an authenticated text model. `/voice:speak full` ca
 | `ctx.ui.pasteToEditor()` | Inserts the finalized transcript |
 | `ctx.ui.setEditorComponent()` | Wraps the active editor with hold-to-dictate handling |
 | `ctx.ui.onTerminalInput()` | Handles Space hold sequences that bypass the editor |
-| `ctx.ui.setStatus()` | Shows speech preparation and playback state |
+| `ctx.ui.setWidget()` | Shows a transient speech indicator above the editor while speech is prepared or played |
 | `ctx.sessionManager.getBranch()` | Finds the latest assistant response |
 | `ctx.modelRegistry` | Selects summary models and resolves credentials |
 | `completeSimple()` | Generates the short spoken summary |

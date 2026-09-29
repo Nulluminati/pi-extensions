@@ -109,8 +109,8 @@ If multiple cached docs match, the tool returns a list of candidates rather than
 
 The cache lives under `$XDG_CACHE_HOME/pi-context7/` (default `~/.cache/pi-context7/`):
 
-- **Resolve cache** — `cache/resolve/objects/<hash>.json` stores resolve results. `cache/resolve/index/` holds `all.json` and `by-library.json` for fast lookups.
-- **Docs cache** — `cache/docs/objects/<hash>.json` stores raw + curated text. `cache/docs/index/` holds `all.json`, `by-ref.json`, `by-library-id.json`, `by-library-name.json`, and `by-version.json` for semantic searches.
+- **Resolve cache** — `resolve/objects/<hash>.json` stores resolve results. `resolve/index/` holds `all.json` and `by-library.json` for fast lookups.
+- **Docs cache** — `docs/objects/<hash>.json` stores raw + curated text. `docs/index/` holds `all.json`, `by-ref.json`, `by-library-id.json`, `by-library-name.json`, and `by-version.json` for semantic searches.
 - **Atomic writes** — All JSON writes go to a temp file first, then are renamed into place. This prevents corruption if the process crashes mid-write.
 - **TTL pruning** — On every read, expired entries are pruned and orphaned object files are deleted. Entries whose object files are missing are also removed from indexes.
 - **Mutation queue** — A simple promise-based queue serializes concurrent cache mutations so two simultaneous tool calls don't corrupt the index files.
@@ -125,13 +125,13 @@ The cache lives under `$XDG_CACHE_HOME/pi-context7/` (default `~/.cache/pi-conte
 
 ## Key Design Decisions
 
-- **No external npm dependencies** — Uses only Node.js built-ins (`crypto`, `fs`, `fs/promises`, `os`, `path`) plus the global `fetch`. Pi transpiles extensions directly.
+- **No external npm dependencies** — Uses Node.js built-ins (`crypto`, `fs`, `fs/promises`, `path`), the Pi-bundled `@earendil-works/pi-tui`, repo-local `lib/` helpers, and the global `fetch`. Pi transpiles extensions directly.
 - **Pi-native, not MCP** — Bypasses the Model Context Protocol entirely. Direct HTTP to Context7 means no extra server process, no stdio pipes, and no MCP client configuration.
 - **Persistent searchable cache** — Documentation is cached locally with structured indexes so repeated lookups for the same library are instant. Semantic fields (`libraryName`, `version`, `query`, `topic`, `page`) make it easy to find prior fetches without remembering an exact docRef.
 - **Curated by default, raw on demand** — `context7_get_library_docs` returns a compact, keyword-relevant summary to save tokens. If the LLM needs more, it can call `context7_get_cached_doc_raw` for the full text. This two-step pattern avoids flooding the context window with long docs.
 - **Stale fallback** — If Context7 is unreachable, stale cached docs are still usable. The tool reports the stale status so the LLM knows the data may be outdated.
 - **Auto-resolve with ambiguity guard** — `context7_get_library_docs` can resolve library names automatically, but it refuses to guess when results are ambiguous. This prevents fetching docs for the wrong library.
-- **Config via env or JSON** — The API key can be set via `CONTEXT7_API_KEY` (preferred) or in `~/.pi/agent/context7.json`. Cache TTLs are also configurable.
+- **Config via env or JSON** — The API key can be set via `CONTEXT7_API_KEY` (preferred) or in `~/.pi/agent/context7.json` (`PI_CODING_AGENT_DIR` overrides the agent directory). Cache TTLs are also configurable.
 
 ## Pi APIs Used
 
@@ -153,7 +153,7 @@ The API key is optional — Context7 works without one but with lower rate limit
 
 ### Config file
 
-Create `~/.pi/agent/context7.json`:
+Create `~/.pi/agent/context7.json` (`$PI_CODING_AGENT_DIR` overrides the directory):
 
 ```json
 {
@@ -169,4 +169,4 @@ Create `~/.pi/agent/context7.json`:
 |-------|---------|-------------|
 | `apiKey` | — | Context7 API key |
 | `cache.resolveTtlHours` | `168` (7 days) | How long to cache library ID resolutions |
-| `cache.docsTtlHours` | `24` (1 day) | How long to cached fetched documentation |
+| `cache.docsTtlHours` | `24` (1 day) | How long to cache fetched documentation |

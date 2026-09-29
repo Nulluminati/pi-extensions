@@ -118,7 +118,7 @@ Switching modes clears the current thread so the two contexts never mix.
 
 ### Persistence
 
-The side thread is hidden — not visible in the main transcript — but it's persisted to the session branch via `appendEntry("btw-thread", { state })`. On `session_start` and on branch navigation, the extension walks the branch backwards to find the most recent thread state and reconstructs it. The overlay reopens showing your saved conversation.
+The side thread is hidden — not visible in the main transcript — but it's persisted to the session branch via `appendEntry("btw-thread", { state })`. On `session_start`, the extension walks the branch backwards to find the most recent `btw-thread` entry and restores that state. Thread resets persist the same way: an empty thread state is appended, so the next `session_start` restores an empty thread.
 
 The `/btw:thinking` setting is stored with the thread, so it survives reloads and branch switches. Old thread entries that contain a model override still load, but the override is ignored.
 
@@ -137,10 +137,9 @@ The overlay starts non-capturing, so the main editor keeps focus by default. Pre
 | `pi.registerCommand("btw", "btw:new", …)` | The seven user-facing slash commands |
 | `pi.registerShortcut("alt+/", "ctrl+alt+w")` | Toggle focus between overlay and editor |
 | `pi.on("context")` | Filters side-thread entries out of the main agent's context every turn |
-| `pi.on("session_start")`, `on("session_tree")` | Reconstructs the side thread from the branch |
+| `pi.on("session_start")` | Reconstructs the side thread from the branch |
 | `pi.on("session_shutdown")` | Tears down the live side session and the overlay |
-| `pi.appendEntry("btw-thread")` | Persists the side thread to the session branch |
-| `pi.appendEntry("btw-thread-reset")` | Marks a thread reset, so reconstruction starts after this point |
+| `pi.appendEntry("btw-thread")` | Persists the side thread to the session branch; `/btw:new` and mode switches persist an empty state to reset the thread |
 | `pi.sendUserMessage(content, { deliverAs: "followUp" })` | Hands the thread or summary back to the main agent (queued as a follow-up when busy) |
 | `ctx.ui.custom(factory, { overlay: true, overlayOptions })` | Opens the side window as a real overlay |
 | `ctx.ui.notify()` | Status messages, model errors, and warnings |

@@ -25,7 +25,7 @@ Rails use semantic colors from the active Pi theme:
 | Cancelled direct command | `warning` |
 | Extension message | `customMessageLabel` |
 
-The surface comes from pywal's current terminal background in `~/.cache/wal/colors.json`. Each RGB channel is blended 25% toward black, which keeps the blocks darker than the surrounding terminal across theme changes. The extension watches the cache file and updates running Pi sessions when pywal writes a new palette.
+The surface comes from pywal's current terminal background in `~/.cache/wal/colors.json`. The lookup honors `PYWAL_CACHE_DIR` (colors file directly in that directory) and then `XDG_CACHE_HOME` (`$XDG_CACHE_HOME/wal/colors.json`) before falling back to `~/.cache/wal/colors.json`. Each RGB channel is blended 25% toward black, which keeps the blocks darker than the surrounding terminal across theme changes. The extension watches the cache file and updates running Pi sessions when pywal writes a new palette.
 
 No fixed RGB color is embedded. If the pywal cache is unavailable, Pi's configured tool and custom-message backgrounds remain in effect.
 

@@ -130,7 +130,6 @@ Both tools use a shared `truncateWithSpill()` helper: output within the 50,000-c
 | `pi.on("session_start")` | Restores the persisted provider or picks the first configured one |
 | `pi.appendEntry("web-search-provider")` | Persist the active provider |
 | `ctx.ui.custom` + `SelectList` | Provider picker UI |
-| `ctx.ui.setStatus` | Footer provider indicator |
 | `ctx.modelRegistry.getApiKeyForProvider` | Synthetic credential resolution |
 | `renderResult` (tool option) | Custom TUI rendering for collapsed/expanded/partial/error states |
 
@@ -156,12 +155,11 @@ Linux/macOS is the official Docker image.
 ### 1. Run an instance (Docker)
 
 ```bash
-mkdir searxng && cd searxng
+mkdir -p searxng
 
 # Minimal settings that enable the JSON output format the extension needs.
 # Without this, /search?format=json returns 403 Forbidden.
-mkdir -p searxng
-cat > searxng/settings.yml <<'EOF'
+cat > searxng/settings.yml <<EOF
 use_default_settings: true
 search:
   formats: [html, json]

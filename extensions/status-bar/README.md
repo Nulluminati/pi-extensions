@@ -56,9 +56,9 @@ The right block has a usage bar, a `tokens/contextWindow` ratio, the token break
 
 The editor is a `CustomEditor` subclass that overrides only `render()`. It renders the base editor at the modal's inner content width, strips the base editor's own top and bottom borders, and wraps the remaining content in the shared `renderModalFrame` chrome (rounded `╭╯` corners, `borderAccent` color, side `│` borders, padding). The title contains the main model, thinking level, optional flex badge, and configured small- and worker-model labels. The secondary labels use icons and grey `/` separators. The title is passed as `rawTitle` so its colored segments are not wrapped again. The frame's top-right cell shows **Approval Mode off** (warning color) while main-session Jev review is disabled and **Goal** while a goal is running, joined by a dim `·` when both apply. The extension reads both model configs on session start, refreshes them at the start of each turn, and watches their files. Changes from `/smallmodel`, `/worker-model`, or an external edit appear without waiting for the next turn. Autocomplete dropdown lines from the base editor remain below the box instead of being absorbed into the frame.
 
-On `session_start` the extension captures whatever editor factory is currently registered (typically undefined, meaning Pi's default) and installs its own. On `session_shutdown` it restores the captured factory. `/statusbar:toggle` does the same swap, on demand.
+On `session_start` the extension wraps the currently registered editor factory with `installEditorFactoryLayer` (layer id `status-bar`, priority 0) and registers the layered factory. On `session_shutdown` it removes that layer with `removeEditorFactoryLayer`, which unwraps back to the factory underneath. `/statusbar:toggle` performs the same install and remove, on demand.
 
-The polished editor also re-checks on the next tick after `session_start` in case a later-loaded extension replaced the editor factory — if so, it re-installs.
+The install also re-checks on the next tick after `session_start` in case a later-loaded extension replaced the editor factory. If the `status-bar` layer is no longer present, the extension deliberately re-installs its layer over the newcomer so the frame stays in place.
 
 ### Footer and status indicator
 
@@ -67,8 +67,8 @@ The footer is registered through `ctx.ui.setFooter()`. While the extension is en
 ## Key Design Decisions
 
 - **Two lines, not one** — Static session info and transient events fight for the same real estate on a single line. Splitting them lets the right block (tokens, cost, bar) breathe on line 1 while third-party statuses live on line 2, omitted when empty.
-- **No new state outside the session** — All state is per-instance and lives in the closure. No module-level mutation, no global map. The status bar extension is safe to load alongside others.
-- **Editor captured, not overwritten** — The base editor factory is captured on install and restored on shutdown. If another extension (or Pi itself) replaces the editor, the polished one yields cleanly.
+- **No new state outside the session** — Footer and status state is per-instance and lives in the closure. The one deliberate exception is the editor's prompt-history store: a process-global map keyed by `Symbol.for("status-bar.prompt-history-by-session")` on `globalThis`, so submitted prompts survive editor re-creation within a session. The status bar extension is safe to load alongside others.
+- **Editor layered, not overwritten** — The polished editor is a named `installEditorFactoryLayer` layer over whatever factory is registered; `removeEditorFactoryLayer` unwraps it on shutdown without disturbing other layers. If a later-loaded extension replaces the factory after `session_start`, the 0-tick re-check re-installs the layer.
 - **Modal chrome, shared with overlays** — The input box reuses `renderModalFrame` (rounded `borderAccent` corners, title in the top border) so it reads as the same family as the voice/handoff modals, instead of a one-off grey rule. Models and thinking live in the title, so the border never needs to track the thinking level.
 - **Token breakdown always visible** — Hiding the breakdown when a bucket is empty makes the layout shift between turns. Showing zeros keeps the right block steady.
 - **Tiered shedding on narrow terminals** — The right block is built in variants from fullest to emptiest. As the terminal narrows, cost and the bar are dropped before the static left block is ever truncated.
