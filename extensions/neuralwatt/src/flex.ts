@@ -1,3 +1,4 @@
+import { createTimeoutController } from "../../../lib/fetch-timeout.ts";
 import { createAuthHeaders } from "./auth.ts";
 import {
   FETCH_TIMEOUT_MS,
@@ -33,15 +34,14 @@ export async function fetchFlexCapableIds(
   apiKey: string,
   signal?: AbortSignal,
 ): Promise<Set<string>> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  if (signal) {
-    signal.addEventListener("abort", () => controller.abort(), { once: true });
-  }
+  const { signal: timeoutSignal, cleanup } = createTimeoutController({
+    timeoutMs: FETCH_TIMEOUT_MS,
+    signal,
+  });
   try {
     const response = await fetch(NEURALWATT_MODELS_ENDPOINT, {
       headers: { ...createAuthHeaders(apiKey), ...NEURALWATT_CLIENT_HEADERS },
-      signal: controller.signal,
+      signal: timeoutSignal,
     });
     if (!response.ok) return new Set();
     const data = (await response.json()) as { data?: Array<{ id: string }> };
@@ -56,7 +56,7 @@ export async function fetchFlexCapableIds(
   } catch {
     return new Set();
   } finally {
-    clearTimeout(timeout);
+    cleanup();
   }
 }
 

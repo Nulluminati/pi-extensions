@@ -47,6 +47,7 @@ import { renderModalFrame } from "../../../lib/tui-frame.ts";
 | Build a `/smallmodel`-style model picker (descriptions, searchable modal) | `formatModelDescription`, `selectModelWithSearch` | `lib/model-picker.ts` |
 | Resolve provider credentials or build Bearer headers | `resolveProviderApiKey`, `createProviderAuthHeaders` | `lib/provider-auth.ts` |
 | Fetch a provider quota as authenticated JSON | `fetchProviderQuota` | `lib/provider-quota.ts` |
+| Apply a fetch timeout and chain a caller abort signal | `createTimeoutController` | `lib/fetch-timeout.ts` |
 | Format a provider's static model list | `formatProviderModelList` | `lib/provider-models.ts` |
 | Share live presence (who is online) between concurrent sessions | `writeShard`, `loadShards`, `removeShard`, `readShard` | `lib/presence-shards.ts` |
 
@@ -352,6 +353,10 @@ capability flags), and `selectModelWithSearch(ctx, items, activeValue, title)` �
 `ui.custom` searchable modal used in TUI mode (resolves the selected value, `undefined` on
 cancel; fall back to `ctx.ui.select` outside TUI). `ModelMetadata` is the shared model shape.
 Config load/save stays in `lib/small-model.ts` / `lib/worker-model.ts`.
+
+## `lib/fetch-timeout.ts` — network timeout and cancellation
+
+`createTimeoutController({ timeoutMs, signal? })` returns a signal for `fetch` and a `cleanup()` function. Call `cleanup()` in `finally`, after the response body is read. It clears the timer and detaches the caller abort listener. A caller signal that is already aborted makes the returned signal abort immediately. Consumers own timeout durations and response/error policy.
 
 ## Provider helpers — hosted model catalogs
 

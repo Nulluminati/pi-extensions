@@ -4,6 +4,7 @@
  * through and non-2xx responses turned into thrown errors.
  */
 
+import { createTimeoutController } from "./fetch-timeout.ts";
 import { createProviderAuthHeaders } from "./provider-auth.ts";
 
 export interface ProviderQuotaFetchOptions {
@@ -19,21 +20,17 @@ export interface ProviderQuotaFetchOptions {
 
 export async function fetchProviderQuota<T>(options: ProviderQuotaFetchOptions): Promise<T> {
   const { endpoint, apiKey, timeoutMs, signal } = options;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  if (signal) {
-    signal.addEventListener("abort", () => controller.abort(), { once: true });
-  }
+  const { signal: timeoutSignal, cleanup } = createTimeoutController({ timeoutMs, signal });
   try {
     const response = await fetch(endpoint, {
       headers: createProviderAuthHeaders(apiKey),
-      signal: controller.signal,
+      signal: timeoutSignal,
     });
     if (!response.ok) {
       throw new Error(`Failed to fetch quota: ${response.status} ${response.statusText}`);
     }
     return response.json() as Promise<T>;
   } finally {
-    clearTimeout(timeout);
+    cleanup();
   }
 }

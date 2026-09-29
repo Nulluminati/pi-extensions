@@ -1,3 +1,4 @@
+import { createTimeoutController } from "../../../lib/fetch-timeout.ts";
 import {
   FETCH_TIMEOUT_MS,
   NEURALWATT_CLIENT_HEADERS,
@@ -18,15 +19,14 @@ export const MISSING_MODELS_MESSAGE =
  * error so the caller stays silent.
  */
 export async function fetchCatalog(signal?: AbortSignal): Promise<NeuralwattCatalogModel[]> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  if (signal) {
-    signal.addEventListener("abort", () => controller.abort(), { once: true });
-  }
+  const { signal: timeoutSignal, cleanup } = createTimeoutController({
+    timeoutMs: FETCH_TIMEOUT_MS,
+    signal,
+  });
   try {
     const response = await fetch(NEURALWATT_MODELS_ENDPOINT, {
       headers: { Accept: "application/json", ...NEURALWATT_CLIENT_HEADERS },
-      signal: controller.signal,
+      signal: timeoutSignal,
     });
     if (!response.ok) return [];
     const data = (await response.json()) as NeuralwattModelsResponse;
@@ -34,7 +34,7 @@ export async function fetchCatalog(signal?: AbortSignal): Promise<NeuralwattCata
   } catch {
     return [];
   } finally {
-    clearTimeout(timeout);
+    cleanup();
   }
 }
 

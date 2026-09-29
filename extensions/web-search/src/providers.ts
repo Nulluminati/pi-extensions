@@ -1,7 +1,9 @@
 import type { ExtensionContext } from "pi";
+import { createTimeoutController } from "../../../lib/fetch-timeout.ts";
 import { authPath } from "../../../lib/paths.ts";
 import {
   BRAVE_SEARCH_API_URL,
+  FETCH_TIMEOUT_MS,
   PROVIDER_STATE_TYPE,
   SEARXNG_API_KEY_ENV,
   SEARXNG_SEARCH_PATH,
@@ -10,7 +12,6 @@ import {
   SYNTHETIC_SNIPPET_MAX_CHARS,
 } from "./constants.ts";
 import { decodeHtmlEntities, stripRemainingTags } from "./html.ts";
-import { createTimeoutController } from "./http.ts";
 import type {
   BraveRawResponse,
   SearchProvider,
@@ -55,7 +56,10 @@ async function braveSearch(
   apiKey: string,
   signal: AbortSignal | undefined,
 ): Promise<SearchResult[]> {
-  const { signal: timeoutSignal, cleanup } = createTimeoutController(signal);
+  const { signal: timeoutSignal, cleanup } = createTimeoutController({
+    timeoutMs: FETCH_TIMEOUT_MS,
+    signal,
+  });
   try {
     const url = new URL(BRAVE_SEARCH_API_URL);
     url.searchParams.set("q", query);
@@ -124,7 +128,10 @@ async function syntheticSearch(
   apiKey: string,
   signal: AbortSignal | undefined,
 ): Promise<SearchResult[]> {
-  const { signal: timeoutSignal, cleanup } = createTimeoutController(signal);
+  const { signal: timeoutSignal, cleanup } = createTimeoutController({
+    timeoutMs: FETCH_TIMEOUT_MS,
+    signal,
+  });
   try {
     const fetchInit: RequestInit = {
       method: "POST",
@@ -180,7 +187,10 @@ async function searxngSearch(
   apiKey: string | undefined,
   signal: AbortSignal | undefined,
 ): Promise<SearchResult[]> {
-  const { signal: timeoutSignal, cleanup } = createTimeoutController(signal);
+  const { signal: timeoutSignal, cleanup } = createTimeoutController({
+    timeoutMs: FETCH_TIMEOUT_MS,
+    signal,
+  });
   try {
     // SearXNG returns a full page of aggregated results (it has no count
     // parameter), so we request page 1 as JSON and slice to maxResults.

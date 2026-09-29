@@ -1,3 +1,4 @@
+import { createTimeoutController } from "../../../lib/fetch-timeout.ts";
 import { createAuthHeaders } from "./auth.ts";
 import { FETCH_TIMEOUT_MS, SYNTHETIC_MODELS_ENDPOINT } from "./constants.ts";
 import { STATIC_MODELS } from "./models.ts";
@@ -16,15 +17,14 @@ export async function fetchCatalog(
   apiKey: string,
   signal?: AbortSignal,
 ): Promise<SyntheticCatalogModel[]> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  if (signal) {
-    signal.addEventListener("abort", () => controller.abort(), { once: true });
-  }
+  const { signal: timeoutSignal, cleanup } = createTimeoutController({
+    timeoutMs: FETCH_TIMEOUT_MS,
+    signal,
+  });
   try {
     const response = await fetch(SYNTHETIC_MODELS_ENDPOINT, {
       headers: createAuthHeaders(apiKey),
-      signal: controller.signal,
+      signal: timeoutSignal,
     });
     if (!response.ok) return [];
     const data = (await response.json()) as SyntheticModelsResponse;
@@ -32,7 +32,7 @@ export async function fetchCatalog(
   } catch {
     return [];
   } finally {
-    clearTimeout(timeout);
+    cleanup();
   }
 }
 

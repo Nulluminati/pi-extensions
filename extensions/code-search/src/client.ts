@@ -4,6 +4,8 @@
 // `filters`, `progress`, `error`, and `done`. The body is read incrementally
 // and parsing begins as soon as the terminal `done` event arrives.
 
+import { createTimeoutController } from "../../../lib/fetch-timeout.ts";
+
 import { DEFAULT_MAX_RESULTS } from "./constants.ts";
 import type {
   CodeSearchParams,
@@ -165,13 +167,10 @@ export async function fetchSourcegraphSearch(
   url: string,
   signal: AbortSignal | undefined,
 ): Promise<SourcegraphStreamData> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
-  if (signal) {
-    const onCallerAbort = () => controller.abort();
-    signal.addEventListener("abort", onCallerAbort, { once: true });
-  }
+  const { signal: timeoutSignal, cleanup } = createTimeoutController({
+    timeoutMs: REQUEST_TIMEOUT_MS,
+    signal,
+  });
 
   try {
     const response = await fetch(url, {
@@ -179,7 +178,7 @@ export async function fetchSourcegraphSearch(
         Accept: "text/event-stream",
         "User-Agent": USER_AGENT,
       },
-      signal: controller.signal,
+      signal: timeoutSignal,
     });
 
     if (response.status === 429) {
@@ -195,6 +194,6 @@ export async function fetchSourcegraphSearch(
     const raw = await readStreamUntilDone(response);
     return parseSearchStream(raw);
   } finally {
-    clearTimeout(timeout);
+    cleanup();
   }
 }
