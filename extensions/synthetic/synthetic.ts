@@ -18,10 +18,11 @@
 
 import type { ExtensionAPI } from "pi";
 import { authPath } from "../../lib/paths.ts";
+import { formatProviderModelList } from "../../lib/provider-models.ts";
 import { getResolvedApiKey } from "./src/auth.ts";
 import { fetchCatalog, findMissingModels, MISSING_MODELS_MESSAGE } from "./src/catalog.ts";
 import { SYNTHETIC_API_BASE_URL } from "./src/constants.ts";
-import { formatModelList, STATIC_MODELS } from "./src/models.ts";
+import { STATIC_MODELS } from "./src/models.ts";
 import { fetchQuota, formatQuotaDisplay } from "./src/quota.ts";
 
 export type { SyntheticModelsResponse } from "./src/types.ts";
@@ -60,7 +61,7 @@ export default async function syntheticExtension(pi: ExtensionAPI) {
     description: "Display all available Synthetic models with pricing and capabilities",
     handler: async (_args, ctx) => {
       if (!ctx.hasUI) return;
-      const text = formatModelList(STATIC_MODELS);
+      const text = formatProviderModelList(STATIC_MODELS);
       ctx.ui.notify(`Synthetic models:\n${text}`, "info");
     },
   });

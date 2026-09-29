@@ -4,6 +4,7 @@ import { exec as execCb } from "node:child_process";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { runExec } from "../../../lib/exec.ts";
 import { cleanGitEnv, runGit } from "../../../lib/git.ts";
 import { isProjectStatePath } from "../../../lib/paths.ts";
 
@@ -87,32 +88,18 @@ export async function runCommand(
   cwd: string,
   timeoutMs: number,
 ): Promise<CommandOutcome> {
-  const started = Date.now();
-  try {
-    const { stdout, stderr } = await execAsync(command, {
-      cwd,
-      timeout: timeoutMs,
-      maxBuffer: 16 * 1024 * 1024,
-    });
-    // Keep stdout and stderr as separate lines: concatenating them can merge
-    // a stdout metric with digits at the start of stderr.
-    const metricOutput = [stdout, stderr].filter(Boolean).join("\n").trim();
-    return {
-      ok: true,
-      output: metricOutput,
-      metricOutput,
-      durationMs: Date.now() - started,
-    };
-  } catch (err) {
-    const e = err as { stdout?: string; stderr?: string; message: string };
-    const metricOutput = [e.stdout, e.stderr].filter(Boolean).join("\n").trim();
-    return {
-      ok: false,
-      output: [metricOutput, e.message].filter(Boolean).join("\n").trim(),
-      metricOutput,
-      durationMs: Date.now() - started,
-    };
-  }
+  const result = await runExec(command, { cwd, timeoutMs, maxBuffer: 16 * 1024 * 1024 });
+  // Keep stdout and stderr as separate lines: concatenating them can merge
+  // a stdout metric with digits at the start of stderr.
+  const metricOutput = [result.stdout, result.stderr].filter(Boolean).join("\n").trim();
+  return {
+    ok: result.ok,
+    output: result.ok
+      ? metricOutput
+      : [metricOutput, result.error].filter(Boolean).join("\n").trim(),
+    metricOutput,
+    durationMs: result.durationMs,
+  };
 }
 
 // --- Git ---

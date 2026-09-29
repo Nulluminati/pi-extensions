@@ -1,4 +1,4 @@
-import { createAuthHeaders } from "./auth.ts";
+import { fetchProviderQuota } from "../../../lib/provider-quota.ts";
 import { FETCH_TIMEOUT_MS, NEURALWATT_QUOTA_ENDPOINT } from "./constants.ts";
 import type { NeuralwattQuotaResponse } from "./types.ts";
 
@@ -6,23 +6,12 @@ export async function fetchQuota(
   apiKey: string,
   signal?: AbortSignal,
 ): Promise<NeuralwattQuotaResponse> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  if (signal) {
-    signal.addEventListener("abort", () => controller.abort(), { once: true });
-  }
-  try {
-    const response = await fetch(NEURALWATT_QUOTA_ENDPOINT, {
-      headers: createAuthHeaders(apiKey),
-      signal: controller.signal,
-    });
-    if (!response.ok) {
-      throw new Error(`Failed to fetch quota: ${response.status} ${response.statusText}`);
-    }
-    return response.json() as Promise<NeuralwattQuotaResponse>;
-  } finally {
-    clearTimeout(timeout);
-  }
+  return fetchProviderQuota<NeuralwattQuotaResponse>({
+    endpoint: NEURALWATT_QUOTA_ENDPOINT,
+    apiKey,
+    timeoutMs: FETCH_TIMEOUT_MS,
+    ...(signal ? { signal } : {}),
+  });
 }
 
 function formatEnergy(kwh: number | undefined | null): string {

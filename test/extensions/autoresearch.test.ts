@@ -8,7 +8,11 @@ import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext } from "pi";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import autoresearchExtension from "../../extensions/autoresearch/autoresearch.ts";
-import { CHECKS_TIMEOUT_MS, parseMetric } from "../../extensions/autoresearch/src/measure.ts";
+import {
+  CHECKS_TIMEOUT_MS,
+  parseMetric,
+  runCommand,
+} from "../../extensions/autoresearch/src/measure.ts";
 import { clearPending } from "../../extensions/autoresearch/src/pending.ts";
 import { AUTORESEARCH_PARAMETERS } from "../../extensions/autoresearch/src/schemas.ts";
 import { bestEntry, spreadScore } from "../../extensions/autoresearch/src/stats.ts";
@@ -1183,6 +1187,28 @@ describe("autoresearch-units", () => {
   it("parseMetric falls back to a bare number only when no METRIC lines exist", () => {
     expect(parseMetric("METRIC memory=500\nMETRIC other=1", "latency")).toBeUndefined();
     expect(parseMetric("12.5", "latency")).toBe(12.5);
+  });
+
+  it("runCommand returns trimmed combined output as both output and metric output", async () => {
+    const out = await runCommand("printf 'METRIC m=1'; printf 'warn' >&2", process.cwd(), 10_000);
+
+    expect(out.ok).toBe(true);
+    expect(out.metricOutput).toBe("METRIC m=1\nwarn");
+    expect(out.output).toBe(out.metricOutput);
+    expect(out.durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it("runCommand keeps the process error out of metricOutput and appends it to output", async () => {
+    const out = await runCommand(
+      "printf 'METRIC m=2'; printf 'boom' >&2; exit 3",
+      process.cwd(),
+      10_000,
+    );
+
+    expect(out.ok).toBe(false);
+    expect(out.metricOutput).toBe("METRIC m=2\nboom");
+    expect(out.output).toContain("METRIC m=2\nboom");
+    expect(out.output).toContain("Command failed");
   });
 
   it("bestEntry respects direction", () => {

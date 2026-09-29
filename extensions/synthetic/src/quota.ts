@@ -1,4 +1,4 @@
-import { createAuthHeaders } from "./auth.ts";
+import { fetchProviderQuota } from "../../../lib/provider-quota.ts";
 import { FETCH_TIMEOUT_MS, SYNTHETIC_QUOTAS_ENDPOINT } from "./constants.ts";
 import type { SyntheticQuotaResponse } from "./types.ts";
 
@@ -6,23 +6,12 @@ export async function fetchQuota(
   apiKey: string,
   signal?: AbortSignal,
 ): Promise<SyntheticQuotaResponse> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  if (signal) {
-    signal.addEventListener("abort", () => controller.abort(), { once: true });
-  }
-  try {
-    const response = await fetch(SYNTHETIC_QUOTAS_ENDPOINT, {
-      headers: createAuthHeaders(apiKey),
-      signal: controller.signal,
-    });
-    if (!response.ok) {
-      throw new Error(`Failed to fetch quota: ${response.status} ${response.statusText}`);
-    }
-    return response.json() as Promise<SyntheticQuotaResponse>;
-  } finally {
-    clearTimeout(timeout);
-  }
+  return fetchProviderQuota<SyntheticQuotaResponse>({
+    endpoint: SYNTHETIC_QUOTAS_ENDPOINT,
+    apiKey,
+    timeoutMs: FETCH_TIMEOUT_MS,
+    ...(signal ? { signal } : {}),
+  });
 }
 
 export function formatQuotaDisplay(quota: SyntheticQuotaResponse): string {

@@ -255,18 +255,3 @@ export const STATIC_MODELS: ProviderModelConfig[] = [
     compat: SYNTHETIC_COMPAT,
   },
 ];
-
-export function formatModelList(models: ProviderModelConfig[]): string {
-  if (models.length === 0) return "No models available.";
-  return models
-    .map((m) => {
-      const caps: string[] = [];
-      if (m.input.includes("image")) caps.push("vision");
-      if (m.reasoning) caps.push("reasoning");
-      caps.push("tools");
-      const capStr = ` (${caps.join(", ")})`;
-      const price = ` · in $${m.cost.input.toFixed(2)}/out $${m.cost.output.toFixed(2)}`;
-      return `  • ${m.id}${capStr}${price}`;
-    })
-    .join("\n");
-}

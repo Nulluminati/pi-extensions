@@ -5,6 +5,7 @@ import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionCommandContext } from "pi";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import missionsExtension from "../../extensions/missions/missions.ts";
+import { createExecVerificationRunner } from "../../extensions/missions/src/actions.ts";
 import {
   acquireMissionLock,
   ensureInsideMissionsDir,
@@ -862,3 +863,31 @@ function renderLastWidget(mockCtx: DeepMocked<ExtensionCommandContext>, width = 
   }
   return factory(undefined, mockCtx.ui.theme).render(width);
 }
+
+describe("createExecVerificationRunner", () => {
+  const runner = createExecVerificationRunner();
+
+  it("reports a fixed success message for a passing command", async () => {
+    await expect(runner.run("true", process.cwd())).resolves.toEqual({
+      ok: true,
+      output: "verification command passed",
+    });
+  });
+
+  it("reports captured stdout and stderr plus the failure cause for a failing command", async () => {
+    const result = await runner.run("printf out; printf err >&2; exit 3", process.cwd());
+
+    expect(result.ok).toBe(false);
+    expect(result.output).toMatch(/^out\nerr\n/);
+    expect(result.output).toContain("Command failed");
+  });
+
+  it("reports the exec failure message even when the command wrote no output", async () => {
+    const result = await runner.run("exit 7", process.cwd());
+
+    expect(result.ok).toBe(false);
+    // The exec rejection message carries the command line, so the fixed
+    // fallback only fires when even that message is empty.
+    expect(result.output).toContain("Command failed: exit 7");
+  });
+});

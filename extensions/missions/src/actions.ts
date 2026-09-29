@@ -9,9 +9,8 @@
  */
 
 // --- Imports ---
-import { exec as execCb } from "node:child_process";
-import { promisify } from "node:util";
 import type { AgentToolResult, ExtensionContext } from "pi";
+import { runExec } from "../../../lib/exec.ts";
 import { findNewestCustomEntry } from "../../../lib/session-utils.ts";
 import {
   formatMissionStatus,
@@ -43,8 +42,6 @@ import {
 import type { Mission } from "./types.ts";
 
 // --- Constants ---
-
-const execAsync = promisify(execCb);
 
 /** Custom entry type carrying this session's active mission id (newest wins;
  * `{ id: undefined }` clears). Session state, not project state: two
@@ -92,14 +89,10 @@ export interface MissionActionDeps {
 export function createExecVerificationRunner(): VerificationRunner {
   return {
     async run(command, cwd) {
-      try {
-        await execAsync(command, { cwd, timeout: 120_000, maxBuffer: 1024 * 1024 });
-        return { ok: true, output: "verification command passed" };
-      } catch (err) {
-        const e = err as { stdout?: string; stderr?: string; message: string };
-        const output = [e.stdout, e.stderr, e.message].filter(Boolean).join("\n").trim();
-        return { ok: false, output: output || "verification command failed" };
-      }
+      const result = await runExec(command, { cwd, timeoutMs: 120_000, maxBuffer: 1024 * 1024 });
+      if (result.ok) return { ok: true, output: "verification command passed" };
+      const output = [result.stdout, result.stderr, result.error].filter(Boolean).join("\n").trim();
+      return { ok: false, output: output || "verification command failed" };
     },
   };
 }

@@ -18,6 +18,7 @@
 
 import type { ExtensionAPI } from "pi";
 import { authPath } from "../../lib/paths.ts";
+import { formatProviderModelList } from "../../lib/provider-models.ts";
 import { getResolvedApiKey } from "./src/auth.ts";
 import { fetchCatalog, findMissingModels, MISSING_MODELS_MESSAGE } from "./src/catalog.ts";
 import { NEURALWATT_API_BASE_URL, NEURALWATT_CLIENT_HEADERS } from "./src/constants.ts";
@@ -28,7 +29,7 @@ import {
   fetchFlexCapableIds,
   injectServiceTier,
 } from "./src/flex.ts";
-import { formatModelList, STATIC_MODELS } from "./src/models.ts";
+import { STATIC_MODELS } from "./src/models.ts";
 import { fetchQuota, formatQuotaDisplay } from "./src/quota.ts";
 
 export type { NeuralwattModelsResponse, NeuralwattQuotaResponse } from "./src/types.ts";
@@ -139,7 +140,7 @@ export default async function neuralwattExtension(pi: ExtensionAPI) {
     description: "Display all available Neuralwatt models with pricing and capabilities",
     handler: async (_args, ctx) => {
       if (!ctx.hasUI) return;
-      const text = formatModelList(STATIC_MODELS);
+      const text = formatProviderModelList(STATIC_MODELS);
       ctx.ui.notify(`Neuralwatt models:\n${text}`, "info");
     },
   });

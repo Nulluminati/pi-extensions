@@ -38,12 +38,16 @@ import { renderModalFrame } from "../../../lib/tui-frame.ts";
 | Prompt for one line of text in a framed modal | `promptText`, `createInputModal` | `lib/input-modal.ts` |
 | Ask a yes/no question in a framed modal | `confirmModal`, `createConfirmModal` | `lib/input-modal.ts` |
 | Wrap/replace the editor component (`ctx.ui.setEditorComponent`) | `installEditorFactoryLayer`, `hasEditorFactoryLayer`, `removeEditorFactoryLayer` | `lib/editor-factory.ts` |
+| Run a one-shot shell command with bounded output and a timeout | `runExec` | `lib/exec.ts` |
 | Write config/state JSON or JSONL without risking a torn file on crash | `writeJsonAtomic`, `writeTextAtomic` | `lib/json-atomic.ts` |
 | Mutate shared state files across sessions without clobbering | `withFileLock` | `lib/file-lock.ts` |
 | Resolve where an extension stores config, state, cache, or project files | `agentConfigPath`, `agentStateDir`, `cacheDir`, `projectStateDir`, `projectStateRelative` | `lib/paths.ts` |
 | Point a user-facing message at Pi's auth file | `authPath` | `lib/paths.ts` |
 | Keep project-local state out of `git status` | `excludeFromGit` | `lib/git.ts` |
 | Build a `/smallmodel`-style model picker (descriptions, searchable modal) | `formatModelDescription`, `selectModelWithSearch` | `lib/model-picker.ts` |
+| Resolve provider credentials or build Bearer headers | `resolveProviderApiKey`, `createProviderAuthHeaders` | `lib/provider-auth.ts` |
+| Fetch a provider quota as authenticated JSON | `fetchProviderQuota` | `lib/provider-quota.ts` |
+| Format a provider's static model list | `formatProviderModelList` | `lib/provider-models.ts` |
 | Share live presence (who is online) between concurrent sessions | `writeShard`, `loadShards`, `removeShard`, `readShard` | `lib/presence-shards.ts` |
 
 ---
@@ -321,6 +325,10 @@ this module and `tool-style` (which reads pywal's cache, not its own state).
 
 Ephemeral spills with no retention go in `os.tmpdir()` with a `pi-<name>-` prefix instead.
 
+## `lib/exec.ts` — bounded one-shot command execution
+
+`runExec(command, { cwd, timeoutMs, maxBuffer? })` captures stdout and stderr and returns `{ ok, stdout, stderr, error?, durationMs }` without throwing. Callers format the result for their own domain. Use it for short, pipe-captured commands such as autoresearch measurement and mission verification. Do not use it for workers: their detached process group and file-backed streaming require separate lifecycle handling.
+
 ## `lib/json-atomic.ts` — atomic JSON writes
 
 Crash-safe state file writes: `writeJsonAtomic(path, data)` pretty-prints JSON. For plain text such as JSONL, use `writeTextAtomic(path, text)`. Both write and sync a `${path}.${pid}.${random}.tmp` sibling, then rename it over the target (rename is atomic). They create parent directories as needed and remove the temp file if rename fails. Use `writeJsonAtomic` for every persisted JSON state file (reservations, missions, registries).
@@ -344,6 +352,10 @@ capability flags), and `selectModelWithSearch(ctx, items, activeValue, title)` �
 `ui.custom` searchable modal used in TUI mode (resolves the selected value, `undefined` on
 cancel; fall back to `ctx.ui.select` outside TUI). `ModelMetadata` is the shared model shape.
 Config load/save stays in `lib/small-model.ts` / `lib/worker-model.ts`.
+
+## Provider helpers — hosted model catalogs
+
+`lib/provider-auth.ts` resolves a model-registry key first, then falls back to the provider's environment variable. It also builds Bearer and JSON-accept headers. `lib/provider-quota.ts` fetches authenticated quota JSON with a timeout and caller abort signal. `lib/provider-models.ts` formats static model capabilities and prices for a `/provider:models` command. Synthetic and Neuralwatt share these helpers; keep provider-specific endpoints, timeout values, and response types in their extensions.
 
 ## `lib/presence-shards.ts` — sharded presence registry
 
