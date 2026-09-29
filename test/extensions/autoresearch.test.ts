@@ -169,6 +169,50 @@ describe("autoresearch-extension", () => {
     await expect(initSession()).rejects.toThrow(/already exists|active autoresearch/);
   });
 
+  it("concurrent inits serialize on the config lock so only one campaign wins", async () => {
+    // Gate both inits at the worktree probe and stub it to an instant
+    // resolve, so they reach the config check-then-save cycle in the same
+    // tick. Without the lock both pass the check and the second save
+    // clobbers the first campaign (same shape as messenger's concurrent
+    // claimIdentity test).
+    const measure = await import("../../extensions/autoresearch/src/measure.ts");
+    let arrived = 0;
+    let releaseGate!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseGate = resolve;
+    });
+    const isGitRepoSpy = vi.spyOn(measure, "isGitRepo").mockResolvedValue(true);
+    const changedFilesSpy = vi.spyOn(measure, "changedFiles").mockImplementation(async () => {
+      arrived += 1;
+      if (arrived === 2) releaseGate();
+      await gate;
+      return { tracked: [], untracked: [] };
+    });
+    try {
+      const results = await Promise.allSettled([
+        initSession(),
+        initSession({ objective: "Second concurrent objective" }),
+      ]);
+
+      const fulfilled = results.filter((result) => result.status === "fulfilled");
+      const rejected = results.filter((result) => result.status === "rejected");
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      const reason = (rejected[0] as PromiseRejectedResult).reason as Error;
+      expect(reason.message).toMatch(/active autoresearch session exists/i);
+
+      // The surviving campaign is whole: active, owned by one objective,
+      // with a single baseline run — not a blend of both inits.
+      const config = await loadConfig(cwd);
+      expect(config?.stopped).toBeUndefined();
+      expect(["Make the code faster", "Second concurrent objective"]).toContain(config?.objective);
+      expect((await readLog(cwd)).map((entry) => entry.status)).toEqual(["baseline"]);
+    } finally {
+      isGitRepoSpy.mockRestore();
+      changedFilesSpy.mockRestore();
+    }
+  });
+
   it("init rejects tracked pre-existing work without writing campaign state", async () => {
     // A modified tracked file predates the campaign; a later discard must not
     // reset it and a later keep must not commit it.

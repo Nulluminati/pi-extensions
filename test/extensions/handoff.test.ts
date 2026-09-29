@@ -263,6 +263,45 @@ describe("handoff-extension", () => {
     expect(transcript?.length).toBeLessThanOrEqual(36000);
   });
 
+  it("joins multiple text blocks in one message with newlines", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCustomResolvesOnDone(mockCtx);
+    mockCtx.sessionManager.getBranch = vi.fn(() => [
+      {
+        type: "message",
+        message: {
+          role: "user",
+          content: [
+            { type: "text", text: "First part." },
+            { type: "text", text: "Second part." },
+          ],
+        },
+      },
+      {
+        type: "message",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "Done." }],
+        },
+      },
+    ]);
+    mockCtx.ui.editor = vi.fn(() => Promise.resolve(undefined));
+
+    const { completeSimple } = await import("@earendil-works/pi-ai");
+    vi.mocked(completeSimple).mockResolvedValue({
+      content: [{ type: "text", text: "summary text" }],
+    });
+
+    await runHandoff(mockPi, mockCtx, "finish the refactor");
+
+    const request = vi.mocked(completeSimple).mock.calls[0][1].messages[0].content[0].text;
+    const transcript = request.match(
+      /<conversation_transcript>\n([\s\S]*)\n<\/conversation_transcript>/,
+    )?.[1];
+    expect(transcript).toContain("User: First part.\nSecond part.");
+  });
+
   it("performs a full handoff with the global small model in UI mode", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();

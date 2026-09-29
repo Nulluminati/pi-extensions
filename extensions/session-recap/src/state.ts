@@ -20,6 +20,7 @@ export function getState(pi: ExtensionAPI): RecapState {
     pendingRecap: undefined,
     lastDraftedLeafId: undefined,
     autoDismissTimer: undefined,
+    resumeTimer: undefined,
   };
   stateMap.set(pi, fresh);
   return fresh;
@@ -38,6 +39,10 @@ export function resetState(state: RecapState) {
   if (state.autoDismissTimer) {
     clearTimeout(state.autoDismissTimer);
     state.autoDismissTimer = undefined;
+  }
+  if (state.resumeTimer) {
+    clearTimeout(state.resumeTimer);
+    state.resumeTimer = undefined;
   }
   state.agentActive = false;
   state.focusDraftAfterAgent = false;

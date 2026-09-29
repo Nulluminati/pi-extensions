@@ -1,3 +1,5 @@
+import { extractText } from "../../../lib/session-utils.ts";
+
 const TRANSCRIPT_MAX_CHARS = 36000;
 
 export interface HandoffEntry {
@@ -11,18 +13,6 @@ export interface HandoffEntry {
 }
 
 // --- Pure utilities ---
-
-function extractText(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .filter(
-      (block): block is { type: "text"; text: string } =>
-        block?.type === "text" && typeof (block as { text?: string }).text === "string",
-    )
-    .map((block) => block.text)
-    .join("");
-}
 
 function formatTranscriptEntry(entry: HandoffEntry): string | undefined {
   if (entry.type !== "message" || !entry.message?.role) return undefined;

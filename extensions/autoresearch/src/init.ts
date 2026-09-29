@@ -25,6 +25,7 @@ import {
   saveConfig,
   savePrompt,
   saveUntrackedSnapshot,
+  withConfigLock,
 } from "./store.ts";
 import type {
   AutoConfig,
@@ -81,47 +82,56 @@ export async function initAction(
   // Campaign-state checks come after worktree safety: an active session
   // refuses re-init, a corrupt config fails visibly (never silently
   // overwritten), and a stopped session archives its log.
-  const existing = await loadConfig(cwd);
-  if (existing && !existing.stopped) {
-    throw new Error(
-      "An active autoresearch session exists. Stop it (action=stop) before re-initializing.",
-    );
-  }
-  // Re-init must not erase an unreadable or corrupt pending experiment.
-  await loadPending(state, cwd);
-  if (existing?.stopped || (await configFileExists(cwd))) {
-    // A stop only deactivates the campaign; archive its log so the new
-    // campaign starts with a clean baseline and run numbering. A file that
-    // exists but reads as absent (foreign shape) gets the same treatment:
-    // the old log must never leak into the new campaign's baseline.
-    await archiveLog(cwd);
-  }
-  const config: AutoConfig = {
-    objective,
-    metric,
-    ...(typeof params.unit === "string" && params.unit.trim() ? { unit: params.unit.trim() } : {}),
-    direction,
-    measure,
-    ...(typeof params.checks === "string" && params.checks.trim()
-      ? { checks: params.checks.trim() }
-      : {}),
-    ...(typeof params.maxIterations === "number" && params.maxIterations > 0
-      ? { maxIterations: params.maxIterations }
-      : {}),
-    // Only this session's agent_end continues the loop; other sessions
-    // in the project see the state (widget, fallback status) but are
-    // never hijacked into driving someone else's experiment.
-    ...(ctx.sessionManager.getSessionId()
-      ? { ownerSessionId: ctx.sessionManager.getSessionId() }
-      : {}),
-    createdAt: Date.now(),
-    // Defensive record of tracked files already dirty when the
-    // campaign started (normally empty: the precondition above refuses
-    // to start on tracked changes). Keeps never stage these files and
-    // discards never restore them.
-    ...(dirty.tracked.length > 0 ? { dirtyAtInit: dirty.tracked } : {}),
-  };
-  await saveConfig(cwd, config);
+  // The check and the save below form a read-modify-write cycle on
+  // config.json, so hold the config lock across both: two concurrent
+  // inits then serialize and the second sees the first's active campaign
+  // instead of clobbering it (stopConfig takes the same lock).
+  const config = await withConfigLock(cwd, async () => {
+    const existing = await loadConfig(cwd);
+    if (existing && !existing.stopped) {
+      throw new Error(
+        "An active autoresearch session exists. Stop it (action=stop) before re-initializing.",
+      );
+    }
+    // Re-init must not erase an unreadable or corrupt pending experiment.
+    await loadPending(state, cwd);
+    if (existing?.stopped || (await configFileExists(cwd))) {
+      // A stop only deactivates the campaign; archive its log so the new
+      // campaign starts with a clean baseline and run numbering. A file that
+      // exists but reads as absent (foreign shape) gets the same treatment:
+      // the old log must never leak into the new campaign's baseline.
+      await archiveLog(cwd);
+    }
+    const config: AutoConfig = {
+      objective,
+      metric,
+      ...(typeof params.unit === "string" && params.unit.trim()
+        ? { unit: params.unit.trim() }
+        : {}),
+      direction,
+      measure,
+      ...(typeof params.checks === "string" && params.checks.trim()
+        ? { checks: params.checks.trim() }
+        : {}),
+      ...(typeof params.maxIterations === "number" && params.maxIterations > 0
+        ? { maxIterations: params.maxIterations }
+        : {}),
+      // Only this session's agent_end continues the loop; other sessions
+      // in the project see the state (widget, fallback status) but are
+      // never hijacked into driving someone else's experiment.
+      ...(ctx.sessionManager.getSessionId()
+        ? { ownerSessionId: ctx.sessionManager.getSessionId() }
+        : {}),
+      createdAt: Date.now(),
+      // Defensive record of tracked files already dirty when the
+      // campaign started (normally empty: the precondition above refuses
+      // to start on tracked changes). Keeps never stage these files and
+      // discards never restore them.
+      ...(dirty.tracked.length > 0 ? { dirtyAtInit: dirty.tracked } : {}),
+    };
+    await saveConfig(cwd, config);
+    return config;
+  });
   await excludeAutoFromGit(cwd);
   await savePrompt(cwd, config, typeof params.notes === "string" ? params.notes : undefined);
   await clearPending(state, cwd);

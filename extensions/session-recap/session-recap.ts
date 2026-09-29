@@ -143,7 +143,8 @@ export default async function sessionRecapExtension(pi: ExtensionAPI) {
     attachFocusReporting(pi, ctx);
     if (pi.getFlag("recap-disable") || !ctx.hasUI) return;
     if (event.reason === "resume" || event.reason === "fork") {
-      setTimeout(() => {
+      state.resumeTimer = setTimeout(() => {
+        state.resumeTimer = undefined;
         void generateAndShow(pi, ctx, { reason: "resume" });
       }, RESUME_RECAP_DELAY_MS);
     }

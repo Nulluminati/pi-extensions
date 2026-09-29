@@ -243,6 +243,35 @@ describe("session-recap-extension", () => {
     expect(lines.some((l: string) => l.includes("recap"))).toBe(true);
   });
 
+  it("session_shutdown before the resume delay cancels the pending recap", async () => {
+    const { completeSimple } = await import("@earendil-works/pi-ai");
+    vi.mocked(completeSimple).mockResolvedValueOnce({
+      content: [{ type: "text", text: "recap: fixed the auth bug" }],
+    });
+
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
+    await sessionRecapExtension(mockPi);
+
+    const startHandler = getEventHandler(mockPi, "session_start");
+    await startHandler({ type: "session_start", reason: "resume" }, mockCtx);
+
+    // Shutdown before the 300 ms resume delay elapses: the pending recap
+    // must never fire on the stale context.
+    const shutdownHandler = getEventHandler(mockPi, "session_shutdown");
+    await shutdownHandler({ type: "session_shutdown", reason: "quit" }, mockCtx);
+
+    await vi.advanceTimersByTimeAsync(400);
+    expect(completeSimple).not.toHaveBeenCalled();
+    expect(
+      mockCtx.ui.setWidget.mock.calls.some(
+        (call: unknown[]) => call[0] === STRIP_KEY_ABOVE && typeof call[1] === "function",
+      ),
+    ).toBe(false);
+  });
+
   it("turn_end schedules idle recap", async () => {
     const { completeSimple } = await import("@earendil-works/pi-ai");
     vi.mocked(completeSimple).mockResolvedValueOnce({

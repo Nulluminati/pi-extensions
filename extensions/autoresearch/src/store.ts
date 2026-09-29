@@ -69,6 +69,15 @@ function configLockPath(cwd: string): string {
 }
 
 /**
+ * Run a read-modify-write cycle on config.json under the config lock so
+ * concurrent mutators (init's check-then-save, stopConfig) serialize
+ * instead of saving stale whole-file copies over each other.
+ */
+export function withConfigLock<T>(cwd: string, fn: () => Promise<T>): Promise<T> {
+  return withFileLock(configLockPath(cwd), fn);
+}
+
+/**
  * Stop the active campaign under the config lock, re-reading the file so
  * two racing stoppers (a budget cap in one window, a stall stop in another)
  * serialize instead of saving stale whole-file copies over each other.
@@ -76,7 +85,7 @@ function configLockPath(cwd: string): string {
  * exists on disk (the caller decides its fallback).
  */
 export async function stopConfig(cwd: string): Promise<AutoConfig | undefined> {
-  return withFileLock(configLockPath(cwd), async () => {
+  return withConfigLock(cwd, async () => {
     const config = await loadConfig(cwd);
     if (!config || config.stopped) return config;
     config.stopped = true;
