@@ -192,6 +192,19 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     editorRequestRender?.();
   });
 
+  // Track Neuralwatt flex state so the editor frame can show the flex badge
+  // next to the thinking level. Subscribed at load time rather than in
+  // session_start: the neuralwatt extension emits flex state during its own
+  // session_start handler, which may run before this extension's
+  // session_start-scoped listeners exist, and re-subscribing per session would
+  // stack a duplicate listener on every session start.
+  pi.events.on(FLEX_EVENT, (flex: { flexOn: boolean; flexCapable: boolean }) => {
+    state.flexOn = flex.flexOn;
+    state.flexCapable = flex.flexCapable;
+    state.lastHandle?.requestRender();
+    editorRequestRender?.();
+  });
+
   function setFooter(ctx: ExtensionCommandContext): void {
     if (!ctx.hasUI) return;
 
@@ -465,19 +478,6 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
         }
       }, 0);
     }
-
-    // Track a running goal so the editor frame can show a "Goal" badge in
-    // its top-right cell (subscribed at load time; see above).
-
-    // Subscribe to Neuralwatt flex state changes to render the flex badge next
-    // to the thinking level. Keeps the metadata line in sync with the toggle
-    // without coupling the status-bar editor to Neuralwatt's internals.
-    pi.events.on(FLEX_EVENT, (flex: { flexOn: boolean; flexCapable: boolean }) => {
-      state.flexOn = flex.flexOn;
-      state.flexCapable = flex.flexCapable;
-      state.lastHandle?.requestRender();
-      editorRequestRender?.();
-    });
 
     // Watch the small-model config so the editor title reflects `/smallmodel`
     // changes immediately rather than on the next turn.

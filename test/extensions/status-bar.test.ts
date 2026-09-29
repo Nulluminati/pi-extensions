@@ -2154,11 +2154,32 @@ describe("status-bar flex badge", () => {
     expect(lines.some((l) => l.includes("flex"))).toBe(false);
   });
 
-  it("status-bar subscribes to neuralwatt:flex-change on session_start", async () => {
+  it("status-bar subscribes to neuralwatt:flex-change at load time (before session_start)", async () => {
+    const mockPi = createMockPi();
+    await statusBarExtension(mockPi);
+    // No session_start required: the neuralwatt extension emits flex state
+    // during its own session_start handler, which may run before this
+    // extension's session_start-scoped listeners exist.
+    expect(getFlexHandler(mockPi)).toBeDefined();
+  });
+
+  it("keeps one neuralwatt:flex-change subscription across repeated session_start", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
-    await enableBar(mockPi, mockCtx);
-    expect(getFlexHandler(mockPi)).toBeDefined();
+    await statusBarExtension(mockPi);
+
+    // pi.events.on records every subscription; the flex subscription must be
+    // registered once at load time, not stacked again on each session start.
+    const flexSubscriptionCount = () =>
+      (mockPi.events.on as ReturnType<typeof vi.fn>).mock.calls.filter(
+        (c) => c[0] === "neuralwatt:flex-change",
+      ).length;
+
+    const sessionStartHandler = getEventHandler(mockPi, "session_start");
+    await sessionStartHandler({ type: "session_start", reason: "new" }, mockCtx);
+    await sessionStartHandler({ type: "session_start", reason: "new" }, mockCtx);
+
+    expect(flexSubscriptionCount()).toBe(1);
   });
 });
 
