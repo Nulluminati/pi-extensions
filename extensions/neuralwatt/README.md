@@ -4,7 +4,7 @@ Registers [Neuralwatt](https://neuralwatt.com) as a Pi model provider using thei
 
 ## What It Does
 
-Registers the `neuralwatt` provider so you can use Neuralwatt's hosted open-source models (DeepSeek V4 Flash, DeepSeek V4 Flash (Speed), DeepSeek V4.1 Flash, Gemma 4, GLM-5.2/5.3, Kimi K2.7/K3, and Qwen3.6/3.8) in Pi. It:
+Registers the `neuralwatt` provider so you can use Neuralwatt's hosted open-source models (DeepSeek V4 Flash, DeepSeek V4 Flash (Speed), DeepSeek V4.1 Flash, Gemma 4, GLM-5.2/5.3, Kimi K2.7/K3, MiMo-V2.6-Pro, and Qwen3.6/3.8) in Pi. It:
 
 1. Registers the provider at load time with a hardcoded catalog of public models, so Pi starts even when the API is unreachable or no key is configured.
 2. On `session_start`, fetches the public `/v1/models` view and warns when Neuralwatt publishes models the static list lacks.
@@ -65,6 +65,7 @@ The catalog comes from Neuralwatt's `/v1/models` metadata. Pricing is per millio
 | kimi-k2.7-code-fast | 256K | yes | yes | $0.95 / $4.00 |
 | kimi-k3 | 1M | yes | yes | $3.00 / $15.00 |
 | kimi-k3-fast | 1M | no | yes | $3.00 / $15.00 |
+| mimo-v2.6-pro | 1M | yes | yes | $0.87 / $1.74 |
 | qwen3.6-35b | 128K | yes | yes | $0.29 / $1.15 |
 | qwen3.6-35b-fast | 128K | no | yes | $0.29 / $1.15 |
 | qwen-3.8-27b | 256K | yes | yes | $0.45 / $3.20 |
@@ -103,10 +104,11 @@ Reasoning models carry per-model `thinkingLevelMap` values verified by probing t
 | kimi-k2.7-code | none | minimal | low | medium | high | max |
 | kimi-k2.7-code-fast | none | minimal | low | medium | high | max |
 | kimi-k3 | none | minimal | low | medium | high | xhigh |
+| mimo-v2.6-pro | none | none | high | high | high | high |
 | qwen3.6-35b | none | minimal | low | medium | high | xhigh |
 | qwen-3.8-27b | none | minimal | low | medium | high | xhigh |
 
-qwen-3.8-27b's catalog aliases `max -> xhigh`, so `xhigh` is its real deepest level; glm-5.3 and glm-5.3-flash alias `xhigh -> max`.
+qwen-3.8-27b's catalog aliases `max -> xhigh`, so `xhigh` is its real deepest level; glm-5.3 and glm-5.3-flash alias `xhigh -> max`. mimo-v2.6-pro supports only two real modes: its catalog `supported_efforts` are `none` and `high`, and its aliases collapse every other level (`minimal -> none`, `low`/`medium`/`xhigh`/`max -> high`), so pi's levels route onto those two modes and `minimal` behaves like `off`.
 
 Neuralwatt returns thinking under a top-level `reasoning` field, not `reasoning_content`. Pi's openai-completions provider reads reasoning from any of `reasoning_content`, `reasoning`, or `reasoning_text`, so thinking parses and replays correctly with no special compat flag. `compat.supportsReasoningEffort` is `true` on every reasoning model so pi sends `reasoning_effort` on the wire.
 

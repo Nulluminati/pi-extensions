@@ -92,6 +92,21 @@ const ALWAYS_ON_FULL_MAP: ThinkingLevelMap = {
   xhigh: "max",
 };
 
+// Disableable with only two real modes (mimo-v2.6-pro). The catalog's
+// supported_efforts are just {none, high}; its effort_aliases collapse every
+// other level (max/xhigh/medium/low -> high, minimal -> none), and a probe
+// across low/medium/high/xhigh showed no behavioral spread. Pi's levels route
+// onto the two real modes: minimal behaves like off, and every enabled level
+// engages the gateway's `high`.
+const DISABLEABLE_BINARY_MAP: ThinkingLevelMap = {
+  off: "none",
+  minimal: "none",
+  low: "high",
+  medium: "high",
+  high: "high",
+  xhigh: "high",
+};
+
 // --- Static model catalog ---
 
 /**
@@ -403,6 +418,28 @@ export const STATIC_MODELS: ProviderModelConfig[] = [
     cost: { input: 0.45, output: 3.2, cacheRead: 0.25, cacheWrite: 0 },
     contextWindow: 262128,
     maxTokens: 131072,
+    compat: NEURALWATT_REASONING_COMPAT,
+  },
+
+  // --- MiMo (Xiaomi) ---
+  // Probed 2026-09: every accepted_effort returns HTTP 200 and `none` produces
+  // no thinking, so thinking is disableable. The catalog's supported_efforts
+  // are only {none, high} and its aliases collapse every other level onto
+  // those two (minimal -> none, low/medium/xhigh/max -> high); a level-compare
+  // probe showed no reasoning spread across low/medium/high/xhigh, so the
+  // binary map routes pi's levels onto the two real modes. MOPD upgrade of
+  // MiMo-V2.6 (sparse MoE, 1.02T total / 42B active) with native vision, tool
+  // calling, optional reasoning, and 1M-token context. No fast variant.
+  {
+    id: "mimo-v2.6-pro",
+    name: "MiMo-V2.6-Pro",
+    api: "openai-completions",
+    reasoning: true,
+    thinkingLevelMap: DISABLEABLE_BINARY_MAP,
+    input: ["text", "image"],
+    cost: { input: 0.87, output: 1.74, cacheRead: 0.036, cacheWrite: 0 },
+    contextWindow: 1048560,
+    maxTokens: 393216,
     compat: NEURALWATT_REASONING_COMPAT,
   },
 ];

@@ -52,6 +52,7 @@ const EXPECTED_MODEL_IDS = [
   "kimi-k2.7-code-fast",
   "kimi-k3",
   "kimi-k3-fast",
+  "mimo-v2.6-pro",
   "qwen-3.8-27b",
   "qwen3.6-35b",
   "qwen3.6-35b-fast",
@@ -93,7 +94,7 @@ describe("neuralwatt-extension", () => {
     }
   });
 
-  it("documents the DeepSeek Speed and V4.1 models in the introduction and catalog tables", async () => {
+  it("documents the DeepSeek Speed, V4.1, and MiMo models in the introduction and catalog tables", async () => {
     const readme = await readFile(
       resolve(import.meta.dirname, "../../extensions/neuralwatt/README.md"),
       "utf8",
@@ -104,14 +105,17 @@ describe("neuralwatt-extension", () => {
 
     expect(introduction).toContain("DeepSeek V4 Flash (Speed)");
     expect(introduction).toContain("DeepSeek V4.1 Flash");
+    expect(introduction).toContain("MiMo-V2.6-Pro");
     expect(catalog).toContain("| deepseek-v4-flash-speed | 1M | yes | — | $0.14 / $0.28 |");
     expect(catalog).toContain("| deepseek-v4.1-flash | 1M | yes | yes | $0.15 / $0.60 |");
+    expect(catalog).toContain("| mimo-v2.6-pro | 1M | yes | yes | $0.87 / $1.74 |");
     expect(thinking).toContain(
       "| deepseek-v4-flash-speed | none | minimal | low | medium | high | max |",
     );
     expect(thinking).toContain(
       "| deepseek-v4.1-flash | none | minimal | low | medium | high | xhigh |",
     );
+    expect(thinking).toContain("| mimo-v2.6-pro | none | none | high | high | high | high |");
   });
 
   it("configures Gemma 4 from live metadata and probed reasoning behavior", () => {
@@ -192,6 +196,21 @@ describe("neuralwatt-extension", () => {
         cost: { input: 0.45, output: 3.2, cacheRead: 0.25, cacheWrite: 0 },
         contextWindow: 262128,
         maxTokens: 131072,
+      }),
+    );
+  });
+
+  it("configures MiMo-V2.6-Pro from live metadata and probed reasoning behavior", () => {
+    const model = STATIC_MODELS.find((candidate) => candidate.id === "mimo-v2.6-pro");
+
+    expect(model).toEqual(
+      expect.objectContaining({
+        name: "MiMo-V2.6-Pro",
+        reasoning: true,
+        input: ["text", "image"],
+        cost: { input: 0.87, output: 1.74, cacheRead: 0.036, cacheWrite: 0 },
+        contextWindow: 1048560,
+        maxTokens: 393216,
       }),
     );
   });
@@ -386,6 +405,19 @@ describe("neuralwatt-extension", () => {
       medium: "medium",
       high: "high",
       xhigh: "max",
+    });
+
+    // mimo-v2.6-pro (2026-09 probe): disableable, but the catalog's
+    // supported_efforts are only {none, high} and its aliases collapse every
+    // other level (minimal -> none, low/medium/xhigh/max -> high), so pi's
+    // levels route onto the two real modes.
+    expect(byId["mimo-v2.6-pro"].thinkingLevelMap).toEqual({
+      off: "none",
+      minimal: "none",
+      low: "high",
+      medium: "high",
+      high: "high",
+      xhigh: "high",
     });
   });
 
