@@ -10,7 +10,7 @@
 
 // --- Imports ---
 import type { AgentToolResult, ExtensionContext } from "pi";
-import { runExec } from "../../../lib/exec.ts";
+import { execPlatformHint, runExec } from "../../../lib/exec.ts";
 import { findNewestCustomEntry } from "../../../lib/session-utils.ts";
 import {
   formatMissionStatus,
@@ -92,7 +92,10 @@ export function createExecVerificationRunner(): VerificationRunner {
     async run(command, cwd) {
       const result = await runExec(command, { cwd, timeoutMs: 120_000, maxBuffer: 1024 * 1024 });
       if (result.ok) return { ok: true, output: "verification command passed" };
-      const output = [result.stdout, result.stderr, result.error].filter(Boolean).join("\n").trim();
+      const output = [result.stdout, result.stderr, result.error, execPlatformHint()]
+        .filter(Boolean)
+        .join("\n")
+        .trim();
       return { ok: false, output: output || "verification command failed" };
     },
   };

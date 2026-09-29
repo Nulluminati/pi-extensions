@@ -1211,6 +1211,33 @@ describe("autoresearch-units", () => {
     expect(out.output).toContain("Command failed");
   });
 
+  it("runCommand appends the macOS shell hint to failed output on darwin, never to metricOutput", async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(process, "platform");
+    try {
+      Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
+      const out = await runCommand("printf 'METRIC m=3'; exit 3", process.cwd(), 10_000);
+
+      expect(out.ok).toBe(false);
+      expect(out.output).toContain("Platform: darwin");
+      expect(out.metricOutput).not.toContain("Platform:");
+    } finally {
+      if (descriptor) Object.defineProperty(process, "platform", descriptor);
+    }
+  });
+
+  it("runCommand keeps output hint-free on linux", async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(process, "platform");
+    try {
+      Object.defineProperty(process, "platform", { value: "linux", configurable: true });
+      const out = await runCommand("printf 'METRIC m=4'; exit 3", process.cwd(), 10_000);
+
+      expect(out.ok).toBe(false);
+      expect(out.output).not.toContain("Platform:");
+    } finally {
+      if (descriptor) Object.defineProperty(process, "platform", descriptor);
+    }
+  });
+
   it("bestEntry respects direction", () => {
     const entries: RunEntry[] = [
       { run: 1, at: 1, status: "baseline", description: "b", metric: 10 },

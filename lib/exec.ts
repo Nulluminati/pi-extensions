@@ -34,6 +34,15 @@ export interface ExecOutcome {
 
 const execAsync = promisify(execCb);
 
+/** One-line platform note for shell-command failure output, or "" when the
+ *  platform needs no note. `child_process.exec` runs commands under /bin/sh,
+ *  which is bash 3.2 on macOS — commands authored with bash-4 or GNU-only
+ *  tool flags fail there and can otherwise be misread as a genuine fault. */
+export function execPlatformHint(): string {
+  if (process.platform !== "darwin") return "";
+  return "Platform: darwin (commands run under /bin/sh, bash 3.2). Use POSIX-sh syntax and BSD-compatible tool flags, then re-run.";
+}
+
 /** Run one shell command with a timeout and a bounded capture buffer.
  *  A timeout kills the child (SIGTERM); whatever it produced before the
  *  kill or the buffer overflow is still returned. */

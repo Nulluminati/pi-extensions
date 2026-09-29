@@ -4,7 +4,7 @@ import { exec as execCb } from "node:child_process";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { runExec } from "../../../lib/exec.ts";
+import { execPlatformHint, runExec } from "../../../lib/exec.ts";
 import { cleanGitEnv, runGit } from "../../../lib/git.ts";
 import { isProjectStatePath } from "../../../lib/paths.ts";
 
@@ -96,7 +96,7 @@ export async function runCommand(
     ok: result.ok,
     output: result.ok
       ? metricOutput
-      : [metricOutput, result.error].filter(Boolean).join("\n").trim(),
+      : [metricOutput, result.error, execPlatformHint()].filter(Boolean).join("\n").trim(),
     metricOutput,
     durationMs: result.durationMs,
   };

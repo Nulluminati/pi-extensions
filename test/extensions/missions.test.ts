@@ -921,4 +921,31 @@ describe("createExecVerificationRunner", () => {
     // fallback only fires when even that message is empty.
     expect(result.output).toContain("Command failed: exit 7");
   });
+
+  it("appends the macOS shell hint to failures on darwin", async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(process, "platform");
+    try {
+      Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
+      const result = await runner.run("printf out; exit 3", process.cwd());
+
+      expect(result.ok).toBe(false);
+      expect(result.output).toContain("Platform: darwin");
+      expect(result.output).toMatch(/POSIX-sh/);
+    } finally {
+      if (descriptor) Object.defineProperty(process, "platform", descriptor);
+    }
+  });
+
+  it("keeps failure output hint-free on linux", async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(process, "platform");
+    try {
+      Object.defineProperty(process, "platform", { value: "linux", configurable: true });
+      const result = await runner.run("printf out; exit 3", process.cwd());
+
+      expect(result.ok).toBe(false);
+      expect(result.output).not.toContain("Platform:");
+    } finally {
+      if (descriptor) Object.defineProperty(process, "platform", descriptor);
+    }
+  });
 });

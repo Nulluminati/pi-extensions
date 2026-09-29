@@ -2,7 +2,30 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { runExec } from "../../lib/exec.ts";
+import { execPlatformHint, runExec } from "../../lib/exec.ts";
+
+const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
+
+function stubPlatform(value: NodeJS.Platform): void {
+  Object.defineProperty(process, "platform", { value, configurable: true });
+}
+
+afterEach(() => {
+  if (platformDescriptor) Object.defineProperty(process, "platform", platformDescriptor);
+});
+
+describe("execPlatformHint", () => {
+  it("is empty on linux", () => {
+    stubPlatform("linux");
+    expect(execPlatformHint()).toBe("");
+  });
+
+  it("explains the macOS shell when running on darwin", () => {
+    stubPlatform("darwin");
+    expect(execPlatformHint()).toMatch(/darwin/);
+    expect(execPlatformHint()).toMatch(/POSIX/);
+  });
+});
 
 const tempDirs: string[] = [];
 

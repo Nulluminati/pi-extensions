@@ -22,11 +22,12 @@ export const AUTORESEARCH_PARAMETERS = {
     measure: {
       type: "string",
       description:
-        "init: shell command that measures the metric. Emit 'METRIC name=value' (or make the last number the value).",
+        "init: shell command that measures the metric. Emit 'METRIC name=value' (or make the last number the value). Must be POSIX-sh compatible (macOS /bin/sh is bash 3.2; avoid GNU-only flags).",
     },
     checks: {
       type: "string",
-      description: "init: optional correctness gate (tests, typecheck) run before measuring.",
+      description:
+        "init: optional correctness gate (tests, typecheck) run before measuring. Must be POSIX-sh compatible (macOS /bin/sh is bash 3.2; avoid GNU-only flags).",
     },
     maxIterations: {
       type: "number",
