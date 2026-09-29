@@ -61,7 +61,7 @@ Workers should use a cheap model; keep design decisions, integration, and review
 | `pi.registerTool("spawn_worker" / "workers")` | Worker spawning and management |
 | `pi.sendMessage(..., { triggerTurn: true, deliverAs: "steer" })` | Trusted wake on worker exit |
 | `pi.on("session_start" / "session_shutdown")` | Reconcile orphaned records / cancel running workers |
-| `pi.events.emit("workers:state")` | Publishes worker-count state (`{ running: <n> }`) for future consumers such as the status bar |
+| `pi.events.emit("workers:state")` | Publishes worker state (`{ running, workerCostUsd, workerTokens }`); the status bar subscribes and shows the delegated-worker spend roll-up next to the session cost |
 | `setStripWidget` (`lib/widget-strip.ts`) | Framed panel above the input at `WIDGET_PRIORITY_WORKERS`: running workers (`N running` in the frame corner), cleared when none |
 
 **Worker sandbox**: every isolated worker is provisioned by the project-owned setup files — the executable hook `.pi/provision-worktree`, the carry file `.worktreeinclude`, and the sandbox policy `.pi/sandbox.json`. The hook runs once per worktree inside the sandbox; its log lands in the provision cache with the failure pointer. The sandbox (`@anthropic-ai/sandbox-runtime`; preflight requires `bwrap` and `socat` plus `rg` on Linux) enforces the policy's read/write/network rules for every built-in tool and `!`. A worker without a working sandbox fails loudly rather than falling back to the host: initialization failure kills all tool calls.

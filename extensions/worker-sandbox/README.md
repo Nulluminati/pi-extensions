@@ -41,7 +41,7 @@ Rules come from the project's `.pi/sandbox.json` (srt schema: filesystem read/wr
 
 | API | Purpose |
 |-----|---------|
-| `pi.on("tool_call")` tool overrides | Routes every built-in tool through the sandbox |
+| `pi.registerTool(...)` tool overrides | Routes every built-in tool through the sandbox |
 | `pi.on("user_bash")` | Routes `!` commands through the sandbox |
 
 ## Related

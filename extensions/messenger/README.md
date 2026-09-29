@@ -5,11 +5,13 @@ File-based coordination between Pi sessions sharing a project: presence, per-age
 ## Usage
 
 ```text
+messenger (action=whoami)                        # your session name
 messenger (action=list)                          # who is online
 messenger (action=send, to="swift-otter", text="auth API is changing, hold off")
 messenger (action=inbox)                          # read + clear your mail
 messenger (action=reserve, paths=["src/auth"], reason="refactor")
 messenger (action=release)                        # drop your reservations
+messenger (action=status, text="working")         # publish your presence line
 ```
 
 ## How It Works

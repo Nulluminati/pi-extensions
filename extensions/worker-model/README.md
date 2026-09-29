@@ -31,7 +31,7 @@ The workers extension resolves every spawn_worker call through `lib/worker-model
 
 | Variable | Description |
 |----------|-------------|
-| `PI_WORKER_MODEL` | `provider/model-id`; overrides the config file and disables `/worker-model` writes with a warning |
+| `PI_WORKER_MODEL` | `provider/model-id`; overrides the config file and disables `/worker-model` (including `status`) with a warning |
 | `PI_WORKER_MODEL_THINKING` | Thinking level used with `PI_WORKER_MODEL`; defaults to `high` |
 | `PI_WORKER_MODEL_CONFIG` | Alternative config-file path |
 

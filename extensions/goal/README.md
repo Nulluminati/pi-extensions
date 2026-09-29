@@ -94,12 +94,12 @@ The extension keeps state in closure variables (`state`, `continuationQueued`, `
 
 ## Key Design Decisions
 
-- **The system prompt is never modified** — the old design appended a per-turn-varying system prompt section, which invalidated the provider prompt cache on every turn. Goal context now enters as a stripped-and-re-injected tail message (the same pattern the `plan` extension uses), so cached prefixes survive.
+- **The system prompt is never modified** — the old design appended a per-turn-varying system prompt section, which invalidated the provider prompt cache on every turn. Goal context now enters as a stripped-and-re-injected tail message, so cached prefixes survive.
 - **No LLM-facing completion tool** — the old `goal_complete` tool let the working model self-report completion (and its enable/disable toggling churned the tool schema). The small-model evaluator is the sole completion authority, so there is nothing to toggle.
 - **No token budget** — budget counters in prompts broke caching, and budget-as-prompt-content is an anti-pattern. Token spend is still tracked for `/goal:status` display only. Bounding is done with the iteration cap and no-progress guard.
 - **Fail-safe evaluation** — an evaluator failure never silently continues the loop; it notifies and hands control back.
-- **Confirmation on replacement** — starting a new goal while one is active (and not complete) triggers a `ui.confirm()` dialog to prevent accidental replacement.
-- **Reset confirmation** — `/goal:reset` wipes the objective and all usage counters, so it requires a `ui.confirm()` before proceeding.
+- **Confirmation on replacement** — starting a new goal while one is active (and not complete) shows the shared framed confirm modal (`confirmModal` from `lib/input-modal.ts`) to prevent accidental replacement; outside TUI mode it falls back to `ctx.ui.confirm()`.
+- **Reset confirmation** — `/goal:reset` wipes the objective and all usage counters, so it requires the framed confirm modal (falling back to `ctx.ui.confirm()` outside TUI mode) before proceeding.
 
 ## Pi APIs Used
 
