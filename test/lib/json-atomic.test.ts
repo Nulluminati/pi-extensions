@@ -1,8 +1,17 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { writeJsonAtomic, writeTextAtomic } from "../../lib/json-atomic.ts";
+
+// randomBytes is wrapped (not replaced) so collision tests can pin the temp
+// suffix while every other test keeps real randomness.
+vi.mock("node:crypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:crypto")>();
+  return { randomBytes: vi.fn(actual.randomBytes) };
+});
+
+import { randomBytes } from "node:crypto";
 
 describe("json-atomic", () => {
   let dir: string;
@@ -14,6 +23,7 @@ describe("json-atomic", () => {
   });
 
   afterEach(async () => {
+    vi.mocked(randomBytes).mockRestore();
     await rm(dir, { recursive: true, force: true });
   });
 
@@ -90,5 +100,66 @@ describe("json-atomic", () => {
 
     await expect(writeTextAtomic(path, "x")).rejects.toThrow();
     expect(await tmpLeftovers()).toEqual([]);
+  });
+
+  it("reuses the existing file's mode on rewrites when no mode is passed", async () => {
+    const path = join(dir, "secret.json");
+
+    await writeJsonAtomic(path, { token: "x" }, { mode: 0o600 });
+    await writeJsonAtomic(path, { token: "y" });
+
+    expect((await stat(path)).mode & 0o777).toBe(0o600);
+  });
+
+  it("an explicit mode still wins over the existing file's mode", async () => {
+    const path = join(dir, "secret.jsonl");
+
+    await writeTextAtomic(path, "one\n", { mode: 0o600 });
+    await writeTextAtomic(path, "two\n", { mode: 0o644 });
+
+    expect((await stat(path)).mode & 0o777).toBe(0o644);
+  });
+
+  it("a mode change applies to new files only when omitted", async () => {
+    const path = join(dir, "fresh.json");
+
+    await writeJsonAtomic(path, { n: 1 });
+
+    // Platform default for new files; the exact value is umask-dependent,
+    // so only assert it was created (mode coverage lives above).
+    expect((await stat(path)).mode & 0o777).toBeGreaterThan(0);
+  });
+
+  it("retries with a fresh temp name instead of truncating a colliding temp", async () => {
+    const path = join(dir, "shared.json");
+    const pinned = Buffer.from("deadbeefdeadbeef", "hex");
+    const collidingTemp = `${path}.${process.pid}.${pinned.toString("hex")}.tmp`;
+    // Another writer's in-flight temp at the name we are about to draw.
+    await writeFile(collidingTemp, "other-writer-in-flight");
+    let call = 0;
+    vi.mocked(randomBytes).mockImplementation((size: number) => {
+      call += 1;
+      return call === 1 ? pinned : Buffer.alloc(size, 7);
+    });
+
+    await writeJsonAtomic(path, { writer: "me" });
+
+    // Our write landed and the other writer's temp is untouched.
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ writer: "me" });
+    expect(await readFile(collidingTemp, "utf8")).toBe("other-writer-in-flight");
+  });
+
+  it("gives up with a clear error when temp names stay occupied", async () => {
+    const path = join(dir, "shared.json");
+    const pinned = Buffer.alloc(8, 9);
+    const collidingTemp = `${path}.${process.pid}.${pinned.toString("hex")}.tmp`;
+    await writeFile(collidingTemp, "other-writer-in-flight");
+    vi.mocked(randomBytes).mockImplementation((size: number) => Buffer.alloc(size, 9));
+
+    await expect(writeJsonAtomic(path, { writer: "me" })).rejects.toThrow(/temp file/i);
+
+    // The other writer's temp survives; our target was never created.
+    expect(await readFile(collidingTemp, "utf8")).toBe("other-writer-in-flight");
+    await expect(readFile(path, "utf8")).rejects.toThrow();
   });
 });
