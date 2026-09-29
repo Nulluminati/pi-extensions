@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { withFileLock } from "../../../lib/file-lock.ts";
+import { writeJsonAtomic } from "../../../lib/json-atomic.ts";
 import type {
   CacheSearchSelector,
   Context7Settings,
@@ -57,19 +59,6 @@ interface CacheLookup<T> {
   fresh: boolean;
 }
 
-// --- Cache mutation queue ---
-
-let mutationQueue: Promise<void> = Promise.resolve();
-
-async function withMutationQueue<T>(fn: () => Promise<T>): Promise<T> {
-  const promise = mutationQueue.then(() => fn());
-  mutationQueue = promise.then(
-    () => {},
-    () => {},
-  );
-  return promise;
-}
-
 // --- Cache helpers ---
 
 function hash(input: string): string {
@@ -96,12 +85,6 @@ async function readJsonFile<T>(path: string, fallback: T): Promise<T> {
   } catch {
     return fallback;
   }
-}
-
-async function atomicWriteJson(path: string, value: unknown): Promise<void> {
-  const tempPath = `${path}.tmp-${process.pid}-${Date.now()}`;
-  await writeFile(tempPath, JSON.stringify(value, null, 2));
-  await rename(tempPath, path);
 }
 
 function uniqueStrings(values: string[]): string[] {
@@ -183,8 +166,8 @@ async function writeResolveIndexes(
   for (const entry of all) {
     pushIndexValue(byLibrary, entry.normalizedLibraryName, entry.objectKey);
   }
-  await atomicWriteJson(paths.allIndexPath, all);
-  await atomicWriteJson(paths.byLibraryPath, byLibrary);
+  await writeJsonAtomic(paths.allIndexPath, all);
+  await writeJsonAtomic(paths.byLibraryPath, byLibrary);
 }
 
 async function writeDocsIndexes(paths: ReturnType<typeof getDocsPaths>, all: DocCacheIndexEntry[]) {
@@ -201,11 +184,11 @@ async function writeDocsIndexes(paths: ReturnType<typeof getDocsPaths>, all: Doc
     pushIndexValue(byVersion, entry.libraryVersionRaw, entry.docRef);
   }
 
-  await atomicWriteJson(paths.allIndexPath, all);
-  await atomicWriteJson(paths.byRefPath, byRef);
-  await atomicWriteJson(paths.byLibraryIdPath, byLibraryId);
-  await atomicWriteJson(paths.byLibraryNamePath, byLibraryName);
-  await atomicWriteJson(paths.byVersionPath, byVersion);
+  await writeJsonAtomic(paths.allIndexPath, all);
+  await writeJsonAtomic(paths.byRefPath, byRef);
+  await writeJsonAtomic(paths.byLibraryIdPath, byLibraryId);
+  await writeJsonAtomic(paths.byLibraryNamePath, byLibraryName);
+  await writeJsonAtomic(paths.byVersionPath, byVersion);
 }
 
 async function pruneResolveIndexes(
@@ -316,7 +299,9 @@ export async function putResolveCache(
 
   const paths = await ensureResolveCacheDirs(settings, objectKey);
 
-  await withMutationQueue(async () => {
+  // Serialize the index read-modify-write across processes: two Pi sessions
+  // putting at once would otherwise write stale indexes over each other.
+  await withFileLock(join(settings.cacheDir, "resolve", ".all.lock"), async () => {
     const { all } = await readResolveIndexes(paths);
     const nextAll = all
       .filter((item) => item.objectKey !== objectKey)
@@ -332,7 +317,7 @@ export async function putResolveCache(
         resultCount: entry.results.length,
       });
 
-    await atomicWriteJson(paths.objectPath, entry);
+    await writeJsonAtomic(paths.objectPath, entry);
     await pruneResolveIndexes(paths, nextAll);
   });
 
@@ -373,7 +358,9 @@ export async function putDocCache(
 
   const paths = await ensureDocsCacheDirs(settings, objectKey);
 
-  await withMutationQueue(async () => {
+  // Serialize the index read-modify-write across processes: two Pi sessions
+  // putting at once would otherwise write stale indexes over each other.
+  await withFileLock(join(settings.cacheDir, "docs", ".all.lock"), async () => {
     const { all } = await readDocsIndexes(paths);
     const nextAll = all
       .filter((item) => item.docRef !== entry.docRef)
@@ -396,7 +383,7 @@ export async function putDocCache(
         curatedLength: entry.curatedText.length,
       });
 
-    await atomicWriteJson(paths.objectPath, entry);
+    await writeJsonAtomic(paths.objectPath, entry);
     await pruneDocsIndexes(paths, nextAll);
   });
 

@@ -1,4 +1,3 @@
-import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import context7Extension, { type DocCacheIndexEntry } from "../../extensions/context7/context7.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
@@ -18,29 +17,73 @@ vi.mock("node:fs", () => ({
   existsSync: vi.fn(),
 }));
 
-vi.mock("node:fs/promises", () => ({
-  readFile: vi.fn(),
-  writeFile: vi.fn(() => Promise.resolve()),
-  rename: vi.fn(() => Promise.resolve()),
-  mkdir: vi.fn(() => Promise.resolve()),
-  readdir: vi.fn(() => Promise.resolve([])),
-  rm: vi.fn(() => Promise.resolve()),
-}));
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    readFile: vi.fn(),
+    writeFile: vi.fn(() => Promise.resolve()),
+    rename: vi.fn(() => Promise.resolve()),
+    mkdir: vi.fn(() => Promise.resolve()),
+    readdir: vi.fn(() => Promise.resolve([])),
+    rm: vi.fn(() => Promise.resolve()),
+    // writeJsonAtomic (lib/json-atomic.ts) stages every write through a
+    // file handle; this fake handle lets mocked-land puts succeed without
+    // a real filesystem.
+    open: vi.fn(async () => ({
+      writeFile: async () => {},
+      sync: async () => {},
+      close: async () => {},
+    })),
+    unlink: vi.fn(() => Promise.resolve()),
+    // withFileLock (lib/file-lock.ts) claims lock pathnames with link; this
+    // mock lets mocked-land puts acquire their lock without a real filesystem.
+    link: vi.fn(() => Promise.resolve()),
+  };
+});
 
 vi.mock("node:os", () => ({
   homedir: vi.fn(() => "/home/test"),
 }));
 
-vi.mock("node:crypto", () => ({
-  createHash: vi.fn(() => ({
-    update: vi.fn(() => ({
-      digest: vi.fn(() => "a".repeat(64)),
+vi.mock("node:crypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:crypto")>();
+  return {
+    ...actual,
+    createHash: vi.fn(() => ({
+      update: vi.fn(() => ({
+        digest: vi.fn(() => "a".repeat(64)),
+      })),
     })),
-  })),
-}));
+  };
+});
 
+// Passthrough spy: tests assert the cache serializes mutations through the
+// shared cross-process lock while keeping the real lock behavior.
+vi.mock("../../lib/file-lock.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../lib/file-lock.ts")>();
+  return {
+    ...actual,
+    withFileLock: vi.fn(actual.withFileLock),
+  };
+});
+
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import {
+  link,
+  mkdir,
+  open,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
+import { withFileLock } from "../../lib/file-lock.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -200,6 +243,33 @@ function setupDocsIndexCache(candidates: Array<Partial<DocCacheIndexEntry>>) {
 
 function normalizeText(value?: string): string {
   return (value ?? "").trim().toLowerCase();
+}
+
+// Delegates the mocked fs modules to the real implementations against a
+// fresh temp root, so tests can assert what actually landed on disk. The
+// mocked homedir points into the root, so cache and agent dirs are isolated.
+async function setupRealFsCacheRoot() {
+  const actualFs = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+  const actualFsSync = await vi.importActual<typeof import("node:fs")>("node:fs");
+  const actualOs = await vi.importActual<typeof import("node:os")>("node:os");
+  const actualCrypto = await vi.importActual<typeof import("node:crypto")>("node:crypto");
+  const root = await actualFs.mkdtemp(join(actualOs.tmpdir(), "pi-context7-test-"));
+
+  vi.mocked(mkdir).mockImplementation(actualFs.mkdir);
+  vi.mocked(writeFile).mockImplementation(actualFs.writeFile);
+  vi.mocked(rename).mockImplementation(actualFs.rename);
+  vi.mocked(readFile).mockImplementation(actualFs.readFile);
+  vi.mocked(readdir).mockImplementation(actualFs.readdir);
+  vi.mocked(rm).mockImplementation(actualFs.rm);
+  vi.mocked(open).mockImplementation(actualFs.open);
+  vi.mocked(unlink).mockImplementation(actualFs.unlink);
+  vi.mocked(link).mockImplementation(actualFs.link);
+  vi.mocked(existsSync).mockImplementation(actualFsSync.existsSync);
+  vi.mocked(createHash).mockImplementation(actualCrypto.createHash);
+  vi.mocked(homedir).mockReturnValue(root);
+  vi.stubEnv("PI_CODING_AGENT_DIR", join(root, "agent"));
+
+  return { root, cachePath: join(root, ".cache", "pi-context7"), actualFs };
 }
 
 // ---------------------------------------------------------------------------
@@ -1023,6 +1093,94 @@ describe("context7-extension", () => {
 
       expect(result.content[0].text).toBe("Stale raw content");
       expect(result.details.cacheStatus).toBe("stale");
+    });
+  });
+
+  // --- Cache durability (real filesystem) ---
+
+  describe("cache durability", () => {
+    it("writes cache index files even when the parent directory does not exist", async () => {
+      const { cachePath, actualFs } = await setupRealFsCacheRoot();
+
+      const mockPi = createMockPi();
+      await context7Extension(mockPi);
+      const tool = getRegisteredTool(mockPi, "context7_get_cached_doc_raw");
+
+      // Fresh cache: docs/index does not exist yet. The semantic lookup's
+      // prune-refresh must still land its index write on disk.
+      await expect(
+        tool.execute("id-1", { libraryName: "NonExistent" }, undefined, undefined, {}),
+      ).rejects.toThrow("No cached Context7 documents matched");
+
+      const allIndex = JSON.parse(
+        await actualFs.readFile(join(cachePath, "docs", "index", "all.json"), "utf8"),
+      );
+      expect(allIndex).toEqual([]);
+      const byRef = JSON.parse(
+        await actualFs.readFile(join(cachePath, "docs", "index", "by-ref.json"), "utf8"),
+      );
+      expect(byRef).toEqual({});
+    });
+
+    it("keeps both instances' writes when two sessions put concurrently", async () => {
+      const { cachePath, actualFs } = await setupRealFsCacheRoot();
+
+      const mockPi = createMockPi();
+      await context7Extension(mockPi);
+      const tool = getRegisteredTool(mockPi, "context7_resolve_library_id");
+
+      mockFetchResolve([{ id: "/org/alpha", title: "Alpha", description: "Lib A" }]);
+      mockFetchResolve([{ id: "/org/beta", title: "Beta", description: "Lib B" }]);
+
+      // Two Pi instances share the cache directory. Both puts are in flight
+      // at once; neither instance's entry may be dropped from the index.
+      await Promise.all([
+        tool.execute("id-1", { libraryName: "alpha" }, undefined, undefined, {}),
+        tool.execute("id-2", { libraryName: "beta" }, undefined, undefined, {}),
+      ]);
+
+      const allIndex = JSON.parse(
+        await actualFs.readFile(join(cachePath, "resolve", "index", "all.json"), "utf8"),
+      ) as Array<{ cacheKey: string; objectKey: string }>;
+      expect(allIndex.map((entry) => entry.cacheKey).sort()).toEqual([
+        "alpha::alpha",
+        "beta::beta",
+      ]);
+      for (const entry of allIndex) {
+        const stats = await actualFs.stat(
+          join(cachePath, "resolve", "objects", `${entry.objectKey}.json`),
+        );
+        expect(stats.isFile()).toBe(true);
+      }
+    });
+
+    it("serializes puts through the cross-process file lock", async () => {
+      const { cachePath, actualFs } = await setupRealFsCacheRoot();
+
+      const mockPi = createMockPi();
+      await context7Extension(mockPi);
+      const resolveTool = getRegisteredTool(mockPi, "context7_resolve_library_id");
+      const docsTool = getRegisteredTool(mockPi, "context7_get_library_docs");
+
+      mockFetchResolve([{ id: "/test/lib", title: "TestLib", description: "Test library" }]);
+      await resolveTool.execute("id-1", { libraryName: "testlib" }, undefined, undefined, {});
+
+      mockFetchDocs("# API Docs\n\nDetails here.");
+      await docsTool.execute(
+        "id-2",
+        { libraryId: "/test/lib", query: "overview" },
+        undefined,
+        undefined,
+        {},
+      );
+
+      const lockPaths = vi.mocked(withFileLock).mock.calls.map((call) => call[0]);
+      expect(lockPaths).toContain(join(cachePath, "resolve", ".all.lock"));
+      expect(lockPaths).toContain(join(cachePath, "docs", ".all.lock"));
+
+      // The writes the locks guarded actually landed.
+      await actualFs.access(join(cachePath, "resolve", "index", "all.json"));
+      await actualFs.access(join(cachePath, "docs", "index", "all.json"));
     });
   });
 });
