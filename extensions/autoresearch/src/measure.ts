@@ -108,7 +108,10 @@ export async function isGitRepo(cwd: string): Promise<boolean> {
   try {
     const stdout = await runGit(cwd, ["rev-parse", "--is-inside-work-tree"]);
     return stdout.trim() === "true";
-  } catch {
+  } catch (error) {
+    // A missing git binary is not repo absence — surface it (init maps the
+    // tag to an install hint) instead of reporting "not a repository".
+    if ((error as NodeJS.ErrnoException).code === "GIT_BINARY_MISSING") throw error;
     return false;
   }
 }

@@ -32,15 +32,27 @@ export function cleanGitEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.Proces
 
 export const gitExecFile = promisify(execFile);
 
-/** Run a git command with a clean git environment and a bounded buffer. */
+/** Run a git command with a clean git environment and a bounded buffer.
+ *  A missing git binary (ENOENT — e.g. a GUI-launched process whose PATH
+ *  lacks Homebrew's prefix) is tagged GIT_BINARY_MISSING so callers can
+ *  report "git not found" instead of misreading it as repo absence. */
 export async function runGit(cwd: string, args: string[], timeoutMs = 60_000): Promise<string> {
-  const { stdout } = await gitExecFile("git", args, {
-    cwd,
-    env: cleanGitEnv(),
-    maxBuffer: 16 * 1024 * 1024,
-    timeout: timeoutMs,
-  });
-  return stdout;
+  try {
+    const { stdout } = await gitExecFile("git", args, {
+      cwd,
+      env: cleanGitEnv(),
+      maxBuffer: 16 * 1024 * 1024,
+      timeout: timeoutMs,
+    });
+    return stdout;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      const missing: NodeJS.ErrnoException = new Error("git not found on PATH");
+      missing.code = "GIT_BINARY_MISSING";
+      throw missing;
+    }
+    throw error;
+  }
 }
 
 // --- Local excludes ---

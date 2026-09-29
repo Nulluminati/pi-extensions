@@ -136,6 +136,16 @@ describe("autoresearch-extension", () => {
     }
   });
 
+  it("init names the missing git binary instead of repo absence", async () => {
+    const empty = await mkdtemp(join(tmpdir(), "autoresearch-nogit-path-"));
+    try {
+      vi.stubEnv("PATH", empty);
+      await expect(initSession()).rejects.toThrow(/not found on PATH/);
+    } finally {
+      await rm(empty, { recursive: true, force: true });
+    }
+  });
+
   it("init records the baseline and writes .pi/autoresearch files", async () => {
     const res = await initSession();
     expect(res.content[0].text).toContain("Baseline: 100");

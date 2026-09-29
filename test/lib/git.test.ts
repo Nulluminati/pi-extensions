@@ -3,8 +3,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, describe, expect, it } from "vitest";
-import { cleanGitEnv, excludeFromGit } from "../../lib/git.ts";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanGitEnv, excludeFromGit, runGit } from "../../lib/git.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -31,8 +31,32 @@ async function initRepo(dir: string): Promise<void> {
 }
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await Promise.all(tempDirs.map((dir) => rm(dir, { recursive: true, force: true })));
   tempDirs.length = 0;
+});
+
+describe("runGit", () => {
+  it("tags the error when the git binary is missing from PATH", async () => {
+    const empty = await tempDir("git-missing-path-");
+    vi.stubEnv("PATH", empty);
+    const dir = await tempDir("git-anywhere-");
+
+    await expect(runGit(dir, ["status"])).rejects.toMatchObject({
+      code: "GIT_BINARY_MISSING",
+      message: expect.stringMatching(/git not found on PATH/),
+    });
+  });
+
+  it("keeps git's own failure for a non-repository directory", async () => {
+    const dir = await tempDir("git-norepo-");
+
+    const error = (await runGit(dir, ["status"]).catch((e) => e)) as NodeJS.ErrnoException;
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error.code).not.toBe("GIT_BINARY_MISSING");
+    expect(error.message).not.toMatch(/not found on PATH/);
+  });
 });
 
 describe("excludeFromGit", () => {

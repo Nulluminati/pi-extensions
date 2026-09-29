@@ -57,7 +57,18 @@ export async function initAction(
   // data from keep/discard, so it must win over config-state errors
   // (a corrupt config still refuses init — just with the tree error
   // when both are wrong).
-  if (!(await isGitRepo(cwd))) {
+  let inRepo: boolean;
+  try {
+    inRepo = await isGitRepo(cwd);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "GIT_BINARY_MISSING") {
+      throw new Error(
+        "autoresearch requires git, but the git binary was not found on PATH. Install git (e.g. 'brew install git' on macOS, 'dnf install git' on Fedora) and re-run init.",
+      );
+    }
+    throw error;
+  }
+  if (!inRepo) {
     throw new Error(
       "autoresearch requires a git repository (keeps are commits, discards are reverts).",
     );
