@@ -425,7 +425,8 @@ declare module "pi" {
 
   export interface ImageContent {
     type: "image";
-    source: { type: "base64"; media_type: string; data: string } | { type: "url"; url: string };
+    data: string;
+    mimeType: string;
   }
 
   // --- Event map ---

@@ -22,6 +22,14 @@ const ROOT = join(import.meta.dirname, "..");
 const ALLOWLIST = new Map<string, string>([
   [join("lib", "paths.ts"), "defines the resolvers; reads homedir() for the cache-root fallback"],
   [
+    join("extensions", "codex-image", "src", "auth.ts"),
+    "reads Codex CLI credentials from its own home, separate from Pi's agent directory",
+  ],
+  [
+    join("extensions", "codex-image", "src", "config.ts"),
+    "reads Codex CLI model config from its own home, separate from Pi's agent directory",
+  ],
+  [
     join("extensions", "tool-style", "src", "surface.ts"),
     "reads pywal's palette at ~/.cache/wal, which this repo does not own",
   ],
