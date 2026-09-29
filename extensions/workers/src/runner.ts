@@ -452,8 +452,11 @@ export async function finalizeWorker(options: FinalizeOptions): Promise<WorkerRe
 // --- Process-group kill (works with or without a ChildProcess handle) ---
 
 /** Kill a worker's whole process group, escalating to SIGKILL. Does not
- *  wait for an exit event: callers poll liveness or rely on close. */
+ *  wait for an exit event: callers poll liveness or rely on close.
+ *  Non-positive or non-integer pids are refused: kill(-pid) on pid <= 0
+ *  degenerates to a broadcast (kill(-1)) or an unintended target. */
 export async function killPidTree(pid: number): Promise<void> {
+  if (!Number.isInteger(pid) || pid <= 0) return;
   try {
     process.kill(-pid, "SIGTERM");
   } catch {
@@ -845,7 +848,9 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
     const timeoutSeconds = Math.round(options.timeoutMs / 1000);
     const timer = setTimeout(() => {
       timedOut = true;
-      void killPidTree(child.pid ?? -1);
+      // A spawn failure leaves child.pid undefined; killing is impossible
+      // and killPidTree refuses non-positive pids anyway.
+      if (child.pid !== undefined) void killPidTree(child.pid);
     }, options.timeoutMs);
     timer.unref?.();
     child.on("close", () => {

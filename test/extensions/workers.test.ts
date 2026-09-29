@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import {
   chmod,
@@ -3138,6 +3138,40 @@ describe("workers-units", () => {
       await expect(createWorktree(repo, "w-tracked")).rejects.toThrow(/dirty tree/);
     } finally {
       await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("killPidTree refuses non-positive and non-integer pids without signaling", async () => {
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
+    try {
+      await killPidTree(0);
+      await killPidTree(-1);
+      await killPidTree(Number.NaN);
+      expect(killSpy).not.toHaveBeenCalled();
+    } finally {
+      killSpy.mockRestore();
+    }
+  });
+
+  it("killPidTree still signals a positive pid", async () => {
+    const sleeper = spawn("sleep", ["30"], { stdio: "ignore", detached: true });
+    sleeper.unref();
+    try {
+      const killSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
+      try {
+        await killPidTree(sleeper.pid ?? 0);
+        expect(killSpy).toHaveBeenCalled();
+      } finally {
+        killSpy.mockRestore();
+      }
+    } finally {
+      if (sleeper.pid !== undefined) {
+        try {
+          process.kill(-sleeper.pid, "SIGKILL");
+        } catch {
+          // Already gone.
+        }
+      }
     }
   });
 });

@@ -95,6 +95,18 @@ function watchConfigFile(configPath: string, onStable: () => void): ConfigWatch 
         onStable();
       }, 25);
     });
+    // Async watcher errors (watched directory removed, resource limits)
+    // arrive as `error` events; with no listener they crash the session.
+    // Watching is best-effort — the bar keeps refreshing on other events.
+    watcher?.on("error", (error) => {
+      console.debug("[status-bar] config watcher failed:", error);
+      if (debounce) {
+        clearTimeout(debounce);
+        debounce = undefined;
+      }
+      watcher?.close();
+      watcher = undefined;
+    });
   } catch {
     watcher = undefined;
   }

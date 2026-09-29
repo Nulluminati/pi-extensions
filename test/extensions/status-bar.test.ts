@@ -1,3 +1,4 @@
+import { type FSWatcher, watch } from "node:fs";
 import { mkdtemp, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -20,6 +21,13 @@ import { loadWorkerModelConfig } from "../../lib/worker-model.ts";
 import { createMockCommandContext } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
 import { getEventHandler } from "../mocks/test-helpers.ts";
+
+// watch is wrapped (not replaced) so tests can grab the live FSWatcher
+// handle while every other test keeps real watch behavior.
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return { ...actual, watch: vi.fn(actual.watch) };
+});
 
 vi.mock("../../lib/small-model.ts", () => ({
   loadSmallModelConfig: vi.fn(),
@@ -2390,6 +2398,40 @@ describe("status-bar small model segment", () => {
           .some((l) => l.includes("synthetic/haiku")),
       ).toBe(true);
     });
+  });
+
+  it("logs async watcher errors instead of crashing the session", async () => {
+    const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
+    const tmp = await mkdtemp(join(tmpdir(), "status-bar-watch-error-"));
+    const configPath = join(tmp, "small-model.json");
+    await writeFile(configPath, "{}");
+    vi.mocked(resolveSmallModelConfigPath).mockReturnValue(configPath);
+
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
+    mockCtx.model = { id: "sonnet-4", provider: "anthropic" } as any;
+    await enableBar(mockPi, mockCtx);
+
+    // The bar attaches config watchers at enable time; grab the live handle
+    // and deliver an async watcher error the way libuv does (volume removed,
+    // resource limits). Without an error listener this throws uncaught.
+    // The worker-model watcher's watch() call throws (missing dir), so pick
+    // the last call that returned a watcher.
+    const results = vi.mocked(watch).mock.results;
+    const handle = [...results].reverse().find((r) => r.type === "return")?.value as
+      | FSWatcher
+      | undefined;
+    expect(handle).toBeDefined();
+    expect(() => handle?.emit("error", new Error("watch limit reached"))).not.toThrow();
+    expect(debug).toHaveBeenCalledWith(
+      expect.stringContaining("watcher failed:"),
+      expect.objectContaining({ message: "watch limit reached" }),
+    );
+
+    // The bar keeps rendering after the watcher died.
+    expect(renderInstalledEditor(mockCtx).render(100).length).toBeGreaterThan(0);
+    debug.mockRestore();
   });
 });
 
