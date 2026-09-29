@@ -56,9 +56,9 @@ export default async function approvalMode(pi: ExtensionAPI) {
     enabled = true;
     if (readOnly) pi.setActiveTools(pi.getActiveTools().filter((name) => READONLY_TOOLS.has(name)));
     publish(ctx);
-    if (!worker && ctx.hasUI && !process.env.TYPESAFEAI_API_KEY) {
+    if (!worker && ctx.hasUI && !process.env.TYPESAFE_API_KEY) {
       ctx.ui.notify(
-        "Approval Mode: TYPESAFEAI_API_KEY is missing. Jev-reviewed commands will be blocked.",
+        "Approval Mode: TYPESAFE_API_KEY is missing. Jev-reviewed commands will be blocked.",
         "warning",
       );
     }
@@ -108,7 +108,7 @@ export default async function approvalMode(pi: ExtensionAPI) {
     const result = await judgeCommand({
       command,
       cwd,
-      apiKey: process.env.TYPESAFEAI_API_KEY,
+      apiKey: process.env.TYPESAFE_API_KEY,
       ...(ctx.signal ? { signal: ctx.signal } : {}),
     });
     if (result.decision === "allow") return undefined;

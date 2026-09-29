@@ -184,7 +184,7 @@ describe("approval-mode Jev diagnostics", () => {
 
 describe("approval-mode extension", () => {
   it("gates bash, background, and monitor with the same Jev decision", async () => {
-    vi.stubEnv("TYPESAFEAI_API_KEY", "test-key");
+    vi.stubEnv("TYPESAFE_API_KEY", "test-key");
     const fetchMock = mockAnswer({ intent: 0.96, harm: 0.02, secrets: 0.01 });
     const { handler, ctx } = await setup();
     for (const toolName of ["bash", "background", "monitor"]) {
@@ -197,7 +197,7 @@ describe("approval-mode extension", () => {
   });
 
   it("judges a background command in its requested directory", async () => {
-    vi.stubEnv("TYPESAFEAI_API_KEY", "test-key");
+    vi.stubEnv("TYPESAFE_API_KEY", "test-key");
     const fetchMock = mockAnswer({ intent: 0.96, harm: 0.02, secrets: 0.01 });
     const { handler, ctx } = await setup();
     await handler(
@@ -209,7 +209,7 @@ describe("approval-mode extension", () => {
   });
 
   it("uses the framed dialog in TUI mode and keeps native selection in RPC mode", async () => {
-    vi.stubEnv("TYPESAFEAI_API_KEY", "test-key");
+    vi.stubEnv("TYPESAFE_API_KEY", "test-key");
     mockAnswer({ intent: 0.04, harm: 0.99, secrets: 0.01 });
     const { handler, ctx } = await setup();
     ctx.ui.custom.mockResolvedValue("Block");
@@ -232,7 +232,7 @@ describe("approval-mode extension", () => {
   });
 
   it("asks before a rejected main-chat command and grants only that call", async () => {
-    vi.stubEnv("TYPESAFEAI_API_KEY", "test-key");
+    vi.stubEnv("TYPESAFE_API_KEY", "test-key");
     mockAnswer({ intent: 0.04, harm: 0.99, secrets: 0.01 });
     const { handler, ctx } = await setup();
     ctx.mode = "rpc";
@@ -248,7 +248,7 @@ describe("approval-mode extension", () => {
   });
 
   it("asks for an uncertain judgment, and treats dismissal as block", async () => {
-    vi.stubEnv("TYPESAFEAI_API_KEY", "test-key");
+    vi.stubEnv("TYPESAFE_API_KEY", "test-key");
     mockAnswer({ intent: 0.5, harm: 0.5, secrets: 0.5 });
     const { handler, ctx } = await setup();
     ctx.mode = "rpc";
@@ -276,11 +276,10 @@ describe("approval-mode extension", () => {
 
   it("warns at session startup when the TypeSafe key is missing", async () => {
     vi.stubEnv("PI_WORKER", "0");
-    vi.stubEnv("TYPESAFE_API_KEY", "old-key");
-    vi.stubEnv("TYPESAFEAI_API_KEY", "");
+    vi.stubEnv("TYPESAFE_API_KEY", "");
     const { pi, ctx } = await setup();
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      expect.stringContaining("TYPESAFEAI_API_KEY is missing"),
+      expect.stringContaining("TYPESAFE_API_KEY is missing"),
       "warning",
     );
     expect(ctx.ui.notify).toHaveBeenCalledWith(
@@ -297,20 +296,20 @@ describe("approval-mode extension", () => {
 
   it("does not warn at startup when the TypeSafe key is configured", async () => {
     vi.stubEnv("PI_WORKER", "0");
-    vi.stubEnv("TYPESAFEAI_API_KEY", "test-key");
+    vi.stubEnv("TYPESAFE_API_KEY", "test-key");
     const { ctx } = await setup();
     expect(ctx.ui.notify).not.toHaveBeenCalled();
   });
 
   it("does not show a startup warning in a headless worker", async () => {
     vi.stubEnv("PI_WORKER", "1");
-    vi.stubEnv("TYPESAFEAI_API_KEY", "");
+    vi.stubEnv("TYPESAFE_API_KEY", "");
     const { ctx } = await setup(false);
     expect(ctx.ui.notify).not.toHaveBeenCalled();
   });
 
   it("allows exact Git status without Jev after a reload acknowledgment", async () => {
-    vi.stubEnv("TYPESAFEAI_API_KEY", "");
+    vi.stubEnv("TYPESAFE_API_KEY", "");
     const { handler, ctx } = await setup();
     ctx.sessionManager.getBranch = vi.fn(() => [
       { type: "message", message: { role: "user", content: "I have reloaded." } },
@@ -322,7 +321,7 @@ describe("approval-mode extension", () => {
   });
 
   it("blocks a missing API key without offering an approval dialog", async () => {
-    vi.stubEnv("TYPESAFEAI_API_KEY", "");
+    vi.stubEnv("TYPESAFE_API_KEY", "");
     const { handler, ctx } = await setup();
     expect(await handler({ toolName: "bash", input: { command: "npm test" } }, ctx)).toMatchObject({
       block: true,
@@ -331,7 +330,7 @@ describe("approval-mode extension", () => {
   });
 
   it("blocks an unavailable, malformed, or cancelled Jev response without prompting", async () => {
-    vi.stubEnv("TYPESAFEAI_API_KEY", "test-key");
+    vi.stubEnv("TYPESAFE_API_KEY", "test-key");
     const fetchMock = vi
       .fn()
       .mockRejectedValueOnce(new Error("offline"))
@@ -347,7 +346,7 @@ describe("approval-mode extension", () => {
 
   it("blocks rejected or uncertain worker commands without a UI", async () => {
     vi.stubEnv("PI_WORKER", "1");
-    vi.stubEnv("TYPESAFEAI_API_KEY", "test-key");
+    vi.stubEnv("TYPESAFE_API_KEY", "test-key");
     mockAnswer({ intent: 0.5, harm: 0.5, secrets: 0.5 });
     const { handler, ctx } = await setup();
     ctx.hasUI = false;
@@ -360,7 +359,7 @@ describe("approval-mode extension", () => {
   it("read-only workers block edits and unapproved commands, even when the main gate is off", async () => {
     vi.stubEnv("PI_WORKER", "1");
     vi.stubEnv("PI_WORKER_READONLY", "1");
-    vi.stubEnv("TYPESAFEAI_API_KEY", "");
+    vi.stubEnv("TYPESAFE_API_KEY", "");
     const { handler, ctx } = await setup();
     expect(await handler({ toolName: "edit", input: {} }, ctx)).toMatchObject({ block: true });
     expect(await handler({ toolName: "bash", input: { command: "npm test" } }, ctx)).toMatchObject({

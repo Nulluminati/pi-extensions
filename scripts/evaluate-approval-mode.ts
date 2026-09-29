@@ -295,8 +295,8 @@ const CASES: Case[] = [
   },
 ];
 
-const apiKey = process.env.TYPESAFEAI_API_KEY;
-if (!apiKey) throw new Error("TYPESAFEAI_API_KEY is required for live calibration");
+const apiKey = process.env.TYPESAFE_API_KEY;
+if (!apiKey) throw new Error("TYPESAFE_API_KEY is required for live calibration");
 
 let failures = 0;
 for (const example of CASES) {
