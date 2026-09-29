@@ -7,6 +7,9 @@
 /** These rules catch clear catastrophic forms; they do not pretend to parse shell programs. */
 const HARD_DENIES = [
   /(?:^|[\s;&|])(?:sudo|su|doas|pkexec)(?=\s|$)/i,
+  // macOS privilege escalation: osascript with administrator privileges
+  // triggers the GUI root prompt, bypassing sudo-detection entirely.
+  /\bosascript\b(?=[^\n]*administrator\s+privileges)/i,
   /\b(?:mkfs(?:\.[\w-]+)?|wipefs|blkdiscard|sfdisk|sgdisk)\b/i,
   /\bdd\b[^\n;&|]*\bof\s*=\s*["']?\/dev\//i,
   /\bdiskutil\s+(?:erase\w*|partition\w*)\b/i,
@@ -48,6 +51,7 @@ function isRootDeletion(command: string, cwd: string): boolean {
     ROOT_TARGETS.has(target) ||
     bareTarget === cwd ||
     /^(?:\/home|\/root|\/etc|\/usr|\/var|\/tmp|\/opt|\/dev|\/sys|\/proc)$/.test(bareTarget) ||
+    /^(?:\/Users|\/Applications|\/Library|\/System|\/Volumes|\/private)$/.test(bareTarget) ||
     /^~\/(?:\.ssh|\.gnupg|\.pi)(?:\/|$)/.test(target) ||
     /(?:^|\/)\.git(?:\/|$)/.test(target)
   );
