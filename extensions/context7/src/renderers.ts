@@ -1,5 +1,5 @@
-import { truncateToWidth } from "@earendil-works/pi-tui";
-import { wrapToolText as wrapMultilineText } from "../../../lib/tool-renderer.ts";
+import type { AgentToolResult, Theme, ToolRenderContext, ToolRenderResultOptions } from "pi";
+import { createToolStatus, wrapToolText as wrapMultilineText } from "../../../lib/tool-renderer.ts";
 import type {
   CacheSearchSelector,
   GetLibraryDocsParams,
@@ -8,29 +8,24 @@ import type {
 } from "./types.ts";
 
 export function createResolveRenderResult() {
-  return (result: any, options: any, theme: any, context: any) => {
+  return (
+    result: AgentToolResult,
+    options: ToolRenderResultOptions,
+    theme: Theme,
+    context: ToolRenderContext<unknown, ResolveLibraryParams>,
+  ) => {
     const details = result.details as Record<string, unknown> | undefined;
     const isError = context.isError || Boolean(details?.isError);
-    const args = context.args as ResolveLibraryParams;
+    const args = context.args;
     const libraryName = args.libraryName ?? "unknown";
 
     if (isError) {
       const errorText = result.content[0]?.type === "text" ? result.content[0].text : "";
-      return {
-        render: (width: number) => [
-          truncateToWidth(theme.fg("error", `✗ Resolve: "${libraryName}" — ${errorText}`), width),
-        ],
-        invalidate: () => {},
-      };
+      return createToolStatus(theme, "error", `✗ Resolve: "${libraryName}" — ${errorText}`);
     }
 
     if (options.isPartial) {
-      return {
-        render: (width: number) => [
-          truncateToWidth(theme.fg("warning", `📚 Resolving: "${libraryName}"...`), width),
-        ],
-        invalidate: () => {},
-      };
+      return createToolStatus(theme, "warning", `📚 Resolving: "${libraryName}"...`);
     }
 
     if (options.expanded) {
@@ -84,42 +79,29 @@ export function createResolveRenderResult() {
     const cacheNote =
       source === "fresh-cache" ? " (cached)" : source === "stale-cache" ? " (stale)" : "";
 
-    return {
-      render: (width: number) => [
-        truncateToWidth(
-          theme.fg("success", `📚 Resolve: "${libraryName}" ${label}${cacheNote}`),
-          width,
-        ),
-      ],
-      invalidate: () => {},
-    };
+    return createToolStatus(theme, "success", `📚 Resolve: "${libraryName}" ${label}${cacheNote}`);
   };
 }
 
 export function createDocsRenderResult() {
-  return (result: any, options: any, theme: any, context: any) => {
+  return (
+    result: AgentToolResult,
+    options: ToolRenderResultOptions,
+    theme: Theme,
+    context: ToolRenderContext<unknown, GetLibraryDocsParams>,
+  ) => {
     const details = result.details as Record<string, unknown> | undefined;
     const isError = context.isError || Boolean(details?.isError);
-    const args = context.args as GetLibraryDocsParams;
+    const args = context.args;
     const displayName = args.libraryName || args.libraryId || "unknown";
 
     if (isError) {
       const errorText = result.content[0]?.type === "text" ? result.content[0].text : "";
-      return {
-        render: (width: number) => [
-          truncateToWidth(theme.fg("error", `✗ Docs: ${displayName} — ${errorText}`), width),
-        ],
-        invalidate: () => {},
-      };
+      return createToolStatus(theme, "error", `✗ Docs: ${displayName} — ${errorText}`);
     }
 
     if (options.isPartial) {
-      return {
-        render: (width: number) => [
-          truncateToWidth(theme.fg("warning", `📖 Fetching docs: ${displayName}...`), width),
-        ],
-        invalidate: () => {},
-      };
+      return createToolStatus(theme, "warning", `📖 Fetching docs: ${displayName}...`);
     }
 
     if (options.expanded) {
@@ -154,53 +136,36 @@ export function createDocsRenderResult() {
     const queryPart = query ? ` — ${query.slice(0, 30)}${query.length > 30 ? "..." : ""}` : "";
 
     if (needsResolution) {
-      return {
-        render: (width: number) => [
-          truncateToWidth(
-            theme.fg("warning", `📖 Docs: ${displayName}${queryPart} — needs resolution`),
-            width,
-          ),
-        ],
-        invalidate: () => {},
-      };
+      return createToolStatus(
+        theme,
+        "warning",
+        `📖 Docs: ${displayName}${queryPart} — needs resolution`,
+      );
     }
 
-    return {
-      render: (width: number) => [
-        truncateToWidth(
-          theme.fg("success", `📖 Docs: ${displayName}${queryPart}${cacheNote}`),
-          width,
-        ),
-      ],
-      invalidate: () => {},
-    };
+    return createToolStatus(theme, "success", `📖 Docs: ${displayName}${queryPart}${cacheNote}`);
   };
 }
 
 export function createRawRenderResult() {
-  return (result: any, options: any, theme: any, context: any) => {
+  return (
+    result: AgentToolResult,
+    options: ToolRenderResultOptions,
+    theme: Theme,
+    context: ToolRenderContext<unknown, CacheSearchSelector>,
+  ) => {
     const details = result.details as Record<string, unknown> | undefined;
     const isError = context.isError || Boolean(details?.isError);
-    const args = context.args as CacheSearchSelector;
+    const args = context.args;
     const docRef = String(args.docRef ?? details?.docRef ?? "unknown");
 
     if (isError) {
       const errorText = result.content[0]?.type === "text" ? result.content[0].text : "";
-      return {
-        render: (width: number) => [
-          truncateToWidth(theme.fg("error", `✗ Raw: ${docRef} — ${errorText}`), width),
-        ],
-        invalidate: () => {},
-      };
+      return createToolStatus(theme, "error", `✗ Raw: ${docRef} — ${errorText}`);
     }
 
     if (options.isPartial) {
-      return {
-        render: (width: number) => [
-          truncateToWidth(theme.fg("warning", `📄 Loading raw docs...`), width),
-        ],
-        invalidate: () => {},
-      };
+      return createToolStatus(theme, "warning", `📄 Loading raw docs...`);
     }
 
     if (options.expanded) {
@@ -238,28 +203,17 @@ export function createRawRenderResult() {
         : "";
 
     if (ambiguous) {
-      return {
-        render: (width: number) => [
-          truncateToWidth(
-            theme.fg("warning", `📄 Raw: ${libraryName} — ambiguous (${candidateCount})`),
-            width,
-          ),
-        ],
-        invalidate: () => {},
-      };
+      return createToolStatus(
+        theme,
+        "warning",
+        `📄 Raw: ${libraryName} — ambiguous (${candidateCount})`,
+      );
     }
 
-    return {
-      render: (width: number) => [
-        truncateToWidth(
-          theme.fg(
-            "success",
-            `📄 Raw: ${libraryName} — ${docRef.slice(0, 40)}${docRef.length > 40 ? "..." : ""}${cacheNote}${rangeNote}`,
-          ),
-          width,
-        ),
-      ],
-      invalidate: () => {},
-    };
+    return createToolStatus(
+      theme,
+      "success",
+      `📄 Raw: ${libraryName} — ${docRef.slice(0, 40)}${docRef.length > 40 ? "..." : ""}${cacheNote}${rangeNote}`,
+    );
   };
 }

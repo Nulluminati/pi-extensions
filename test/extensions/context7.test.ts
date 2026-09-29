@@ -120,6 +120,22 @@ function mockFetchResolve(
   });
 }
 
+// Renders through a registered tool's renderResult with an identity theme,
+// so assertions check the plain visible text of the rendered lines.
+function renderResultLines(
+  tool: { renderResult?: unknown },
+  result: unknown,
+  options: { expanded: boolean; isPartial: boolean },
+  context: Record<string, unknown>,
+): string[] {
+  const theme = { fg: (_color: string, text: string) => text };
+  const render = tool.renderResult as
+    | ((...args: unknown[]) => { render: (width: number) => string[] })
+    | undefined;
+  if (!render) throw new Error("Tool has no renderResult");
+  return render(result, options, theme, context).render(80);
+}
+
 function mockFetchDocs(text: string) {
   mockFetch.mockResolvedValueOnce({
     ok: true,
@@ -341,6 +357,279 @@ describe("context7-extension", () => {
     const tool = getRegisteredTool(mockPi, "context7_get_cached_doc_raw");
     expect(tool.label).toBe("Context7 Get Cached Raw Doc");
     expect(tool.description).toContain("raw cached");
+  });
+
+  // --- renderResult ---
+
+  describe("renderResult", () => {
+    describe("context7_resolve_library_id", () => {
+      it("shows collapsed success line with recommended library and cache note", async () => {
+        const mockPi = createMockPi();
+        await context7Extension(mockPi);
+        const tool = getRegisteredTool(mockPi, "context7_resolve_library_id");
+        const lines = renderResultLines(
+          tool,
+          {
+            content: [{ type: "text", text: "results" }],
+            details: {
+              recommendedLibraryId: "/facebook/react",
+              source: "fresh-cache",
+              results: [{ id: "/facebook/react", title: "React", description: "" }],
+            },
+          },
+          { expanded: false, isPartial: false },
+          { args: { libraryName: "react" } },
+        );
+        expect(lines[0]).toContain('📚 Resolve: "react" → /facebook/react (cached)');
+      });
+
+      it("shows collapsed count labels for empty, counted, and ambiguous results", async () => {
+        const mockPi = createMockPi();
+        await context7Extension(mockPi);
+        const tool = getRegisteredTool(mockPi, "context7_resolve_library_id");
+
+        const noMatches = renderResultLines(
+          tool,
+          { content: [{ type: "text", text: "" }], details: {} },
+          { expanded: false, isPartial: false },
+          { args: { libraryName: "react" } },
+        );
+        expect(noMatches[0]).toContain('📚 Resolve: "react" no matches');
+
+        const counted = renderResultLines(
+          tool,
+          {
+            content: [{ type: "text", text: "" }],
+            details: {
+              results: [
+                { id: "/a", title: "A", description: "" },
+                { id: "/b", title: "B", description: "" },
+              ],
+            },
+          },
+          { expanded: false, isPartial: false },
+          { args: { libraryName: "react" } },
+        );
+        expect(counted[0]).toContain('📚 Resolve: "react" 2 candidates');
+
+        const ambiguous = renderResultLines(
+          tool,
+          {
+            content: [{ type: "text", text: "" }],
+            details: {
+              ambiguous: true,
+              results: [
+                { id: "/a", title: "A", description: "" },
+                { id: "/b", title: "B", description: "" },
+              ],
+            },
+          },
+          { expanded: false, isPartial: false },
+          { args: { libraryName: "react" } },
+        );
+        expect(ambiguous[0]).toContain('📚 Resolve: "react" ambiguous (2 candidates)');
+      });
+
+      it("shows collapsed error line with the error text", async () => {
+        const mockPi = createMockPi();
+        await context7Extension(mockPi);
+        const tool = getRegisteredTool(mockPi, "context7_resolve_library_id");
+        const lines = renderResultLines(
+          tool,
+          { content: [{ type: "text", text: "Context7 rate limit hit" }], details: {} },
+          { expanded: false, isPartial: false },
+          { args: { libraryName: "react" }, isError: true },
+        );
+        expect(lines[0]).toContain('✗ Resolve: "react" — Context7 rate limit hit');
+      });
+
+      it("shows streaming line when partial", async () => {
+        const mockPi = createMockPi();
+        await context7Extension(mockPi);
+        const tool = getRegisteredTool(mockPi, "context7_resolve_library_id");
+        const lines = renderResultLines(
+          tool,
+          { content: [{ type: "text", text: "" }], details: {} },
+          { expanded: false, isPartial: true },
+          { args: { libraryName: "react" } },
+        );
+        expect(lines[0]).toContain('📚 Resolving: "react"...');
+      });
+
+      it("shows expanded result preview with snippet metadata and overflow note", async () => {
+        const mockPi = createMockPi();
+        await context7Extension(mockPi);
+        const tool = getRegisteredTool(mockPi, "context7_resolve_library_id");
+        const results = Array.from({ length: 7 }, (_, i) => ({
+          id: `/lib/react-${i + 1}`,
+          title: `React ${i + 1}`,
+          description: "",
+          totalSnippets: 5,
+          benchmarkScore: 9.1,
+        }));
+        const lines = renderResultLines(
+          tool,
+          { content: [{ type: "text", text: "" }], details: { results } },
+          { expanded: true, isPartial: false },
+          { args: { libraryName: "react" } },
+        );
+        expect(
+          lines.some((line) => line.includes("• React 1 — /lib/react-1 (5 snippets, score 9.1)")),
+        ).toBe(true);
+        expect(lines.some((line) => line.includes("... and 2 more"))).toBe(true);
+      });
+    });
+
+    describe("context7_get_library_docs", () => {
+      it("shows collapsed success line with query and cache note", async () => {
+        const mockPi = createMockPi();
+        await context7Extension(mockPi);
+        const tool = getRegisteredTool(mockPi, "context7_get_library_docs");
+        const lines = renderResultLines(
+          tool,
+          { content: [{ type: "text", text: "docs" }], details: { cacheStatus: "fresh" } },
+          { expanded: false, isPartial: false },
+          { args: { libraryId: "/vercel/next.js", query: "routing" } },
+        );
+        expect(lines[0]).toContain("📖 Docs: /vercel/next.js — routing (cached)");
+      });
+
+      it("shows collapsed error line with the error text", async () => {
+        const mockPi = createMockPi();
+        await context7Extension(mockPi);
+        const tool = getRegisteredTool(mockPi, "context7_get_library_docs");
+        const lines = renderResultLines(
+          tool,
+          { content: [{ type: "text", text: "Context7 unavailable" }], details: {} },
+          { expanded: false, isPartial: false },
+          { args: { libraryId: "/vercel/next.js" }, isError: true },
+        );
+        expect(lines[0]).toContain("✗ Docs: /vercel/next.js — Context7 unavailable");
+      });
+
+      it("shows streaming line when partial", async () => {
+        const mockPi = createMockPi();
+        await context7Extension(mockPi);
+        const tool = getRegisteredTool(mockPi, "context7_get_library_docs");
+        const lines = renderResultLines(
+          tool,
+          { content: [{ type: "text", text: "" }], details: {} },
+          { expanded: false, isPartial: true },
+          { args: { libraryId: "/vercel/next.js" } },
+        );
+        expect(lines[0]).toContain("📖 Fetching docs: /vercel/next.js...");
+      });
+
+      it("shows needs-resolution line with query", async () => {
+        const mockPi = createMockPi();
+        await context7Extension(mockPi);
+        const tool = getRegisteredTool(mockPi, "context7_get_library_docs");
+        const lines = renderResultLines(
+          tool,
+          { content: [{ type: "text", text: "" }], details: { needsResolution: true } },
+          { expanded: false, isPartial: false },
+          { args: { libraryName: "next.js", query: "caching" } },
+        );
+        expect(lines[0]).toContain("📖 Docs: next.js — caching — needs resolution");
+      });
+
+      it("shows expanded preview lines and overflow note", async () => {
+        const mockPi = createMockPi();
+        await context7Extension(mockPi);
+        const tool = getRegisteredTool(mockPi, "context7_get_library_docs");
+        const text = Array.from({ length: 12 }, (_, i) => `doc line ${i + 1}`).join("\n");
+        const lines = renderResultLines(
+          tool,
+          { content: [{ type: "text", text }], details: {} },
+          { expanded: true, isPartial: false },
+          { args: { libraryId: "/vercel/next.js" } },
+        );
+        expect(lines[0]).toContain("doc line 1");
+        expect(lines.some((line) => line.includes("... and 2 more lines"))).toBe(true);
+      });
+    });
+
+    describe("context7_get_cached_doc_raw", () => {
+      it("shows collapsed success line with docRef, cache status, and range", async () => {
+        const mockPi = createMockPi();
+        await context7Extension(mockPi);
+        const tool = getRegisteredTool(mockPi, "context7_get_cached_doc_raw");
+        const lines = renderResultLines(
+          tool,
+          {
+            content: [{ type: "text", text: "raw" }],
+            details: {
+              docRef: "ctx7:docs:abc",
+              libraryName: "TestLib",
+              cacheStatus: "fresh",
+              startLine: 41,
+              endLine: 80,
+              totalLines: 200,
+            },
+          },
+          { expanded: false, isPartial: false },
+          { args: {} },
+        );
+        expect(lines[0]).toContain("📄 Raw: TestLib — ctx7:docs:abc (fresh) — lines 41-80 of 200");
+      });
+
+      it("shows collapsed error line with the error text", async () => {
+        const mockPi = createMockPi();
+        await context7Extension(mockPi);
+        const tool = getRegisteredTool(mockPi, "context7_get_cached_doc_raw");
+        const lines = renderResultLines(
+          tool,
+          { content: [{ type: "text", text: "cache miss" }], details: {} },
+          { expanded: false, isPartial: false },
+          { args: { docRef: "ctx7:docs:abc" }, isError: true },
+        );
+        expect(lines[0]).toContain("✗ Raw: ctx7:docs:abc — cache miss");
+      });
+
+      it("shows streaming line when partial", async () => {
+        const mockPi = createMockPi();
+        await context7Extension(mockPi);
+        const tool = getRegisteredTool(mockPi, "context7_get_cached_doc_raw");
+        const lines = renderResultLines(
+          tool,
+          { content: [{ type: "text", text: "" }], details: {} },
+          { expanded: false, isPartial: true },
+          { args: {} },
+        );
+        expect(lines[0]).toContain("📄 Loading raw docs...");
+      });
+
+      it("shows ambiguous line with candidate count", async () => {
+        const mockPi = createMockPi();
+        await context7Extension(mockPi);
+        const tool = getRegisteredTool(mockPi, "context7_get_cached_doc_raw");
+        const lines = renderResultLines(
+          tool,
+          {
+            content: [{ type: "text", text: "" }],
+            details: { ambiguous: true, candidates: [1, 2, 3], libraryName: "TestLib" },
+          },
+          { expanded: false, isPartial: false },
+          { args: {} },
+        );
+        expect(lines[0]).toContain("📄 Raw: TestLib — ambiguous (3)");
+      });
+
+      it("shows expanded preview lines and overflow note", async () => {
+        const mockPi = createMockPi();
+        await context7Extension(mockPi);
+        const tool = getRegisteredTool(mockPi, "context7_get_cached_doc_raw");
+        const text = Array.from({ length: 12 }, (_, i) => `raw line ${i + 1}`).join("\n");
+        const lines = renderResultLines(
+          tool,
+          { content: [{ type: "text", text }], details: {} },
+          { expanded: true, isPartial: false },
+          { args: {} },
+        );
+        expect(lines[0]).toContain("raw line 1");
+        expect(lines.some((line) => line.includes("... and 2 more lines"))).toBe(true);
+      });
+    });
   });
 
   // --- context7_resolve_library_id ---

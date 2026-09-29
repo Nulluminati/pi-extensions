@@ -46,7 +46,7 @@ export default async function context7Extension(pi: ExtensionAPI) {
     renderResult: createResolveRenderResult(),
     async execute(_toolCallId, params) {
       const resolved = await resolveLibraries(params as ResolveLibraryParams);
-      const formatted = formatResolveResults(resolved.response, params.libraryName as string);
+      const formatted = formatResolveResults(resolved.response, params.libraryName);
       return {
         content: [{ type: "text", text: formatted.text }],
         details: {
@@ -80,7 +80,7 @@ export default async function context7Extension(pi: ExtensionAPI) {
         return {
           content: [{ type: "text", text: result.text }],
           details: result.details,
-        } as any;
+        };
       }
 
       const entry = result.entry;
@@ -104,7 +104,7 @@ export default async function context7Extension(pi: ExtensionAPI) {
           topic: entry.topic,
           effectiveQuery: entry.effectiveQuery,
         },
-      } as any;
+      };
     },
   });
 
@@ -141,10 +141,7 @@ export default async function context7Extension(pi: ExtensionAPI) {
             `No cached Context7 document found for docRef ${selector.docRef}. Call context7_get_library_docs first.`,
           );
         }
-        const rawWindow = sliceRawDoc(
-          cached.entry.rawText,
-          params.offsetLine as number | undefined,
-        );
+        const rawWindow = sliceRawDoc(cached.entry.rawText, params.offsetLine);
         return {
           content: [{ type: "text", text: rawWindow.text }],
           details: {
@@ -163,7 +160,7 @@ export default async function context7Extension(pi: ExtensionAPI) {
             truncated: rawWindow.truncated,
             nextOffsetLine: rawWindow.nextOffsetLine,
           },
-        } as any;
+        };
       }
 
       if (
@@ -196,7 +193,7 @@ export default async function context7Extension(pi: ExtensionAPI) {
             ambiguous: true,
             candidates,
           },
-        } as any;
+        };
       }
 
       const only = candidates[0];
@@ -212,7 +209,7 @@ export default async function context7Extension(pi: ExtensionAPI) {
         );
       }
 
-      const rawWindow = sliceRawDoc(entry.rawText, params.offsetLine as number | undefined);
+      const rawWindow = sliceRawDoc(entry.rawText, params.offsetLine);
       return {
         content: [{ type: "text", text: rawWindow.text }],
         details: {
@@ -231,7 +228,7 @@ export default async function context7Extension(pi: ExtensionAPI) {
           truncated: rawWindow.truncated,
           nextOffsetLine: rawWindow.nextOffsetLine,
         },
-      } as any;
+      };
     },
   });
 }
