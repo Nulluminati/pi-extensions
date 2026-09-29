@@ -50,6 +50,7 @@ export async function runSummarize(
   ctx: ExtensionContext,
   state: BtwLiveState,
   _instructions: string,
+  signal?: AbortSignal,
 ): Promise<string | null> {
   let resolved: Awaited<ReturnType<typeof resolveSmallModel>>;
   try {
@@ -74,6 +75,7 @@ export async function runSummarize(
         ...(resolved.auth.headers ? { headers: resolved.auth.headers } : {}),
         ...(resolved.auth.env ? { env: resolved.auth.env } : {}),
         ...(resolved.reasoning ? { reasoning: resolved.reasoning } : {}),
+        ...(signal ? { signal } : {}),
       },
     );
     const text = response.content

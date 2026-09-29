@@ -634,6 +634,29 @@ describe("btw-extension", () => {
       expect(context.systemPrompt).toContain("<main_session_background>");
     });
 
+    it("joins multi-text-block branch messages with newlines in the background", async () => {
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      const mockPi = createMockPi() as any;
+      const { mockCtx } = setupContext();
+      mockCtx.sessionManager.getBranch = vi.fn(() => [
+        {
+          type: "message",
+          message: {
+            role: "assistant",
+            content: [
+              { type: "text", text: "part one" },
+              { type: "text", text: "part two" },
+            ],
+          },
+        },
+      ]);
+      await registerAll(mockPi);
+      await getCommandHandler(mockPi, "btw")("what is the login bug?", mockCtx);
+      await flush();
+      const [, context] = vi.mocked(stream).mock.calls[0];
+      expect(context.systemPrompt).toContain("part one part two");
+    });
+
     it("tangent mode omits main-session background and flags the title", async () => {
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       const mockPi = createMockPi() as any;
@@ -770,6 +793,8 @@ describe("btw-extension", () => {
       };
       vi.stubEnv("PI_SMALL_MODEL", "small-provider/small-model");
       mockCtx.modelRegistry.find = vi.fn(() => smallModel);
+      const signal = new AbortController().signal;
+      mockCtx.signal = signal as unknown as typeof mockCtx.signal;
       await registerAll(mockPi);
       await getCommandHandler(mockPi, "btw")("should we use A or B?", mockCtx);
       await flush();
@@ -782,6 +807,8 @@ describe("btw-extension", () => {
       expect(summaryModel).toBe(smallModel);
       // Summarization always runs with thinking off (minimal).
       expect(options).toMatchObject({ reasoning: "minimal" });
+      // The summarize call is cancellable via the extension context's signal.
+      expect(options.signal).toBe(signal);
       const [content] =
         mockPi.sendUserMessage.mock.calls[mockPi.sendUserMessage.mock.calls.length - 1];
       expect(content).toContain("Decision: use option A");
@@ -1200,6 +1227,20 @@ describe("btw-extension", () => {
       const rendered = getOverlay(overlays).component.render(90).join("\n");
       expect(rendered).toContain("small-provider/small-model");
       expect(rendered).toContain("thinking high");
+    });
+
+    it("falls back to a not-configured label when the small model cannot be resolved", async () => {
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      const mockPi = createMockPi() as any;
+      const { mockCtx, overlays } = setupContext();
+      vi.stubEnv("PI_SMALL_MODEL", "small-provider/small-model");
+      mockCtx.modelRegistry.find = vi.fn(() => undefined);
+      await registerAll(mockPi);
+      await getCommandHandler(mockPi, "btw")("q?", mockCtx);
+      await flush();
+      const rendered = getOverlay(overlays).component.render(90).join("\n");
+      expect(rendered).toContain("(small model not configured)");
+      expect(rendered).not.toContain("small-provider/small-model");
     });
   });
 

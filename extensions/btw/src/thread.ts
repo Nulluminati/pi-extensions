@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "pi";
+import { extractText } from "../../../lib/session-utils.ts";
 import {
   SIDE_GUIDANCE,
   SIDE_SYSTEM_PROMPT,
@@ -116,18 +117,6 @@ export function formatMainBackground(
     lines.push(`[${entry.message.role}] ${truncateForBackground(text)}`);
   }
   return lines.join("\n");
-}
-
-function extractText(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .filter(
-      (b): b is { type: "text"; text: string } =>
-        b?.type === "text" && typeof (b as { text?: string }).text === "string",
-    )
-    .map((b) => b.text)
-    .join("");
 }
 
 function truncateForBackground(text: string): string {

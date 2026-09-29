@@ -12,7 +12,7 @@ import type { ExtensionContext } from "pi";
 import { modalContentWidth, renderModalFrame } from "../../../lib/tui-frame.ts";
 import { formatStyledKeyHints } from "../../../lib/ui-format.ts";
 import { isFocusShortcut, MAX_QUESTION_LENGTH } from "./constants.ts";
-import { globalSmallModelDisplay, resolveThinkingLevel } from "./model.ts";
+import { resolveThinkingLevel, type SmallModelDisplay } from "./model.ts";
 import { statusToText } from "./thread.ts";
 import { buildTranscriptLines, type ThemeLite } from "./transcript.ts";
 import type {
@@ -295,6 +295,7 @@ type SubmitHandler = (text: string) => Promise<void> | void;
 export function openOverlay(
   ctx: ExtensionContext,
   state: BtwLiveState,
+  smallModel: SmallModelDisplay,
   onSubmit: SubmitHandler,
 ): Promise<void> {
   state.statusText = statusToText(state.status, state.lastError);
@@ -309,9 +310,8 @@ export function openOverlay(
         () => state.transcript,
         () => state.statusText,
         () => state.thread.mode,
-        () => globalSmallModelDisplay().model,
-        () =>
-          resolveThinkingLevel(state.thread.thinkingOverride, globalSmallModelDisplay().thinking),
+        () => smallModel.model,
+        () => resolveThinkingLevel(state.thread.thinkingOverride, smallModel.thinking),
         async (text) => {
           const trimmed = text.trim();
           if (!trimmed) return;

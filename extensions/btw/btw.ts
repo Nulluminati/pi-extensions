@@ -23,7 +23,7 @@ import {
   THREAD_CUSTOM_TYPE,
 } from "./src/constants.ts";
 import { buildHandoffContent, runSummarize } from "./src/handoff.ts";
-import { globalSmallModelDisplay } from "./src/model.ts";
+import { resolveSmallModelDisplay } from "./src/model.ts";
 import { openOverlay } from "./src/overlay.ts";
 import {
   appendResetMarker,
@@ -105,9 +105,12 @@ export default async function btwExtension(pi: ExtensionAPI) {
     handler: () => toggleOverlayFocus(),
   });
 
-  function ensureOverlayOpen(extraCtx: ExtensionCommandContext): void {
+  async function ensureOverlayOpen(extraCtx: ExtensionCommandContext): Promise<void> {
     if (state.overlay) return;
-    void openOverlay(extraCtx, state, async (text) => {
+    const smallModel = await resolveSmallModelDisplay(extraCtx);
+    // Fire-and-forget: openOverlay resolves when the overlay closes, and the
+    // command handler must not wait for that.
+    void openOverlay(extraCtx, state, smallModel, async (text) => {
       requestSideTurn(pi, extraCtx, state, text);
     });
   }
@@ -120,7 +123,7 @@ export default async function btwExtension(pi: ExtensionAPI) {
       // No question — just open the overlay. The user can type into the
       // composer and press Enter to start a side turn.
       if (!question) {
-        ensureOverlayOpen(ctx);
+        await ensureOverlayOpen(ctx);
         return;
       }
       if (question.length > MAX_QUESTION_LENGTH) {
@@ -130,7 +133,7 @@ export default async function btwExtension(pi: ExtensionAPI) {
         );
         return;
       }
-      ensureOverlayOpen(ctx);
+      await ensureOverlayOpen(ctx);
       requestSideTurn(pi, ctx, state, question);
     },
   });
@@ -149,7 +152,7 @@ export default async function btwExtension(pi: ExtensionAPI) {
       state.status = "idle";
       state.statusText = statusToText("idle", null);
       appendResetMarker(pi, "contextual");
-      ensureOverlayOpen(ctx);
+      await ensureOverlayOpen(ctx);
       ctx.ui.notify("Started a new side thread.", "info");
       if (question) {
         requestSideTurn(pi, ctx, state, question);
@@ -170,7 +173,7 @@ export default async function btwExtension(pi: ExtensionAPI) {
       state.status = "idle";
       state.statusText = statusToText("idle", null);
       appendResetMarker(pi, "tangent");
-      ensureOverlayOpen(ctx);
+      await ensureOverlayOpen(ctx);
       ctx.ui.notify("Tangent thread started (no main context).", "info");
       if (question) {
         requestSideTurn(pi, ctx, state, question);
@@ -261,7 +264,7 @@ export default async function btwExtension(pi: ExtensionAPI) {
       state.status = "summarizing";
       state.statusText = statusToText("summarizing", null);
       requestRender(state);
-      const summary = await runSummarize(pi, ctx, state, instructions);
+      const summary = await runSummarize(pi, ctx, state, instructions, ctx.signal);
       if (!summary) {
         state.status = "idle";
         state.statusText = statusToText("idle", state.lastError);
@@ -305,7 +308,7 @@ export default async function btwExtension(pi: ExtensionAPI) {
         const ov = state.thread.thinkingOverride;
         if (ov) ctx.ui.notify(`Side thinking level is ${ov} (override).`, "info");
         else {
-          const configured = globalSmallModelDisplay().thinking;
+          const { thinking: configured } = await resolveSmallModelDisplay(ctx);
           ctx.ui.notify(
             `Side thinking level inherits the global small model (${configured === "off" ? "none" : configured}).`,
             "info",
