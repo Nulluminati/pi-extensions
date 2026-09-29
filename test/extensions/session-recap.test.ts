@@ -736,7 +736,7 @@ describe("session-recap-extension", () => {
 
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
-    // Branch with only a short assistant message (< 30 words)
+    // Branch with only a short assistant message (< 50 words)
     mockCtx.sessionManager.getBranch = vi.fn(() => [
       {
         type: "message",

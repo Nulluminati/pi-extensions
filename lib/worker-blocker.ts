@@ -3,7 +3,7 @@
  *
  * A delegated worker session declares "I cannot proceed" through its
  * `report_blocker` tool (worker-blocker extension). The sanitized reason is
- * appended as an `workers_blocker` marker line to the worker's own event
+ * appended as a `workers_blocker` marker line to the worker's own event
  * spool (`streams/<id>.jsonl`) — the file the parent already tails — so the
  * parent ingests it into the worker record and wakes once with ids and
  * status words only. The reason text itself stays behind the pull-only
@@ -65,7 +65,7 @@ export function sanitizeBlockerReason(raw: unknown): { reason: string; truncated
 // --- Parsing ---
 
 /**
- * Parse one spool line as an `workers_blocker` marker; undefined for
+ * Parse one spool line as a `workers_blocker` marker; undefined for
  * anything else. The reason is re-sanitized defensively: markers may come
  * from files written by other processes.
  */

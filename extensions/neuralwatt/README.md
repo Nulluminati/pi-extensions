@@ -129,8 +129,10 @@ The probe checks `reasoning_content`, `reasoning`, and `reasoning_text`. Neuralw
 | `pi.registerCommand("neuralwatt:flex")` | Toggles the flex pricing tier for the current model |
 | `pi.registerCommand("neuralwatt:models")` | Lists models with capabilities and pricing |
 | `pi.registerCommand("neuralwatt:quota")` | Displays quota and energy usage |
-| `pi.on("session_start")` | Public-catalog staleness check |
-| `pi.on("model_select")` | Notifies when a Neuralwatt model is selected |
+| `pi.on("session_start")` | Public-catalog staleness check and flex-capable model discovery |
+| `pi.on("before_provider_request")` | Adds `service_tier: "flex"` to requests when flex is enabled for the model |
+| `pi.on("model_select")` | Notifies when a Neuralwatt model is selected and updates the flex badge |
+| `pi.events.emit(FLEX_EVENT)` | Publishes flex state to the status bar |
 | `ctx.modelRegistry.getApiKeyForProvider()` | Auth resolution from Pi's credential store |
 | `ctx.ui.notify()` | Model list and quota display |
 

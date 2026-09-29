@@ -4,7 +4,7 @@
  * Worker-side half of the blocker-reporting channel between delegated
  * worker sessions and their parent. Gives the worker's model a
  * `report_blocker` tool to declare "I cannot proceed" with one short
- * reason. The sanitized reason is appended as an `workers_blocker` marker
+ * reason. The sanitized reason is appended as a `workers_blocker` marker
  * to the worker's own event spool — the file the parent session already
  * tails — so the parent wakes once (ids and status words only) and reads
  * the reason back through the workers tool (action=status). Nothing here

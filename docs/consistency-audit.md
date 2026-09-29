@@ -1,15 +1,15 @@
 # Consistency audit — remaining work
 
-This list contains 39 low-severity findings from the audit of 27 extensions. Paths and line numbers come from the audit; entries marked `(verified)` were checked again.
+This audit found 39 low-severity issues across 27 extensions. The README and documentation issues below are closed. The code issues remain open. Paths and line numbers refer to the original audit; entries marked `(verified)` were checked again.
 
 ---
 
-## 1. Open README / doc gaps
+## 1. Closed README / doc gaps
 
-- [low] neuralwatt/README.md — "Pi APIs Used" table omits `pi.on("before_provider_request")` (neuralwatt.ts:93) and `pi.events.emit(FLEX_EVENT)` (neuralwatt.ts:50) (verified)
-- [low] worker-blocker/README.md:7 + worker-blocker.ts:7 — "as an `workers_blocker` marker" → "as a" (verified)
-- [low] approval-mode/README.md — the `--worker-readonly` flag (approval-mode.ts:41) is undocumented (verified)
-- [low] test/extensions/session-recap.test.ts:665 — comment says "< 30 words"; the threshold is 50 (verified)
+- [x] neuralwatt/README.md — Documented `pi.on("before_provider_request")` and `pi.events.emit(FLEX_EVENT)` in the Pi APIs table.
+- [x] worker-blocker/README.md + worker-blocker.ts — Corrected "an `workers_blocker` marker" to "a `workers_blocker` marker". Corrected the same wording in lib/worker-blocker.ts.
+- [x] approval-mode/README.md — Documented `--worker-readonly`, its worker-only scope, and its separate sandbox enforcement.
+- [x] test/extensions/session-recap.test.ts — Corrected the short-message comment to match the 50-word threshold.
 
 ---
 
