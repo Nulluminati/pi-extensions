@@ -7,7 +7,6 @@
  */
 
 import { readFile, stat } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import type { AgentToolResult, ExtensionContext, ThinkingLevel } from "pi";
 import { withFileLock } from "../../../lib/file-lock.ts";
 import { runGit } from "../../../lib/git.ts";
@@ -310,9 +309,7 @@ export async function planDelegate(
   const requestedExtensions = Array.isArray(params.extensions)
     ? params.extensions.map(String)
     : undefined;
-  const resolvedExtensions = resolveWorkerExtensions(requestedExtensions, {
-    extensionsRoot: fileURLToPath(new URL("../../../extensions/", import.meta.url)),
-  });
+  const resolvedExtensions = resolveWorkerExtensions(requestedExtensions);
 
   // Every worker routes built-in file and shell tools through the OS
   // sandbox extension and command calls through the mandatory approval gate.

@@ -27,7 +27,7 @@ import {
   parseBlockerMarker,
   WORKER_STREAM_ENV_VAR,
 } from "../../../lib/worker-blocker.ts";
-import { SetupHookCancelled } from "./provision/hook.ts";
+import { abortReason, SetupHookCancelled } from "./provision/hook.ts";
 import type { ProvisionStatus } from "./provision/types.ts";
 import { stderrLogPath, streamPath, patchPath as workerPatchPath } from "./store.ts";
 import type { WorkerActivity, WorkerEvents, WorkerRecord } from "./types.ts";
@@ -200,6 +200,23 @@ export function ingestStreamEvent(jsonLine: string, record: WorkerRecord): "bloc
 
 // --- Parsing ---
 
+/** Concatenated text-block text from an assistant message's content; empty
+ *  when the content is not an array of text blocks. */
+export function assistantTextFromContent(content: unknown): string {
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter(
+      (block): block is { type: string; text?: string } =>
+        typeof block === "object" &&
+        block !== null &&
+        (block as { type?: string }).type === "text" &&
+        typeof (block as { text?: unknown }).text === "string",
+    )
+    .map((block) => block.text ?? "")
+    .join("")
+    .trim();
+}
+
 /**
  * Extract the last assistant text from a pi JSON event stream. Each line is
  * a JSON event; we keep the text of the most recent assistant message_end so
@@ -212,19 +229,7 @@ export function extractAssistantText(jsonLine: string, current: string): string 
       message?: { role?: string; content?: unknown };
     };
     if (event.type !== "message_end" || event.message?.role !== "assistant") return current;
-    const content = event.message.content;
-    if (!Array.isArray(content)) return current;
-    const text = content
-      .filter(
-        (block): block is { type: string; text?: string } =>
-          typeof block === "object" &&
-          block !== null &&
-          (block as { type?: string }).type === "text" &&
-          typeof (block as { text?: unknown }).text === "string",
-      )
-      .map((block) => block.text ?? "")
-      .join("")
-      .trim();
+    const text = assistantTextFromContent(event.message.content);
     return text || current;
   } catch {
     return current;
@@ -568,15 +573,6 @@ export function composeWorkerTask(task: string, provision: ProvisionStatus | und
 
 // --- Runner ---
 
-/** One-line reason for a caller's abort, kept as the cancelled record's
- *  error detail. */
-function abortDetail(signal: AbortSignal): string {
-  const reason = signal.reason;
-  if (typeof reason === "string" && reason.length > 0) return reason;
-  if (reason instanceof Error && reason.message.length > 0) return reason.message;
-  return "cancelled before the worker started";
-}
-
 export interface StartWorkerOptions {
   cwd: string;
   task: string;
@@ -660,7 +656,10 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
   const childRef: { value?: ChildProcess } = {};
   let spawnError: Error | undefined;
   const assertNotAborted = () => {
-    if (options.signal?.aborted) throw new SetupHookCancelled(abortDetail(options.signal));
+    if (options.signal?.aborted)
+      throw new SetupHookCancelled(
+        abortReason(options.signal, "cancelled before the worker started"),
+      );
   };
   const started = (async (): Promise<ChildProcess> => {
     assertNotAborted();

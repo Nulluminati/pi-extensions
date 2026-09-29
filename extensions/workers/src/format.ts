@@ -3,7 +3,7 @@
 import { createFramedWidget, type FramedWidgetFactory } from "../../../lib/framed-widget.ts";
 import { formatStatusLine } from "../../../lib/ui-format.ts";
 import { BLOCKER_MARKER_TYPE } from "../../../lib/worker-blocker.ts";
-import { summarizeStreamValue } from "./runner.ts";
+import { assistantTextFromContent, summarizeStreamValue } from "./runner.ts";
 import type { WorkerRecord } from "./types.ts";
 
 // --- Constants ---
@@ -192,20 +192,7 @@ export function formatRawStreamEntries(lines: string[]): string[] {
       const detail = summarizeStreamValue(event.result);
       out.push(`${time}✓ ${event.toolName}${detail !== undefined ? ` ${detail}` : ""}`);
     } else if (event.type === "message_end" && event.message?.role === "assistant") {
-      const content = event.message.content;
-      const text = Array.isArray(content)
-        ? content
-            .filter(
-              (block): block is { type: string; text?: string } =>
-                typeof block === "object" &&
-                block !== null &&
-                (block as { type?: string }).type === "text" &&
-                typeof (block as { text?: unknown }).text === "string",
-            )
-            .map((block) => block.text ?? "")
-            .join("")
-            .trim()
-        : "";
+      const text = assistantTextFromContent(event.message.content);
       if (text) {
         const streamed = summarizeStreamValue(text);
         if (streamed !== undefined) out.push(`${time}✎ ${streamed}`);

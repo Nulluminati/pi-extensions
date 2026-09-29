@@ -1039,6 +1039,47 @@ describe("btw-extension", () => {
       const persisted = mockPi.appendEntry.mock.calls.at(-1)?.[1] as Record<string, unknown>;
       expect(JSON.stringify(persisted)).not.toContain("modelOverride");
     });
+
+    it("clones reconstructed state so later entry mutations do not alias the thread", async () => {
+      setupTools();
+      const persistedState = {
+        mode: "tangent",
+        messages: [
+          { role: "user", content: "old question", timestamp: 1 },
+          {
+            role: "assistant",
+            content: [{ type: "text", text: "old answer" }],
+            stopReason: "stop",
+            usage: { totalTokens: 5 },
+            timestamp: 2,
+            // biome-ignore lint/suspicious/noExplicitAny: test mock
+          } as any,
+        ],
+        thinkingOverride: null,
+      };
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      const mockPi = createMockPi() as any;
+      const { mockCtx, overlays } = setupContext();
+      const branchEntry = {
+        type: "custom",
+        customType: "btw-thread",
+        data: { state: persistedState },
+      };
+      mockCtx.sessionManager.getBranch = vi.fn(() => [branchEntry]);
+      await registerAll(mockPi);
+      const handler = getEventHandler(mockPi, "session_start");
+      await handler({ type: "session_start", reason: "resume" }, mockCtx);
+
+      // Mutating the persisted entry after reconstruction must not leak
+      // into the live thread: reconstruction clones before returning.
+      persistedState.messages[1].content[0].text = "MUTATED AFTER RESTORE";
+
+      await getCommandHandler(mockPi, "btw")("", mockCtx);
+      const rendered = getOverlay(overlays).component.render(80).join("\n");
+      expect(rendered).toContain("old question");
+      expect(rendered).toContain("old answer");
+      expect(rendered).not.toContain("MUTATED AFTER RESTORE");
+    });
   });
 
   // §8/§12 — context isolation

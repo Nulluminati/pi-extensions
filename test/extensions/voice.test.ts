@@ -63,11 +63,14 @@ vi.mock("@earendil-works/pi-ai", () => ({
 }));
 
 /** Recorder fake: captures the overlay's chunk callback so a test can feed
- *  microphone samples without spawning a real ffmpeg/arecord child process. */
+ *  microphone samples without spawning a real ffmpeg/arecord child process,
+ *  plus each fake recorder so tests can assert the overlay stopped it. */
 const recorderHarness = vi.hoisted(() => {
   const chunkHandlers: Array<(samples: Float32Array, rms: number) => void> = [];
+  const recorders: Array<{ stop: () => void }> = [];
   return {
     chunkHandlers,
+    recorders,
     emit(samples: Float32Array): void {
       for (const handler of chunkHandlers) handler(samples, 0.5);
     },
@@ -81,7 +84,9 @@ vi.mock("../../extensions/voice/src/audio.ts", async (importOriginal) => {
     startStreamingRecorder: vi.fn(
       (_source: string, _deps: unknown, onChunk: (samples: Float32Array, rms: number) => void) => {
         recorderHarness.chunkHandlers.push(onChunk);
-        return { stop: vi.fn() };
+        const recorder = { stop: vi.fn() };
+        recorderHarness.recorders.push(recorder);
+        return recorder;
       },
     ),
   };
@@ -1798,6 +1803,36 @@ describe("voice-extension", () => {
       vi.advanceTimersByTime(8000);
       expect(ctx.ui.notify).toHaveBeenCalledTimes(1);
       expect(stt.recognize).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("voice overlay cleanup", () => {
+    it("stops the recorder and clears timers when the overlay dialog rejects", async () => {
+      vi.useFakeTimers();
+      const modelsDir = createDownloadedVoiceModels();
+      const ctx = createMockCommandContext();
+      // The factory runs (overlay component + render interval start), then the
+      // dialog promise rejects, as it can during terminal teardown.
+      ctx.ui.custom = vi.fn((factory) => {
+        factory({ requestRender: vi.fn() }, createTestTheme(), {}, vi.fn());
+        return Promise.reject(new Error("dialog crashed"));
+      });
+      const stt = { recognize: vi.fn(() => "") } as unknown as SttEngine;
+
+      const overlay = runVoiceOverlay("", ctx, {
+        modelsDir,
+        sherpa: {} as SherpaOnnx,
+        recorder: { hasFfmpeg: true, hasArecord: false },
+        stt,
+      });
+
+      await expect(overlay).rejects.toThrow("dialog crashed");
+
+      const recorder = recorderHarness.recorders.at(-1);
+      expect(recorder?.stop).toHaveBeenCalledTimes(1);
+      // Elapsed, partial, and render intervals must all be gone; a leaked
+      // interval keeps firing after the overlay is gone.
+      expect(vi.getTimerCount()).toBe(0);
     });
   });
 

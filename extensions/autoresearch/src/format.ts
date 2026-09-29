@@ -10,9 +10,9 @@ import type { AutoConfig, AutoSummary, RunEntry } from "./types.ts";
 export const AUTORESEARCH_STATUS_KEY = "autoresearch";
 export const AUTORESEARCH_WIDGET_KEY = "autoresearch";
 export const AUTORESEARCH_STATE_EVENT = "autoresearch:state";
-export const AUTORESEARCH_STATUS_ICON = "⚗";
-export const AUTORESEARCH_ICON_COLOR = "accent";
-export const AUTORESEARCH_TEXT_COLOR = "muted";
+const AUTORESEARCH_STATUS_ICON = "⚗";
+const AUTORESEARCH_ICON_COLOR = "accent";
+const AUTORESEARCH_TEXT_COLOR = "muted";
 
 // --- Summary ---
 
@@ -77,7 +77,7 @@ function round(value: number): number {
 }
 
 /** Short footer text while the loop is active, or undefined when stopped. */
-export function statusText(summary: AutoSummary): string | undefined {
+function statusText(summary: AutoSummary): string | undefined {
   if (!summary.active) return undefined;
   const parts = [
     `it ${summary.iterations}${summary.maxIterations !== undefined ? `/${summary.maxIterations}` : ""}`,

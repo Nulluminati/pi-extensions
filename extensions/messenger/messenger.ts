@@ -16,6 +16,8 @@
  * the inbox watcher (src/watcher.ts) are delegated to focused modules.
  */
 
+// --- Imports ---
+
 import type { ExtensionAPI, ExtensionContext } from "pi";
 import { excludeFromGit } from "../../lib/git.ts";
 import { projectStateRelative } from "../../lib/paths.ts";

@@ -66,8 +66,13 @@ describe("missions-extension", () => {
     ]);
   });
 
+  /** Spy restorers so a throwing test cannot leak process-global mocks. */
+  const consoleRestores: Array<() => void> = [];
+
   afterEach(async () => {
     await rm(cwd, { recursive: true, force: true });
+    for (const restore of consoleRestores) restore();
+    consoleRestores.length = 0;
   });
 
   it("registers the mission tool and commands", () => {
@@ -579,6 +584,32 @@ describe("missions-extension", () => {
     // reads (switch loads the file directly).
     await expect(executeTool({ action: "status" })).rejects.toThrow(/No active mission/);
     await expect(executeTool({ action: "switch", id })).rejects.toThrow(/corrupt/);
+  });
+
+  it("a corrupt active mission file warns through the UI when one exists", async () => {
+    await executeTool({ action: "create", title: "corrupt-warn", objective: "o" });
+    const id = lastActiveEntryId();
+    if (!id) throw new Error("no active entry");
+    await writeFile(join(cwd, CONFIG_DIR_NAME, "missions", `${id}.json`), "{ corrupted");
+
+    const handler = getEventHandler("session_start");
+    await handler({ type: "session_start", reason: "reload" }, mockCtx);
+    expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining(id), "warning");
+  });
+
+  it("a corrupt active mission file stays log-only when no UI exists", async () => {
+    await executeTool({ action: "create", title: "corrupt-quiet", objective: "o" });
+    const id = lastActiveEntryId();
+    if (!id) throw new Error("no active entry");
+    await writeFile(join(cwd, CONFIG_DIR_NAME, "missions", `${id}.json`), "{ corrupted");
+    (mockCtx as { hasUI: boolean }).hasUI = false;
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    consoleRestores.push(() => consoleError.mockRestore());
+
+    const handler = getEventHandler("session_start");
+    await handler({ type: "session_start", reason: "reload" }, mockCtx);
+    expect(mockCtx.ui.notify).not.toHaveBeenCalled();
+    expect(consoleError).toHaveBeenCalledWith(expect.stringContaining(id));
   });
 
   it("list skips a corrupt mission file and reports its filename while still listing others", async () => {

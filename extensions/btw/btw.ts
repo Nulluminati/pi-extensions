@@ -7,8 +7,8 @@
  * main agent's context by default.
  *
  * Architecture follows the platform's component model: the overlay is a
- * `Container` whose rows are framed by hand with `frameLine` helpers, and
- * the composer is the platform's `Input` widget. The TUI positions the
+ * `Container` whose rows are wrapped with `renderModalFrame`, and the
+ * composer is the platform's `Input` widget. The TUI positions the
  * overlay and clips anything that overflows; we just render the right rows
  * in the right order.
  */
@@ -33,7 +33,7 @@ import {
   statusToText,
 } from "./src/thread.ts";
 import { rebuildTranscriptFromThread, requestRender } from "./src/transcript.ts";
-import type { BtwLiveState } from "./src/types.ts";
+import type { BtwLiveState, BtwMode } from "./src/types.ts";
 
 // --- Extension ---
 
@@ -52,6 +52,19 @@ export default async function btwExtension(pi: ExtensionAPI) {
     abortController: null,
     pendingTurn: null,
   };
+
+  // Start a fresh thread of the given mode: reset the live state and
+  // persist a reset marker so restore skips earlier thread entries.
+  function resetThread(mode: BtwMode): void {
+    state.thread = emptyThread(mode);
+    state.transcript = [];
+    state.composer = "";
+    state.scroll = 0;
+    state.lastError = null;
+    state.status = "idle";
+    state.statusText = statusToText("idle", null);
+    appendResetMarker(pi, mode);
+  }
 
   pi.on("session_start", async (_event, ctx) => {
     state.thread = reconstructThreadState(ctx);
@@ -144,14 +157,7 @@ export default async function btwExtension(pi: ExtensionAPI) {
       if (!ctx.hasUI) return;
       const question = args.trim();
       // Reset the thread regardless of whether a question was passed.
-      state.thread = emptyThread("contextual");
-      state.transcript = [];
-      state.composer = "";
-      state.scroll = 0;
-      state.lastError = null;
-      state.status = "idle";
-      state.statusText = statusToText("idle", null);
-      appendResetMarker(pi, "contextual");
+      resetThread("contextual");
       await ensureOverlayOpen(ctx);
       ctx.ui.notify("Started a new side thread.", "info");
       if (question) {
@@ -165,14 +171,7 @@ export default async function btwExtension(pi: ExtensionAPI) {
     handler: async (args, ctx) => {
       if (!ctx.hasUI) return;
       const question = args.trim();
-      state.thread = emptyThread("tangent");
-      state.transcript = [];
-      state.composer = "";
-      state.scroll = 0;
-      state.lastError = null;
-      state.status = "idle";
-      state.statusText = statusToText("idle", null);
-      appendResetMarker(pi, "tangent");
+      resetThread("tangent");
       await ensureOverlayOpen(ctx);
       ctx.ui.notify("Tangent thread started (no main context).", "info");
       if (question) {
@@ -194,14 +193,7 @@ export default async function btwExtension(pi: ExtensionAPI) {
         body: "This wipes the whole side conversation and closes the side window.",
       });
       if (!confirmed) return;
-      state.thread = emptyThread("contextual");
-      state.transcript = [];
-      state.composer = "";
-      state.scroll = 0;
-      state.lastError = null;
-      state.status = "idle";
-      state.statusText = statusToText("idle", null);
-      appendResetMarker(pi, "contextual");
+      resetThread("contextual");
       if (state.overlay) {
         state.overlay.done();
         state.overlay = null;
@@ -228,14 +220,7 @@ export default async function btwExtension(pi: ExtensionAPI) {
       const idle = ctx.isIdle();
       if (idle) pi.sendUserMessage(content);
       else pi.sendUserMessage(content, { deliverAs: "followUp" });
-      state.thread = emptyThread("contextual");
-      state.transcript = [];
-      state.composer = "";
-      state.scroll = 0;
-      state.lastError = null;
-      state.status = "idle";
-      state.statusText = statusToText("idle", null);
-      appendResetMarker(pi, "contextual");
+      resetThread("contextual");
       if (state.overlay) {
         state.overlay.done();
         state.overlay = null;
@@ -280,14 +265,7 @@ export default async function btwExtension(pi: ExtensionAPI) {
       const idle = ctx.isIdle();
       if (idle) pi.sendUserMessage(content);
       else pi.sendUserMessage(content, { deliverAs: "followUp" });
-      state.thread = emptyThread("contextual");
-      state.transcript = [];
-      state.composer = "";
-      state.scroll = 0;
-      state.lastError = null;
-      state.status = "idle";
-      state.statusText = statusToText("idle", null);
-      appendResetMarker(pi, "contextual");
+      resetThread("contextual");
       if (state.overlay) {
         state.overlay.done();
         state.overlay = null;

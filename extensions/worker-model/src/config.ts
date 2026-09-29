@@ -43,11 +43,3 @@ export function parseWorkerModelSpec(args: string): WorkerModelConfig | undefine
     thinkingLevel,
   };
 }
-
-export function configuredWorkerModelLabel(): string | undefined {
-  try {
-    return `${loadWorkerModelConfig().config.provider}/${loadWorkerModelConfig().config.model}`;
-  } catch {
-    return undefined;
-  }
-}

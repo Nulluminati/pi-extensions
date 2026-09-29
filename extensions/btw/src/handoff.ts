@@ -6,6 +6,9 @@ import type { BtwLiveState, BtwThreadState } from "./types.ts";
 
 // --- Handoff ---
 
+// Character cap for the transcript slice sent to the summarizer model.
+const SUMMARIZE_TRANSCRIPT_MAX_CHARS = 12000;
+
 // Flatten the side thread into a plain transcript for handoff/summary.
 function flattenThreadForHandoff(thread: BtwThreadState): string {
   return thread.messages
@@ -63,7 +66,7 @@ export async function runSummarize(
   const transcript = flattenThreadForHandoff(state.thread);
   if (!transcript.trim()) return null;
   const steer = instructions ? `\n\nSteer the summary: ${instructions}` : "";
-  const prompt = `${SUMMARIZE_GUIDANCE}${steer}\n\nSide conversation transcript:\n${transcript.slice(0, 12000)}`;
+  const prompt = `${SUMMARIZE_GUIDANCE}${steer}\n\nSide conversation transcript:\n${transcript.slice(0, SUMMARIZE_TRANSCRIPT_MAX_CHARS)}`;
   try {
     const response = await completeSimple(
       resolved.model,

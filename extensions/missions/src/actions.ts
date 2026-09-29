@@ -39,7 +39,7 @@ import {
   saveMission,
   validateMissionId,
 } from "./storage.ts";
-import type { Mission } from "./types.ts";
+import type { Mission, MissionStatus, TaskStatus, TaskVerification } from "./types.ts";
 
 // --- Constants ---
 
@@ -50,8 +50,9 @@ export const MISSION_ACTIVE_ENTRY_TYPE = "missions-active";
 
 // --- Types ---
 
-/** Raw mission tool parameters as received from the model (see schemas.ts). */
-export type MissionToolParams = Record<string, any>;
+/** Raw mission tool parameters as received from the model; fields are
+ * narrowed at runtime against MISSION_PARAMETERS (see schemas.ts). */
+export type MissionToolParams = Record<string, unknown>;
 
 /** The session's active-mission pointer, split into its two effects: the
  * in-memory cache every tool call consults, and the session-transcript
@@ -120,8 +121,65 @@ export async function loadSessionActiveMission(
     // Corrupt mission file: degrade to no active mission rather than
     // breaking session startup; the corruption surfaces on explicit reads.
     console.error(`[missions] active mission ${id} unreadable: ${(error as Error).message}`);
+    // The degradation silences the session's active mission; tell the user
+    // when a UI can show it. Outside the UI the log line is the only record.
+    if (ctx.hasUI) {
+      ctx.ui.notify(
+        `Active mission ${id} is unreadable and was deactivated: ${(error as Error).message}`,
+        "warning",
+      );
+    }
     return undefined;
   }
+}
+
+// --- Parameter narrowing ---
+
+/** Optional array-of-strings parameter (schema: dependsOn); undefined when
+ * absent, a usage error otherwise so malformed task ids cannot slip through
+ * to ops. */
+function dependsOnParam(value: unknown): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) {
+    throw new Error("dependsOn must be an array of task ids.");
+  }
+  return value;
+}
+
+/** Optional TaskVerification parameter (schema: { command, description? });
+ * undefined when absent, a usage error when malformed so ops never sees a
+ * verification without a command. */
+function verificationParam(value: unknown): TaskVerification | undefined {
+  if (value === undefined) return undefined;
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    typeof (value as { command?: unknown }).command !== "string"
+  ) {
+    throw new Error("verification must be an object with a command string.");
+  }
+  const { command, description } = value as { command: string; description?: unknown };
+  return {
+    command,
+    ...(typeof description === "string" ? { description } : {}),
+  };
+}
+
+/** The schema's missionStatus enum, narrowed; a usage error otherwise so a
+ * garbage status never reaches the mission record. */
+function missionStatusParam(value: unknown): MissionStatus {
+  if (
+    value === "planning" ||
+    value === "active" ||
+    value === "paused" ||
+    value === "complete" ||
+    value === "aborted"
+  ) {
+    return value;
+  }
+  throw new Error(
+    "set_status requires missionStatus (planning, active, paused, complete, or aborted).",
+  );
 }
 
 // --- Guards ---
@@ -149,8 +207,8 @@ export async function executeMissionAction(
   const action = params.action;
 
   if (action === "create") {
-    const title = (params.title ?? "").trim();
-    const objective = (params.objective ?? "").trim();
+    const title = typeof params.title === "string" ? params.title.trim() : "";
+    const objective = typeof params.objective === "string" ? params.objective.trim() : "";
     if (!title) throw new Error("create requires title.");
     if (!objective) throw new Error("create requires objective.");
     if (deps.mission.get()) {
@@ -159,8 +217,8 @@ export async function executeMissionAction(
       );
     }
     const mission = createMission(generateMissionId(), title, objective, {
-      ...(params.maxIterations !== undefined ? { maxIterations: params.maxIterations } : {}),
-      ...(params.maxTokens !== undefined ? { maxTokens: params.maxTokens } : {}),
+      ...(typeof params.maxIterations === "number" ? { maxIterations: params.maxIterations } : {}),
+      ...(typeof params.maxTokens === "number" ? { maxTokens: params.maxTokens } : {}),
     });
     await saveMission(ctx.cwd, mission);
     deps.mission.record(mission.id);
@@ -183,7 +241,7 @@ export async function executeMissionAction(
   }
 
   if (action === "switch") {
-    const id = (params.id ?? "").trim();
+    const id = typeof params.id === "string" ? params.id.trim() : "";
     if (!id) throw new Error("switch requires id.");
     validateMissionId(id);
     const mission = await loadMission(ctx.cwd, id);
@@ -214,13 +272,15 @@ export async function executeMissionAction(
   switch (action) {
     case "task_add": {
       requireOpen(mission);
-      const title = (params.taskTitle ?? "").trim();
+      const title = typeof params.taskTitle === "string" ? params.taskTitle.trim() : "";
       if (!title) throw new Error("task_add requires taskTitle.");
+      const dependsOn = dependsOnParam(params.dependsOn);
+      const verification = verificationParam(params.verification);
       const task = addTask(mission, {
         title,
-        ...(params.dependsOn !== undefined ? { dependsOn: params.dependsOn } : {}),
-        ...(params.owner !== undefined ? { owner: params.owner } : {}),
-        ...(params.verification !== undefined ? { verification: params.verification } : {}),
+        ...(dependsOn !== undefined ? { dependsOn } : {}),
+        ...(typeof params.owner === "string" ? { owner: params.owner } : {}),
+        ...(verification !== undefined ? { verification } : {}),
       });
       await deps.persist(ctx, mission);
       return {
@@ -229,13 +289,14 @@ export async function executeMissionAction(
       };
     }
     case "task_update": {
-      const taskId = (params.taskId ?? "").trim();
+      const taskId = typeof params.taskId === "string" ? params.taskId.trim() : "";
       if (!taskId) throw new Error("task_update requires taskId.");
       const task = updateTask(mission, {
         taskId,
-        ...(params.status !== undefined ? { status: params.status } : {}),
-        ...(params.summary !== undefined ? { summary: params.summary } : {}),
-        ...(params.owner !== undefined ? { owner: params.owner } : {}),
+        // updateTask validates the raw string against the task statuses.
+        ...(typeof params.status === "string" ? { status: params.status as TaskStatus } : {}),
+        ...(typeof params.summary === "string" ? { summary: params.summary } : {}),
+        ...(typeof params.owner === "string" ? { owner: params.owner } : {}),
       });
       await deps.persist(ctx, mission);
       return {
@@ -244,9 +305,9 @@ export async function executeMissionAction(
       };
     }
     case "task_verify": {
-      const taskId = (params.taskId ?? "").trim();
+      const taskId = typeof params.taskId === "string" ? params.taskId.trim() : "";
       if (!taskId) throw new Error("task_verify requires taskId.");
-      const task = setTaskVerification(mission, taskId, params.verification);
+      const task = setTaskVerification(mission, taskId, verificationParam(params.verification));
       await deps.persist(ctx, mission);
       return {
         content: [
@@ -261,11 +322,16 @@ export async function executeMissionAction(
       };
     }
     case "checkpoint": {
-      const label = (params.label ?? "").trim();
+      const label = typeof params.label === "string" ? params.label.trim() : "";
       if (!label) throw new Error("checkpoint requires label.");
-      const summary = (params.summary ?? "").trim();
+      const summary = typeof params.summary === "string" ? params.summary.trim() : "";
       if (!summary) throw new Error("checkpoint requires summary.");
-      const { id } = addCheckpoint(mission, label, summary, params.commit);
+      const { id } = addCheckpoint(
+        mission,
+        label,
+        summary,
+        typeof params.commit === "string" ? params.commit : undefined,
+      );
       await deps.persist(ctx, mission);
       return {
         content: [{ type: "text", text: `Checkpoint ${id} recorded.` }],
@@ -273,7 +339,7 @@ export async function executeMissionAction(
       };
     }
     case "decision": {
-      const text = (params.text ?? "").trim();
+      const text = typeof params.text === "string" ? params.text.trim() : "";
       if (!text) throw new Error("decision requires text.");
       addDecision(mission, text);
       await deps.persist(ctx, mission);
@@ -281,8 +347,10 @@ export async function executeMissionAction(
     }
     case "set_budget": {
       const budget = setBudget(mission, {
-        ...(params.maxIterations !== undefined ? { maxIterations: params.maxIterations } : {}),
-        ...(params.maxTokens !== undefined ? { maxTokens: params.maxTokens } : {}),
+        ...(typeof params.maxIterations === "number"
+          ? { maxIterations: params.maxIterations }
+          : {}),
+        ...(typeof params.maxTokens === "number" ? { maxTokens: params.maxTokens } : {}),
       });
       await deps.persist(ctx, mission);
       return {
@@ -291,10 +359,12 @@ export async function executeMissionAction(
       };
     }
     case "spend": {
-      if (params.iterations === undefined && params.tokens === undefined) {
+      const iterations = typeof params.iterations === "number" ? params.iterations : undefined;
+      const tokens = typeof params.tokens === "number" ? params.tokens : undefined;
+      if (iterations === undefined && tokens === undefined) {
         throw new Error("spend requires iterations and/or tokens.");
       }
-      const { overBudget, spent } = addSpend(mission, params.iterations, params.tokens);
+      const { overBudget, spent } = addSpend(mission, iterations, tokens);
       await deps.persist(ctx, mission);
       return {
         content: [
@@ -309,8 +379,7 @@ export async function executeMissionAction(
       };
     }
     case "set_status": {
-      const status = params.missionStatus;
-      if (!status) throw new Error("set_status requires missionStatus.");
+      const status = missionStatusParam(params.missionStatus);
       // requireOpen is deliberately NOT called here: reopening a paused,
       // completed, or aborted mission is allowed.
       setStatus(mission, status);

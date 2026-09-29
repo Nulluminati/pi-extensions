@@ -7,7 +7,14 @@ import { isArrowDown, isArrowUp } from "../../../lib/arrow-keys.ts";
 import { PANEL_OVERLAY_OPTIONS } from "../../../lib/overlay-options.ts";
 import { renderModalFrame } from "../../../lib/tui-frame.ts";
 import { formatStyledKeyHints } from "../../../lib/ui-format.ts";
-import { elapseMs, fmtDuration, formatJobLine, tailLines, truncate } from "./format.ts";
+import {
+  elapseMs,
+  fmtDuration,
+  formatJobLine,
+  JOB_STATUS_DISPLAY,
+  tailLines,
+  truncate,
+} from "./format.ts";
 import { getJob, type JobRegistry, listJobs } from "./registry.ts";
 import { cancelJob, KILL_GRACE_MS } from "./runner.ts";
 import type { Job, JobEvents } from "./types.ts";
@@ -77,9 +84,9 @@ export async function executeJobsAction(options: {
     };
   }
 
-  const job: Job | undefined = Number.isFinite(options.jobId as number)
-    ? getJob(registry, options.jobId as number)
-    : undefined;
+  const jobId = options.jobId;
+  const job: Job | undefined =
+    typeof jobId === "number" && Number.isFinite(jobId) ? getJob(registry, jobId) : undefined;
 
   if (action === "status") {
     if (!job) return errorResult("unknown_job", `No job #${options.jobId}.`);
@@ -148,14 +155,6 @@ function errorResult(code: string, text: string): JobsToolResult {
 }
 
 // --- Panel -------------------------------------------------------------------
-
-/** Theme color for a job status, matching repo modal conventions. */
-function statusColor(status: Job["status"]): string {
-  if (status === "running" || status === "cancelling") return "accent";
-  if (status === "completed" || status === "satisfied") return "success";
-  if (status === "failed" || status === "timeout" || status === "kill_failed") return "error";
-  return "muted"; // cancelled
-}
 
 const RAW_NAV = {
   up: (d: string) => d === "k" || isArrowUp(d),
@@ -315,15 +314,7 @@ export class JobPanel {
 
   /** formatJobLine (format.ts) with theme colors; the model-facing list stays plain. */
   private themedJobLine(job: Job): string {
-    const color = statusColor(job.status);
-    const mark =
-      job.status === "running" || job.status === "cancelling"
-        ? "●"
-        : job.status === "completed" || job.status === "satisfied"
-          ? "✓"
-          : job.status === "failed" || job.status === "timeout" || job.status === "kill_failed"
-            ? "✗"
-            : "⊘";
+    const { color, mark } = JOB_STATUS_DISPLAY[job.status];
     const exit = job.exitCode != null ? ` exit ${job.exitCode}` : "";
     const status = this.theme.fg(color, `[${job.status}${exit}]`);
     return `#${job.id} ${this.theme.fg(color, mark)} ${status} ${job.kind} "${job.label}" (${fmtDuration(elapseMs(job))})`;

@@ -1,4 +1,4 @@
-import type { TextContent, ToolCall } from "@earendil-works/pi-ai";
+import type { AssistantMessageEvent, TextContent, ToolCall } from "@earendil-works/pi-ai";
 import { truncateToWidth } from "@earendil-works/pi-tui";
 import type { BtwLiveState, BtwThreadState, TranscriptEntry } from "./types.ts";
 
@@ -131,7 +131,7 @@ export function buildTranscriptLines(
 
 export function processStreamEvent(
   state: BtwLiveState,
-  event: import("@earendil-works/pi-ai").AssistantMessageEvent,
+  event: AssistantMessageEvent,
   onText: (s: string) => void,
   onThinking: (s: string) => void,
   onToolCall: (call: ToolCall) => void,

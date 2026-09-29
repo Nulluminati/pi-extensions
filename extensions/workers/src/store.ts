@@ -75,9 +75,9 @@ export function stderrLogPath(cwd: string, workerId: string): string {
  *  last STREAM_TAIL_BYTES (runner.ts) of the file. */
 export const STREAM_MAX_BYTES = 512 * 1024;
 
-/** Per-record lock: sérialise le read-modify-write de collect sur le
- *  record.json d'un worker étranger (l'owner n'écrit jamais via ce lock ;
- *  ses writes sont single-writer par construction). */
+/** Per-record lock: serializes collect's read-modify-write on a foreign
+ *  worker's record.json (the owner never writes through this lock; its
+ *  writes are single-writer by construction). */
 function recordLockPath(cwd: string, workerId: string): string {
   return join(recordsDir(cwd), `${assertWorkerId(workerId)}.lock`);
 }
@@ -489,11 +489,10 @@ export async function migrateLegacyRegistry(cwd: string): Promise<boolean> {
 
 // --- Removal ---
 
-/** Supprimer un worker précis (action remove du tool workers) avec ses
- *  artifacts. Refuse un record running. L'existence du fichier d'artifacts
- *  n'est pas exigée : le transcript est l'autorité d'ownership et l'appelant
- *  valide l'ownership — un ghost (entrée transcript, fichier perdu) se
- *  supprime proprement. */
+/** Remove one worker (the workers tool's remove action) with its artifacts.
+ *  Refuses a running record. The artifact file need not exist: the transcript
+ *  is the ownership authority and the caller validates ownership — a ghost
+ *  (transcript entry, lost file) removes cleanly. */
 export async function removeWorkerRecord(cwd: string, id: string): Promise<void> {
   const record = await readRecordFile(cwd, id);
   if (record?.status === "running") {

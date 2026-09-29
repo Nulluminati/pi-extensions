@@ -13,13 +13,13 @@ export const MISSION_STATE_EVENT = "missions:state";
 export const MISSION_STATUS_ICON = "◈";
 
 /** Short footer text for the active mission, or undefined when none. */
-export function statusText(mission: Mission | undefined): string | undefined {
+function statusText(mission: Mission | undefined): string | undefined {
   if (!mission) return undefined;
   return `${mission.status} · ${progressText(mission)}`;
 }
 
 /** Task progress for the widget's top-right label, e.g. "tasks 3/7 · 1 failing". */
-export function progressText(mission: Mission): string {
+function progressText(mission: Mission): string {
   const done = mission.tasks.filter((t) => t.status === "done").length;
   const failed = mission.tasks.filter(
     (t) => t.status === "failed" || t.status === "regressed",

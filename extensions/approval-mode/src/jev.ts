@@ -2,10 +2,6 @@
 
 import { hasExecutionHook } from "./policy.ts";
 
-// --- Types ---
-
-export type JevDecision = "allow" | "reject" | "uncertain" | "unavailable";
-
 // --- Constants ---
 
 const ENDPOINT = "https://api.typesafe.ai/v1/systemone";
@@ -43,6 +39,10 @@ const QUESTIONS = {
     },
   },
 } as const;
+
+// --- Types ---
+
+export type JevDecision = "allow" | "reject" | "uncertain" | "unavailable";
 
 /** Redaction limits accidental disclosure; unusual secret formats may still pass. */
 function redact(text: string): string {

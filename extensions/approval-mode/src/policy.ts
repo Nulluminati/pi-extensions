@@ -1,8 +1,6 @@
 /** Deterministic command checks. Hard denies precede every approval path. */
 
-// --- Types ---
-
-export type CommandClass = "hard-deny" | "known-safe" | "needs-jev";
+// --- Constants ---
 
 // --- Hard denies ---
 
@@ -37,6 +35,10 @@ const ROOT_TARGETS = new Set([
   ".git",
   "./.git",
 ]);
+
+// --- Types ---
+
+export type CommandClass = "hard-deny" | "known-safe" | "needs-jev";
 
 function isRootDeletion(command: string, cwd: string): boolean {
   const target = RECURSIVE_DELETE.exec(command)?.[1]?.replace(/^["']|["']$/g, "");

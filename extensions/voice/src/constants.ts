@@ -16,8 +16,6 @@ export const SPACE_COMMIT_DELAY_MS = 400;
 // the panel cannot instantly reopen it.
 export const HOLD_COOLDOWN_MS = 1500;
 
-export const HOLD_REPEAT_INITIAL_GAP_MS = 2000;
-
 export const HOLD_REPEAT_GAP_MS = 1200;
 
 export const HOLD_REPEAT_MIN_EVENTS = 2;

@@ -78,13 +78,10 @@ export function reconstructThreadState(ctx: ExtensionContext): BtwThreadState {
 function cloneThreadState(state: BtwThreadState): BtwThreadState {
   return {
     mode: state.mode,
-    messages: state.messages.map((m) => {
-      if (m.role === "user") return { ...m };
-      if (m.role === "assistant") {
-        return { ...m, content: m.content.map((b) => ({ ...b })) };
-      }
-      return { ...m, content: m.content.map((b) => ({ ...b })) };
-    }),
+    // User content is a plain string; assistant and toolResult content is
+    // a block array. A structured clone copies both without aliasing any
+    // nested block in the persisted branch entry.
+    messages: state.messages.map((m) => structuredClone(m)),
     thinkingOverride: state.thinkingOverride,
   };
 }

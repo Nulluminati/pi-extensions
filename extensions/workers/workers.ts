@@ -19,6 +19,8 @@
  * or worker-model.json; keep orchestration and judgment in the main session.
  */
 
+// --- Imports ---
+
 import { existsSync } from "node:fs";
 import type { ExtensionAPI, ExtensionContext, ExtensionUIContext } from "pi";
 import { excludeFromGit } from "../../lib/git.ts";

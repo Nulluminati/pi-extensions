@@ -146,6 +146,34 @@ export function splitSamples(
   return chunks;
 }
 
+/**
+ * Decode samples with an offline recognizer in one pass, or in chunks at the
+ * model's decode cap, applying the anti-loop filters to each decode result.
+ * Shared by one-shot transcription and the cached streaming engine.
+ */
+function decodeOffline(
+  recognizer: OfflineRecognizer,
+  model: ModelDef,
+  samples: Float32Array,
+  sampleRate: number,
+): string {
+  const parts: string[] = [];
+  const maxSec = maxDecodeSec(model);
+  for (const chunk of maxSec ? splitSamples(samples, sampleRate, maxSec) : [samples]) {
+    const stream = recognizer.createStream();
+    stream.acceptWaveform({ sampleRate, samples: chunk });
+    recognizer.decode(stream);
+    const raw = recognizer.getResult(stream).text;
+    // Anti-loop layers (offline models only — online models don't loop):
+    //   1. Drop the whole segment if it's a known Whisper filler/hallucination.
+    //   2. Strip a trailing repetition loop, keeping the legitimate lead text.
+    if (isHallucination(raw)) continue;
+    const cleaned = stripRepetitionLoop(raw);
+    if (cleaned.trim()) parts.push(cleaned.trim());
+  }
+  return parts.join(" ");
+}
+
 /** Segment audio into speech regions using silero VAD. Returns speech segments. */
 export function vadSegment(
   sherpa: SherpaOnnx,
@@ -205,21 +233,7 @@ export function transcribeSegment(
     return recognizer.getResult(stream).text;
   }
   const recognizer = new sherpa.OfflineRecognizer(buildOfflineConfig(model, modelsDir, numThreads));
-  const parts: string[] = [];
-  const maxSec = maxDecodeSec(model);
-  for (const chunk of maxSec ? splitSamples(samples, sampleRate, maxSec) : [samples]) {
-    const stream = recognizer.createStream();
-    stream.acceptWaveform({ sampleRate, samples: chunk });
-    recognizer.decode(stream);
-    const raw = recognizer.getResult(stream).text;
-    // Anti-loop layers (offline models only — online models don't loop):
-    //   1. Drop the whole segment if it's a known Whisper filler/hallucination.
-    //   2. Strip a trailing repetition loop, keeping the legitimate lead text.
-    if (isHallucination(raw)) continue;
-    const cleaned = stripRepetitionLoop(raw);
-    if (cleaned.trim()) parts.push(cleaned.trim());
-  }
-  return parts.join(" ");
+  return decodeOffline(recognizer, model, samples, sampleRate);
 }
 
 export function transcribeFile(
@@ -319,17 +333,6 @@ export class SttEngine {
       return r.getResult(stream).text;
     }
     const r = this.recognizer as OfflineRecognizer;
-    const parts: string[] = [];
-    const maxSec = maxDecodeSec(this.model);
-    for (const chunk of maxSec ? splitSamples(samples, sampleRate, maxSec) : [samples]) {
-      const stream = r.createStream();
-      stream.acceptWaveform({ samples: chunk, sampleRate });
-      r.decode(stream);
-      const raw = r.getResult(stream).text;
-      if (isHallucination(raw)) continue;
-      const cleaned = stripRepetitionLoop(raw);
-      if (cleaned.trim()) parts.push(cleaned.trim());
-    }
-    return parts.join(" ");
+    return decodeOffline(r, this.model, samples, sampleRate);
   }
 }

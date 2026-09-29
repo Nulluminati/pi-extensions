@@ -115,7 +115,8 @@ export async function startBackgroundJob(options: StartBackgroundOptions): Promi
   await mkdir(options.spoolDir, { recursive: true });
   // The owning pid in the name lets any session's prune recognize another
   // live session's active log and never delete it (see pruneSpoolDir).
-  job.spoolPath = join(options.spoolDir, `job-${job.id}-p${process.pid}-${label}.log`);
+  const spoolPath = join(options.spoolDir, `job-${job.id}-p${process.pid}-${label}.log`);
+  job.spoolPath = spoolPath;
   job.wakeOnPattern = options.wakeOnPattern;
   job.patternSource = options.patternSource;
 
@@ -133,7 +134,7 @@ export async function startBackgroundJob(options: StartBackgroundOptions): Promi
     const text = typeof data === "string" ? data : data.toString("utf8");
     appendBuffer(job, text);
     // Spool write is best-effort; the buffer remains the source of truth.
-    appendFile(job.spoolPath as string, text).catch((err: unknown) => {
+    appendFile(spoolPath, text).catch((err: unknown) => {
       console.error(`[background-jobs] spool write failed: ${(err as Error).message}`);
     });
     if (job.wakeOnPattern && !job.patternFired && job.wakeOnPattern.test(text)) {

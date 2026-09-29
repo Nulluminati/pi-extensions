@@ -2145,6 +2145,36 @@ describe("status-bar flex badge", () => {
     expect(unrelatedHistory).not.toContain("prompt before reload");
   });
 
+  it("bounds prompt history across sessions without losing the current session", async () => {
+    const { PolishedEditor } = await import("../../extensions/status-bar/src/editor.ts");
+    const theme = { fg: vi.fn((_c: string, text: string) => text) };
+    const makeEditor = (sessionId: string) =>
+      new PolishedEditor(
+        { requestRender: vi.fn() },
+        theme,
+        {},
+        theme,
+        () => "main",
+        () => "",
+        () => "none",
+        () => ({ on: false, capable: false }),
+        () => undefined,
+        () => undefined,
+        undefined,
+        sessionId,
+      );
+
+    makeEditor("history-bound-0").addToHistory("old prompt");
+    for (let index = 1; index <= 32; index++) {
+      makeEditor(`history-bound-${index}`).addToHistory(`prompt ${index}`);
+    }
+
+    const oldest = makeEditor("history-bound-0") as unknown as { history: string[] };
+    const latest = makeEditor("history-bound-32") as unknown as { history: string[] };
+    expect(oldest.history).not.toContain("old prompt");
+    expect(latest.history).toContain("prompt 32");
+  });
+
   it("installed editor hides the flex badge when flexCapable is false", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();

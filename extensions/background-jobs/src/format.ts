@@ -2,12 +2,24 @@
  * Pure formatting helpers for job output and job lines.
  */
 
-import type { Job } from "./types.ts";
+import type { Job, JobStatus } from "./types.ts";
 
 export const MAX_TAIL_CHARS = 6_000; // hard cap on anything sent back to the model
 export const MAX_BUFFER_CHARS = 200_000; // rolling in-memory buffer per job
 export const DEFAULT_TAIL_LINES = 40;
 export const MAX_RETAINED_JOBS = 50; // prune oldest terminal jobs above this count
+
+/** Marks and theme colors shared by the model-facing list and the jobs panel. */
+export const JOB_STATUS_DISPLAY: Record<JobStatus, { mark: string; color: string }> = {
+  running: { mark: "●", color: "accent" },
+  cancelling: { mark: "●", color: "accent" },
+  completed: { mark: "✓", color: "success" },
+  satisfied: { mark: "✓", color: "success" },
+  failed: { mark: "✗", color: "error" },
+  timeout: { mark: "✗", color: "error" },
+  kill_failed: { mark: "✗", color: "error" },
+  cancelled: { mark: "⊘", color: "muted" },
+};
 
 /** Hard cap: marker length is computed first so total never exceeds max. */
 export function truncate(text: string, max = MAX_TAIL_CHARS): string {
@@ -42,14 +54,7 @@ export function elapseMs(job: Job): number {
 }
 
 export function formatJobLine(job: Job): string {
-  const mark =
-    job.status === "running" || job.status === "cancelling"
-      ? "●"
-      : job.status === "completed" || job.status === "satisfied"
-        ? "✓"
-        : job.status === "failed" || job.status === "timeout" || job.status === "kill_failed"
-          ? "✗"
-          : "⊘";
+  const { mark } = JOB_STATUS_DISPLAY[job.status];
   const exit = job.exitCode != null ? ` exit ${job.exitCode}` : "";
   return `#${job.id} ${mark} [${job.status}${exit}] ${job.kind} "${job.label}" (${fmtDuration(elapseMs(job))})`;
 }

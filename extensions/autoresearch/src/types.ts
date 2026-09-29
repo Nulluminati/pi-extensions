@@ -89,7 +89,6 @@ export interface AutoSummary {
   best?: number;
   bestRun?: number;
   lastStatus?: RunStatus;
-  /** |best - baseline| relative to the noise floor (MAD), when computable. */
   /** Descriptive spread score (see stats.ts): |best - baseline| relative to
    *  observed run-to-run variation. Not a confidence measure. */
   spread?: number;

@@ -98,8 +98,6 @@ function createVoiceOverlay(
   };
 }
 
-// 0.5s
-
 export async function runVoiceOverlay(
   _args: string,
   ctx: ExtensionContext,
@@ -268,28 +266,35 @@ export async function runVoiceOverlay(
   };
 
   let renderInterval: ReturnType<typeof setInterval> | null = null;
-  const result = await ctx.ui.custom<string | null>((tui, theme, _kb, done) => {
-    pendingDone = done;
-    const component = createVoiceOverlay(
-      theme as {
-        fg: (c: string, t: string) => string;
-        bold: (t: string) => string;
-      },
-      state,
-      handleCommit,
-      handleCancel,
-    );
-    const tt = tui as { requestRender: () => void };
-    renderInterval = setInterval(() => tt.requestRender(), 200);
-    return {
-      ...component,
-      dispose: () => {
-        if (renderInterval) clearInterval(renderInterval);
-      },
-    };
-  });
+  let result: string | null;
+  // The dialog promise can reject (terminal teardown, host shutdown). The
+  // finally block still stops the recorder child process and every timer so
+  // nothing outlives the overlay.
+  try {
+    result = await ctx.ui.custom<string | null>((tui, theme, _kb, done) => {
+      pendingDone = done;
+      const component = createVoiceOverlay(
+        theme as {
+          fg: (c: string, t: string) => string;
+          bold: (t: string) => string;
+        },
+        state,
+        handleCommit,
+        handleCancel,
+      );
+      const tt = tui as { requestRender: () => void };
+      renderInterval = setInterval(() => tt.requestRender(), 200);
+      return {
+        ...component,
+        dispose: () => {
+          if (renderInterval) clearInterval(renderInterval);
+        },
+      };
+    });
+  } finally {
+    if (renderInterval) clearInterval(renderInterval);
+    cleanup();
+  }
 
-  if (renderInterval) clearInterval(renderInterval);
-  cleanup();
   if (result) ctx.ui.pasteToEditor(result);
 }

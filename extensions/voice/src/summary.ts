@@ -1,6 +1,6 @@
 import { completeSimple } from "@earendil-works/pi-ai";
-import { Loader } from "@earendil-works/pi-tui";
-import type { ExtensionCommandContext } from "pi";
+import { Loader, type TUI } from "@earendil-works/pi-tui";
+import type { Component, ExtensionCommandContext, Theme } from "pi";
 import { extractText } from "../../../lib/session-utils.ts";
 import { resolveSmallModel } from "../../../lib/small-model.ts";
 import { resolveModelsDir } from "./config.ts";
@@ -150,7 +150,7 @@ export function setTtsIndicator(ctx: ExtensionCommandContext, text: string | und
     ctx.ui.setWidget(TTS_WIDGET_KEY, undefined);
     return;
   }
-  ctx.ui.setWidget(TTS_WIDGET_KEY, (tui: any, theme: any) => {
+  ctx.ui.setWidget(TTS_WIDGET_KEY, (tui: TUI, theme: Theme): Component => {
     const loader = new Loader(
       tui,
       (spinner: string) => theme.fg("accent", spinner),

@@ -115,14 +115,6 @@ export function renderEditorModalFrame(input: EditorModalFrameInput): string[] {
   return [...modalLines, ...autocompleteLines.map((line) => truncateToWidth(line, width, ""))];
 }
 
-/**
- * The default Pi editor, framed in the same rounded accent modal box the
- * voice/handoff overlays use, with the model and thinking level shown in the
- * title (top border). Subclasses CustomEditor so all text handling,
- * keybindings, autocomplete, and history are inherited; only render() is
- * overridden to add the frame.
- */
-
 // --- Prompt history persistence ---
 
 /**
@@ -135,6 +127,7 @@ export function renderEditorModalFrame(input: EditorModalFrameInput): string[] {
  */
 const HISTORY_STORES_KEY = Symbol.for("status-bar.prompt-history-by-session");
 const HISTORY_LIMIT = 100;
+const HISTORY_SESSION_LIMIT = 32;
 
 function promptHistoryStore(sessionId: string): string[] {
   const g = globalThis as Record<symbol, unknown>;
@@ -143,10 +136,18 @@ function promptHistoryStore(sessionId: string): string[] {
     stores = new Map();
     g[HISTORY_STORES_KEY] = stores;
   }
-  let store = stores.get(sessionId);
-  if (!store) {
-    store = [];
-    stores.set(sessionId, store);
+  const existing = stores.get(sessionId);
+  if (existing) {
+    // Keep active sessions when the bounded store evicts older sessions.
+    stores.delete(sessionId);
+    stores.set(sessionId, existing);
+    return existing;
+  }
+  const store: string[] = [];
+  stores.set(sessionId, store);
+  if (stores.size > HISTORY_SESSION_LIMIT) {
+    const oldest = stores.keys().next().value;
+    if (oldest !== undefined) stores.delete(oldest);
   }
   return store;
 }
@@ -157,6 +158,13 @@ function mirrorPrompt(sessionId: string, text: string): void {
   if (store.length > HISTORY_LIMIT) store.length = HISTORY_LIMIT;
 }
 
+/**
+ * The default Pi editor, framed in the same rounded accent modal box the
+ * voice/handoff overlays use, with the model and thinking level shown in the
+ * title (top border). Subclasses CustomEditor so all text handling,
+ * keybindings, autocomplete, and history are inherited; only render() is
+ * overridden to add the frame.
+ */
 export class PolishedEditor extends CustomEditor {
   private readonly uiTheme: any;
   private readonly getModelLabel: () => string;

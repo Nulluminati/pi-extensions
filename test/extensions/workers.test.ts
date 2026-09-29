@@ -22,10 +22,19 @@ import {
   startDelegatedWorker,
   type WorkerSessionState,
 } from "../../extensions/workers/src/delegate.ts";
-import { createWorkersWidget, formatWorkersStatus } from "../../extensions/workers/src/format.ts";
-import { runSetupHook, SetupHookCancelled } from "../../extensions/workers/src/provision/hook.ts";
+import {
+  createWorkersWidget,
+  formatRawStreamEntries,
+  formatWorkersStatus,
+} from "../../extensions/workers/src/format.ts";
+import {
+  abortReason,
+  runSetupHook,
+  SetupHookCancelled,
+} from "../../extensions/workers/src/provision/hook.ts";
 import {
   armAdoptedTimeout,
+  assistantTextFromContent,
   extractAssistantText,
   finalizeWorker,
   ingestStreamEvent,
@@ -56,6 +65,7 @@ import {
   writeRecordFile,
 } from "../../extensions/workers/src/store.ts";
 import type { WorkerEvents, WorkerRecord } from "../../extensions/workers/src/types.ts";
+import { resolveWorkerExtensions } from "../../extensions/workers/src/worker-extensions.ts";
 import {
   applyPatch,
   captureWorktreePatch,
@@ -2711,6 +2721,46 @@ describe("workers-units", () => {
       text,
     );
     expect(text).toBe("second");
+  });
+
+  it("assistantTextFromContent joins text blocks and ignores other content", () => {
+    expect(
+      assistantTextFromContent([
+        { type: "text", text: "half " },
+        { type: "text", text: "done" },
+      ]),
+    ).toBe("half done");
+    expect(assistantTextFromContent([{ type: "thinking", thinking: "h" }])).toBe("");
+    expect(assistantTextFromContent("a plain string")).toBe("");
+  });
+
+  it("formatRawStreamEntries renders the joined assistant text", () => {
+    const lines = [
+      '{"type":"workers_start","task":"do it"}',
+      '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"half "},{"type":"text","text":"done"}]}}',
+    ];
+    expect(formatRawStreamEntries(lines)).toEqual(["▷ started do it", "✎ half done"]);
+  });
+
+  it("abortReason prefers the signal reason and uses the caller's fallback", () => {
+    const aborted = (reason: unknown) => {
+      const controller = new AbortController();
+      controller.abort(reason);
+      return controller.signal;
+    };
+    expect(abortReason(aborted("stop it"), "fallback")).toBe("stop it");
+    expect(abortReason(aborted(new Error("boom")), "fallback")).toBe("boom");
+    // abort(null) leaves a reason with no usable text; only an absent signal
+    // or an unusable reason reaches the caller's fallback.
+    expect(abortReason(aborted(null), "fallback")).toBe("fallback");
+    expect(abortReason(undefined, "fallback")).toBe("fallback");
+  });
+
+  it("resolveWorkerExtensions defaults extensionsRoot to the repository extensions directory", () => {
+    const messenger = resolveWorkerExtensions(["messenger"]).find(
+      (extension) => extension.name === "messenger",
+    );
+    expect(messenger?.path).toContain(join("extensions", "messenger", "messenger.ts"));
   });
 
   it("ingestStreamEvent records blocker markers on the record", () => {

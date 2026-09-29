@@ -28,11 +28,13 @@ export class SetupHookCancelled extends Error {
   }
 }
 
-function abortReason(signal: AbortSignal | undefined): string {
+/** One-line reason for a caller's abort, from the signal's reason; the
+ *  caller supplies the fallback for a reason that carries no usable text. */
+export function abortReason(signal: AbortSignal | undefined, fallback: string): string {
   const reason = signal?.reason;
   if (typeof reason === "string" && reason.length > 0) return reason;
   if (reason instanceof Error && reason.message.length > 0) return reason.message;
-  return "caller aborted setup";
+  return fallback;
 }
 
 /** Check the executable before reserving a worker slot or creating a worktree. */
@@ -52,7 +54,8 @@ export async function runSetupHook(
   timeoutMs: number,
   externalSignal?: AbortSignal,
 ): Promise<HookResult> {
-  if (externalSignal?.aborted) throw new SetupHookCancelled(abortReason(externalSignal));
+  if (externalSignal?.aborted)
+    throw new SetupHookCancelled(abortReason(externalSignal, "caller aborted setup"));
   await assertSetupHook(worktree);
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
     throw new Error("worktree setup timeout must be positive");
@@ -67,7 +70,7 @@ export async function runSetupHook(
   let cancelReason = "caller aborted setup";
   const cancel = () => {
     cancelled = true;
-    cancelReason = abortReason(externalSignal);
+    cancelReason = abortReason(externalSignal, "caller aborted setup");
     controller.abort();
   };
   externalSignal?.addEventListener("abort", cancel, { once: true });
