@@ -9,6 +9,7 @@
 import { readFile, stat } from "node:fs/promises";
 import type { AgentToolResult, ExtensionContext, ThinkingLevel } from "pi";
 import { withFileLock } from "../../../lib/file-lock.ts";
+import { isCaseInsensitiveVolume } from "../../../lib/fs-case.ts";
 import { runGit } from "../../../lib/git.ts";
 import { projectStateRelative } from "../../../lib/paths.ts";
 import { resolveWorkerModelSpec } from "../../../lib/worker-model.ts";
@@ -17,7 +18,7 @@ import { carryIncludedPaths } from "./provision/carry.ts";
 import { assertSetupHook, runSetupHook, SetupHookCancelled } from "./provision/hook.ts";
 import type { ProvisionStatus } from "./provision/types.ts";
 import { type RunningWorker, startWorker } from "./runner.ts";
-import { generateWorkerId, sweepWorkerArtifacts } from "./store.ts";
+import { generateWorkerId, sweepWorkerArtifacts, workersDir } from "./store.ts";
 import type { WorkerEvents, WorkerRecord } from "./types.ts";
 import { resolveWorkerExtensions } from "./worker-extensions.ts";
 import { PROVISION_HOOK_RELATIVE, WORKER_SANDBOX_RELATIVE } from "./worker-sandbox-config.ts";
@@ -378,11 +379,20 @@ async function foreignLiveNames(cwd: string, state: WorkerSessionState): Promise
   return sweep.foreignLive.map((worker) => worker.name);
 }
 
-function assertWorkerLimits(
+/** Refuse when the requested name is taken or the worker cap is full, before
+ *  any side effect. Foreign-live names (workers of other live sessions) keep
+ *  messenger-name collisions unlikely; the check is best-effort (no lock,
+ *  small race window) because names route mail, not correctness. Runs before
+ *  the provision preflight so a limit or name refusal cannot leave a setup
+ *  commit behind. The slot is reserved synchronously after this check.
+ *  `caseInsensitiveFs` folds name comparison: on a folding volume (APFS)
+ *  case-variant names share one presence shard, so they cannot coexist. */
+export function assertWorkerLimits(
   state: WorkerSessionState,
   name: string,
   maxWorkers: number,
   foreignNames: string[],
+  caseInsensitiveFs = false,
 ): void {
   const takenNames = new Set<string>([...state.reserved.values(), ...foreignNames]);
   let runningCount = 0;
@@ -392,7 +402,10 @@ function assertWorkerLimits(
     takenNames.add(record.name);
   }
   runningCount += state.reserved.size;
-  if (takenNames.has(name)) {
+  const isTaken = caseInsensitiveFs
+    ? [...takenNames].some((taken) => taken.toLowerCase() === name.toLowerCase())
+    : takenNames.has(name);
+  if (isTaken) {
     throw new Error(`A worker named "${name}" is already running.`);
   }
   if (runningCount >= maxWorkers) {
@@ -426,7 +439,15 @@ export async function startDelegatedWorker(
   // cannot take this slot while preflight commits setup files.
   const foreignNames = await foreignLiveNames(cwd, state);
   assertNotAborted(signal);
-  assertWorkerLimits(state, name, plan.maxWorkers, foreignNames);
+  // The fold decision must be resolved synchronously: the check plus the
+  // slot reservation below run without an await between them.
+  assertWorkerLimits(
+    state,
+    name,
+    plan.maxWorkers,
+    foreignNames,
+    isCaseInsensitiveVolume(workersDir(cwd)),
+  );
   state.reserved.set(workerId, name);
 
   let worktree: { path: string; branch: string } | undefined;

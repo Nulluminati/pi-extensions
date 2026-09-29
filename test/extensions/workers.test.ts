@@ -18,6 +18,7 @@ import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext } from "pi";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  assertWorkerLimits,
   planDelegate,
   startDelegatedWorker,
   type WorkerSessionState,
@@ -819,6 +820,22 @@ sleep 30
     await expect(
       executeTool("spawn_worker", { task: "two", isolate: false, name: "scout" }),
     ).rejects.toThrow(/already running/);
+  });
+
+  it("assertWorkerLimits treats case-variant names as taken on a folding volume", () => {
+    const state: WorkerSessionState = {
+      running: new Map(),
+      branchWorkers: new Map(),
+      reserved: new Map(),
+    };
+
+    // APFS folds case: "Fix" must not run beside a live "fix", or both
+    // write the same presence shard and clobber each other.
+    expect(() => assertWorkerLimits(state, "Fix", 4, ["fix"], true)).toThrow(/already running/);
+    expect(() => assertWorkerLimits(state, "fix", 4, [], true)).not.toThrow();
+
+    // A case-sensitive volume keeps the names distinct.
+    expect(() => assertWorkerLimits(state, "Fix", 4, ["fix"], false)).not.toThrow();
   });
 
   it("workers status reads a finished worker's report", async () => {

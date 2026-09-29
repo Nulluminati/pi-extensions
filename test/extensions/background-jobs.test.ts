@@ -1212,3 +1212,12 @@ describe("spool retention", () => {
     expect((await readdir(dir)).length).toBe(SPOOL_MAX_FILES);
   });
 });
+
+describe("slugify", () => {
+  it("lowercases the label so case variants cannot collide on folding volumes", async () => {
+    const { slugify } = await import("../../extensions/background-jobs/src/format.ts");
+    expect(slugify("BUILD app")).toBe("build");
+    expect(slugify("Npm test")).toBe("npm");
+    expect(slugify("./Tools/x")).toBe(".toolsx");
+  });
+});

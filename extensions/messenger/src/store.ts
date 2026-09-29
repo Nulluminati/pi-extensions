@@ -11,11 +11,12 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { closeSync, mkdirSync, openSync, statSync, unlinkSync } from "node:fs";
+import { statSync } from "node:fs";
 import { appendFile, readFile, unlink } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { isNodeError } from "../../../lib/errors.ts";
 import { withFileLock } from "../../../lib/file-lock.ts";
+import { isCaseInsensitiveVolume } from "../../../lib/fs-case.ts";
 import { writeJsonAtomic, writeTextAtomic } from "../../../lib/json-atomic.ts";
 import { projectStateDir, projectStateRelative } from "../../../lib/paths.ts";
 import {
@@ -171,6 +172,20 @@ function noFreeNameError(name: string): Error {
  * identity. Dead holders are pruned on read, so a name whose session died is
  * reusable; a live holder pushes the claim to `name-2`, `name-3`, ….
  */
+/** The registry record covering `candidate` under the volume's fold policy:
+ *  on a folding volume (APFS), a case-variant holder occupies the same shard
+ *  file and mailbox, so it must count as taken. */
+function findHolder(
+  registry: PresenceRegistry,
+  candidate: string,
+  fold: boolean,
+): Presence | undefined {
+  if (!fold) return registry[candidate];
+  const folded = candidate.toLowerCase();
+  const key = Object.keys(registry).find((name) => name.toLowerCase() === folded);
+  return key === undefined ? undefined : registry[key];
+}
+
 export async function claimIdentity(
   cwd: string,
   name: string,
@@ -178,10 +193,11 @@ export async function claimIdentity(
 ): Promise<string> {
   return withFileLock(registryLockPath(cwd), async () => {
     const registry = await loadRegistry(cwd);
+    const fold = resolveCaseFold(cwd);
     let candidate = name;
     let claimed = false;
     for (let attempt = 0; attempt < MAX_NAME_ATTEMPTS; attempt += 1) {
-      const holder = registry[candidate];
+      const holder = findHolder(registry, candidate, fold);
       if (holder === undefined || holder.pid === pid || !isProcessAlive(holder.pid)) {
         claimed = true;
         break;
@@ -467,49 +483,6 @@ async function saveReservations(cwd: string, reservations: ReservationMap): Prom
  */
 export interface CaseFoldOptions {
   caseInsensitiveFs?: boolean;
-}
-
-const CASE_PROBE_TTL_MS = 60_000;
-// Module-level `let` by exemption: this memo caches a filesystem measurement,
-// not session or coordination state. Pi instances probing the same directory
-// share its volume's case behavior. A result only applies to its own directory
-// and expires after CASE_PROBE_TTL_MS; changes to volume behavior within that
-// interval can temporarily affect case-folded reservation conflicts. Tests in
-// test/extensions/messenger.test.ts pin directory scoping and expiry.
-let caseProbeCache: { dir: string; insensitive: boolean; at: number } | undefined;
-
-/**
- * Whether the filesystem backing `dir` treats names differing only by case as
- * one file. Probes by creating a uniquely named file and looking for its
- * case-flipped twin; a failed probe folds case to avoid missing a held path.
- * Cached briefly per directory: a probe costs one file create per TTL window.
- */
-function isCaseInsensitiveVolume(dir: string): boolean {
-  const now = Date.now();
-  if (caseProbeCache && caseProbeCache.dir === dir && now - caseProbeCache.at < CASE_PROBE_TTL_MS) {
-    return caseProbeCache.insensitive;
-  }
-  let insensitive = true;
-  try {
-    mkdirSync(dir, { recursive: true });
-    const probe = `case-probe-${process.pid}-${randomBytes(4).toString("hex")}`;
-    const handle = openSync(join(dir, probe), "wx", 0o600);
-    try {
-      try {
-        statSync(join(dir, probe.toUpperCase()));
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") insensitive = false;
-        else throw error;
-      }
-    } finally {
-      closeSync(handle);
-      unlinkSync(join(dir, probe));
-    }
-  } catch {
-    insensitive = true;
-  }
-  caseProbeCache = { dir, insensitive, at: now };
-  return insensitive;
 }
 
 /** Effective fold policy for one reservation operation. */

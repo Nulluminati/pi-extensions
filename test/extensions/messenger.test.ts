@@ -1371,6 +1371,40 @@ describe("messenger-store", () => {
     }
   });
 
+  it("claimIdentity treats a case-variant holder as taken on a folding volume", async () => {
+    // APFS folds case: "Raven" must not claim beside a live "raven", or the
+    // two agents would share one shard file and one mailbox.
+    mockVolumeCase([]);
+    const helper = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30_000)"], {
+      stdio: "ignore",
+    });
+    try {
+      const helperPid = helper.pid;
+      if (helperPid === undefined) throw new Error("failed to spawn live helper process");
+
+      expect(await claimIdentity(cwd, "raven", helperPid)).toBe("raven");
+      expect(await claimIdentity(cwd, "Raven", process.pid)).toBe("Raven-2");
+    } finally {
+      helper.kill();
+    }
+  });
+
+  it("claimIdentity allows case variants on a case-sensitive volume", async () => {
+    mockVolumeCase([join(cwd, CONFIG_DIR_NAME, "messenger")]);
+    const helper = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30_000)"], {
+      stdio: "ignore",
+    });
+    try {
+      const helperPid = helper.pid;
+      if (helperPid === undefined) throw new Error("failed to spawn live helper process");
+
+      expect(await claimIdentity(cwd, "raven", helperPid)).toBe("raven");
+      expect(await claimIdentity(cwd, "Raven", process.pid)).toBe("Raven");
+    } finally {
+      helper.kill();
+    }
+  });
+
   it("concurrent claimIdentity calls serialize and converge on distinct names", async () => {
     const helper = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30_000)"], {
       stdio: "ignore",

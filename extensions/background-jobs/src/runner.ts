@@ -115,7 +115,13 @@ export async function startBackgroundJob(options: StartBackgroundOptions): Promi
   await mkdir(options.spoolDir, { recursive: true });
   // The owning pid in the name lets any session's prune recognize another
   // live session's active log and never delete it (see pruneSpoolDir).
-  const spoolPath = join(options.spoolDir, `job-${job.id}-p${process.pid}-${label}.log`);
+  // The label is lowercased in the filename (display keeps its case): the
+  // owning pid already disambiguates across sessions, so this only stops
+  // case-variant labels from reading as the same log on a folding volume.
+  const spoolPath = join(
+    options.spoolDir,
+    `job-${job.id}-p${process.pid}-${label.toLowerCase()}.log`,
+  );
   job.spoolPath = spoolPath;
   job.wakeOnPattern = options.wakeOnPattern;
   job.patternSource = options.patternSource;

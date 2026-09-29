@@ -35,10 +35,15 @@ export function tailLines(text: string, lines = DEFAULT_TAIL_LINES): string {
   return `…[+ ${all.length - lines} earlier lines]\n${all.slice(-lines).join("\n")}`;
 }
 
-/** Derive a short filesystem-safe label from the command's first token. */
+/** Derive a short filesystem-safe label from the command's first token.
+ *  Lowercased: the label lands in spool filenames, and a folding volume
+ *  (APFS) cannot keep case-variant names apart. */
 export function slugify(command: string): string {
   const first = command.replace(/\s+/g, " ").trim().split(" ")[0] ?? "job";
-  const base = first.replace(/[^a-zA-Z0-9._-]/g, "").slice(0, 24);
+  const base = first
+    .replace(/[^a-zA-Z0-9._-]/g, "")
+    .slice(0, 24)
+    .toLowerCase();
   return base || "job";
 }
 
