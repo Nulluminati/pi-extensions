@@ -30,7 +30,7 @@ function escapeRegex(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function stripGithubPrefix(repository: string): string {
+export function stripGithubPrefix(repository: string): string {
   return repository.startsWith(GITHUB_REPO_PREFIX)
     ? repository.slice(GITHUB_REPO_PREFIX.length)
     : repository;

@@ -1,53 +1,11 @@
 # Consistency audit — remaining work
 
-This list contains the open findings from the audit of 27 extensions. It has 65 findings: 26 medium and 39 low. Paths and line numbers come from the audit; entries marked `(verified)` were checked again.
+This list contains 39 low-severity findings from the audit of 27 extensions. Paths and line numbers come from the audit; entries marked `(verified)` were checked again.
 
 ---
 
-## 1. Open code findings — medium
+## 1. Open README / doc gaps
 
-### Errors swallowed or mislabeled
-
-- [medium] btw/src/handoff.ts:85 — `catch { return null; }` swallows the summarize failure; the caller shows a generic warning and the cause is lost
-- [medium] btw/src/handoff.ts:52 — `runSummarize` ignores `_instructions`; `/btw:summarize <instructions>` never steers the summary prompt
-- [medium] session-recap/src/engine.ts:128 — background (idle/focus/resume) failures only hit `console.error`; with no small model configured this logs on every idle tick instead of notifying once
-- [medium] voice/src/overlay.ts:212-213 — empty `catch` silently drops partial-transcription failures (verified)
-- [medium] workers/src/store.ts:156-160 — dead ENOENT/ENOTDIR branch and fallthrough both return `undefined`; every read error (EACCES and others) is swallowed
-- [medium] workers/src/actions.ts:111-115 — catch converts every spool read failure into "No stream captured"; EACCES hides as a missing stream
-
-### State
-
-- [medium] workers/src/store.ts:204,211 — module-level `persistQueues` / `removedWorkers` maps leak across Pi instances and tests; move to per-instance state or document as deliberate with a test reset
-- [medium] messenger/src/store.ts:479 — module-level `caseProbeCache` memo leaks across instances; pass the probe result in from the composition root or exempt it in a comment
-
-### Structure
-
-- [medium] voice/voice.ts:79-120 — composition root re-exports ~30 internal symbols (barrel pattern); tests already import `src/` modules directly
-- [medium] synthetic/synthetic.ts:27-28 — root re-exports internal symbols consumed only by the test; point the test at `src/` and delete the re-exports
-- [medium] neuralwatt/neuralwatt.ts:34-35 — root re-exports five internal symbols; the test also imports `src/flex.ts` directly
-- [medium] ask-user/ask-user.ts — no `// --- ` section comments (verified)
-- [medium] ask-user/ask-user.ts:148-272 — `askWithDialogs`, `parseMultiSelectAnswer`, `formatNumberedOptions`, `extractQuestions`, `safeQuestions` live in the composition root; move to `src/`
-- [medium] ask-user/src/result.ts:83-97 — `textComponent` reimplements `wrapToolText` from lib/tool-renderer
-- [medium] workers/src/provision/hook.ts:6 — cross-extension src import `worker-sandbox/src/client.ts`; the only such import in the repo
-- [medium] worker-sandbox/src/client.ts:1-8 — consumed by a second extension (workers); promote `client.ts` + `policy.ts` to `lib/` or record an exception (preserve the `import.meta.url`-relative broker spawn at client.ts:224)
-- [medium] background-jobs/src/registry.ts:90 — `formatStatusText` exported but never called (verified); the extension has no `ctx.ui.setStatus` fallback, so the widget-first rule is unmet here too — wire it via `formatStatusLine` and add the key to the status-bar skip list, or delete the helper
-- [medium] background-jobs/background-jobs.ts:303 — `err()` helper sits after `// --- Extension ---`; move it up under `// --- Helpers ---`
-- [medium] approval-mode/src/dialog.ts:88 — bespoke approval dialog (defensible: Enter must not mean approve); record the deviation in a comment/README or extend lib/input-modal with a safe-default variant
-- [medium] context/context.ts:31-38 — non-TUI modes send a transcript message with `triggerTurn: false`; the only such call in the repo; deliberate and tested — drop it or add a documented carve-out to the extension-development skill
-- [medium] status-bar/status-bar.ts:9-12 — module header still says footer line 1 shows "model/provider, thinking level (color-coded, with a live activity dot)"; the model/thinking moved to the editor title (verified)
-
-### Duplication within one extension
-
-- [medium] goal/src/formatting.ts:3-8 — `formatTokens` reimplements `lib/model-picker.ts` `formatTokenCount` with different rounding (goal: 1500 → "2k"; lib: "1.5k")
-- [medium] context/src/view.ts:17 — `formatTokenCount` reimplements `lib/model-picker.ts` (output drift: lib renders `1m`, local renders `1.0m`)
-- [medium] code-search/src/results.ts:15-17 — `stripGithubPrefix` duplicates client.ts:31-33; export once from client.ts
-
----
-
-## 2. Open README / doc gaps
-
-- [medium] synthetic/README.md:3 — intro claims "dynamic model discovery" (verified); lines 55-69 — model table omits the `hf:` prefix the code registers; line 73 — "Startup staleness check" section has no body
-- [medium] clear/README.md:25 — says the handler runs `ctx.ui.confirm()` (verified); the code calls `confirmModal` (framed modal in TUI, `ctx.ui.confirm` only as non-TUI fallback)
 - [low] neuralwatt/README.md — "Pi APIs Used" table omits `pi.on("before_provider_request")` (neuralwatt.ts:93) and `pi.events.emit(FLEX_EVENT)` (neuralwatt.ts:50) (verified)
 - [low] worker-blocker/README.md:7 + worker-blocker.ts:7 — "as an `workers_blocker` marker" → "as a" (verified)
 - [low] approval-mode/README.md — the `--worker-readonly` flag (approval-mode.ts:41) is undocumented (verified)
@@ -55,7 +13,7 @@ This list contains the open findings from the audit of 27 extensions. It has 65 
 
 ---
 
-## 3. Open code findings — low
+## 2. Open code findings — low
 
 - [low] voice/src/summary.ts:166 — `(tui: any, theme: any)` erases widget component types
 - [low] voice/src/overlay.ts:101 — stray `// 0.5s` comment

@@ -1,5 +1,5 @@
 import { execFile, spawn } from "node:child_process";
-import { existsSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext } from "pi";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import messengerExtension from "../../extensions/messenger/messenger.ts";
 import { checkToolCall } from "../../extensions/messenger/src/enforce.ts";
 import { formatBlockReason } from "../../extensions/messenger/src/format.ts";
@@ -37,6 +37,14 @@ import { withFileLock } from "../../lib/file-lock.ts";
 vi.mock("../../lib/file-lock.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/file-lock.ts")>();
   return { ...actual, withFileLock: vi.fn(actual.withFileLock) };
+});
+
+// Call-through spy on statSync only: the reservation case probe is the one
+// node:fs call whose outcome depends on the host volume's case behavior, so
+// tests pin it per directory while every other call stays real.
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return { ...actual, statSync: vi.fn(actual.statSync) };
 });
 
 import { runGit } from "../../lib/git.ts";
@@ -859,6 +867,36 @@ describe("messenger-extension", () => {
   });
 });
 
+/**
+ * Pin the reservation case probe without depending on the host volume's real
+ * case behavior: a probe under any `exactDirs` path measures case-sensitive
+ * (the uppercased twin is missing), every other probe measures
+ * case-insensitive, and the registered restore puts the call-through
+ * implementation back. `exactDirs` is read live, so a test can flip the
+ * simulated volume mid-test. Non-probe statSync calls always pass through.
+ */
+function mockVolumeCase(exactDirs: string[]): { probeCount: () => number } {
+  const statSyncMock = statSync as unknown as Mock<(...args: unknown[]) => unknown>;
+  const callThrough = statSyncMock.getMockImplementation();
+  let probes = 0;
+  statSyncMock.mockImplementation((path: unknown, options?: unknown) => {
+    const probed = String(path);
+    if (probed.toLowerCase().includes("case-probe-")) {
+      probes += 1;
+      if (exactDirs.some((dir) => probed.startsWith(dir))) {
+        throw Object.assign(new Error(`ENOENT: ${probed}`), { code: "ENOENT" });
+      }
+      return {}; // The case-flipped twin exists: the volume folds case.
+    }
+    if (!callThrough) throw new Error("real statSync implementation missing");
+    return callThrough(path, options);
+  });
+  globalRestores.push(() => {
+    if (callThrough) statSyncMock.mockImplementation(callThrough);
+  });
+  return { probeCount: () => probes };
+}
+
 describe("messenger-store", () => {
   let cwd: string;
 
@@ -1125,6 +1163,55 @@ describe("messenger-store", () => {
       prefix: "docs",
       owner: "owner",
     });
+  });
+
+  it("the case probe memo answers only for its own directory", async () => {
+    // Two instances share the module-level probe memo: this volume folds
+    // case, the other instance's does not.
+    const otherCwd = await mkdtemp(join(tmpdir(), "messenger-store-"));
+    globalRestores.push(() => rmSync(otherCwd, { recursive: true, force: true }));
+    const probe = mockVolumeCase([messengerDir(otherCwd)]);
+
+    expect((await reserve(cwd, "owner", ["docs"])).reserved).toEqual(["docs"]);
+    expect((await reserve(otherCwd, "owner", ["docs"])).reserved).toEqual(["docs"]);
+
+    // The first instance folds "Docs" onto the held claim; the second
+    // instance measures its own volume and stores it as a distinct key.
+    const folded = await reserve(cwd, "other", ["Docs"]);
+    expect(folded.conflicts).toEqual([{ path: "Docs", owner: "owner" }]);
+    const distinct = await reserve(otherCwd, "other", ["Docs"]);
+    expect(distinct.reserved).toEqual(["Docs"]);
+
+    // The memo holds one directory at a time, so alternating instances each
+    // re-measure instead of reusing the other volume's answer.
+    expect(probe.probeCount()).toBe(4);
+    expect(Object.keys(await loadReservations(cwd))).toEqual(["docs"]);
+    expect(Object.keys(await loadReservations(otherCwd)).sort()).toEqual(["Docs", "docs"]);
+  });
+
+  it("a memoized case probe expires after its TTL and re-measures the volume", async () => {
+    let now = 1_700_000_000_000;
+    const dateSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+    globalRestores.push(() => dateSpy.mockRestore());
+    const exactDirs: string[] = [];
+    const probe = mockVolumeCase(exactDirs);
+
+    expect((await reserve(cwd, "owner", ["docs"])).reserved).toEqual(["docs"]);
+
+    // The volume stops folding case inside the TTL window; the memoized
+    // answer is reused, so matching still folds and no probe runs.
+    now += 30_000;
+    exactDirs.push(messengerDir(cwd));
+    const withinTtl = await reserve(cwd, "other", ["Docs"]);
+    expect(withinTtl.conflicts).toEqual([{ path: "Docs", owner: "owner" }]);
+    expect(probe.probeCount()).toBe(1);
+
+    // After the TTL the probe re-measures and the new answer applies.
+    now += 61_000;
+    const afterTtl = await reserve(cwd, "other", ["Docs"]);
+    expect(afterTtl.reserved).toEqual(["Docs"]);
+    expect(probe.probeCount()).toBe(2);
+    expect(Object.keys(await loadReservations(cwd)).sort()).toEqual(["Docs", "docs"]);
   });
 
   it("loadReservations keeps a claim whose pid is live behind an EPERM signal check", async () => {

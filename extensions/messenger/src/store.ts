@@ -470,8 +470,12 @@ export interface CaseFoldOptions {
 }
 
 const CASE_PROBE_TTL_MS = 60_000;
-/** Memoized probe result, not coordination state: a wrong entry expires with
- *  the TTL and only skips re-measuring an unchanged volume. */
+// Module-level `let` by exemption: this memo caches a filesystem measurement,
+// not session or coordination state. Pi instances probing the same directory
+// share its volume's case behavior. A result only applies to its own directory
+// and expires after CASE_PROBE_TTL_MS; changes to volume behavior within that
+// interval can temporarily affect case-folded reservation conflicts. Tests in
+// test/extensions/messenger.test.ts pin directory scoping and expiry.
 let caseProbeCache: { dir: string; insensitive: boolean; at: number } | undefined;
 
 /**

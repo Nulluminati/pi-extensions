@@ -1,3 +1,4 @@
+import { stripGithubPrefix } from "./client.ts";
 import type {
   CodeSearchDetails,
   CodeSearchFacetBucket,
@@ -11,11 +12,6 @@ const MAX_SNIPPET_LENGTH = 400;
 const MAX_SNIPPET_LINES = 8;
 
 // --- Pure utility functions ---
-
-function stripGithubPrefix(repository: string): string {
-  const prefix = "github.com/";
-  return repository.startsWith(prefix) ? repository.slice(prefix.length) : repository;
-}
 
 function fallbackLanguageFromPath(filePath: string): string {
   const extension = filePath.split(".").pop()?.toLowerCase() ?? "";
