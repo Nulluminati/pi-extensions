@@ -12,11 +12,11 @@
 
 import { randomBytes } from "node:crypto";
 import { closeSync, mkdirSync, openSync, statSync, unlinkSync } from "node:fs";
-import { appendFile, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { appendFile, readFile, unlink } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { isNodeError } from "../../../lib/errors.ts";
 import { withFileLock } from "../../../lib/file-lock.ts";
-import { writeJsonAtomic } from "../../../lib/json-atomic.ts";
+import { writeJsonAtomic, writeTextAtomic } from "../../../lib/json-atomic.ts";
 import { projectStateDir, projectStateRelative } from "../../../lib/paths.ts";
 import {
   isProcessAlive,
@@ -330,9 +330,7 @@ async function quarantineMalformedLocked(cwd: string, name: string): Promise<num
     await unlink(path).catch(() => {});
     return malformed.length;
   }
-  const tmp = `${path}.${process.pid}.${randomBytes(2).toString("hex")}.tmp`;
-  await writeFile(tmp, `${kept.join("\n")}\n`, "utf8");
-  await rename(tmp, path);
+  await writeTextAtomic(path, `${kept.join("\n")}\n`);
   return malformed.length;
 }
 
@@ -370,9 +368,7 @@ export async function markRead(cwd: string, name: string, ids: string[]): Promis
       await unlink(path).catch(() => {});
       return;
     }
-    const tmp = `${path}.${process.pid}.${randomBytes(2).toString("hex")}.tmp`;
-    await writeFile(tmp, `${kept.join("\n")}\n`, "utf8");
-    await rename(tmp, path);
+    await writeTextAtomic(path, `${kept.join("\n")}\n`);
   });
 }
 

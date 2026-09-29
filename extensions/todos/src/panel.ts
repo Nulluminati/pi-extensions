@@ -5,6 +5,7 @@
  */
 
 import type { ExtensionAPI, ExtensionCommandContext } from "pi";
+import { PANEL_OVERLAY_OPTIONS } from "../../../lib/overlay-options.ts";
 import { getTodoItems, removeCompletedTodoItems, type TodoItem } from "../../../lib/todos.ts";
 import { type ModalFrameOptions, renderModalFrame } from "../../../lib/tui-frame.ts";
 import { formatStyledKeyHints } from "../../../lib/ui-format.ts";
@@ -12,9 +13,6 @@ import { buildProgressLabel, itemLine, type WidgetTheme } from "./widget.ts";
 
 const PANEL_TITLE = "Todos";
 const EMPTY_LINE = "No items yet.";
-
-/** Overlay options shared with the context and background-jobs panels. */
-const OVERLAY_OPTIONS = { width: "70%", maxHeight: "80%", anchor: "center" } as const;
 
 function buildPanelLines(theme: WidgetTheme, items: TodoItem[]): string[] {
   if (items.length === 0) return [theme.fg("dim", EMPTY_LINE)];
@@ -58,6 +56,6 @@ export function showTodosPanel(pi: ExtensionAPI, ctx: ExtensionCommandContext): 
         },
       };
     },
-    { overlay: true, overlayOptions: OVERLAY_OPTIONS },
+    { overlay: true, overlayOptions: PANEL_OVERLAY_OPTIONS },
   );
 }

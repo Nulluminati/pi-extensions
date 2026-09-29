@@ -1,8 +1,8 @@
-import { mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { writeJsonAtomic } from "../../lib/json-atomic.ts";
+import { writeJsonAtomic, writeTextAtomic } from "../../lib/json-atomic.ts";
 
 describe("json-atomic", () => {
   let dir: string;
@@ -62,6 +62,33 @@ describe("json-atomic", () => {
     // Last-writer-wins: the final content is exactly one of the payloads.
     const final = JSON.parse(await readFile(path, "utf8"));
     expect([{ writer: "a" }, { writer: "b" }]).toContainEqual(final);
+    expect(await tmpLeftovers()).toEqual([]);
+  });
+
+  it("writeTextAtomic writes text verbatim to the target path", async () => {
+    const path = join(dir, "inbox.jsonl");
+
+    await writeTextAtomic(path, '{"id":"m1"}\n{"id":"m2"}\n');
+
+    expect(await readFile(path, "utf8")).toBe('{"id":"m1"}\n{"id":"m2"}\n');
+    expect(await tmpLeftovers()).toEqual([]);
+  });
+
+  it("writeTextAtomic writes the file with the requested mode", async () => {
+    const path = join(dir, "secret.jsonl");
+
+    await writeTextAtomic(path, "x\n", { mode: 0o600 });
+
+    expect((await stat(path)).mode & 0o777).toBe(0o600);
+  });
+
+  it("writeTextAtomic removes the temp file and rethrows when the rename fails", async () => {
+    // Renaming a file onto a directory fails, leaving the staged temp behind
+    // unless the helper cleans it up.
+    const path = join(dir, "blocker");
+    await mkdir(path);
+
+    await expect(writeTextAtomic(path, "x")).rejects.toThrow();
     expect(await tmpLeftovers()).toEqual([]);
   });
 });

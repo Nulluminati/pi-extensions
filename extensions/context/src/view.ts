@@ -4,6 +4,7 @@
  */
 
 import type { ExtensionCommandContext } from "pi";
+import { PANEL_OVERLAY_OPTIONS } from "../../../lib/overlay-options.ts";
 import {
   type ModalFrameOptions,
   modalContentWidth,
@@ -177,11 +178,6 @@ function buildModalLines(theme: any, data: ContextBreakdown, width: number): str
 // --- Modal ---
 
 /**
- * Overlay options for the context modal: 70% wide, up to 80% of terminal
- * height, centered — the same treatment as the background-jobs panel.
- */
-const OVERLAY_OPTIONS = { width: "70%", maxHeight: "80%", anchor: "center" } as const;
-/**
  * Frame rows outside the body: top border + bottom border.
  */
 const FRAME_BORDER_ROWS = 2;
@@ -226,7 +222,7 @@ export async function showContextModal(
         },
       };
     },
-    { overlay: true, overlayOptions: OVERLAY_OPTIONS },
+    { overlay: true, overlayOptions: PANEL_OVERLAY_OPTIONS },
   );
 }
 

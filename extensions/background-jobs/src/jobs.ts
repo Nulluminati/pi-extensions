@@ -3,6 +3,7 @@
  * focusable overlay panel opened by the user-facing /jobs command.
  */
 
+import { PANEL_OVERLAY_OPTIONS } from "../../../lib/overlay-options.ts";
 import { renderModalFrame } from "../../../lib/tui-frame.ts";
 import { formatStyledKeyHints } from "../../../lib/ui-format.ts";
 import { elapseMs, fmtDuration, formatJobLine, tailLines, truncate } from "./format.ts";
@@ -51,7 +52,7 @@ export function openJobsPanel(ui: PanelUi, registry: JobRegistry): void {
   ui.custom(
     (tui: unknown, theme: any, keybindings: any, done: (result?: unknown) => void) =>
       new JobPanel(registry, theme, done, keybindings, tui as PanelTui | null),
-    { overlay: true, overlayOptions: { width: "70%", maxHeight: "80%", anchor: "center" } },
+    { overlay: true, overlayOptions: PANEL_OVERLAY_OPTIONS },
   );
 }
 

@@ -10,33 +10,36 @@
  * roll the rename itself back; the invariant is no torn content.)
  *
  * Consumers: messenger reservations, missions, autoresearch, the workers
- * worker registry, and presence shards.
+ * worker registry, and presence shards. `writeTextAtomic` is the text-level
+ * primitive beneath `writeJsonAtomic`; messenger also uses it directly for
+ * JSONL mailbox rewrites.
  */
 
 import { randomBytes } from "node:crypto";
 import { mkdir, open, rename, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 
-export interface WriteJsonAtomicOptions {
+export interface WriteAtomicOptions {
   /** Mode for the freshly created file. Omitted, the platform default applies. */
   mode?: number;
 }
 
 /**
- * Serialize `data` as pretty-printed JSON and atomically replace `path`:
- * writes `${path}.${pid}.${random}.tmp` next to it, fsyncs it, then renames
- * the temp file into place. Creates parent directories as needed.
+ * Atomically replace `path` with `text`: writes
+ * `${path}.${pid}.${random}.tmp` next to it, fsyncs it, then renames the
+ * temp file into place. Creates parent directories as needed. Use this for
+ * plain-text formats such as JSONL; use `writeJsonAtomic` for JSON documents.
  */
-export async function writeJsonAtomic(
+export async function writeTextAtomic(
   path: string,
-  data: unknown,
-  options: WriteJsonAtomicOptions = {},
+  text: string,
+  options: WriteAtomicOptions = {},
 ): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   const tmp = `${path}.${process.pid}.${randomBytes(2).toString("hex")}.tmp`;
   const handle = await open(tmp, "w", options.mode);
   try {
-    await handle.writeFile(JSON.stringify(data, null, 2), "utf8");
+    await handle.writeFile(text, "utf8");
     await handle.sync();
   } finally {
     await handle.close();
@@ -47,4 +50,15 @@ export async function writeJsonAtomic(
     await unlink(tmp).catch(() => {});
     throw error;
   }
+}
+
+/**
+ * Serialize `data` as pretty-printed JSON and atomically replace `path`.
+ */
+export async function writeJsonAtomic(
+  path: string,
+  data: unknown,
+  options: WriteAtomicOptions = {},
+): Promise<void> {
+  await writeTextAtomic(path, JSON.stringify(data, null, 2), options);
 }

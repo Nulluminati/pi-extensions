@@ -27,6 +27,7 @@ import { renderModalFrame } from "../../../lib/tui-frame.ts";
 | Make a cheap one-off LLM call (summaries, side agents, recaps) | `resolveSmallModel` (+ `complete` / `completeSimple` from `@earendil-works/pi-ai`) | `lib/small-model.ts` |
 | Build a `/smallmodel`-style config command or read the user's saved small-model choice | `loadSmallModelConfig`, `saveSmallModelConfig`, `parseSmallModelSpec` | `lib/small-model.ts` |
 | Draw a bordered modal dialog with a title | `renderModalFrame`, `modalContentWidth` | `lib/tui-frame.ts` |
+| Size a centered list or detail overlay | `PANEL_OVERLAY_OPTIONS` | `lib/overlay-options.ts` |
 | Build a framed editor-widget panel (jobs, todos, missions, workers, autoresearch) | `createFramedWidget` | `lib/framed-widget.ts` |
 | Publish an editor widget with a guaranteed, churn-free position (recap first, then workers/jobs/todos/missions/autoresearch) | `setStripWidget`, `WIDGET_PRIORITY` | `lib/widget-strip.ts` |
 | Show an icon + colored status in the footer/status area | `formatStatusLine` | `lib/ui-format.ts` |
@@ -36,7 +37,7 @@ import { renderModalFrame } from "../../../lib/tui-frame.ts";
 | Prompt for one line of text in a framed modal | `promptText`, `createInputModal` | `lib/input-modal.ts` |
 | Ask a yes/no question in a framed modal | `confirmModal`, `createConfirmModal` | `lib/input-modal.ts` |
 | Wrap/replace the editor component (`ctx.ui.setEditorComponent`) | `installEditorFactoryLayer`, `hasEditorFactoryLayer`, `removeEditorFactoryLayer` | `lib/editor-factory.ts` |
-| Write config/state JSON without risking a torn file on crash | `writeJsonAtomic` | `lib/json-atomic.ts` |
+| Write config/state JSON or JSONL without risking a torn file on crash | `writeJsonAtomic`, `writeTextAtomic` | `lib/json-atomic.ts` |
 | Mutate shared state files across sessions without clobbering | `withFileLock` | `lib/file-lock.ts` |
 | Resolve where an extension stores config, state, cache, or project files | `agentConfigPath`, `agentStateDir`, `cacheDir`, `projectStateDir`, `projectStateRelative` | `lib/paths.ts` |
 | Point a user-facing message at Pi's auth file | `authPath` | `lib/paths.ts` |
@@ -89,6 +90,10 @@ render(width: number): string[] {
 - Compute body width with `modalContentWidth(width)` and render your content into that narrower width; the frame adds the border and padding around it.
 - Small widths are handled: below 4 columns the frame degrades to truncated raw lines. You don't need width guards beyond the empty case.
 - Lower-level pieces (`frameBorderLine`, `frameRuleLine`, `frameContentLine`) exist for custom layouts, but prefer `renderModalFrame` so all dialogs share one visual language.
+
+## `lib/overlay-options.ts` — centered panel dimensions
+
+Use `PANEL_OVERLAY_OPTIONS` in `ctx.ui.custom` for a centered panel that is 70% wide and up to 80% tall. The todos, context, and background-jobs panels share this constant. Account for the 80% height limit when rendering frame borders and key hints.
 
 ## `lib/framed-widget.ts` — framed editor widgets
 
@@ -313,11 +318,7 @@ Ephemeral spills with no retention go in `os.tmpdir()` with a `pi-<name>-` prefi
 
 ## `lib/json-atomic.ts` — atomic JSON writes
 
-Crash-safe state file writes: `writeJsonAtomic(path, data)` pretty-prints `data`, writes a
-`${path}.${pid}.${random}.tmp` sibling, then renames it over the target (rename is atomic),
-creating parent directories as needed. Use for every persisted JSON state file (reservations,
-missions, registries). Used by `messenger`, `missions`, `autoresearch`, `workers`, and
-`lib/presence-shards`.
+Crash-safe state file writes: `writeJsonAtomic(path, data)` pretty-prints JSON. For plain text such as JSONL, use `writeTextAtomic(path, text)`. Both write and sync a `${path}.${pid}.${random}.tmp` sibling, then rename it over the target (rename is atomic). They create parent directories as needed and remove the temp file if rename fails. Use `writeJsonAtomic` for every persisted JSON state file (reservations, missions, registries).
 
 ## `lib/file-lock.ts` — cross-process advisory file lock
 
