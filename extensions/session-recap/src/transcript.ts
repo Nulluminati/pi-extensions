@@ -1,4 +1,5 @@
 import { extractText, extractToolCallBlocks } from "../../../lib/session-utils.ts";
+import { formatTranscriptEntry } from "../../../lib/transcript-prompt.ts";
 import type { Entry } from "./types.ts";
 
 // --- Utilities ---
@@ -42,20 +43,11 @@ export function buildRecentTranscript(entries: Entry[], fromLastUser = true): st
 
   const lines: string[] = [];
   for (const e of slice) {
-    if (e.type !== "message" || !e.message?.role) continue;
-    const role = e.message.role;
-    if (role === "user") {
-      const t = extractText(e.message.content).trim();
-      if (t) lines.push(`User: ${t.slice(0, 1200)}`);
-    } else if (role === "assistant") {
-      const t = extractText(e.message.content).trim();
-      if (t) lines.push(`Assistant: ${t.slice(0, 1200)}`);
+    const line = formatTranscriptEntry(e);
+    if (line) lines.push(line);
+    if (e.type === "message" && e.message?.role === "assistant") {
       const calls = formatToolCallSummary(e.message.content);
       if (calls.length) lines.push(...calls);
-    } else if (role === "toolResult") {
-      const t = extractText(e.message.content).trim();
-      const name = e.message.toolName ?? "tool";
-      if (t) lines.push(`Result(${name}): ${t.slice(0, 400)}`);
     }
   }
   return lines.join("\n");

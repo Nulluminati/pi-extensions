@@ -1,37 +1,10 @@
-import { extractText } from "../../../lib/session-utils.ts";
+import { formatTranscriptEntry, type TranscriptEntry } from "../../../lib/transcript-prompt.ts";
 
 const TRANSCRIPT_MAX_CHARS = 36000;
 
-export interface HandoffEntry {
-  id?: string;
-  type: string;
-  message?: {
-    role?: string;
-    content?: unknown;
-    toolName?: string;
-  };
-}
+export type HandoffEntry = TranscriptEntry;
 
 // --- Pure utilities ---
-
-function formatTranscriptEntry(entry: HandoffEntry): string | undefined {
-  if (entry.type !== "message" || !entry.message?.role) return undefined;
-
-  const role = entry.message.role;
-  const text = extractText(entry.message.content).trim();
-
-  if (role === "user" && text) {
-    return `User: ${text.slice(0, 1200)}`;
-  }
-  if (role === "assistant" && text) {
-    return `Assistant: ${text.slice(0, 1200)}`;
-  }
-  if (role === "toolResult" && text) {
-    const name = entry.message.toolName ?? "tool";
-    return `Result(${name}): ${text.slice(0, 400)}`;
-  }
-  return undefined;
-}
 
 export function buildTranscript(entries: HandoffEntry[]): string {
   const lines: string[] = [];

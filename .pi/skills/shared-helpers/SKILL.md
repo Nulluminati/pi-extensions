@@ -24,6 +24,7 @@ import { renderModalFrame } from "../../../lib/tui-frame.ts";
 | You need to… | Use | Module |
 |---|---|---|
 | Read text / tool calls / tool results from `sessionManager.getBranch()` entries | `extractText`, `extractToolCallBlocks`, `extractToolResultBlocks`, `parseContentBlocks` | `lib/session-utils.ts` |
+| Format user, assistant, and tool-result entries for a summary prompt | `formatTranscriptEntry` | `lib/transcript-prompt.ts` |
 | Make a cheap one-off LLM call (summaries, side agents, recaps) | `resolveSmallModel` (+ `complete` / `completeSimple` from `@earendil-works/pi-ai`) | `lib/small-model.ts` |
 | Build a `/smallmodel`-style config command or read the user's saved small-model choice | `loadSmallModelConfig`, `saveSmallModelConfig`, `parseSmallModelSpec` | `lib/small-model.ts` |
 | Draw a bordered modal dialog with a title | `renderModalFrame`, `modalContentWidth` | `lib/tui-frame.ts` |
@@ -206,6 +207,10 @@ Session message content is `string | Array<block>` where blocks vary by shape. T
 - `extractToolCallBlocks(content)` / `extractToolResultBlocks(content)` — pull tool calls (with `name`, `arguments`) and results.
 
 Reach for these any time you walk `ctx.sessionManager.getBranch()` to build a transcript, recap, or background summary (see `session-recap/src/transcript.ts`). Never hand-roll `typeof content === "string"` / `Array.isArray` filtering per extension.
+
+## `lib/transcript-prompt.ts` — transcript entries for prompts
+
+`formatTranscriptEntry(entry)` renders a message as `User:`, `Assistant:`, or `Result(tool):` text. It trims text, caps user and assistant text at 1200 characters, caps tool results at 400 characters, and returns `undefined` for other entries. Consumers keep their own selection and total-length limits.
 
 ## `lib/small-model.ts` — cheap direct LLM calls
 
