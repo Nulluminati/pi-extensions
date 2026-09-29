@@ -20,6 +20,22 @@ interface VoiceSettingsTheme {
   bold(text: string): string;
 }
 
+/** Name the backend that capture would actually use, so the settings row
+ *  cannot claim "Ready" while the platform has no working recorder. Linux
+ *  keeps the historical "Ready" wording. */
+export function describeRecorderBackend(deps: RecorderDeps): string {
+  if (process.platform === "darwin") {
+    if (deps.hasFfmpeg) return "Ready (ffmpeg/avfoundation)";
+    if (deps.hasSox) return "Ready (sox)";
+    return "Not connected";
+  }
+  return deps.hasFfmpeg || deps.hasArecord ? "Ready" : "Not connected";
+}
+
+function resolvePlaybackProbe(): boolean {
+  return hasTool("afplay") || hasTool("pw-play") || hasTool("ffplay");
+}
+
 interface VoiceSettingsOptions {
   modelsDir?: string;
   activeModelId?: string;
@@ -67,7 +83,7 @@ export async function runVoiceSettings(
 
   const modelsDir = opts.modelsDir ?? resolveModelsDir(process.env);
   const recorder = opts.recorder ?? detectRecorders();
-  const playbackReady = opts.playbackReady ?? (hasTool("pw-play") || hasTool("ffplay"));
+  const playbackReady = opts.playbackReady ?? resolvePlaybackProbe();
   const source = opts.source ?? resolveSource(process.env);
   let activeModelId = opts.activeModelId ?? DEFAULT_MODEL_ID;
   let activeTtsModelId = opts.activeTtsModelId ?? DEFAULT_TTS_MODEL_ID;
@@ -138,12 +154,12 @@ export async function runVoiceSettings(
       id: "recording-input",
       label: "Recording input",
       description: `Set a different source with ${SOURCE_ENV_VAR} before starting Pi.`,
-      currentValue: `${source} · ${recorder.hasFfmpeg || recorder.hasArecord ? "Ready" : "Not connected"}`,
+      currentValue: `${source} · ${describeRecorderBackend(recorder)}`,
     },
     {
       id: "speech-output",
       label: "Speech output",
-      description: "Playback requires pw-play or ffplay.",
+      description: "Playback requires afplay (macOS), pw-play, or ffplay.",
       currentValue: playbackReady ? "Ready" : "Not connected",
     },
     {

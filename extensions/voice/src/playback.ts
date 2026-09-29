@@ -17,21 +17,28 @@ export function stopSpeechJob(job: SpeechJob): void {
   job.player = null;
 }
 
-function resolvePlaybackCommand(): "pw-play" | "ffplay" {
-  if (hasTool("pw-play")) return "pw-play";
-  if (hasTool("ffplay")) return "ffplay";
-  throw new Error("Install PipeWire (pw-play) or ffmpeg (ffplay) for playback.");
+export type PlaybackCommand = "afplay" | "pw-play" | "ffplay";
+
+export function resolvePlaybackCommand(
+  probe: (name: string) => boolean = hasTool,
+): PlaybackCommand {
+  // afplay ships with macOS and plays WAV directly; probe order is safe on
+  // every platform because the other players are simply absent elsewhere.
+  if (probe("afplay")) return "afplay";
+  if (probe("pw-play")) return "pw-play";
+  if (probe("ffplay")) return "ffplay";
+  throw new Error("Install afplay (macOS), PipeWire (pw-play), or ffmpeg (ffplay) for playback.");
 }
 
 async function playWaveFile(
-  playerCommand: "pw-play" | "ffplay",
+  playerCommand: PlaybackCommand,
   wavPath: string,
   job: SpeechJob,
 ): Promise<void> {
   const playerArgs =
-    playerCommand === "pw-play"
-      ? [wavPath]
-      : ["-nodisp", "-autoexit", "-loglevel", "error", wavPath];
+    playerCommand === "ffplay"
+      ? ["-nodisp", "-autoexit", "-loglevel", "error", wavPath]
+      : [wavPath];
   const player = spawn(playerCommand, playerArgs, { stdio: ["ignore", "ignore", "ignore"] });
   job.player = player;
   try {

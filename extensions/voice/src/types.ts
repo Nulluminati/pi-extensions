@@ -120,6 +120,8 @@ export interface TranscribeResult {
 export interface RecorderDeps {
   hasFfmpeg: boolean;
   hasArecord: boolean;
+  /** sox works on every platform; on macOS it is the fallback recorder. */
+  hasSox?: boolean;
 }
 
 export type TtsBackend = "kitten" | "inflect" | "supertonic";

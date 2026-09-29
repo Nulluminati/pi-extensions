@@ -65,58 +65,123 @@ interface StreamingRecorder {
   stop(): void;
 }
 
-/** Spawn ffmpeg/arecord with PCM output piped to stdout for chunk-based capture. */
+export interface RecorderCommand {
+  cmd: string;
+  args: string[];
+}
+
+/** Pick the capture backend for the platform. Linux captures through
+ *  PulseAudio (ffmpeg) or ALSA (arecord); macOS has neither, so ffmpeg uses
+ *  the avfoundation input and sox is the fallback. */
+export function resolveRecorderCommand(source: string, deps: RecorderDeps): RecorderCommand | null {
+  if (deps.hasFfmpeg) {
+    if (process.platform === "darwin") {
+      return {
+        cmd: "ffmpeg",
+        args: [
+          "-hide_banner",
+          "-loglevel",
+          "error",
+          "-f",
+          "avfoundation",
+          "-i",
+          source,
+          "-ac",
+          "1",
+          "-ar",
+          String(SAMPLE_RATE),
+          "-f",
+          "s16le",
+          "-",
+        ],
+      };
+    }
+    return {
+      cmd: "ffmpeg",
+      args: [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-f",
+        "pulse",
+        "-i",
+        source,
+        "-ac",
+        "1",
+        "-ar",
+        String(SAMPLE_RATE),
+        "-f",
+        "s16le",
+        "-",
+      ],
+    };
+  }
+  if (process.platform === "darwin" && deps.hasSox) {
+    return {
+      cmd: "sox",
+      args: ["-d", "-t", "s16le", "-r", String(SAMPLE_RATE), "-c", "1", "-"],
+    };
+  }
+  // arecord is Linux ALSA-only; alsa-utils does not exist on macOS.
+  if (process.platform !== "darwin" && deps.hasArecord) {
+    return {
+      cmd: "arecord",
+      args: [
+        "-q",
+        "-D",
+        source,
+        "-f",
+        "S16_LE",
+        "-r",
+        String(SAMPLE_RATE),
+        "-c",
+        "1",
+        "-t",
+        "raw",
+        "-",
+      ],
+    };
+  }
+  return null;
+}
+
+/** Spawn the platform's recorder with PCM output piped to stdout for
+ *  chunk-based capture. `onFailure` reports spawn errors and early exits
+ *  (with the stderr tail) so callers can surface them instead of hanging. */
 export function startStreamingRecorder(
   source: string,
   deps: RecorderDeps,
   onChunk: (samples: Float32Array, rms: number) => void,
+  onFailure?: (reason: string) => void,
 ): StreamingRecorder | null {
-  let cmd: string | null = null;
-  let args: string[] = [];
-  if (deps.hasFfmpeg) {
-    cmd = "ffmpeg";
-    args = [
-      "-hide_banner",
-      "-loglevel",
-      "error",
-      "-f",
-      "pulse",
-      "-i",
-      source,
-      "-ac",
-      "1",
-      "-ar",
-      String(SAMPLE_RATE),
-      "-f",
-      "s16le",
-      "-",
-    ];
-  } else if (deps.hasArecord) {
-    cmd = "arecord";
-    args = [
-      "-q",
-      "-D",
-      source,
-      "-f",
-      "S16_LE",
-      "-r",
-      String(SAMPLE_RATE),
-      "-c",
-      "1",
-      "-t",
-      "raw",
-      "-",
-    ];
-  }
-  if (!cmd) return null;
-  const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "ignore"] });
+  const resolved = resolveRecorderCommand(source, deps);
+  if (!resolved) return null;
+  const { cmd, args } = resolved;
+  const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"] });
+  let stopped = false;
+  let stderrTail = "";
   child.stdout?.on("data", (buf: Buffer) => {
     if (buf.length < 2) return;
     const samples = int16ToFloat32(buf);
     onChunk(samples, rmsFloat32(samples));
   });
+  child.stderr?.on("data", (buf: Buffer) => {
+    // Keep a bounded tail so failure reports stay readable.
+    stderrTail = `${stderrTail}${buf.toString("utf8")}`.slice(-400);
+  });
+  child.on("error", (error: Error) => {
+    onFailure?.(error.message);
+  });
+  child.on("close", (code, signal) => {
+    if (stopped) return;
+    const exit = code === null ? `signal ${signal}` : `exit code ${code}`;
+    onFailure?.(
+      `Recorder ${cmd} stopped early (${exit}).${stderrTail ? ` ${stderrTail.trim()}` : ""}`,
+    );
+  });
   return {
     stop(): void {
+      stopped = true;
       child.kill("SIGKILL");
     },
   };
@@ -126,6 +191,7 @@ export function detectRecorders(): RecorderDeps {
   return {
     hasFfmpeg: hasTool("ffmpeg"),
     hasArecord: hasTool("arecord"),
+    hasSox: hasTool("sox"),
   };
 }
 

@@ -32,7 +32,7 @@ import {
   TTS_MODELS,
 } from "../../extensions/voice/src/models.ts";
 import { runVoiceOverlay } from "../../extensions/voice/src/overlay.ts";
-import { runVoiceSettings } from "../../extensions/voice/src/settings.ts";
+import { describeRecorderBackend, runVoiceSettings } from "../../extensions/voice/src/settings.ts";
 import {
   buildSpokenSummaryPrompt,
   cleanTextForSpeech,
@@ -1848,6 +1848,61 @@ describe("voice-extension", () => {
     it("defaults to default when unset or blank", () => {
       expect(resolveSource({})).toBe("default");
       expect(resolveSource({ PI_VOICE_SOURCE: "   " })).toBe("default");
+    });
+
+    it("defaults to the avfoundation audio source on darwin", () => {
+      const descriptor = Object.getOwnPropertyDescriptor(process, "platform");
+      try {
+        Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
+        expect(resolveSource({})).toBe(":0");
+        expect(resolveSource({ PI_VOICE_SOURCE: "   " })).toBe(":0");
+      } finally {
+        if (descriptor) Object.defineProperty(process, "platform", descriptor);
+      }
+    });
+
+    it("PI_VOICE_SOURCE overrides the platform default", () => {
+      const descriptor = Object.getOwnPropertyDescriptor(process, "platform");
+      try {
+        Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
+        expect(resolveSource({ PI_VOICE_SOURCE: ":1" })).toBe(":1");
+      } finally {
+        if (descriptor) Object.defineProperty(process, "platform", descriptor);
+      }
+    });
+  });
+
+  describe("describeRecorderBackend", () => {
+    it("names the darwin capture backend instead of a bare Ready", () => {
+      const descriptor = Object.getOwnPropertyDescriptor(process, "platform");
+      try {
+        Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
+        expect(describeRecorderBackend({ hasFfmpeg: true, hasArecord: false })).toBe(
+          "Ready (ffmpeg/avfoundation)",
+        );
+        expect(describeRecorderBackend({ hasFfmpeg: false, hasArecord: false, hasSox: true })).toBe(
+          "Ready (sox)",
+        );
+        expect(describeRecorderBackend({ hasFfmpeg: false, hasArecord: true })).toBe(
+          "Not connected",
+        );
+      } finally {
+        if (descriptor) Object.defineProperty(process, "platform", descriptor);
+      }
+    });
+
+    it("keeps the historical linux wording", () => {
+      const descriptor = Object.getOwnPropertyDescriptor(process, "platform");
+      try {
+        Object.defineProperty(process, "platform", { value: "linux", configurable: true });
+        expect(describeRecorderBackend({ hasFfmpeg: true, hasArecord: false })).toBe("Ready");
+        expect(describeRecorderBackend({ hasFfmpeg: false, hasArecord: true })).toBe("Ready");
+        expect(describeRecorderBackend({ hasFfmpeg: false, hasArecord: false })).toBe(
+          "Not connected",
+        );
+      } finally {
+        if (descriptor) Object.defineProperty(process, "platform", descriptor);
+      }
     });
   });
 

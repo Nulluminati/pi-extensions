@@ -173,26 +173,41 @@ export async function runVoiceOverlay(
     );
   }
 
-  const rec = startStreamingRecorder(source, recorder, (samples, rms) => {
-    if (!active) return;
-    state.level = Math.min(1, rms * 4);
-    partialBuffer.push(samples);
-    if (vadInstance) {
-      vadInstance.acceptWaveform(samples);
-      while (!vadInstance.isEmpty()) {
-        const seg = vadInstance.front();
-        vadInstance.pop();
-        const text = stt.recognize(seg.samples, SAMPLE_RATE);
-        if (text.trim()) {
-          state.committed = state.committed ? `${state.committed} ${text}` : text;
+  const rec = startStreamingRecorder(
+    source,
+    recorder,
+    (samples, rms) => {
+      if (!active) return;
+      state.level = Math.min(1, rms * 4);
+      partialBuffer.push(samples);
+      if (vadInstance) {
+        vadInstance.acceptWaveform(samples);
+        while (!vadInstance.isEmpty()) {
+          const seg = vadInstance.front();
+          vadInstance.pop();
+          const text = stt.recognize(seg.samples, SAMPLE_RATE);
+          if (text.trim()) {
+            state.committed = state.committed ? `${state.committed} ${text}` : text;
+          }
+          partialBuffer = [];
         }
-        partialBuffer = [];
       }
-    }
-  });
+    },
+    (reason) => {
+      // A dead recorder must end the session instead of leaving the overlay on
+      // "Listening…" with a silent mic (e.g. ffmpeg missing an input format).
+      if (!active) return;
+      ctx.ui.notify(`Voice recording failed: ${reason}`, "error");
+      handleCancel();
+    },
+  );
 
   if (!rec) {
-    ctx.ui.notify("No audio recorder found. Install ffmpeg or alsa-utils.", "error");
+    const installHint =
+      process.platform === "darwin"
+        ? "No audio recorder found. Install ffmpeg or sox via brew."
+        : "No audio recorder found. Install ffmpeg or alsa-utils.";
+    ctx.ui.notify(installHint, "error");
     return;
   }
 

@@ -92,5 +92,7 @@ export async function saveActiveTtsModel(configPath: string, modelId: string): P
 export function resolveSource(env: NodeJS.ProcessEnv): string {
   const fromEnv = env[SOURCE_ENV_VAR];
   if (fromEnv?.trim()) return fromEnv.trim();
-  return "default";
+  // "default" is a PulseAudio source id; avfoundation addresses the default
+  // microphone as ":0" (no video device, first audio device).
+  return process.platform === "darwin" ? ":0" : "default";
 }
