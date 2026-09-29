@@ -3,6 +3,7 @@
  * focusable overlay panel opened by the user-facing /jobs command.
  */
 
+import { isArrowDown, isArrowUp } from "../../../lib/arrow-keys.ts";
 import { PANEL_OVERLAY_OPTIONS } from "../../../lib/overlay-options.ts";
 import { renderModalFrame } from "../../../lib/tui-frame.ts";
 import { formatStyledKeyHints } from "../../../lib/ui-format.ts";
@@ -157,8 +158,8 @@ function statusColor(status: Job["status"]): string {
 }
 
 const RAW_NAV = {
-  up: (d: string) => d === "k" || d === "\u001b[A" || d === "\u001bOA",
-  down: (d: string) => d === "j" || d === "\u001b[B" || d === "\u001bOB",
+  up: (d: string) => d === "k" || isArrowUp(d),
+  down: (d: string) => d === "j" || isArrowDown(d),
   confirm: (d: string) => d === "\r" || d === "\n",
   cancel: (d: string) => d === "\u001b" || d === "\u0003" || d === "q",
 };

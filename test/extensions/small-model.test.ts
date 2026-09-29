@@ -28,7 +28,7 @@ describe("small-model-extension", () => {
       const sourceFiles = await readdir(resolve(extensionDir, "src"));
 
       expect(rootTypeScriptFiles).toEqual(["small-model.ts"]);
-      expect(sourceFiles.filter((file) => file.endsWith(".ts"))).toHaveLength(4);
+      expect(sourceFiles.filter((file) => file.endsWith(".ts"))).toHaveLength(3);
     });
   });
 
@@ -220,6 +220,20 @@ describe("small-model-extension", () => {
       "Global small model set to opencode-go/deepseek-flash (high).",
       "info",
     );
+  });
+
+  it("reports the missing config when only the thinking level is requested", async () => {
+    const path = configPath();
+    vi.stubEnv("PI_SMALL_MODEL_CONFIG", path);
+    vi.stubEnv("PI_SMALL_MODEL", "");
+    const pi = createMockPi();
+    const ctx = createMockCommandContext();
+    await smallModelExtension(pi);
+
+    await getCommandHandler(pi, "smallmodel")("thinking high", ctx);
+
+    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("not configured"), "error");
+    expect(() => readFileSync(path)).toThrow();
   });
 
   it("rejects unavailable models without changing the config", async () => {

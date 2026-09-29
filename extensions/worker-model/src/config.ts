@@ -1,4 +1,4 @@
-import type { ExtensionCommandContext, ThinkingLevel } from "pi";
+import { createModelConfigFlow } from "../../../lib/model-picker.ts";
 import {
   DEFAULT_WORKER_THINKING_LEVEL,
   isWorkerThinkingLevel,
@@ -7,6 +7,24 @@ import {
   saveWorkerModelConfig,
   type WorkerModelConfig,
 } from "../../../lib/worker-model.ts";
+
+// --- Config flow ---
+
+const flow = createModelConfigFlow({
+  label: "worker",
+  pickerTitle: "Worker Model",
+  selectTitle: "Select Global Worker Model",
+  loadConfig: loadWorkerModelConfig,
+  defaultThinkingLevel: DEFAULT_WORKER_THINKING_LEVEL,
+  saveConfig: (config) => saveWorkerModelConfig(config, resolveWorkerModelConfigPath()),
+});
+
+export const applyWorkerConfig = flow.applyConfig;
+export const applyWorkerThinkingLevel = flow.applyThinkingLevel;
+export const currentWorkerThinkingLevel = flow.currentThinkingLevel;
+export const selectWorkerModel = flow.selectModel;
+
+// --- Helpers ---
 
 export function parseWorkerModelSpec(args: string): WorkerModelConfig | undefined {
   const tokens = args.trim().split(/\s+/).filter(Boolean);
@@ -24,50 +42,6 @@ export function parseWorkerModelSpec(args: string): WorkerModelConfig | undefine
     model: rest.join("/").trim(),
     thinkingLevel,
   };
-}
-
-export async function applyWorkerConfig(
-  config: WorkerModelConfig,
-  ctx: ExtensionCommandContext,
-): Promise<boolean> {
-  const configPath = resolveWorkerModelConfigPath();
-  try {
-    await saveWorkerModelConfig(config, configPath);
-  } catch (error) {
-    ctx.ui.notify(
-      `Could not save global worker model config: ${error instanceof Error ? error.message : String(error)}`,
-      "error",
-    );
-    return false;
-  }
-
-  ctx.ui.notify(
-    `Global worker model set to ${config.provider}/${config.model} (${config.thinkingLevel}).`,
-    "info",
-  );
-  return true;
-}
-
-export async function applyWorkerThinkingLevel(
-  thinkingLevel: ThinkingLevel,
-  ctx: ExtensionCommandContext,
-): Promise<boolean> {
-  let current: WorkerModelConfig;
-  try {
-    current = loadWorkerModelConfig().config;
-  } catch (error) {
-    ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
-    return false;
-  }
-  return applyWorkerConfig({ ...current, thinkingLevel }, ctx);
-}
-
-export function currentWorkerThinkingLevel(): ThinkingLevel {
-  try {
-    return loadWorkerModelConfig().config.thinkingLevel;
-  } catch {
-    return DEFAULT_WORKER_THINKING_LEVEL;
-  }
 }
 
 export function configuredWorkerModelLabel(): string | undefined {

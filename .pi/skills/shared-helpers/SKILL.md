@@ -44,7 +44,9 @@ import { renderModalFrame } from "../../../lib/tui-frame.ts";
 | Resolve where an extension stores config, state, cache, or project files | `agentConfigPath`, `agentStateDir`, `cacheDir`, `projectStateDir`, `projectStateRelative` | `lib/paths.ts` |
 | Point a user-facing message at Pi's auth file | `authPath` | `lib/paths.ts` |
 | Keep project-local state out of `git status` | `excludeFromGit` | `lib/git.ts` |
-| Build a `/smallmodel`-style model picker (descriptions, searchable modal) | `formatModelDescription`, `selectModelWithSearch` | `lib/model-picker.ts` |
+| Build a `/smallmodel`-style model picker and config flow | `formatModelDescription`, `selectModelWithSearch`, `createModelConfigFlow` | `lib/model-picker.ts` |
+| Settle an abortable custom dialog once | `createSettleOnce` | `lib/settle-once.ts` |
+| Match terminal arrow-key byte sequences | `isArrowUp`, `isArrowDown`, `isArrowLeft`, `isArrowRight` | `lib/arrow-keys.ts` |
 | Resolve provider credentials or build Bearer headers | `resolveProviderApiKey`, `createProviderAuthHeaders` | `lib/provider-auth.ts` |
 | Fetch a provider quota as authenticated JSON | `fetchProviderQuota` | `lib/provider-quota.ts` |
 | Apply a fetch timeout and chain a caller abort signal | `createTimeoutController` | `lib/fetch-timeout.ts` |
@@ -181,6 +183,14 @@ Rules of use:
 - Provide `onSelect` and `onCancel`; both typically call `done`. Resolve with `null`/`undefined` on cancel and treat that as "user aborted."
 - For non-TUI modes (`ctx.mode !== "tui"`), fall back to `ctx.ui.select` — see `web-search`'s `selectProvider` for the dual-path pattern.
 - Use the exported `SearchableSelect` class directly only when you need the selector *without* the modal frame (e.g. embedding it in a larger component).
+
+## `lib/settle-once.ts` — abortable dialog settlement
+
+`createSettleOnce(done, signal, abortValue)` returns `settle(value)` and `dispose()`. It calls `done` at most once and removes the abort listener before `done`. Call `dispose()` when the dialog component closes. Each consumer selects its own abort result and checks an already-aborted signal when required.
+
+## `lib/arrow-keys.ts` — arrow-key byte matching
+
+Use `isArrowUp`, `isArrowDown`, `isArrowLeft`, or `isArrowRight` for raw terminal fallback keys. Each matcher accepts CSI and application-cursor sequences. Check Pi keybindings first when available; raw bytes do not cover user rebindings or every terminal protocol.
 
 ## `lib/tool-renderer.ts` — compact tool result renderers
 
@@ -352,7 +362,7 @@ Shared formatting and modal for `/smallmodel`- and `/worker-model`-style pickers
 capability flags), and `selectModelWithSearch(ctx, items, activeValue, title)` — the
 `ui.custom` searchable modal used in TUI mode (resolves the selected value, `undefined` on
 cancel; fall back to `ctx.ui.select` outside TUI). `ModelMetadata` is the shared model shape.
-Config load/save stays in `lib/small-model.ts` / `lib/worker-model.ts`.
+`createModelConfigFlow(options)` shares model selection, validation, saving, thinking-level updates, and confirmation messages across the small-model and worker-model extensions. Pass extension-specific loaders, savers, titles, and validation/status callbacks. Config load/save stays in `lib/small-model.ts` / `lib/worker-model.ts`.
 
 ## `lib/fetch-timeout.ts` — network timeout and cancellation
 

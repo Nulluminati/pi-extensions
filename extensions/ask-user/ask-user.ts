@@ -5,6 +5,7 @@
  */
 
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "pi";
+import { createSettleOnce } from "../../lib/settle-once.ts";
 import { QuestionnaireComponent, type QuestionnaireOutcome } from "./src/dialog.ts";
 import {
   createStatusDetails,
@@ -109,22 +110,14 @@ async function showQuestionnaire(
   signal: AbortSignal | undefined,
 ): Promise<QuestionnaireOutcome> {
   return ctx.ui.custom<QuestionnaireOutcome>((tui, theme, keybindings, done) => {
-    let settled = false;
-    const settle = (outcome: QuestionnaireOutcome) => {
-      if (settled) return;
-      settled = true;
-      signal?.removeEventListener("abort", onAbort);
-      done(outcome);
-    };
-    const onAbort = () => settle({ status: "aborted" });
-    signal?.addEventListener("abort", onAbort, { once: true });
+    const handle = createSettleOnce(done, signal, { status: "aborted" });
 
     const component = new QuestionnaireComponent({
       questions,
       tui,
       theme,
       keybindings,
-      done: settle,
+      done: handle.settle,
     });
 
     return {
@@ -138,7 +131,7 @@ async function showQuestionnaire(
       invalidate: () => component.invalidate(),
       handleInput: (data) => component.handleInput(data),
       dispose: () => {
-        signal?.removeEventListener("abort", onAbort);
+        handle.dispose();
         component.dispose();
       },
     };

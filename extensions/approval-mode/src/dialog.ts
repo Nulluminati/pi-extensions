@@ -2,6 +2,7 @@
 
 import { SelectList, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { ExtensionContext } from "pi";
+import { createSettleOnce } from "../../../lib/settle-once.ts";
 import { modalContentWidth, renderModalFrame } from "../../../lib/tui-frame.ts";
 import { formatStyledKeyHints } from "../../../lib/ui-format.ts";
 
@@ -163,19 +164,21 @@ export async function promptApproval(
     ) as Promise<ApprovalChoice | undefined>;
   }
   return ctx.ui.custom<ApprovalChoice>((tui, theme, keybindings, done) => {
-    let settled = false;
-    const settle = (choice: ApprovalChoice) => {
-      if (settled) return;
-      settled = true;
-      ctx.signal?.removeEventListener("abort", onAbort);
-      done(choice);
-    };
-    const onAbort = () => settle("Block");
-    ctx.signal?.addEventListener("abort", onAbort, { once: true });
-    if (ctx.signal?.aborted) onAbort();
+    const handle = createSettleOnce(done, ctx.signal, "Block");
+    // A signal already aborted before registration never fires its listener;
+    // settle immediately so the dialog cannot hang on a dead context.
+    if (ctx.signal?.aborted) handle.settle("Block");
     return {
-      ...createApprovalDialog({ command, reason, decision, tui, theme, keybindings, done: settle }),
-      dispose: () => ctx.signal?.removeEventListener("abort", onAbort),
+      ...createApprovalDialog({
+        command,
+        reason,
+        decision,
+        tui,
+        theme,
+        keybindings,
+        done: handle.settle,
+      }),
+      dispose: () => handle.dispose(),
     };
   });
 }

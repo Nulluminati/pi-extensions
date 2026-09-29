@@ -110,6 +110,44 @@ describe("worker-model-extension", () => {
     );
   });
 
+  it("uses the standard selector outside TUI mode", async () => {
+    const path = configPath();
+    vi.stubEnv("PI_WORKER_MODEL_CONFIG", path);
+    vi.stubEnv("PI_WORKER_MODEL", "");
+    const pi = createMockPi();
+    const ctx = createMockCommandContext();
+    ctx.mode = "rpc";
+    ctx.modelRegistry.getAvailable = vi.fn(() => [ctx.model]);
+    ctx.ui.select = vi.fn(async (_title, options) => options[0]);
+    await workerModelExtension(pi);
+
+    await getCommandHandler(pi, "worker-model")("", ctx);
+
+    expect(ctx.ui.select).toHaveBeenCalledWith("Select Global Worker Model", [
+      "test-provider/test-model",
+    ]);
+    expect(ctx.ui.custom).not.toHaveBeenCalled();
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
+      provider: "test-provider",
+      model: "test-model",
+      thinkingLevel: "high",
+    });
+  });
+
+  it("reports the missing config when only the thinking level is requested", async () => {
+    const path = configPath();
+    vi.stubEnv("PI_WORKER_MODEL_CONFIG", path);
+    vi.stubEnv("PI_WORKER_MODEL", "");
+    const pi = createMockPi();
+    const ctx = createMockCommandContext();
+    await workerModelExtension(pi);
+
+    await getCommandHandler(pi, "worker-model")("thinking high", ctx);
+
+    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("not configured"), "error");
+    expect(() => readFileSync(path)).toThrow();
+  });
+
   it("changes only the thinking level with the thinking subcommand", async () => {
     const path = configPath();
     vi.stubEnv("PI_WORKER_MODEL_CONFIG", path);

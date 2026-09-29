@@ -15,8 +15,12 @@ import {
   loadWorkerModelConfig,
   WORKER_MODEL_ENV_VAR,
 } from "../../lib/worker-model.ts";
-import { applyWorkerConfig, applyWorkerThinkingLevel, parseWorkerModelSpec } from "./src/config.ts";
-import { selectWorkerModel } from "./src/picker.ts";
+import {
+  applyWorkerConfig,
+  applyWorkerThinkingLevel,
+  parseWorkerModelSpec,
+  selectWorkerModel,
+} from "./src/config.ts";
 
 // --- Extension ---
 

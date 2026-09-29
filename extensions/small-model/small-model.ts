@@ -13,9 +13,8 @@ import {
   resolveSmallModelConfigPath,
   SMALL_MODEL_ENV_VAR,
 } from "../../lib/small-model.ts";
-import { applyConfig, applyThinkingLevel, parseCommandConfig } from "./src/config.ts";
+import { applyConfig, applyThinkingLevel, parseCommandConfig, selectModel } from "./src/config.ts";
 import { STATUS_ICON, STATUS_KEY, THINKING_LEVELS } from "./src/constants.ts";
-import { selectModel } from "./src/picker.ts";
 import { updateStatus } from "./src/status.ts";
 
 export { STATUS_ICON };

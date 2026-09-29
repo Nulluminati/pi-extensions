@@ -19,7 +19,7 @@ The docs pass and all 29 high-severity findings are resolved. Commits, in order:
 - `f9387d8` — autoresearch init lock, session-recap resume timer tracked, handoff `extractText`
 - `c86c0c2` — workers status fallback + skip-list entry; voice config via `writeJsonAtomic` under `withFileLock`, `extractText`
 
-Everything below is open. Citations come from the audit; line numbers were spot-re-verified against the current tree where marked `(verified)`.
+Sections 1–3 remain open. Section 4 is complete. Citations come from the audit; line numbers were spot-re-verified against the current tree where marked `(verified)`.
 
 ---
 
@@ -114,19 +114,23 @@ Everything below is open. Citations come from the audit; line numbers were spot-
 
 ---
 
-## 4. lib/ extraction candidates (proven 2+ consumers)
+## 4. lib/ extractions (completed)
 
-1. Exec-with-timeout runner — autoresearch/src/measure.ts:87-118, missions/src/actions.ts:79-92, workers/src/runner.ts (third variant)
-2. Fetch-with-timeout controller — synthetic (3 sites), neuralwatt (3 sites), code-search/src/client.ts:168-186 (web-search already shares `createTimeoutController` in web-search/src/http.ts:11-26)
-3. Provider API-key resolver — synthetic/src/auth.ts:3-19, neuralwatt/src/auth.ts:3-19 (byte-identical)
-4. Quota-fetch skeleton — synthetic/src/quota.ts:5-25, neuralwatt/src/quota.ts:5-25
-5. `formatModelList` — synthetic/src/models.ts:259, neuralwatt/src/models.ts:410 (byte-identical)
-6. Transcript-to-prompt formatter — handoff/src/transcript.ts:37-46, session-recap/src/transcript.ts:51-62 (line-for-line)
-7. `writeTextAtomic` for JSONL — messenger/src/store.ts:333-335,373-375 (extend lib/json-atomic.ts)
-8. Overlay size options constant — todos/src/panel.ts:17, context/src/view.ts:183, background-jobs/src/jobs.ts:54 (byte-identical)
-9. `ui.custom` settle-once + abort-listener pattern — ask-user.ts:106-146, approval-mode/src/dialog.ts:158-181
-10. Arrow-key byte matcher — ask-user/src/dialog.ts:541-548, background-jobs/src/jobs.ts:158-164
-11. Model-picker config flow — small-model/src/{picker,config}.ts, worker-model/src/{picker,config}.ts (near line-for-line)
+All 11 candidates now use shared helpers where behavior matches. The workers process runner remains separate: it streams to files and kills a detached process group, unlike one-shot captured commands.
+
+1. `lib/exec.ts` — autoresearch measurement and mission verification. The workers runner stays separate for the reason above.
+2. `lib/fetch-timeout.ts` — Synthetic and Neuralwatt catalog/quota requests, Neuralwatt Flex, code-search, and web-search.
+3. `lib/provider-auth.ts` — Synthetic and Neuralwatt API keys and request headers.
+4. `lib/provider-quota.ts` — Synthetic and Neuralwatt quota requests.
+5. `lib/provider-models.ts` — Synthetic and Neuralwatt static model lists.
+6. `lib/transcript-prompt.ts` — handoff and session-recap prompt lines.
+7. `writeTextAtomic` in `lib/json-atomic.ts` — messenger JSONL mailbox rewrites.
+8. `lib/overlay-options.ts` — todos, context, and background-jobs panels.
+9. `lib/settle-once.ts` — ask-user and approval-mode abortable dialogs.
+10. `lib/arrow-keys.ts` — ask-user and background-jobs raw arrow keys.
+11. `createModelConfigFlow` in `lib/model-picker.ts` — small-model and worker-model configuration.
+
+The original candidate list described code before extraction. The audit history remains in git.
 
 Not recommended for extraction: budget/iteration bookkeeping (autoresearch/missions/goal) — persistence and semantics differ per domain.
 

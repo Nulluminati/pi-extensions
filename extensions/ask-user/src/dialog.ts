@@ -1,4 +1,5 @@
 import { Input, Key, matchesKey, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { isArrowLeft, isArrowRight } from "../../../lib/arrow-keys.ts";
 import { modalContentWidth, renderModalFrame } from "../../../lib/tui-frame.ts";
 import { formatStyledKeyHints } from "../../../lib/ui-format.ts";
 import { type AskUserAnswer, type AskUserQuestion, normalizeCustomText } from "./schema.ts";
@@ -331,8 +332,8 @@ export class QuestionnaireComponent {
   }
 
   private getNavigationDelta(data: string, includeArrows: boolean): -1 | 1 | undefined {
-    if (matchesKey(data, Key.shift("tab")) || (includeArrows && isLeft(data))) return -1;
-    if (this.keybindings.matches(data, "tui.input.tab") || (includeArrows && isRight(data))) {
+    if (matchesKey(data, Key.shift("tab")) || (includeArrows && isArrowLeft(data))) return -1;
+    if (this.keybindings.matches(data, "tui.input.tab") || (includeArrows && isArrowRight(data))) {
       return 1;
     }
     return undefined;
@@ -536,14 +537,6 @@ function withDerivedState(
 
 function wrapStyled(text: string, width: number, style: (text: string) => string): string[] {
   return wrapTextWithAnsi(text, Math.max(1, width)).map(style);
-}
-
-function isLeft(data: string): boolean {
-  return data === "\u001b[D" || data === "\u001bOD";
-}
-
-function isRight(data: string): boolean {
-  return data === "\u001b[C" || data === "\u001bOC";
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {
