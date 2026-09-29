@@ -8,6 +8,7 @@
 import { existsSync } from "node:fs";
 import { access, readFile } from "node:fs/promises";
 import type { AgentToolResult } from "pi";
+import { isNodeError } from "../../../lib/errors.ts";
 import {
   formatRawStreamEntries,
   formatStreamEntries,
@@ -109,10 +110,16 @@ export async function tailWorkerStream(
           let raw = "";
           try {
             raw = await readFile(streamPath(cwd, id), "utf8");
-          } catch {
-            throw new Error(
-              `No stream captured for worker ${id}. Streams exist for workers started after this feature landed.`,
-            );
+          } catch (error) {
+            // A missing spool is the "no stream" answer for legacy workers;
+            // any other read failure (permissions, I/O) surfaces as-is
+            // instead of masquerading as a missing stream.
+            if (isNodeError(error) && (error.code === "ENOENT" || error.code === "ENOTDIR")) {
+              throw new Error(
+                `No stream captured for worker ${id}. Streams exist for workers started after this feature landed.`,
+              );
+            }
+            throw error;
           }
           return formatStreamEntries(raw);
         })();

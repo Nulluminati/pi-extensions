@@ -143,6 +143,10 @@ export async function runVoiceOverlay(
 
   let partialBuffer: Float32Array[] = [];
   let partialInFlight = false;
+  // Set on the first partial decode failure: the user is warned once and the
+  // overlay stops retrying, so a broken engine cannot spam the notification.
+  // Committed text (Enter) still attempts a final transcription.
+  let partialFailed = false;
   let active = true;
   let vadInstance: VadInstance | null = null;
   let elapsedTimer: ReturnType<typeof setInterval> | null = null;
@@ -200,7 +204,7 @@ export async function runVoiceOverlay(
   }, 500);
 
   partialTimer = setInterval(() => {
-    if (!active || partialInFlight || partialBuffer.length === 0) return;
+    if (!active || partialFailed || partialInFlight || partialBuffer.length === 0) return;
     const snapshot = concatFloat32(partialBuffer);
     if (snapshot.length < PARTIAL_MIN_SAMPLES) return;
     partialInFlight = true;
@@ -209,8 +213,13 @@ export async function runVoiceOverlay(
       partialInFlight = false;
       if (!active) return;
       state.partial = text.trim();
-    } catch {
+    } catch (error) {
       partialInFlight = false;
+      if (active && !partialFailed) {
+        partialFailed = true;
+        const message = error instanceof Error ? error.message : String(error);
+        ctx.ui.notify(`Voice live transcription failed: ${message}`, "warning");
+      }
     }
   }, PARTIAL_INTERVAL_MS);
 

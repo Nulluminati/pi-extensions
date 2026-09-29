@@ -142,19 +142,28 @@ export async function writeRecordFile(cwd: string, record: WorkerRecord): Promis
   await writeJsonAtomic(recordPath(cwd, record.id), record);
 }
 
-/** Read one worker's artifact metadata file. */
+/** Read one worker's artifact metadata file. A missing file (ENOENT,
+ *  ENOTDIR) is the normal "no record" answer; any other read failure
+ *  (permissions, I/O) surfaces to the caller. Unparseable or mismatched
+ *  content reads as absent — callers iterate over foreign files, and
+ *  corrupt records are skipped by contract. */
 export async function readRecordFile(
   cwd: string,
   workerId: string,
 ): Promise<WorkerRecord | undefined> {
   assertWorkerId(workerId);
+  let raw: string;
   try {
-    const raw = await readFile(recordPath(cwd, workerId), "utf8");
-    const parsed: unknown = JSON.parse(raw);
-    return isWorkerRecord(parsed) && parsed.id === workerId ? parsed : undefined;
+    raw = await readFile(recordPath(cwd, workerId), "utf8");
   } catch (error) {
     if (isNodeError(error) && (error.code === "ENOENT" || error.code === "ENOTDIR"))
       return undefined;
+    throw error;
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return isWorkerRecord(parsed) && parsed.id === workerId ? parsed : undefined;
+  } catch {
     return undefined;
   }
 }
@@ -177,7 +186,9 @@ export async function updateRecordFile(
   });
 }
 
-/** Every worker artifact record on disk, corrupt files skipped. */
+/** Every worker artifact record on disk, corrupt files skipped. An
+ *  unreadable file (permissions, I/O) is logged and skipped so one broken
+ *  record cannot hide all the others from the janitor. */
 export async function listRecordFiles(cwd: string): Promise<WorkerRecord[]> {
   let files: string[] = [];
   try {
@@ -190,7 +201,10 @@ export async function listRecordFiles(cwd: string): Promise<WorkerRecord[]> {
     if (!file.endsWith(".json")) continue;
     const id = file.replace(/\.json$/, "");
     if (!isWorkerId(id)) continue;
-    const record = await readRecordFile(cwd, id);
+    const record = await readRecordFile(cwd, id).catch((error: unknown) => {
+      console.error(`[workers] worker record ${id} unreadable: ${(error as Error).message}`);
+      return undefined;
+    });
     if (record) records.push(record);
   }
   return records;
@@ -198,88 +212,112 @@ export async function listRecordFiles(cwd: string): Promise<WorkerRecord[]> {
 
 // --- Persistence (composition root) ---
 
-/** Persistence queues per cwd: the running-snapshot save and the terminal
- *  save can race inside one process when a child exits mid-bookkeeping;
- *  the queue keeps transcript and artifact file order stable. */
-const persistQueues = new Map<string, Promise<unknown>>();
-
-/** Removal tombstones for this process, keyed by cwd: saves for a removed
- *  id are refused at execution time, when the queue guarantees the removal
- *  (artifact deletion + transcript marker) has already run. Transcript
- *  markers cover replay after restart; this set covers the in-process race
- *  between a terminal save and a remove. */
-const removedWorkers = new Map<string, Set<string>>();
-
-/**
- * Persist one worker state transition: a transcript entry in the owning
- * session (ownership) plus the artifact metadata file (janitor). Returns
- * false when a late running snapshot would clobber a terminal state, or
- * when the worker was removed in this process — either way the caller must
- * not adopt the record into its in-memory cache.
- */
-export function persistWorkerRecord(
-  appendEntry: (customType: string, data: unknown) => void,
-  cwd: string,
-  worker: WorkerRecord,
-): Promise<boolean> {
-  const task = (persistQueues.get(cwd) ?? Promise.resolve())
-    .then(async () => {
-      // A queued terminal save must not re-add a worker whose removal is
-      // already ordered ahead of it on this queue.
-      if (removedWorkers.get(cwd)?.has(worker.id)) return false;
-      const existing = await readRecordFile(cwd, worker.id);
-      if (existing && existing.status !== "running" && worker.status === "running") {
-        return false; // Terminal state already durable; a stale running snapshot loses.
-      }
-      appendEntry(WORKER_RECORD_ENTRY, worker);
-      await writeRecordFile(cwd, worker);
-      return true;
-    })
-    .catch((error) => {
-      // Persistence failure must not crash the runner; surface loudly.
-      console.error(`[workers] worker record persistence failed: ${(error as Error).message}`);
-      throw error;
-    });
-  persistQueues.set(
-    cwd,
-    task.catch(() => {}),
-  );
-  return task;
+/** Per-instance worker persistence: transcript entries (ownership) plus
+ *  artifact record files (janitor), ordered per cwd. Each Pi extension
+ *  instance creates its own, so queues and removal tombstones never leak
+ *  across instances, sessions, or tests. */
+export interface WorkerPersistence {
+  /** Persist one worker state transition; see the returned function. */
+  persistWorkerRecord(
+    appendEntry: (customType: string, data: unknown) => void,
+    cwd: string,
+    worker: WorkerRecord,
+  ): Promise<boolean>;
+  /** Persist a worker removal; see the returned function. */
+  persistWorkerRemoval(
+    appendEntry: (customType: string, data: unknown) => void,
+    cwd: string,
+    workerId: string,
+  ): Promise<void>;
 }
 
-/**
- * Persist a worker removal: artifact cleanup plus a `worker-removed`
- * transcript marker, ordered on the same persistence queue as record saves
- * so a queued terminal save cannot land after the marker and resurrect the
- * worker on the next replay. Only for workers this session's transcript
- * owns (the marker governs this session's replay); orphans and foreign
- * workers get artifact cleanup only.
- */
-export function persistWorkerRemoval(
-  appendEntry: (customType: string, data: unknown) => void,
-  cwd: string,
-  workerId: string,
-): Promise<void> {
-  const task = (persistQueues.get(cwd) ?? Promise.resolve())
-    .then(async () => {
-      await removeWorkerRecord(cwd, workerId);
-      appendEntry(WORKER_REMOVED_ENTRY, { id: workerId, removedAt: Date.now() });
-      let tombstones = removedWorkers.get(cwd);
-      if (!tombstones) {
-        tombstones = new Set<string>();
-        removedWorkers.set(cwd, tombstones);
-      }
-      tombstones.add(workerId);
-    })
-    .catch((error) => {
-      console.error(`[workers] worker removal persistence failed: ${(error as Error).message}`);
-      throw error;
-    });
-  persistQueues.set(
-    cwd,
-    task.catch(() => {}),
-  );
-  return task;
+/** Create one instance's persistence queue and removal tombstones. */
+export function createWorkerPersistence(): WorkerPersistence {
+  /** Persistence queues per cwd: the running-snapshot save and the terminal
+   *  save can race inside one process when a child exits mid-bookkeeping;
+   *  the queue keeps transcript and artifact file order stable. */
+  const persistQueues = new Map<string, Promise<unknown>>();
+
+  /** Removal tombstones for this instance, keyed by cwd: saves for a removed
+   *  id are refused at execution time, when the queue guarantees the removal
+   *  (artifact deletion + transcript marker) has already run. Transcript
+   *  markers cover replay after restart; this set covers the in-process race
+   *  between a terminal save and a remove. */
+  const removedWorkers = new Map<string, Set<string>>();
+
+  /**
+   * Persist one worker state transition: a transcript entry in the owning
+   * session (ownership) plus the artifact metadata file (janitor). Returns
+   * false when a late running snapshot would clobber a terminal state, or
+   * when the worker was removed in this instance — either way the caller
+   * must not adopt the record into its in-memory cache.
+   */
+  function persistWorkerRecord(
+    appendEntry: (customType: string, data: unknown) => void,
+    cwd: string,
+    worker: WorkerRecord,
+  ): Promise<boolean> {
+    const task = (persistQueues.get(cwd) ?? Promise.resolve())
+      .then(async () => {
+        // A queued terminal save must not re-add a worker whose removal is
+        // already ordered ahead of it on this queue.
+        if (removedWorkers.get(cwd)?.has(worker.id)) return false;
+        const existing = await readRecordFile(cwd, worker.id);
+        if (existing && existing.status !== "running" && worker.status === "running") {
+          return false; // Terminal state already durable; a stale running snapshot loses.
+        }
+        appendEntry(WORKER_RECORD_ENTRY, worker);
+        await writeRecordFile(cwd, worker);
+        return true;
+      })
+      .catch((error) => {
+        // Persistence failure must not crash the runner; surface loudly.
+        console.error(`[workers] worker record persistence failed: ${(error as Error).message}`);
+        throw error;
+      });
+    persistQueues.set(
+      cwd,
+      task.catch(() => {}),
+    );
+    return task;
+  }
+
+  /**
+   * Persist a worker removal: artifact cleanup plus a `worker-removed`
+   * transcript marker, ordered on the same persistence queue as record saves
+   * so a queued terminal save cannot land after the marker and resurrect the
+   * worker on the next replay. Only for workers this session's transcript
+   * owns (the marker governs this session's replay); orphans and foreign
+   * workers get artifact cleanup only.
+   */
+  function persistWorkerRemoval(
+    appendEntry: (customType: string, data: unknown) => void,
+    cwd: string,
+    workerId: string,
+  ): Promise<void> {
+    const task = (persistQueues.get(cwd) ?? Promise.resolve())
+      .then(async () => {
+        await removeWorkerRecord(cwd, workerId);
+        appendEntry(WORKER_REMOVED_ENTRY, { id: workerId, removedAt: Date.now() });
+        let tombstones = removedWorkers.get(cwd);
+        if (!tombstones) {
+          tombstones = new Set<string>();
+          removedWorkers.set(cwd, tombstones);
+        }
+        tombstones.add(workerId);
+      })
+      .catch((error) => {
+        console.error(`[workers] worker removal persistence failed: ${(error as Error).message}`);
+        throw error;
+      });
+    persistQueues.set(
+      cwd,
+      task.catch(() => {}),
+    );
+    return task;
+  }
+
+  return { persistWorkerRecord, persistWorkerRemoval };
 }
 
 // --- Janitor ---

@@ -2,7 +2,9 @@
 // builders against the real sherpa-onnx-node addon and the downloaded models
 // on this machine. Not a test file; run with: npx tsx scripts/voice-bench.ts
 import { createRequire } from "node:module";
-import { MODELS, resolveModelsDir, transcribeFile } from "../extensions/voice/voice.ts";
+import { resolveModelsDir } from "../extensions/voice/src/config.ts";
+import { MODELS } from "../extensions/voice/src/models.ts";
+import { transcribeFile } from "../extensions/voice/src/transcription.ts";
 
 const require = createRequire(import.meta.url);
 const sherpa = require("sherpa-onnx-node");

@@ -35,14 +35,13 @@ import {
   startWorker,
 } from "../../extensions/workers/src/runner.ts";
 import {
+  createWorkerPersistence,
   generateWorkerId,
   listRecordFiles,
   loadWorker,
   loadWorkersFromBranch,
   migrateLegacyRegistry,
   patchPath,
-  persistWorkerRecord,
-  persistWorkerRemoval,
   pruneStreams,
   pruneWorkerArtifacts,
   recordPath,
@@ -272,7 +271,7 @@ async function waitForRecord(
 /** Seed a worker's artifact record file directly (no transcript): the
  *  pre-existing-state setup path for store-level and cross-session tests. */
 async function seedRecord(dir: string, record: WorkerRecord): Promise<void> {
-  await persistWorkerRecord(() => {}, dir, record);
+  await createWorkerPersistence().persistWorkerRecord(() => {}, dir, record);
 }
 
 /** Transcript entry shape the extension appends worker records under. */
@@ -848,8 +847,9 @@ sleep 30
   });
 
   it("persistWorkerRecord ignores a stale running snapshot for a terminal record", async () => {
+    const persistence = createWorkerPersistence();
     const appendEntry = vi.fn();
-    await persistWorkerRecord(appendEntry, cwd, {
+    await persistence.persistWorkerRecord(appendEntry, cwd, {
       id: "w-done",
       name: "done",
       task: "t",
@@ -865,7 +865,7 @@ sleep 30
     // A late-arriving initial snapshot (parent bookkeeping) must not clobber
     // the terminal record the runner already wrote — neither on disk nor in
     // the transcript.
-    const persisted = await persistWorkerRecord(appendEntry, cwd, {
+    const persisted = await persistence.persistWorkerRecord(appendEntry, cwd, {
       id: "w-done",
       name: "done",
       task: "t",
@@ -884,8 +884,9 @@ sleep 30
   });
 
   it("concurrent initial-save and completion-save keep the terminal record", async () => {
+    const persistence = createWorkerPersistence();
     const appendEntry = vi.fn();
-    const running = persistWorkerRecord(appendEntry, cwd, {
+    const running = persistence.persistWorkerRecord(appendEntry, cwd, {
       id: "w-race",
       name: "race",
       task: "t",
@@ -895,7 +896,7 @@ sleep 30
       status: "running",
       startedAt: Date.now(),
     });
-    await persistWorkerRecord(appendEntry, cwd, {
+    await persistence.persistWorkerRecord(appendEntry, cwd, {
       id: "w-race",
       name: "race",
       task: "t",
@@ -1592,6 +1593,37 @@ sleep 30
       expect(text).toContain("■ finished completed");
     });
 
+    it("workers tail keeps missing-stream wording for ENOENT but surfaces real spool read failures", async () => {
+      // Legacy (parent-projected) records carry no streamFormat; tail reads
+      // their spool whole, and a missing spool has its own wording.
+      const missing = makeWorkerRecord({
+        id: "w-tailgone",
+        name: "gone",
+        status: "completed",
+        startedAt: 1,
+        endedAt: 2,
+      });
+      await seedRecord(cwd, missing);
+      await expect(executeTool("workers", { action: "tail", id: missing.id })).rejects.toThrow(
+        /No stream captured for worker w-tailgone/,
+      );
+
+      // A spool that exists but cannot be read must surface the underlying
+      // read error, not masquerade as a missing stream.
+      const blocked = makeWorkerRecord({
+        id: "w-tailbad",
+        name: "bad",
+        status: "completed",
+        startedAt: 1,
+        endedAt: 2,
+      });
+      await seedRecord(cwd, blocked);
+      await mkdir(streamPath(cwd, blocked.id), { recursive: true });
+      await expect(
+        executeTool("workers", { action: "tail", id: blocked.id }),
+      ).rejects.toMatchObject({ code: "EISDIR" });
+    });
+
     it("rolls up worker usage and publishes it on workers:state", async () => {
       const fixture = await writeFixture(fixtureDir, "usage-worker.sh", USAGE_WORKER);
       setEnv("PI_WORKER_COMMAND", fixture);
@@ -1751,6 +1783,62 @@ sleep 30
     );
     await expect(executeTool("workers", { action: "remove", id: "w-ghost" })).rejects.toThrow(
       /Unknown worker/,
+    );
+  });
+
+  it("a second extension instance persists terminal saves after the first removed the same id", async () => {
+    // Two Pi instances in one process share the module registry; the
+    // persistence queues and removal tombstones must not be shared state.
+    const id = "w-reload";
+
+    // Instance one owns the worker and removes it.
+    const removed = makeWorkerRecord({
+      id,
+      name: "reload",
+      status: "completed",
+      startedAt: 1,
+      endedAt: 2,
+    });
+    await seedRecord(cwd, removed);
+    mockCtx.sessionManager.getBranch = vi.fn(() => [branchEntry(removed)]);
+    await executeTool("workers", { action: "remove", id });
+    expect(await loadWorker(cwd, id)).toBeUndefined();
+
+    // Instance two (fresh extension instance, same project cwd) restores the
+    // same id as running-from-transcript and salvage-finalizes it: its
+    // persistence state is its own, so the terminal save must land.
+    const running = makeWorkerRecord({
+      id,
+      name: "reload",
+      pid: 999_999_999,
+      status: "running",
+      startedAt: Date.now(),
+      streamFormat: "raw",
+    });
+    await seedRecord(cwd, running);
+    const spoolDir = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
+    await mkdir(spoolDir, { recursive: true });
+    await writeFile(
+      join(spoolDir, `${id}.jsonl`),
+      `{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"salvaged report"}]}}\n`,
+      "utf8",
+    );
+    const mockPi2 = createMockPi() as DeepMocked<ExtensionAPI>;
+    const mockCtx2 = createMockContext();
+    (mockCtx2 as { cwd: string }).cwd = cwd;
+    mockCtx2.sessionManager.getBranch = vi.fn(() => [branchEntry(running)]);
+    await workersExtension(mockPi2);
+    const startHandler = mockPi2.on.mock.calls.find((call) => call[0] === "session_start")?.[1];
+    if (!startHandler) throw new Error("handler for session_start not found");
+    await startHandler({ type: "session_start", reason: "startup" }, mockCtx2);
+
+    expect(await loadWorker(cwd, id)).toMatchObject({
+      status: "completed",
+      outputText: expect.stringContaining("salvaged report"),
+    });
+    expect(mockPi2.appendEntry).toHaveBeenCalledWith(
+      WORKER_RECORD_ENTRY,
+      expect.objectContaining({ id, status: "completed" }),
     );
   });
 
@@ -3115,6 +3203,7 @@ describe("worker store (session-scoped)", () => {
   });
 
   it("persistWorkerRemoval deletes artifacts, appends the marker, and blocks later saves", async () => {
+    const persistence = createWorkerPersistence();
     const appendEntry = vi.fn();
     await seedRecord(
       cwd,
@@ -3124,7 +3213,7 @@ describe("worker store (session-scoped)", () => {
     const streamFile = streamPath(cwd, "w-r");
     await writeFile(streamFile, "{}\n", "utf8");
 
-    await persistWorkerRemoval(appendEntry, cwd, "w-r");
+    await persistence.persistWorkerRemoval(appendEntry, cwd, "w-r");
 
     expect(appendEntry).toHaveBeenCalledWith(
       WORKER_REMOVED_ENTRY,
@@ -3135,7 +3224,7 @@ describe("worker store (session-scoped)", () => {
 
     // A terminal save arriving after the removal cannot re-add the worker:
     // no transcript entry, no artifact file.
-    const lateSave = await persistWorkerRecord(
+    const lateSave = await persistence.persistWorkerRecord(
       appendEntry,
       cwd,
       makeWorkerRecord({ id: "w-r", name: "r", status: "completed", startedAt: 3, endedAt: 4 }),
@@ -3146,10 +3235,11 @@ describe("worker store (session-scoped)", () => {
   });
 
   it("a terminal save queued behind a removal in the same tick is refused", async () => {
+    const persistence = createWorkerPersistence();
     const appendEntry = vi.fn();
 
-    const removal = persistWorkerRemoval(appendEntry, cwd, "w-q");
-    const save = persistWorkerRecord(
+    const removal = persistence.persistWorkerRemoval(appendEntry, cwd, "w-q");
+    const save = persistence.persistWorkerRecord(
       appendEntry,
       cwd,
       makeWorkerRecord({ id: "w-q", name: "q", status: "completed" }),
@@ -3159,6 +3249,83 @@ describe("worker store (session-scoped)", () => {
     expect(await save).toBe(false);
     expect(appendEntry).toHaveBeenCalledTimes(1); // the marker only
     expect(await loadWorker(cwd, "w-q")).toBeUndefined();
+  });
+
+  it("persistence state is per-instance: one instance's removal does not block another's saves", async () => {
+    const owner = createWorkerPersistence();
+    const other = createWorkerPersistence();
+    const appendOwner = vi.fn();
+    const appendOther = vi.fn();
+
+    await owner.persistWorkerRemoval(appendOwner, cwd, "w-shared");
+    const saved = await other.persistWorkerRecord(
+      appendOther,
+      cwd,
+      makeWorkerRecord({
+        id: "w-shared",
+        name: "shared",
+        status: "completed",
+        startedAt: 1,
+        endedAt: 2,
+      }),
+    );
+
+    // The tombstone is scoped to the instance that removed the worker; a
+    // second Pi instance (fresh extension instance, same project cwd) must
+    // still persist its own records for that cwd.
+    expect(saved).toBe(true);
+    expect(appendOther).toHaveBeenCalledWith(
+      WORKER_RECORD_ENTRY,
+      expect.objectContaining({ id: "w-shared" }),
+    );
+  });
+
+  it("loadWorker surfaces an unreadable record file instead of reporting it missing", async () => {
+    // A directory at the record path makes readFile fail with EISDIR — not
+    // a missing file. The read error must surface; returning undefined
+    // would make a broken record indistinguishable from a removed one.
+    await mkdir(recordPath(cwd, "w-bad"), { recursive: true });
+    await expect(loadWorker(cwd, "w-bad")).rejects.toMatchObject({ code: "EISDIR" });
+  });
+
+  it("loadWorker surfaces EACCES on a permission-denied record file", async () => {
+    if (process.getuid?.() === 0) return; // root reads past file modes; cannot simulate
+    await seedRecord(
+      cwd,
+      makeWorkerRecord({
+        id: "w-denied",
+        name: "denied",
+        status: "completed",
+        startedAt: 1,
+        endedAt: 2,
+      }),
+    );
+    await chmod(recordPath(cwd, "w-denied"), 0o000);
+    try {
+      await expect(loadWorker(cwd, "w-denied")).rejects.toMatchObject({ code: "EACCES" });
+    } finally {
+      await chmod(recordPath(cwd, "w-denied"), 0o644);
+    }
+  });
+
+  it("listRecordFiles skips an unreadable record file with a logged error", async () => {
+    // The janitor must keep classifying the readable records; the broken
+    // one is announced, not silently dropped.
+    await seedRecord(
+      cwd,
+      makeWorkerRecord({ id: "w-ok", name: "ok", status: "completed", startedAt: 1, endedAt: 2 }),
+    );
+    await mkdir(join(cwd, CONFIG_DIR_NAME, "workers", "records", "w-broken.json"), {
+      recursive: true,
+    });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const records = await listRecordFiles(cwd);
+      expect(records.map((record) => record.id)).toEqual(["w-ok"]);
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("w-broken"));
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it("removeWorkerRecord clears a ghost with no artifact file but refuses a running record", async () => {

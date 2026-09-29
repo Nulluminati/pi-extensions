@@ -58,12 +58,11 @@ import {
 } from "./src/runner.ts";
 import { DELEGATE_PARAMETERS, WORKERS_PARAMETERS } from "./src/schemas.ts";
 import {
+  createWorkerPersistence,
   listRecordFiles,
   loadWorker,
   loadWorkersFromBranch,
   migrateLegacyRegistry,
-  persistWorkerRecord,
-  persistWorkerRemoval,
   pruneStreams,
   pruneWorkerArtifacts,
   removeWorkerRecord,
@@ -88,6 +87,9 @@ export default async function workersExtension(pi: ExtensionAPI) {
     branchWorkers: new Map<string, WorkerRecord>(),
     reserved: new Map<string, string>(),
   };
+  // Persistence queues and removal tombstones are per instance: they must
+  // not leak into a second Pi instance (or test) in the same process.
+  const persistence = createWorkerPersistence();
   let lastUi: ExtensionUIContext | undefined;
   // The worker cwd is fixed per session; publish and persistence need it
   // between tool calls and lifecycle events.
@@ -178,7 +180,7 @@ export default async function workersExtension(pi: ExtensionAPI) {
    * cache must not adopt it either.
    */
   async function persistRecord(record: WorkerRecord): Promise<boolean> {
-    const persisted = await persistWorkerRecord(
+    const persisted = await persistence.persistWorkerRecord(
       (customType, data) => pi.appendEntry(customType, data),
       lastCwd,
       record,
@@ -550,7 +552,7 @@ export default async function workersExtension(pi: ExtensionAPI) {
         // session's marker cannot govern that replay, so it gets artifact
         // cleanup only.
         if (state.branchWorkers.has(id)) {
-          await persistWorkerRemoval(
+          await persistence.persistWorkerRemoval(
             (customType, data) => pi.appendEntry(customType, data),
             ctx.cwd,
             id,

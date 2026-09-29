@@ -76,49 +76,6 @@ import type {
   TtsSherpa,
 } from "./src/types.ts";
 
-export { encodePcm16Wave } from "./src/audio.ts";
-export { resolveModelsDir, resolveSource, resolveVoiceConfigPath } from "./src/config.ts";
-export { addHoldToVoice } from "./src/hold.ts";
-export {
-  buildInflectPhonemeText,
-  createInflectGaussianSamples,
-  InflectTtsEngine,
-  inflectTextToTokens,
-  splitInflectText,
-} from "./src/inflect.ts";
-export {
-  buildKittenConfig,
-  buildOfflineConfig,
-  buildOnlineConfig,
-  buildSupertonicConfig,
-  buildTtsConfig,
-  getModel,
-  MODELS,
-  modelDirPath,
-  modelIsDownloaded,
-  TTS_MODELS,
-} from "./src/models.ts";
-export { runVoiceOverlay } from "./src/overlay.ts";
-export { runVoiceSettings } from "./src/settings.ts";
-export {
-  buildSpokenSummaryPrompt,
-  cleanTextForSpeech,
-  findLatestAssistantText,
-  runVoiceSpeak,
-  summarizeForSpeech,
-} from "./src/summary.ts";
-export {
-  isHallucination,
-  maxDecodeSec,
-  resolveVadModel,
-  SttEngine,
-  splitSamples,
-  stripRepetitionLoop,
-  transcribeFile,
-  transcribeSegment,
-  vadSegment,
-} from "./src/transcription.ts";
-
 // --- Extension ---
 
 export default async function voiceExtension(pi: ExtensionAPI) {

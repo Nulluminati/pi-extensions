@@ -5,38 +5,50 @@ import { join, resolve } from "node:path";
 import { completeSimple } from "@earendil-works/pi-ai";
 import { isKittyProtocolActive } from "@earendil-works/pi-tui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadActiveSpeakerId, saveActiveVoice } from "../../extensions/voice/src/config.ts";
-import type { SherpaOnnx } from "../../extensions/voice/src/types.ts";
-import voiceExtension, {
-  addHoldToVoice,
-  buildInflectPhonemeText,
-  buildKittenConfig,
-  buildOfflineConfig,
-  buildSpokenSummaryPrompt,
-  buildSupertonicConfig,
-  buildTtsConfig,
-  cleanTextForSpeech,
-  createInflectGaussianSamples,
-  encodePcm16Wave,
-  findLatestAssistantText,
-  getModel,
-  inflectTextToTokens,
-  isHallucination,
-  MODELS,
-  modelIsDownloaded,
+import { encodePcm16Wave } from "../../extensions/voice/src/audio.ts";
+import {
+  loadActiveSpeakerId,
   resolveModelsDir,
   resolveSource,
   resolveVoiceConfigPath,
-  runVoiceSettings,
-  runVoiceSpeak,
-  SttEngine,
+  saveActiveVoice,
+} from "../../extensions/voice/src/config.ts";
+import { SAMPLE_RATE } from "../../extensions/voice/src/constants.ts";
+import { addHoldToVoice } from "../../extensions/voice/src/hold.ts";
+import {
+  buildInflectPhonemeText,
+  createInflectGaussianSamples,
+  inflectTextToTokens,
   splitInflectText,
+} from "../../extensions/voice/src/inflect.ts";
+import {
+  buildKittenConfig,
+  buildOfflineConfig,
+  buildSupertonicConfig,
+  buildTtsConfig,
+  getModel,
+  MODELS,
+  modelIsDownloaded,
+  TTS_MODELS,
+} from "../../extensions/voice/src/models.ts";
+import { runVoiceOverlay } from "../../extensions/voice/src/overlay.ts";
+import { runVoiceSettings } from "../../extensions/voice/src/settings.ts";
+import {
+  buildSpokenSummaryPrompt,
+  cleanTextForSpeech,
+  findLatestAssistantText,
+  runVoiceSpeak,
+  summarizeForSpeech,
+} from "../../extensions/voice/src/summary.ts";
+import {
+  isHallucination,
+  SttEngine,
   splitSamples,
   stripRepetitionLoop,
-  summarizeForSpeech,
-  TTS_MODELS,
   transcribeFile,
-} from "../../extensions/voice/voice.ts";
+} from "../../extensions/voice/src/transcription.ts";
+import type { SherpaOnnx } from "../../extensions/voice/src/types.ts";
+import voiceExtension from "../../extensions/voice/voice.ts";
 import {
   type EditorFactory,
   hasEditorFactoryLayer,
@@ -49,6 +61,31 @@ import { getCommandHandler, getEventHandler } from "../mocks/test-helpers.ts";
 vi.mock("@earendil-works/pi-ai", () => ({
   completeSimple: vi.fn(),
 }));
+
+/** Recorder fake: captures the overlay's chunk callback so a test can feed
+ *  microphone samples without spawning a real ffmpeg/arecord child process. */
+const recorderHarness = vi.hoisted(() => {
+  const chunkHandlers: Array<(samples: Float32Array, rms: number) => void> = [];
+  return {
+    chunkHandlers,
+    emit(samples: Float32Array): void {
+      for (const handler of chunkHandlers) handler(samples, 0.5);
+    },
+  };
+});
+
+vi.mock("../../extensions/voice/src/audio.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../extensions/voice/src/audio.ts")>();
+  return {
+    ...actual,
+    startStreamingRecorder: vi.fn(
+      (_source: string, _deps: unknown, onChunk: (samples: Float32Array, rms: number) => void) => {
+        recorderHarness.chunkHandlers.push(onChunk);
+        return { stop: vi.fn() };
+      },
+    ),
+  };
+});
 
 /** Sherpa fake: records every OfflineTts engine config, so a test can assert
  *  which model each engine was built from. The native addon loads through
@@ -1712,6 +1749,55 @@ describe("voice-extension", () => {
 
       expect(ctx.ui.custom).not.toHaveBeenCalled();
       expect(ctx.ui.notify).toHaveBeenCalledWith("Voice settings require TUI mode.", "error");
+    });
+  });
+
+  describe("voice overlay partial transcription", () => {
+    it("notifies once when live partial transcription fails", async () => {
+      vi.useFakeTimers();
+      const modelsDir = createDownloadedVoiceModels();
+      const ctx = createMockCommandContext();
+      let releaseOverlay: ((result: string | null) => void) | undefined;
+      ctx.ui.custom = vi.fn((factory) => {
+        factory({ requestRender: vi.fn() }, createTestTheme(), {}, vi.fn());
+        return new Promise<string | null>((resolve) => {
+          releaseOverlay = resolve;
+        });
+      });
+      const stt = {
+        recognize: vi.fn((): string => {
+          throw new Error("decode exploded");
+        }),
+      } as unknown as SttEngine;
+
+      const overlay = runVoiceOverlay("", ctx, {
+        modelsDir,
+        sherpa: {} as SherpaOnnx,
+        recorder: { hasFfmpeg: true, hasArecord: false },
+        stt,
+      });
+      recorderHarness.emit(new Float32Array(SAMPLE_RATE));
+      vi.advanceTimersByTime(2000);
+
+      // The first failure surfaces as a single warning naming the cause.
+      expect(ctx.ui.notify).toHaveBeenCalledTimes(1);
+      expect(ctx.ui.notify).toHaveBeenCalledWith(
+        expect.stringContaining("decode exploded"),
+        "warning",
+      );
+      expect(stt.recognize).toHaveBeenCalledTimes(1);
+
+      // Later intervals do not retry the failing engine or repeat the warning.
+      vi.advanceTimersByTime(8000);
+      expect(ctx.ui.notify).toHaveBeenCalledTimes(1);
+      expect(stt.recognize).toHaveBeenCalledTimes(1);
+
+      // After the overlay closes no timer still calls into the failed engine.
+      releaseOverlay?.(null);
+      await overlay;
+      vi.advanceTimersByTime(8000);
+      expect(ctx.ui.notify).toHaveBeenCalledTimes(1);
+      expect(stt.recognize).toHaveBeenCalledTimes(1);
     });
   });
 
