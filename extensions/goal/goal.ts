@@ -113,6 +113,7 @@ export default async function goalExtension(pi: ExtensionAPI) {
     resetContinuationGuard();
     persistState();
     updateStatusLine(ctx);
+    if (!ctx.hasUI) return;
     ctx.ui.notify(reason, "warning");
   }
 
@@ -233,6 +234,7 @@ export default async function goalExtension(pi: ExtensionAPI) {
       state.status = "complete";
       persistState();
       showCompletionStatus(ctx);
+      if (!ctx.hasUI) return;
       ctx.ui.notify(`Goal complete: ${verdict.reason}`, "info");
       return;
     }

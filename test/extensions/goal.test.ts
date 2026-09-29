@@ -513,6 +513,78 @@ describe("goal-extension", () => {
     });
   });
 
+  describe("non-UI mode", () => {
+    /** A ctx for rpc/json/print modes: notify must never be called. */
+    function makeNonUiContext() {
+      const mockCtx = createMockCommandContext();
+      mockCtx.hasUI = false;
+      mockCtx.ui.notify = vi.fn(() => {
+        throw new Error("ui.notify is unavailable in non-UI mode");
+      });
+      return mockCtx;
+    }
+
+    it("agent_end with an impossible verdict pauses the goal without notifying", async () => {
+      const mockPi = createMockPi();
+      const startCtx = createMockCommandContext();
+      await goalExtension(mockPi);
+      await getCommandHandler(mockPi, "goal:new")("implement snake game", startCtx);
+
+      // The turn ends in a non-UI mode (e.g. --mode json).
+      const mockCtx = makeNonUiContext();
+      mockVerdict("impossible", "the target module does not exist in this repo");
+      await getEventHandler(mockPi, "agent_end")({ type: "agent_end", messages: [] }, mockCtx);
+
+      expect(mockPi.appendEntry).toHaveBeenLastCalledWith(
+        "goal-state",
+        expect.objectContaining({
+          goal: expect.objectContaining({ status: "paused" }),
+        }),
+      );
+      expect(mockCtx.ui.notify).not.toHaveBeenCalled();
+    });
+
+    it("agent_end with a met verdict completes the goal without notifying", async () => {
+      const mockPi = createMockPi();
+      const startCtx = createMockCommandContext();
+      await goalExtension(mockPi);
+      await getCommandHandler(mockPi, "goal:new")("implement snake game", startCtx);
+
+      const mockCtx = makeNonUiContext();
+      mockVerdict("met", "tests pass and the game runs");
+      await getEventHandler(mockPi, "agent_end")({ type: "agent_end", messages: [] }, mockCtx);
+
+      expect(mockPi.appendEntry).toHaveBeenLastCalledWith(
+        "goal-state",
+        expect.objectContaining({
+          goal: expect.objectContaining({ status: "complete" }),
+        }),
+      );
+      expect(mockCtx.ui.notify).not.toHaveBeenCalled();
+    });
+
+    it("message_end with an error stop reason pauses the goal without notifying", async () => {
+      const mockPi = createMockPi();
+      const startCtx = createMockCommandContext();
+      await goalExtension(mockPi);
+      await getCommandHandler(mockPi, "goal:new")("implement snake game", startCtx);
+
+      const mockCtx = makeNonUiContext();
+      await getEventHandler(mockPi, "message_end")(
+        { type: "message_end", message: { role: "assistant", stopReason: "error" } },
+        mockCtx,
+      );
+
+      expect(mockPi.appendEntry).toHaveBeenLastCalledWith(
+        "goal-state",
+        expect.objectContaining({
+          goal: expect.objectContaining({ status: "paused" }),
+        }),
+      );
+      expect(mockCtx.ui.notify).not.toHaveBeenCalled();
+    });
+  });
+
   describe("runaway guards", () => {
     it("pauses when the iteration cap is reached", async () => {
       const mockPi = createMockPi();

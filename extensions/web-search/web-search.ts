@@ -302,7 +302,7 @@ export default async function webSearchExtension(pi: ExtensionAPI) {
         const message = error instanceof Error ? error.message : String(error);
         return {
           content: [{ type: "text", text: `Error: ${message}` }],
-          details: { url },
+          details: { url, isError: true },
         };
       }
     },

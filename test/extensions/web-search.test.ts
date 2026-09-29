@@ -1167,6 +1167,23 @@ describe("web-search-extension", () => {
       expect(result.content[0].text).toContain("Connection refused");
     });
 
+    it("marks network errors as error results", async () => {
+      mockFetch.mockRejectedValue(new Error("Connection refused"));
+
+      const mockPi = createMockPi();
+      await webSearchExtension(mockPi);
+      const tool = getRegisteredTool(mockPi, "web_fetch");
+      const result = await tool.execute(
+        "id-1",
+        { url: "https://example.com" },
+        undefined,
+        undefined,
+        {},
+      );
+
+      expect(result.details.isError).toBe(true);
+    });
+
     it("strips script and style tags from HTML", async () => {
       const html = `<html><head><style>.x{color:red}</style></head><body><p>Content</p><script>alert('xss')</script></body></html>`;
       mockFetch.mockResolvedValue(fetchResponse(html, { contentType: "text/html" }));
