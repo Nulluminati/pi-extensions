@@ -3,6 +3,7 @@ import type { ExtensionCommandContext } from "pi";
 import {
   APPROVAL_STATUS_KEY,
   AUTORESEARCH_STATUS_KEY,
+  BACKGROUND_JOBS_STATUS_KEY,
   BAR_SEGMENTS,
   GOAL_STATUS_KEY,
   ICON_AHEAD,
@@ -236,10 +237,10 @@ export function buildFooterLines(
       // Skip our own indicator and the small-model status: the small model is
       // shown in the editor meta line, not the footer. Skip goal: a running
       // goal is shown as a "Goal" badge in the editor frame. Skip missions,
-      // messenger, autoresearch and workers as well: their setStatus entries
-      // are fallback text for the default footer. Approval Mode shows its off
-      // state in the editor instead. Messenger's unread count reaches line 1
-      // via messenger:state.
+      // messenger, autoresearch, workers and background-jobs as well: their
+      // setStatus entries are fallback text for the default footer. Approval
+      // Mode shows its off state in the editor instead. Messenger's unread
+      // count reaches line 1 via messenger:state.
       if (
         key !== STATUS_KEY &&
         key !== SMALL_MODEL_STATUS_KEY &&
@@ -248,6 +249,7 @@ export function buildFooterLines(
         key !== MESSENGER_STATUS_KEY &&
         key !== AUTORESEARCH_STATUS_KEY &&
         key !== WORKERS_STATUS_KEY &&
+        key !== BACKGROUND_JOBS_STATUS_KEY &&
         key !== APPROVAL_STATUS_KEY &&
         text
       ) {

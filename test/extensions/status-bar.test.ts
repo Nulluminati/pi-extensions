@@ -1124,7 +1124,7 @@ describe("status-bar-extension", () => {
     expect(lines[1]).toContain("🎯 active");
   });
 
-  it("footer line 2 suppresses missions, messenger, autoresearch, and workers statuses (widget-first fallbacks)", async () => {
+  it("footer line 2 suppresses missions, messenger, autoresearch, workers, and background-jobs statuses (widget-first fallbacks)", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await enableBar(mockPi, mockCtx);
@@ -1138,6 +1138,7 @@ describe("status-bar-extension", () => {
           ["messenger", "✉ Messenger: 3 unread · scout"],
           ["autoresearch", "⌕ researching auth flows"],
           ["workers", "⚙ Workers: 1 running · $0.04"],
+          ["background-jobs", "▣ Jobs: 1 job: #1 npm"],
           ["some-other-ext", "foreign status"],
         ]),
       }),
@@ -1154,6 +1155,7 @@ describe("status-bar-extension", () => {
     expect(lines[1]).not.toContain("✉");
     expect(lines[1]).not.toContain("researching auth flows");
     expect(lines[1]).not.toContain("running · $0.04");
+    expect(lines[1]).not.toContain("Jobs: 1 job");
   });
 
   it("onBranchChange triggers requestRender", async () => {

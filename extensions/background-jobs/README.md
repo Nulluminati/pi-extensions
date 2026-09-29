@@ -141,6 +141,7 @@ removed when no jobs are active, and re-registered on `session_start`.
 | `pi.sendMessage()` | Trusted wake messages (`triggerTurn`, `deliverAs: "steer"`) |
 | `pi.appendEntry("background-jobs")` | Registry snapshot on the session branch |
 | `ctx.ui.custom()` | The focusable `/jobs` overlay panel |
+| `ctx.ui.setStatus("background-jobs", …)` | Fallback footer line for pi's default footer (skipped by the bundled status bar, which shows the widget instead) |
 | `lib/widget-strip.ts` / `lib/framed-widget.ts` | The Jobs editor widget |
 | `lib/paths.ts` (`agentStateDir`) | The spool directory |
 | `lib/presence-shards.ts` (`isProcessAlive`) | Spool liveness checks during pruning |

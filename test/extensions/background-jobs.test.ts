@@ -1065,6 +1065,57 @@ describe("background-jobs-extension", () => {
       expect(result.content[0].text).toContain("No background jobs");
     });
   });
+
+  describe("status-line fallback", () => {
+    it("publishes the status fallback while jobs are active", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await backgroundJobsExtension(mockPi);
+      await startBackgroundJob(mockPi, mockCtx, { command: "npm test" });
+
+      expect(mockCtx.ui.setStatus).toHaveBeenCalledWith(
+        "background-jobs",
+        expect.stringContaining("Jobs: 1 job: #1 npm"),
+      );
+    });
+
+    it("clears the status fallback when the last active job exits", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await backgroundJobsExtension(mockPi);
+      const { child } = await startBackgroundJob(mockPi, mockCtx, { command: "npm test" });
+      mockCtx.ui.setStatus.mockClear();
+
+      child.emit("exit", 0);
+
+      expect(mockCtx.ui.setStatus).toHaveBeenLastCalledWith("background-jobs", undefined);
+    });
+
+    it("clears the status fallback on session_start", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await backgroundJobsExtension(mockPi);
+      await startBackgroundJob(mockPi, mockCtx, { command: "npm test" });
+      mockCtx.ui.setStatus.mockClear();
+
+      const sessionStart = getEventHandler(mockPi, "session_start");
+      await sessionStart({ type: "session_start", reason: "new" }, mockCtx);
+
+      expect(mockCtx.ui.setStatus).toHaveBeenLastCalledWith("background-jobs", undefined);
+    });
+
+    it("does not publish the status fallback without UI", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      mockCtx.hasUI = false;
+      await backgroundJobsExtension(mockPi);
+
+      const sessionStart = getEventHandler(mockPi, "session_start");
+      await sessionStart({ type: "session_start", reason: "new" }, mockCtx);
+
+      expect(mockCtx.ui.setStatus).not.toHaveBeenCalled();
+    });
+  });
 });
 
 // --- Spool retention --------------------------------------------------------

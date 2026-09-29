@@ -32,6 +32,12 @@ Rules come from the project's `.pi/sandbox.json` (srt schema: filesystem read/wr
 - `src/tool-child.mjs` — the sandboxed child: executes one tool or shell request and reports the result.
 - `src/git-metadata.mjs` — read-only git metadata helpers for the sandboxed environment.
 
+## Cross-Extension Use
+
+`extensions/workers/src/provision/hook.ts` imports `src/client.ts` directly. Worktree provisioning runs the project's setup script inside the same sandbox as worker tools, and only this client starts that sandbox.
+
+This import is the repository's single documented exception to keeping extensions independent. `src/client.ts` resolves `src/broker.mjs` through `import.meta.url`, so the broker must stay beside the client. Moving the pair to `lib/` would put the broker lookup at risk, so both files stay in `src/`. The test `test/extensions/worker-sandbox-client.test.ts` pins the spawned broker path to this directory.
+
 ## Platform Requirements
 
 - Linux: `bwrap` (bubblewrap), `socat`, and `rg` on `PATH`.

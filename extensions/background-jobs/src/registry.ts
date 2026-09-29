@@ -86,7 +86,8 @@ export function buildSnapshot(registry: JobRegistry): { jobs: JobSnapshot[] } {
   };
 }
 
-/** Footer text summarizing active jobs, or undefined when none are running. */
+/** Plain text for the setStatus fallback, or undefined when none are running;
+ *  the composition root wraps it with `formatStatusLine`. */
 export function formatStatusText(registry: JobRegistry): string | undefined {
   const active = activeJobs(registry);
   if (active.length === 0) return undefined;

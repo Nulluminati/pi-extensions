@@ -27,10 +27,17 @@
 
 import type { ExtensionAPI, ExtensionUIContext } from "pi";
 import { agentStateDir } from "../../lib/paths.ts";
+import { formatStatusLine } from "../../lib/ui-format.ts";
 import { setStripWidget, WIDGET_PRIORITY_JOBS } from "../../lib/widget-strip.ts";
 import { executeJobsAction, openJobsPanel } from "./src/jobs.ts";
 import { startMonitor } from "./src/monitor.ts";
-import { activeJobs, buildSnapshot, createRegistry, type JobRegistry } from "./src/registry.ts";
+import {
+  activeJobs,
+  buildSnapshot,
+  createRegistry,
+  formatStatusText,
+  type JobRegistry,
+} from "./src/registry.ts";
 import { cancelJob, pruneSpoolDir, startBackgroundJob } from "./src/runner.ts";
 import { BACKGROUND_PARAMETERS, JOBS_PARAMETERS, MONITOR_PARAMETERS } from "./src/schemas.ts";
 import type { JobEvents } from "./src/types.ts";
@@ -41,6 +48,23 @@ import { createJobsWidget } from "./src/widget.ts";
 const WIDGET_KEY = "background-jobs";
 const SNAPSHOT_TYPE = "background-jobs";
 const WAKE_CUSTOM_TYPE = "background-jobs:wake";
+
+// Status fallback key for pi's default footer; mirrors WIDGET_KEY so the
+// status bar's line-2 skip list can suppress it while its widget is visible.
+const STATUS_KEY = "background-jobs";
+const STATUS_ICON = "▣";
+const STATUS_ICON_COLOR = "accent";
+const STATUS_TEXT_COLOR = "muted";
+
+// --- Helpers ---
+
+function err(code: string, text: string) {
+  return {
+    content: [{ type: "text" as const, text }],
+    details: { error: code },
+    terminate: true as const,
+  };
+}
 
 // --- Extension ---
 
@@ -65,18 +89,35 @@ export default async function backgroundJobsExtension(pi: ExtensionAPI) {
     }
   }
 
-  function publishWidget(ui: ExtensionUIContext): void {
+  // Publishes the widget-first surfaces: the framed Jobs panel above the
+  // editor, plus the setStatus fallback pi's default footer shows when the
+  // bundled status bar is disabled. The status bar skips STATUS_KEY on its
+  // second line so the state never double-renders.
+  function publish(ui: ExtensionUIContext): void {
     const active = activeJobs(registry);
+    const statusText = formatStatusText(registry);
     try {
       setStripWidget(ui, "aboveEditor", {
         key: WIDGET_KEY,
         priority: WIDGET_PRIORITY_JOBS,
         factory: active.length > 0 ? createJobsWidget(registry) : undefined,
       });
+      ui.setStatus(
+        STATUS_KEY,
+        statusText === undefined
+          ? undefined
+          : formatStatusLine(ui.theme, {
+              icon: STATUS_ICON,
+              prefix: "Jobs",
+              text: statusText,
+              iconColor: STATUS_ICON_COLOR,
+              textColor: STATUS_TEXT_COLOR,
+            }),
+      );
     } catch (err) {
       const message = (err as Error).message;
       if (!message.includes("stale")) {
-        console.error(`[background-jobs] widget refresh failed: ${message}`);
+        console.error(`[background-jobs] publish failed: ${message}`);
       }
     }
   }
@@ -84,7 +125,7 @@ export default async function backgroundJobsExtension(pi: ExtensionAPI) {
   function refreshWidget(): void {
     const ui = lastUi;
     if (!ui?.setWidget) return;
-    publishWidget(ui);
+    publish(ui);
   }
 
   const events: JobEvents = {
@@ -133,7 +174,7 @@ export default async function backgroundJobsExtension(pi: ExtensionAPI) {
     // and the strip contract expects extensions to re-register on
     // session_start. The registry is empty here, so the entry is removed
     // (factory undefined) until a new job publishes it again.
-    if (ctx.hasUI) publishWidget(ctx.ui);
+    if (ctx.hasUI) publish(ctx.ui);
     try {
       await pruneSpoolDir(agentStateDir("background-jobs"), { keep: liveSpoolPaths });
     } catch (error) {
@@ -301,12 +342,4 @@ export default async function backgroundJobsExtension(pi: ExtensionAPI) {
       });
     },
   });
-}
-
-function err(code: string, text: string) {
-  return {
-    content: [{ type: "text" as const, text }],
-    details: { error: code },
-    terminate: true as const,
-  };
 }

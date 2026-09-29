@@ -7,10 +7,10 @@
  * title (top border).
  *
  *  Footer line 1 (static session info):
- *    model/provider, thinking level (color-coded, with a live activity dot),
  *    working directory (last path component + icon), git branch + status
  *    indicator block (!?+$»=✘$↑↓⇕), and a right-aligned context usage bar
- *    with the token breakdown (↑↓↗↘), turn count, and cost.
+ *    with the token breakdown (↑↓↗↘), turn count, and cost. The model and
+ *    thinking level are NOT here: they live in the editor title.
  *
  *  Footer line 2 (transient events):
  *    third-party extension statuses published via ctx.ui.setStatus(). Omitted

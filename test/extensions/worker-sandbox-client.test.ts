@@ -1,6 +1,8 @@
 import { EventEmitter } from "node:events";
 import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
+import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { startWorkerSandbox } from "../../extensions/worker-sandbox/src/client.ts";
 import { loadWorkerSandboxPolicy } from "../../extensions/worker-sandbox/src/policy.ts";
@@ -11,6 +13,10 @@ vi.mock("../../extensions/worker-sandbox/src/policy.ts", () => ({
 }));
 
 import { spawn } from "node:child_process";
+
+// The broker script must live beside client.ts; workers provision imports the
+// client from another extension, so the path cannot depend on the caller.
+const repositoryRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 describe("worker sandbox broker client", () => {
   beforeEach(() => {
@@ -84,6 +90,18 @@ describe("worker sandbox broker client", () => {
       ),
     ).rejects.toThrow(/aborted/);
     expect(requests.filter((request) => request.type === "tool")).toEqual([]);
+    await client.close();
+  });
+
+  it("resolves the broker script beside client.ts, not beside the caller", async () => {
+    const child = fakeChild((request) => (request.type === "init" ? { type: "ready" } : undefined));
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const client = await startWorkerSandbox("/worktree");
+    const brokerPath = vi.mocked(spawn).mock.calls[0]?.[1]?.[0];
+    expect(brokerPath).toBe(
+      join(repositoryRoot, "extensions", "worker-sandbox", "src", "broker.mjs"),
+    );
+    expect(existsSync(brokerPath ?? "")).toBe(true);
     await client.close();
   });
 

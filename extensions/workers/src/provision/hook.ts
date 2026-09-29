@@ -3,6 +3,10 @@ import { mkdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import { cacheDir } from "../../../../lib/paths.ts";
+// Documented exception: the repository's only cross-extension src import.
+// startWorkerSandbox resolves ./broker.mjs through import.meta.url, so the
+// client and broker must stay together in worker-sandbox/src/; see
+// extensions/worker-sandbox/README.md ("Cross-Extension Use").
 import { startWorkerSandbox } from "../../../worker-sandbox/src/client.ts";
 
 const HOOK_PATH = join(CONFIG_DIR_NAME, "provision-worktree");
