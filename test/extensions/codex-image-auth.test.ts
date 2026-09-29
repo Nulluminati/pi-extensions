@@ -145,12 +145,15 @@ describe("getCodexCredentials", () => {
   it("treats a token expiring within the 60s margin as expired", async () => {
     const tokens = chatGptTokens(30);
     await writeAuthFile(apiAuthFile(tokens));
-    mockFetch.mockResolvedValueOnce(refreshResponse({ refresh_token: "refresh-token-2" }));
+    const freshToken = refreshedAccessToken(1);
+    mockFetch.mockResolvedValueOnce(
+      refreshResponse({ access_token: freshToken, refresh_token: "refresh-token-2" }),
+    );
 
     const credentials = await getCodexCredentials(signal());
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
-    expect(credentials.accessToken).toBe(refreshedAccessToken(1));
+    expect(credentials.accessToken).toBe(freshToken);
   });
 
   it("treats a token just outside the 60s margin as valid", async () => {
@@ -170,8 +173,10 @@ describe("getCodexCredentials", () => {
       custom_note: "hello",
       nested: { keep: true },
     });
+    const freshToken = refreshedAccessToken(1);
     mockFetch.mockResolvedValueOnce(
       refreshResponse({
+        access_token: freshToken,
         id_token: "new-id-token",
         refresh_token: "refresh-token-2",
         expires_in: 3600,
@@ -180,7 +185,7 @@ describe("getCodexCredentials", () => {
 
     const credentials = await getCodexCredentials(signal());
 
-    expect(credentials).toEqual({ accessToken: refreshedAccessToken(1), accountId: "acct-123" });
+    expect(credentials).toEqual({ accessToken: freshToken, accountId: "acct-123" });
     expect(mockFetch).toHaveBeenCalledTimes(1);
     const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("https://auth.openai.com/oauth/token");
@@ -192,7 +197,7 @@ describe("getCodexCredentials", () => {
     expect(body.get("refresh_token")).toBe("refresh-token-1");
 
     const saved = JSON.parse(await readFile(authPath(), "utf8"));
-    expect(saved.tokens.access_token).toBe(refreshedAccessToken(1));
+    expect(saved.tokens.access_token).toBe(freshToken);
     expect(saved.tokens.refresh_token).toBe("refresh-token-2");
     expect(saved.tokens.id_token).toBe("new-id-token");
     expect(saved.tokens.account_id).toBe("acct-123");
@@ -260,7 +265,10 @@ describe("getCodexCredentials", () => {
 
   it("serializes concurrent refreshes so the second call reuses the fresh token", async () => {
     await writeAuthFile(apiAuthFile(chatGptTokens(-3600)));
-    mockFetch.mockResolvedValueOnce(refreshResponse({ refresh_token: "refresh-token-2" }));
+    const freshToken = refreshedAccessToken(1);
+    mockFetch.mockResolvedValueOnce(
+      refreshResponse({ access_token: freshToken, refresh_token: "refresh-token-2" }),
+    );
 
     const [first, second] = await Promise.all([
       getCodexCredentials(signal()),
@@ -268,10 +276,10 @@ describe("getCodexCredentials", () => {
     ]);
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
-    expect(first.accessToken).toBe(refreshedAccessToken(1));
-    expect(second.accessToken).toBe(refreshedAccessToken(1));
+    expect(first.accessToken).toBe(freshToken);
+    expect(second.accessToken).toBe(freshToken);
     const saved = JSON.parse(await readFile(authPath(), "utf8"));
-    expect(saved.tokens.access_token).toBe(refreshedAccessToken(1));
+    expect(saved.tokens.access_token).toBe(freshToken);
   });
 
   it("falls back to ~/.codex when CODEX_HOME is unset", async () => {
