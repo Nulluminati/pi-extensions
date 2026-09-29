@@ -28,9 +28,9 @@ interface VoiceSettingsOptions {
   recorder?: RecorderDeps;
   playbackReady?: boolean;
   source?: string;
-  onModelSelect: (modelId: string) => void;
-  onTtsModelSelect: (modelId: string) => void;
-  onSpeakerSelect: (speakerId: number) => void;
+  onModelSelect: (modelId: string) => void | Promise<void>;
+  onTtsModelSelect: (modelId: string) => void | Promise<void>;
+  onSpeakerSelect: (speakerId: number) => void | Promise<void>;
 }
 
 function modelSettingValue(modelsDir: string, model: ModelDef | TtsModelDef): string {
@@ -162,7 +162,7 @@ export async function runVoiceSettings(
         items,
         items.length,
         { ...settingsTheme, hint: () => "" },
-        (id, newValue) => {
+        async (id, newValue) => {
           if (id === "dictation-model") {
             const previousValue = modelSettingValue(
               modelsDir,
@@ -180,7 +180,7 @@ export async function runVoiceSettings(
               return;
             }
             try {
-              opts.onModelSelect(model.id);
+              await opts.onModelSelect(model.id);
             } catch (error) {
               settingsList.updateValue(id, previousValue);
               ctx.ui.notify(
@@ -210,7 +210,7 @@ export async function runVoiceSettings(
               return;
             }
             try {
-              opts.onTtsModelSelect(model.id);
+              await opts.onTtsModelSelect(model.id);
             } catch (error) {
               settingsList.updateValue(id, previousValue);
               ctx.ui.notify(
@@ -244,7 +244,7 @@ export async function runVoiceSettings(
             return;
           }
           try {
-            opts.onSpeakerSelect(speakerId);
+            await opts.onSpeakerSelect(speakerId);
           } catch (error) {
             settingsList.updateValue(id, previousValue);
             ctx.ui.notify(

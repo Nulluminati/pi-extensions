@@ -28,6 +28,7 @@ import {
   STATUS_KEY,
   TOKEN_COLORS,
   WORKER_COLOR,
+  WORKERS_STATUS_KEY,
 } from "./constants.ts";
 import type { GitStatus, State, TokenUsage } from "./types.ts";
 
@@ -235,8 +236,8 @@ export function buildFooterLines(
       // Skip our own indicator and the small-model status: the small model is
       // shown in the editor meta line, not the footer. Skip goal: a running
       // goal is shown as a "Goal" badge in the editor frame. Skip missions,
-      // messenger and autoresearch as well: their setStatus entries are
-      // fallback text for the default footer. Approval Mode shows its off
+      // messenger, autoresearch and workers as well: their setStatus entries
+      // are fallback text for the default footer. Approval Mode shows its off
       // state in the editor instead. Messenger's unread count reaches line 1
       // via messenger:state.
       if (
@@ -246,6 +247,7 @@ export function buildFooterLines(
         key !== MISSIONS_STATUS_KEY &&
         key !== MESSENGER_STATUS_KEY &&
         key !== AUTORESEARCH_STATUS_KEY &&
+        key !== WORKERS_STATUS_KEY &&
         key !== APPROVAL_STATUS_KEY &&
         text
       ) {

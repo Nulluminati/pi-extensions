@@ -1,6 +1,7 @@
 /** Rendering for worker lists, status output, and the editor widget. */
 
 import { createFramedWidget, type FramedWidgetFactory } from "../../../lib/framed-widget.ts";
+import { formatStatusLine } from "../../../lib/ui-format.ts";
 import { BLOCKER_MARKER_TYPE } from "../../../lib/worker-blocker.ts";
 import { summarizeStreamValue } from "./runner.ts";
 import type { WorkerRecord } from "./types.ts";
@@ -9,6 +10,12 @@ import type { WorkerRecord } from "./types.ts";
 
 export const WORKERS_WIDGET_KEY = "workers";
 export const WORKERS_STATE_EVENT = "workers:state";
+
+// Status-line fallback for pi's default footer (shown when the bundled
+// status bar is disabled); registered in the status bar's line-2 skip list
+// because the widget already shows the live state.
+export const WORKERS_STATUS_KEY = "workers";
+export const WORKERS_STATUS_ICON = "⚙";
 
 /** How many workers the widget shows before collapsing the rest. */
 const MAX_WIDGET_WORKERS = 5;
@@ -69,6 +76,32 @@ export function createWorkersWidget(getWorkers: () => WorkerRecord[]): FramedWid
     titleRight: () => `${getWorkers().length} running`,
     getBodyLines: () => getWorkers().map((w) => formatWorkerLine(w)),
     maxBodyLines: MAX_WIDGET_WORKERS,
+  });
+}
+
+/** Short footer text for the running workers, or undefined when none. */
+export function workersStatusText(running: number, costUsd: number): string | undefined {
+  if (running <= 0) return undefined;
+  // Same sub-cent floor as the status bar's spend roll-up so both surfaces
+  // show the same figure for tiny costs.
+  const cost = costUsd < 0.01 ? "<0.01" : costUsd.toFixed(2);
+  return `${running} running · $${cost}`;
+}
+
+/** Themed status-line fallback (default footer) for the widget state. */
+export function formatWorkersStatus(
+  theme: { fg: (color: string, text: string) => string },
+  running: number,
+  costUsd: number,
+): string | undefined {
+  const text = workersStatusText(running, costUsd);
+  if (text === undefined) return undefined;
+  return formatStatusLine(theme, {
+    icon: WORKERS_STATUS_ICON,
+    prefix: "Workers",
+    text,
+    iconColor: "accent",
+    textColor: "muted",
   });
 }
 

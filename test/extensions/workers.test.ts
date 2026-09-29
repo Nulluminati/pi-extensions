@@ -22,7 +22,7 @@ import {
   startDelegatedWorker,
   type WorkerSessionState,
 } from "../../extensions/workers/src/delegate.ts";
-import { createWorkersWidget } from "../../extensions/workers/src/format.ts";
+import { createWorkersWidget, formatWorkersStatus } from "../../extensions/workers/src/format.ts";
 import { runSetupHook, SetupHookCancelled } from "../../extensions/workers/src/provision/hook.ts";
 import {
   armAdoptedTimeout,
@@ -1490,6 +1490,37 @@ sleep 30
       await vi.waitFor(() => {
         expect(mockCtx.ui.setWidget).toHaveBeenLastCalledWith(STRIP_KEY_ABOVE, undefined);
       });
+    });
+  });
+
+  // --- Status-line fallback (default footer when the status bar is off) ---
+
+  describe("status line fallback", () => {
+    it("sets a formatted status line while workers run and clears it when none run", async () => {
+      const fixture = await writeFixture(fixtureDir, "slow-status-worker.sh", SLOW_WORKER);
+      setEnv("PI_WORKER_COMMAND", fixture);
+
+      await executeTool("spawn_worker", { task: "t", isolate: false, name: "scout" });
+
+      expect(mockCtx.ui.setStatus).toHaveBeenCalledWith(
+        "workers",
+        expect.stringContaining("Workers: 1 running"),
+      );
+
+      await getEventHandler("session_shutdown")(
+        { type: "session_shutdown", reason: "quit" },
+        mockCtx,
+      );
+      expect(mockCtx.ui.setStatus).toHaveBeenLastCalledWith("workers", undefined);
+    });
+
+    it("formats the status line from running count and rolled-up worker cost", () => {
+      const theme = { fg: (_color: string, text: string) => text };
+      expect(formatWorkersStatus(theme, 2, 0.041)).toBe("⚙ Workers: 2 running · $0.04");
+      // Sub-cent spends stay visible instead of rounding to $0.00.
+      expect(formatWorkersStatus(theme, 1, 0.004)).toBe("⚙ Workers: 1 running · $<0.01");
+      // Nothing running: the fallback is cleared, like the widget.
+      expect(formatWorkersStatus(theme, 0, 1.5)).toBeUndefined();
     });
   });
 

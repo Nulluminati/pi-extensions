@@ -41,7 +41,13 @@ import {
   startDelegatedWorker,
   type WorkerSessionState,
 } from "./src/delegate.ts";
-import { createWorkersWidget, WORKERS_STATE_EVENT, WORKERS_WIDGET_KEY } from "./src/format.ts";
+import {
+  createWorkersWidget,
+  formatWorkersStatus,
+  WORKERS_STATE_EVENT,
+  WORKERS_STATUS_KEY,
+  WORKERS_WIDGET_KEY,
+} from "./src/format.ts";
 import { assertWorkerId } from "./src/ids.ts";
 import { SetupHookCancelled } from "./src/provision/hook.ts";
 import {
@@ -246,7 +252,14 @@ export default async function workersExtension(pi: ExtensionAPI) {
       workerCostUsd,
       workerTokens,
     });
-    if (!ctx.hasUI || !lastUi?.setWidget) return;
+    if (!ctx.hasUI) return;
+    // Status-line fallback for the default footer (status bar disabled);
+    // mirrors the widget, which only shows running workers.
+    ctx.ui.setStatus(
+      WORKERS_STATUS_KEY,
+      formatWorkersStatus(ctx.ui.theme, runningCount, workerCostUsd),
+    );
+    if (!lastUi?.setWidget) return;
     const live = [...workers.values()]
       .filter((w) => w.status === "running")
       .sort((a, b) => a.startedAt - b.startedAt);
@@ -671,11 +684,13 @@ export default async function workersExtension(pi: ExtensionAPI) {
         });
       }
     }
-    if (ctx.hasUI)
+    if (ctx.hasUI) {
+      ctx.ui.setStatus(WORKERS_STATUS_KEY, undefined);
       setStripWidget(ctx.ui, "aboveEditor", {
         key: WORKERS_WIDGET_KEY,
         priority: WIDGET_PRIORITY_WORKERS,
         factory: undefined,
       });
+    }
   });
 }

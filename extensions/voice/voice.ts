@@ -428,28 +428,28 @@ export default async function voiceExtension(pi: ExtensionAPI) {
         activeModelId,
         activeTtsModelId,
         activeSpeakerId,
-        onModelSelect: (modelId) => {
-          saveActiveModel(voiceConfigPath, modelId);
+        onModelSelect: async (modelId) => {
+          await saveActiveModel(voiceConfigPath, modelId);
           activeModelId = modelId;
         },
-        onTtsModelSelect: (modelId) => {
-          saveActiveTtsModel(voiceConfigPath, modelId);
+        onTtsModelSelect: async (modelId) => {
+          await saveActiveTtsModel(voiceConfigPath, modelId);
           activeTtsModelId = modelId;
         },
-        onSpeakerSelect: (speakerId) => {
+        onSpeakerSelect: async (speakerId) => {
           const ttsModel = TTS_MODELS.find((model) => model.id === activeTtsModelId);
           if (ttsModel?.backend === "supertonic") {
             // Supertonic voices are unnamed speakers addressed by index.
             if (speakerId < 0 || speakerId >= (ttsModel.speakerCount ?? 0)) {
               throw new Error(`Unknown local voice index: ${speakerId}`);
             }
-            saveActiveVoice(voiceConfigPath, speakerId);
+            await saveActiveVoice(voiceConfigPath, speakerId);
             activeSpeakerId = speakerId;
             return;
           }
           const voice = KITTEN_VOICES[speakerId];
           if (!voice) throw new Error(`Unknown local voice index: ${speakerId}`);
-          saveActiveVoice(voiceConfigPath, voice);
+          await saveActiveVoice(voiceConfigPath, voice);
           activeSpeakerId = speakerId;
         },
       });

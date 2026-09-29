@@ -1,6 +1,7 @@
 import { completeSimple } from "@earendil-works/pi-ai";
 import { Loader } from "@earendil-works/pi-tui";
 import type { ExtensionCommandContext } from "pi";
+import { extractText } from "../../../lib/session-utils.ts";
 import { resolveSmallModel } from "../../../lib/small-model.ts";
 import { resolveModelsDir } from "./config.ts";
 import { DEFAULT_TTS_MODEL_ID, TTS_WIDGET_KEY } from "./constants.ts";
@@ -16,21 +17,7 @@ export function findLatestAssistantText(entries: unknown[]): string | undefined 
     };
     const message = entry.type === "message" ? entry.message : entry;
     if (message?.role !== "assistant") continue;
-    if (typeof message.content === "string" && message.content.trim()) {
-      return message.content.trim();
-    }
-    if (!Array.isArray(message.content)) continue;
-    const text = message.content
-      .filter(
-        (block): block is { type: "text"; text: string } =>
-          typeof block === "object" &&
-          block !== null &&
-          (block as { type?: unknown }).type === "text" &&
-          typeof (block as { text?: unknown }).text === "string",
-      )
-      .map((block) => block.text)
-      .join("\n")
-      .trim();
+    const text = extractText(message.content).trim();
     if (text) return text;
   }
   return undefined;

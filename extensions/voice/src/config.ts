@@ -1,6 +1,8 @@
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { withFileLock } from "../../../lib/file-lock.ts";
+import { writeJsonAtomic } from "../../../lib/json-atomic.ts";
 import { agentConfigPath, cacheDir } from "../../../lib/paths.ts";
 import {
   DEFAULT_MODEL_ID,
@@ -33,17 +35,18 @@ function readVoiceConfig(configPath: string): Record<string, unknown> {
   }
 }
 
-function writeVoiceConfig(configPath: string, changes: Record<string, unknown>): void {
-  const config = { ...readVoiceConfig(configPath), ...changes };
-  mkdirSync(dirname(configPath), { recursive: true });
-  const temporaryPath = `${configPath}.${process.pid}.${Date.now()}.tmp`;
-  try {
-    writeFileSync(temporaryPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
-    renameSync(temporaryPath, configPath);
-  } catch (error) {
-    rmSync(temporaryPath, { force: true });
-    throw error;
-  }
+async function writeVoiceConfig(
+  configPath: string,
+  changes: Record<string, unknown>,
+): Promise<void> {
+  // Settings rows save independently and each save merges into the existing
+  // file; the lock keeps a slow save from clobbering a newer one.
+  await withFileLock(`${configPath}.lock`, async () => {
+    const config = { ...readVoiceConfig(configPath), ...changes };
+    // The config carries user identity details; the atomic writer keeps the
+    // file 0600 and never leaves a torn file behind on crash.
+    await writeJsonAtomic(configPath, config, { mode: 0o600 });
+  });
 }
 
 export function loadActiveModelId(configPath: string): string {
@@ -74,16 +77,16 @@ export function loadActiveTtsModelId(configPath: string): string {
     : DEFAULT_TTS_MODEL_ID;
 }
 
-export function saveActiveModel(configPath: string, modelId: string): void {
-  writeVoiceConfig(configPath, { dictationModel: modelId });
+export async function saveActiveModel(configPath: string, modelId: string): Promise<void> {
+  await writeVoiceConfig(configPath, { dictationModel: modelId });
 }
 
-export function saveActiveVoice(configPath: string, voice: string | number): void {
-  writeVoiceConfig(configPath, { voice });
+export async function saveActiveVoice(configPath: string, voice: string | number): Promise<void> {
+  await writeVoiceConfig(configPath, { voice });
 }
 
-export function saveActiveTtsModel(configPath: string, modelId: string): void {
-  writeVoiceConfig(configPath, { ttsModel: modelId });
+export async function saveActiveTtsModel(configPath: string, modelId: string): Promise<void> {
+  await writeVoiceConfig(configPath, { ttsModel: modelId });
 }
 
 export function resolveSource(env: NodeJS.ProcessEnv): string {

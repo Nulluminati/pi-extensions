@@ -1,11 +1,11 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { completeSimple } from "@earendil-works/pi-ai";
 import { isKittyProtocolActive } from "@earendil-works/pi-tui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadActiveSpeakerId } from "../../extensions/voice/src/config.ts";
+import { loadActiveSpeakerId, saveActiveVoice } from "../../extensions/voice/src/config.ts";
 import type { SherpaOnnx } from "../../extensions/voice/src/types.ts";
 import voiceExtension, {
   addHoldToVoice,
@@ -693,6 +693,23 @@ describe("voice-extension", () => {
       ).toBeUndefined();
     });
 
+    it("joins multiple text blocks with newlines", () => {
+      const text = findLatestAssistantText([
+        {
+          type: "message",
+          message: {
+            role: "assistant",
+            content: [
+              { type: "text", text: "Line one." },
+              { type: "text", text: "Line two." },
+            ],
+          },
+        },
+      ]);
+
+      expect(text).toBe("Line one.\nLine two.");
+    });
+
     it("cleans Markdown and code from text before speaking", () => {
       expect(
         cleanTextForSpeech(
@@ -1273,6 +1290,25 @@ describe("voice-extension", () => {
     });
   });
 
+  describe("voice config writes", () => {
+    it("writes config atomically through the public save path", async () => {
+      const configPath = join(
+        mkdtempSync(join(tmpdir(), "pi-voice-config-")),
+        "nested",
+        "config.json",
+      );
+
+      await saveActiveVoice(configPath, "expr-voice-4-f");
+
+      const content = readFileSync(configPath, "utf8");
+      expect(JSON.parse(content)).toEqual({ voice: "expr-voice-4-f" });
+      // Byte-identical to the shared atomic writer's canonical output.
+      expect(content).toBe(JSON.stringify({ voice: "expr-voice-4-f" }, null, 2));
+      // The voice config may hold user identity details; it stays 0600.
+      expect(statSync(configPath).mode & 0o777).toBe(0o600);
+    });
+  });
+
   describe("resolveVoiceConfigPath", () => {
     it("uses the global Pi agent directory by default", () => {
       expect(resolveVoiceConfigPath({}, "/home/zero/.pi/agent")).toBe(
@@ -1549,12 +1585,19 @@ describe("voice-extension", () => {
         onSpeakerSelect,
       });
 
+      // Saves run through the async atomic writer; flush after each Enter so
+      // each change settles before the next key, matching real key timing.
+      const flushSaves = () => new Promise((resolve) => setTimeout(resolve, 0));
       component?.handleInput?.("\r");
+      await flushSaves();
       component?.handleInput?.("\x1b[B");
       component?.handleInput?.("\r");
+      await flushSaves();
       component?.handleInput?.("\r");
+      await flushSaves();
       component?.handleInput?.("\x1b[B");
       component?.handleInput?.("\r");
+      await flushSaves();
 
       expect(onModelSelect).toHaveBeenCalledWith("whisper-tiny-en-int8");
       // Kitten cycles to Supertonic, then to Inflect's fixed voice.
@@ -1717,15 +1760,29 @@ describe("voice-extension", () => {
 
       await firstHandler("", firstCtx);
       const firstComponent = getFirstComponent();
+      // Each Enter saves through the real filesystem before the modal's
+      // list value advances; wait for the completion notification so the
+      // next key always lands on the settled row.
+      const waitForNotify = (fragment: string) =>
+        vi.waitFor(() =>
+          expect(firstCtx.ui.notify).toHaveBeenCalledWith(
+            expect.stringContaining(fragment),
+            "info",
+          ),
+        );
       firstComponent.handleInput?.("\x1b[B");
       firstComponent.handleInput?.("\x1b[B");
       firstComponent.handleInput?.("\r");
+      await waitForNotify("Local voice set to");
       firstComponent.handleInput?.("\x1b[A");
       // Kitten cycles through Supertonic before reaching Inflect.
       firstComponent.handleInput?.("\r");
+      await waitForNotify("Speech model set to Supertonic 3");
       firstComponent.handleInput?.("\r");
+      await waitForNotify("Speech model set to Inflect Nano v2");
       firstComponent.handleInput?.("\x1b[A");
       firstComponent.handleInput?.("\r");
+      await waitForNotify("Dictation model set to");
 
       expect(JSON.parse(readFileSync(configPath, "utf8"))).toEqual({
         voice: "expr-voice-2-f",
@@ -1792,10 +1849,13 @@ describe("voice-extension", () => {
       component.handleInput?.("\x1b[B");
       component.handleInput?.("\x1b[B");
       component.handleInput?.("\r");
-
-      expect(ctx.ui.notify).toHaveBeenCalledWith(
-        expect.stringContaining("Could not save local voice"),
-        "error",
+      // The failed save surfaces asynchronously through the real filesystem;
+      // wait for the error notification.
+      await vi.waitFor(() =>
+        expect(ctx.ui.notify).toHaveBeenCalledWith(
+          expect.stringContaining("Could not save local voice"),
+          "error",
+        ),
       );
       expect(component.render(72).join("\n")).toContain("Voice 2 · Masculine");
     });
@@ -1843,6 +1903,14 @@ describe("voice-extension", () => {
       await getCommandHandler(mockPi, "voice:settings")("", ctx);
       component?.handleInput?.("\x1b[B");
       component?.handleInput?.("\r");
+      // The model switch saves through the real filesystem; wait for its
+      // completion notification before speaking again.
+      await vi.waitFor(() =>
+        expect(ctx.ui.notify).toHaveBeenCalledWith(
+          expect.stringContaining("Speech model set to"),
+          "info",
+        ),
+      );
 
       // The second speak must get an engine built for Supertonic, not reuse
       // the cached Kitten engine.

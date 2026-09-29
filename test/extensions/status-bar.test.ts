@@ -1124,7 +1124,7 @@ describe("status-bar-extension", () => {
     expect(lines[1]).toContain("🎯 active");
   });
 
-  it("footer line 2 suppresses missions, messenger, and autoresearch statuses (widget-first fallbacks)", async () => {
+  it("footer line 2 suppresses missions, messenger, autoresearch, and workers statuses (widget-first fallbacks)", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await enableBar(mockPi, mockCtx);
@@ -1137,13 +1137,14 @@ describe("status-bar-extension", () => {
           ["missions", "◆ mission fix-bug · running 4m"],
           ["messenger", "✉ Messenger: 3 unread · scout"],
           ["autoresearch", "⌕ researching auth flows"],
+          ["workers", "⚙ Workers: 1 running · $0.04"],
           ["some-other-ext", "foreign status"],
         ]),
       }),
     );
     const lines = component.render(120);
 
-    // Line 2 still renders for the foreign status, but the three widget-first
+    // Line 2 still renders for the foreign status, but the widget-first
     // extensions are suppressed (their setStatus entries are default-footer
     // fallbacks and would double-render).
     expect(lines.length).toBe(2);
@@ -1152,6 +1153,7 @@ describe("status-bar-extension", () => {
     expect(lines[1]).not.toContain("Messenger");
     expect(lines[1]).not.toContain("✉");
     expect(lines[1]).not.toContain("researching auth flows");
+    expect(lines[1]).not.toContain("running · $0.04");
   });
 
   it("onBranchChange triggers requestRender", async () => {
