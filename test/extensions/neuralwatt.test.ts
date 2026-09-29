@@ -1,18 +1,19 @@
 import { readdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import neuralwattExtension, {
-  FLEX_EVENT,
-  MISSING_MODELS_MESSAGE,
-  type NeuralwattModelsResponse,
-  type NeuralwattQuotaResponse,
-  STATIC_MODELS,
-} from "../../extensions/neuralwatt/neuralwatt.ts";
+import neuralwattExtension from "../../extensions/neuralwatt/neuralwatt.ts";
+import { MISSING_MODELS_MESSAGE } from "../../extensions/neuralwatt/src/catalog.ts";
 import {
   computeFlexState,
+  FLEX_EVENT,
   fetchFlexCapableIds,
   injectServiceTier,
 } from "../../extensions/neuralwatt/src/flex.ts";
+import { STATIC_MODELS } from "../../extensions/neuralwatt/src/models.ts";
+import type {
+  NeuralwattModelsResponse,
+  NeuralwattQuotaResponse,
+} from "../../extensions/neuralwatt/src/types.ts";
 import { createMockCommandContext } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
 import { getCommandHandler, getEventHandler } from "../mocks/test-helpers.ts";

@@ -1,6 +1,6 @@
 # Synthetic Provider Extension
 
-Registers [Synthetic](https://synthetic.new) as a Pi model provider using their OpenAI-compatible API, with dynamic model discovery, capability detection, cost tracking, and quota display.
+Registers [Synthetic](https://synthetic.new) as a Pi model provider using their OpenAI-compatible API. It ships a static model catalog with pricing and capabilities, warns when the live catalog gains new models, and displays quota usage.
 
 ## What It Does
 
@@ -50,7 +50,7 @@ The extension calls `pi.registerProvider("synthetic", config)` at load time. The
 
 ### Static model catalog
 
-The extension ships a hardcoded list of always-on, tools-capable models with known pricing and capabilities (priced per million tokens, sourced from the live catalog in 2026-08):
+The extension ships a hardcoded list of always-on, tools-capable models with known pricing and capabilities (priced per million tokens, sourced from the live catalog in 2026-08). The table lists registered ids exactly as the live catalog reports them: `syn:` ids are first-class Synthetic catalog entries, and the rest carry the `hf:` prefix.
 
 | Model | Context | Reasoning | Vision | Input/Output Cost |
 |-------|---------|-----------|--------|-------------------|
@@ -58,19 +58,26 @@ The extension ships a hardcoded list of always-on, tools-capable models with kno
 | syn:small:text | 196K | ✓ | — | $0.10 / $0.50 |
 | syn:large:vision | 524K | ✓ | ✓ | $3.00 / $15.00 |
 | syn:small:vision | 262K | ✓ | ✓ | $0.45 / $2.20 |
-| zai-org/GLM-5.2 | 524K | ✓ | — | $1.00 / $3.00 |
-| zai-org/GLM-5.3-Flash | 524K | ✓ | ✓ | $0.15 / $0.50 |
-| zai-org/GLM-4.7-Flash | 196K | ✓ | — | $0.10 / $0.50 |
-| moonshotai/Kimi-K3 | 524K | ✓ | ✓ | $3.00 / $15.00 |
-| Qwen/Qwen3.6-27B | 262K | ✓ | ✓ | $0.45 / $2.20 |
-| Qwen/Qwen3.8-27B | 262K | ✓ | ✓ | $0.45 / $2.20 |
-| nvidia/NVIDIA-Nemotron-3-Super | 262K | ✓ | — | $0.30 / $1.00 |
-| deepseek-ai/DeepSeek-V4.1-Flash | 524K | ✓ | — | $0.80 / $1.20 |
-| openai/gpt-oss-120b | 131K | ✓ (always on) | — | $0.10 / $0.10 |
+| hf:zai-org/GLM-5.2 | 524K | ✓ | — | $1.00 / $3.00 |
+| hf:zai-org/GLM-5.3-Flash | 524K | ✓ | ✓ | $0.15 / $0.50 |
+| hf:zai-org/GLM-4.7-Flash | 196K | ✓ | — | $0.10 / $0.50 |
+| hf:moonshotai/Kimi-K3 | 524K | ✓ | ✓ | $3.00 / $15.00 |
+| hf:Qwen/Qwen3.6-27B | 262K | ✓ | ✓ | $0.45 / $2.20 |
+| hf:Qwen/Qwen3.8-27B | 262K | ✓ | ✓ | $0.45 / $2.20 |
+| hf:nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4 | 262K | ✓ | — | $0.30 / $1.00 |
+| hf:deepseek-ai/DeepSeek-V4.1-Flash | 524K | ✓ | — | $0.80 / $1.20 |
+| hf:openai/gpt-oss-120b | 131K | ✓ (always on) | — | $0.10 / $0.10 |
 
 One model (`gpt-oss-120b`) always thinks and cannot be turned off, so its `off` thinking level is hidden. Every other reasoning model accepts the full `none`/`minimal`/`low`/`medium`/`high`/`xhigh` enum. GLM-5.3-Flash, Qwen3.8-27B, and DeepSeek-V4.1-Flash carry an `always_on` flag in the catalog, but probing shows `none` still disables thinking on all three, so they get the normal `off: "none"` map. `Kimi-K2.7-Code` and `MiniMax-M3` were retired by Synthetic (HTTP 404 "no longer supported") and are no longer listed.
 
 ### Startup staleness check
+
+On `session_start`, the extension compares the live catalog against the static list. The check is best effort: it never blocks startup.
+
+1. Skip when there is no UI or no resolved API key.
+2. Fetch `GET https://api.synthetic.new/openai/v1/models` with the key (15 second timeout). A network error or non-OK response ends the check quietly.
+3. Filter the live catalog to models with `always_on: true` and `"tools"` in `supported_features`, since Pi requires tool calling.
+4. Send one warning notification listing the filtered ids the static list does not include.
 
 ### Auth resolution
 

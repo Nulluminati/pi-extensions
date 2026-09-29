@@ -25,15 +25,11 @@ import { NEURALWATT_API_BASE_URL, NEURALWATT_CLIENT_HEADERS } from "./src/consta
 import {
   computeFlexState,
   FLEX_EVENT,
-  type FlexState,
   fetchFlexCapableIds,
   injectServiceTier,
 } from "./src/flex.ts";
 import { STATIC_MODELS } from "./src/models.ts";
 import { fetchQuota, formatQuotaDisplay } from "./src/quota.ts";
-
-export type { NeuralwattModelsResponse, NeuralwattQuotaResponse } from "./src/types.ts";
-export { FLEX_EVENT, type FlexState, MISSING_MODELS_MESSAGE, STATIC_MODELS };
 
 // --- Extension ---
 

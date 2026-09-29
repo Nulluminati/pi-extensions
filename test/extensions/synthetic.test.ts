@@ -1,11 +1,10 @@
 import { readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import syntheticExtension, {
-  MISSING_MODELS_MESSAGE,
-  STATIC_MODELS,
-  type SyntheticModelsResponse,
-} from "../../extensions/synthetic/synthetic.ts";
+import { MISSING_MODELS_MESSAGE } from "../../extensions/synthetic/src/catalog.ts";
+import { STATIC_MODELS } from "../../extensions/synthetic/src/models.ts";
+import type { SyntheticModelsResponse } from "../../extensions/synthetic/src/types.ts";
+import syntheticExtension from "../../extensions/synthetic/synthetic.ts";
 import { createMockCommandContext } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
 import { getCommandHandler, getEventHandler } from "../mocks/test-helpers.ts";

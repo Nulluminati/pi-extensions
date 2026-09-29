@@ -25,9 +25,6 @@ import { SYNTHETIC_API_BASE_URL } from "./src/constants.ts";
 import { STATIC_MODELS } from "./src/models.ts";
 import { fetchQuota, formatQuotaDisplay } from "./src/quota.ts";
 
-export type { SyntheticModelsResponse } from "./src/types.ts";
-export { MISSING_MODELS_MESSAGE, STATIC_MODELS };
-
 // --- Extension ---
 
 export default async function syntheticExtension(pi: ExtensionAPI) {
