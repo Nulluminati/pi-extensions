@@ -1,6 +1,6 @@
 import { readdir } from "node:fs/promises";
 import { resolve } from "node:path";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { MISSING_MODELS_MESSAGE } from "../../extensions/synthetic/src/catalog.ts";
 import { STATIC_MODELS } from "../../extensions/synthetic/src/models.ts";
 import type { SyntheticModelsResponse } from "../../extensions/synthetic/src/types.ts";
@@ -45,6 +45,7 @@ describe("synthetic-extension", () => {
     });
   });
 
+  let debugSpy: MockInstance<typeof console.debug>;
   let mockFetch: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -55,6 +56,12 @@ describe("synthetic-extension", () => {
     vi.stubEnv("SYNTHETIC_API_KEY", "syn_test_key_123");
     // Default: live catalog in sync with the static list (no warning).
     mockFetch.mockResolvedValue(mockModelsResponse(STATIC_MODELS));
+    // Capture debug diagnostics so failure-path output stays out of the test log.
+    debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    debugSpy.mockRestore();
   });
 
   // --- static list ---
@@ -223,11 +230,12 @@ describe("synthetic-extension", () => {
     await handler({ type: "session_start", reason: "new" }, mockCtx);
 
     expect(mockFetch).not.toHaveBeenCalled();
+    expect(debugSpy).not.toHaveBeenCalled();
     const warnings = mockCtx.ui.notify.mock.calls.filter((c) => c[1] === "warning");
     expect(warnings).toEqual([]);
   });
 
-  it("startup check is silent on network error", async () => {
+  it("startup check logs a diagnostic and skips the warning on network error", async () => {
     mockFetch.mockRejectedValueOnce(new Error("boom"));
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
@@ -236,6 +244,39 @@ describe("synthetic-extension", () => {
     const handler = getEventHandler(mockPi, "session_start");
     await handler({ type: "session_start", reason: "new" }, mockCtx);
 
+    expect(debugSpy).toHaveBeenCalledTimes(1);
+    expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining("synthetic"));
+    expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining("boom"));
+    const warnings = mockCtx.ui.notify.mock.calls.filter((c) => c[1] === "warning");
+    expect(warnings).toEqual([]);
+  });
+
+  it("startup check logs a diagnostic with the HTTP status on a non-OK catalog response", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 503, statusText: "Service Unavailable" });
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await syntheticExtension(mockPi);
+
+    const handler = getEventHandler(mockPi, "session_start");
+    await handler({ type: "session_start", reason: "new" }, mockCtx);
+
+    expect(debugSpy).toHaveBeenCalledTimes(1);
+    expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining("synthetic"));
+    expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining("503"));
+    const warnings = mockCtx.ui.notify.mock.calls.filter((c) => c[1] === "warning");
+    expect(warnings).toEqual([]);
+  });
+
+  it("startup check logs no diagnostic for a valid empty catalog", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ data: [] }) });
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await syntheticExtension(mockPi);
+
+    const handler = getEventHandler(mockPi, "session_start");
+    await handler({ type: "session_start", reason: "new" }, mockCtx);
+
+    expect(debugSpy).not.toHaveBeenCalled();
     const warnings = mockCtx.ui.notify.mock.calls.filter((c) => c[1] === "warning");
     expect(warnings).toEqual([]);
   });

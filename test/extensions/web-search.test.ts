@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { decodeHtmlEntities } from "../../extensions/web-search/src/html.ts";
 import webSearchExtension from "../../extensions/web-search/web-search.ts";
 import { createMockCommandContext } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
@@ -1607,6 +1608,27 @@ describe("web-search-extension", () => {
       expect(lines.some((l: string) => l.includes("Result 6"))).toBe(false);
       expect(lines.some((l: string) => l.includes("... and 2 more results"))).toBe(true);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// decodeHtmlEntities
+// ---------------------------------------------------------------------------
+
+describe("decodeHtmlEntities", () => {
+  it("decodes each entity exactly once so double-encoded input stays encoded", () => {
+    expect(decodeHtmlEntities("&amp;lt;")).toBe("&lt;");
+    expect(decodeHtmlEntities("&amp;gt;")).toBe("&gt;");
+    expect(decodeHtmlEntities("&amp;#39;")).toBe("&#39;");
+    expect(decodeHtmlEntities("&amp;#x27;")).toBe("&#x27;");
+    expect(decodeHtmlEntities("&amp;amp;")).toBe("&amp;");
+  });
+
+  it("still decodes single-encoded named, decimal, and hex entities", () => {
+    expect(decodeHtmlEntities("&lt;&#39;&quot;")).toBe("<'\"");
+    expect(decodeHtmlEntities("&amp;")).toBe("&");
+    expect(decodeHtmlEntities("&nbsp;")).toBe(" ");
+    expect(decodeHtmlEntities("&#x27;Tom&#x27;s &#65;bcd")).toBe("'Tom's Abcd");
   });
 });
 

@@ -39,9 +39,10 @@ export function createInboxWatcher(options: InboxWatcherOptions): InboxWatcher {
     try {
       if (!ctx.isIdle()) return;
       await deliver(ctx);
-    } catch {
+    } catch (error) {
       // ctx can go stale after session replacement; settle-time delivery
       // still works.
+      console.debug("[messenger] inbox delivery failed:", error);
     }
   }
 
@@ -58,9 +59,12 @@ export function createInboxWatcher(options: InboxWatcherOptions): InboxWatcher {
       });
       // The watched directory can vanish (project cleanup) or the watcher can
       // hit resource limits; delivery still works at settle time.
-      watcher.on("error", () => {});
-    } catch {
+      watcher.on("error", (error) => {
+        console.debug("[messenger] inbox watcher failed:", error);
+      });
+    } catch (error) {
       // Watching is best-effort; agent_settled delivery remains.
+      console.debug("[messenger] inbox watcher could not start:", error);
     }
   }
 

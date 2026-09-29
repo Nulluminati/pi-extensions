@@ -17,11 +17,11 @@ export const ANY_REMAINING_TAG_REGEX = /<[^>]+>/g;
 
 export const TITLE_TAG_REGEX = /<title[^>]*>([\s\S]*?)<\/title>/i;
 
-export const NUMERIC_HTML_ENTITY_REGEX = /&#(\d+);/g;
-
-// Hex numeric character reference, e.g. &#x27; (apostrophe). Brave payloads use
-// these alongside the decimal form, so both must be handled.
-export const HEX_HTML_ENTITY_REGEX = /&#x([0-9a-fA-F]+);/gi;
+// Named, decimal, and hex character references, e.g. &#x27; (apostrophe). Brave
+// payloads use hex alongside the decimal form, so both must be handled. One
+// combined pass decodes each reference exactly once, so double-encoded input
+// such as "&amp;lt;" becomes "&lt;", never "<".
+export const HTML_ENTITY_REGEX = /&(?:amp|lt|gt|quot|nbsp|#[0-9]+|#[xX][0-9a-fA-F]+);/g;
 
 export const HORIZONTAL_WHITESPACE_RUN = /[ \t]+/g;
 
@@ -43,15 +43,26 @@ export function stripRemainingTags(text: string): string {
 }
 
 export function decodeHtmlEntities(text: string): string {
-  return text
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&nbsp;/g, " ")
-    .replace(NUMERIC_HTML_ENTITY_REGEX, (_, code: string) => String.fromCharCode(Number(code)))
-    .replace(HEX_HTML_ENTITY_REGEX, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+  return text.replace(HTML_ENTITY_REGEX, (entity: string) => {
+    switch (entity) {
+      case "&amp;":
+        return "&";
+      case "&lt;":
+        return "<";
+      case "&gt;":
+        return ">";
+      case "&quot;":
+        return '"';
+      case "&nbsp;":
+        return " ";
+      default: {
+        // Numeric reference: decimal (&#39;) or hex (&#x27;).
+        const isHex = entity[2]?.toLowerCase() === "x";
+        const digits = isHex ? entity.slice(3, -1) : entity.slice(2, -1);
+        return String.fromCharCode(parseInt(digits, isHex ? 16 : 10));
+      }
+    }
+  });
 }
 
 export function collapseWhitespace(text: string): string {

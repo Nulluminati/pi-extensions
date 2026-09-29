@@ -11,6 +11,7 @@ vi.mock("../../extensions/codex-image/src/auth.ts", () => ({ getCodexCredentials
 vi.mock("../../extensions/codex-image/src/config.ts", () => ({ getCodexResponseModel: vi.fn() }));
 vi.mock("../../extensions/codex-image/src/hosted.ts", () => ({ generateHostedImage: vi.fn() }));
 vi.mock("../../extensions/codex-image/src/output.ts", () => ({
+  MAX_INPUT_IMAGES: 5,
   loadInputImages: vi.fn(),
   saveImage: vi.fn(),
 }));
@@ -40,6 +41,8 @@ describe("codex-image extension", () => {
     await codexImageExtension(pi);
     expect(pi.registerTool).toHaveBeenCalledTimes(1);
     expect(pi.registerTool.mock.calls[0][0].name).toBe("generate_image");
+    // Pi's default renderer shows the returned image; a text-only renderer would hide it.
+    expect(pi.registerTool.mock.calls[0][0].renderResult).toBeUndefined();
     expect(pi.registerCommand).not.toHaveBeenCalled();
   });
 

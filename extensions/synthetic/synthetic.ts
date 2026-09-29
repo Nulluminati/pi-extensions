@@ -39,12 +39,14 @@ export default async function syntheticExtension(pi: ExtensionAPI) {
 
   // session_start: best-effort staleness check. Warns (once per session) when
   // the live catalog exposes always-on, tools-capable models the static list
-  // does not include. Silent on missing key or network error; never blocks.
+  // does not include. Silent on missing key; a catalog fetch failure logs a
+  // debug diagnostic and skips the check without a UI warning. Never blocks.
   pi.on("session_start", async (_event, ctx) => {
     if (!ctx.hasUI) return;
     const apiKey = await getResolvedApiKey(ctx);
     if (!apiKey) return;
     const catalog = await fetchCatalog(apiKey, ctx.signal);
+    if (catalog === undefined) return;
     const missing = findMissingModels(catalog);
     if (missing.length === 0) return;
     ctx.ui.notify(

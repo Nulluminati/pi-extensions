@@ -16,8 +16,6 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
 
-export const wrapMultilineText = wrapToolText;
-
 export function renderSearchResult(
   result: AgentToolResult,
   options: ToolRenderResultOptions,
@@ -51,13 +49,13 @@ export function renderSearchResult(
         text += theme.fg("muted", `... and ${results.length - limit} more results`);
       }
       return {
-        render: (width: number) => wrapMultilineText(text.trimEnd(), width),
+        render: (width: number) => wrapToolText(text.trimEnd(), width),
         invalidate: () => {},
       };
     }
     const text = result.content[0]?.type === "text" ? result.content[0].text : "";
     return {
-      render: (width: number) => wrapMultilineText(text, width),
+      render: (width: number) => wrapToolText(text, width),
       invalidate: () => {},
     };
   }
@@ -102,7 +100,7 @@ export function renderFetchResult(
       preview += theme.fg("muted", ellipsis);
     }
     return {
-      render: (width: number) => wrapMultilineText(preview.trimEnd(), width),
+      render: (width: number) => wrapToolText(preview.trimEnd(), width),
       invalidate: () => {},
     };
   }

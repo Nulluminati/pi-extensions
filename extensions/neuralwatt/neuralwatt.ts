@@ -62,19 +62,22 @@ export default async function neuralwattExtension(pi: ExtensionAPI) {
   // Warns (once per session) when Neuralwatt publishes models the static list
   // does not include. Gated on a configured key so non-Neuralwatt users do not
   // pay a startup fetch; uses the unauthenticated /v1/models view and ignores
-  // flex siblings represented by the service-tier toggle. Silent on network
-  // error; never blocks.
+  // flex siblings represented by the service-tier toggle. A catalog fetch
+  // failure logs a debug diagnostic and skips the warning without UI output;
+  // flex discovery below still runs. Never blocks.
   pi.on("session_start", async (_event, ctx) => {
     if (!ctx.hasUI) return;
     const apiKey = await getResolvedApiKey(ctx);
     if (!apiKey) return;
     const catalog = await fetchCatalog(ctx.signal);
-    const missing = findMissingModels(catalog);
-    if (missing.length > 0) {
-      ctx.ui.notify(
-        `${MISSING_MODELS_MESSAGE}:\n${missing.map((id) => `  • ${id}`).join("\n")}`,
-        "warning",
-      );
+    if (catalog) {
+      const missing = findMissingModels(catalog);
+      if (missing.length > 0) {
+        ctx.ui.notify(
+          `${MISSING_MODELS_MESSAGE}:\n${missing.map((id) => `  • ${id}`).join("\n")}`,
+          "warning",
+        );
+      }
     }
 
     // Build the flex-capable set from the authenticated catalog. Reuses the key

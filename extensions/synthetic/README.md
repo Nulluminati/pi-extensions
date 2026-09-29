@@ -75,7 +75,7 @@ One model (`gpt-oss-120b`) always thinks and cannot be turned off, so its `off` 
 On `session_start`, the extension compares the live catalog against the static list. The check is best effort: it never blocks startup.
 
 1. Skip when there is no UI or no resolved API key.
-2. Fetch `GET https://api.synthetic.new/openai/v1/models` with the key (15 second timeout). A network error or non-OK response ends the check quietly.
+2. Fetch `GET https://api.synthetic.new/openai/v1/models` with the key (15 second timeout). A network error or non-OK response skips the warning and logs one `console.debug` diagnostic containing the provider and the error or HTTP status; no UI warning is shown for a failed check.
 3. Filter the live catalog to models with `always_on: true` and `"tools"` in `supported_features`, since Pi requires tool calling.
 4. Send one warning notification listing the filtered ids the static list does not include.
 

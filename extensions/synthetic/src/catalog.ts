@@ -10,13 +10,16 @@ export const MISSING_MODELS_MESSAGE =
 
 /**
  * Fetch the live catalog (id + always_on + supported_features only) for the
- * startup staleness check. Returns an empty array on any error or missing key
- * so the caller stays silent.
+ * startup staleness check. Returns the model list on success (an empty array
+ * for a valid response without entries) and undefined on transport error or a
+ * non-OK response, so the caller can tell a failure apart from an in-sync
+ * catalog. Failures log a debug diagnostic with the provider and error/status;
+ * they never raise a UI warning.
  */
 export async function fetchCatalog(
   apiKey: string,
   signal?: AbortSignal,
-): Promise<SyntheticCatalogModel[]> {
+): Promise<SyntheticCatalogModel[] | undefined> {
   const { signal: timeoutSignal, cleanup } = createTimeoutController({
     timeoutMs: FETCH_TIMEOUT_MS,
     signal,
@@ -26,11 +29,18 @@ export async function fetchCatalog(
       headers: createAuthHeaders(apiKey),
       signal: timeoutSignal,
     });
-    if (!response.ok) return [];
+    if (!response.ok) {
+      const statusText = response.statusText ? ` ${response.statusText}` : "";
+      console.debug(`[synthetic] model catalog check failed: HTTP ${response.status}${statusText}`);
+      return undefined;
+    }
     const data = (await response.json()) as SyntheticModelsResponse;
     return data.data ?? [];
-  } catch {
-    return [];
+  } catch (error) {
+    console.debug(
+      `[synthetic] model catalog check failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return undefined;
   } finally {
     cleanup();
   }

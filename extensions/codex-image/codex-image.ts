@@ -1,14 +1,17 @@
-import type { ExtensionAPI } from "pi";
+// biome-ignore assist/source/organizeImports: Runtime imports precede Pi types in extension entrypoints.
 import { Type } from "typebox";
+import type { ExtensionAPI } from "pi";
 import { getCodexCredentials } from "./src/auth.ts";
 import { getCodexResponseModel } from "./src/config.ts";
 import { generateHostedImage } from "./src/hosted.ts";
-import { loadInputImages, saveImage } from "./src/output.ts";
+import { loadInputImages, MAX_INPUT_IMAGES, saveImage } from "./src/output.ts";
 
-// --- Extension ---
+// --- Constants ---
 
 const FALLBACK_RESPONSE_MODEL = "gpt-5.5";
 const UNSUPPORTED_CODEX_MODEL = "model is not supported when using Codex with a ChatGPT account";
+
+// --- Extension ---
 
 export default async function codexImageExtension(pi: ExtensionAPI) {
   pi.registerTool({
@@ -22,7 +25,7 @@ export default async function codexImageExtension(pi: ExtensionAPI) {
         Type.Array(Type.String(), {
           description:
             "Local PNG, JPEG, or WebP image paths to edit or use as references (up to five).",
-          maxItems: 5,
+          maxItems: MAX_INPUT_IMAGES,
         }),
       ),
       size: Type.Optional(
@@ -40,8 +43,8 @@ export default async function codexImageExtension(pi: ExtensionAPI) {
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       const prompt = params.prompt.trim();
       if (!prompt) throw new Error("Image prompt must not be empty.");
-      if (params.inputImages && params.inputImages.length > 5) {
-        throw new Error("Use no more than 5 input images.");
+      if (params.inputImages && params.inputImages.length > MAX_INPUT_IMAGES) {
+        throw new Error(`Use no more than ${MAX_INPUT_IMAGES} input images.`);
       }
 
       const requestSignal = signal ?? ctx.signal ?? new AbortController().signal;

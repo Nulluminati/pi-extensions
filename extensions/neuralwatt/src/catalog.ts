@@ -15,10 +15,15 @@ export const MISSING_MODELS_MESSAGE =
  * Fetch the public model catalog from the unauthenticated /v1/models view.
  * Neuralwatt's public list is reachable without a key, so this runs even before
  * credentials are configured. No Authorization header is sent because the
- * staleness check only needs the public catalog. Returns an empty array on any
- * error so the caller stays silent.
+ * staleness check only needs the public catalog. Returns the model list on
+ * success (an empty array for a valid response without entries) and undefined
+ * on transport error or a non-OK response, so the caller can tell a failure
+ * apart from an in-sync catalog. Failures log a debug diagnostic with the
+ * provider and error/status; they never raise a UI warning.
  */
-export async function fetchCatalog(signal?: AbortSignal): Promise<NeuralwattCatalogModel[]> {
+export async function fetchCatalog(
+  signal?: AbortSignal,
+): Promise<NeuralwattCatalogModel[] | undefined> {
   const { signal: timeoutSignal, cleanup } = createTimeoutController({
     timeoutMs: FETCH_TIMEOUT_MS,
     signal,
@@ -28,11 +33,20 @@ export async function fetchCatalog(signal?: AbortSignal): Promise<NeuralwattCata
       headers: { Accept: "application/json", ...NEURALWATT_CLIENT_HEADERS },
       signal: timeoutSignal,
     });
-    if (!response.ok) return [];
+    if (!response.ok) {
+      const statusText = response.statusText ? ` ${response.statusText}` : "";
+      console.debug(
+        `[neuralwatt] model catalog check failed: HTTP ${response.status}${statusText}`,
+      );
+      return undefined;
+    }
     const data = (await response.json()) as NeuralwattModelsResponse;
     return data.data ?? [];
-  } catch {
-    return [];
+  } catch (error) {
+    console.debug(
+      `[neuralwatt] model catalog check failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return undefined;
   } finally {
     cleanup();
   }

@@ -1,5 +1,13 @@
 import { execFile, spawn } from "node:child_process";
-import { existsSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  type FSWatcher,
+  rmSync,
+  statSync,
+  unlinkSync,
+  watch,
+  writeFileSync,
+} from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
@@ -18,6 +26,7 @@ import {
   findBlockingReservation,
   generateMessageId,
   heartbeat,
+  inboxFileName,
   inboxPath,
   leaveRegistry,
   loadRegistry,
@@ -30,6 +39,7 @@ import {
   reserve,
   sendMessage,
 } from "../../extensions/messenger/src/store.ts";
+import { createInboxWatcher } from "../../extensions/messenger/src/watcher.ts";
 import { withFileLock } from "../../lib/file-lock.ts";
 
 // Call-through spy: lets tests assert who took which lock while keeping the
@@ -44,7 +54,7 @@ vi.mock("../../lib/file-lock.ts", async (importOriginal) => {
 // tests pin it per directory while every other call stays real.
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
-  return { ...actual, statSync: vi.fn(actual.statSync) };
+  return { ...actual, statSync: vi.fn(actual.statSync), watch: vi.fn(actual.watch) };
 });
 
 import { runGit } from "../../lib/git.ts";
@@ -127,6 +137,59 @@ describe("messenger-extension", () => {
     expect(events).toContain("session_start");
     expect(events).toContain("agent_settled");
     expect(events).toContain("session_shutdown");
+  });
+
+  it("logs inbox delivery failures while leaving settle-time delivery available", async () => {
+    const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
+    globalRestores.push(() => debug.mockRestore());
+    mockCtx.isIdle.mockReturnValue(true);
+    const deliver = vi.fn().mockRejectedValue(new Error("mailbox read failed"));
+    const watcher = createInboxWatcher({ getAgentName: () => "test-agent", deliver });
+    watcher.start(mockCtx);
+    const handle = vi.mocked(watch).mock.results.at(-1)?.value as FSWatcher | undefined;
+    expect(handle).toBeDefined();
+    handle?.emit("change", "change", inboxFileName("test-agent"));
+
+    await vi.waitFor(() =>
+      expect(debug).toHaveBeenCalledWith(
+        "[messenger] inbox delivery failed:",
+        expect.objectContaining({ message: "mailbox read failed" }),
+      ),
+    );
+    expect(deliver).toHaveBeenCalledWith(mockCtx);
+    watcher.stop();
+  });
+
+  it("logs inbox watcher errors while keeping settle-time delivery available", () => {
+    const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
+    globalRestores.push(() => debug.mockRestore());
+    const watcher = createInboxWatcher({ getAgentName: () => "test-agent", deliver: vi.fn() });
+    watcher.start(mockCtx);
+    const handle = vi.mocked(watch).mock.results.at(-1)?.value as FSWatcher | undefined;
+    expect(handle).toBeDefined();
+    handle?.emit("error", new Error("watch limit reached"));
+
+    expect(debug).toHaveBeenCalledWith(
+      "[messenger] inbox watcher failed:",
+      expect.objectContaining({ message: "watch limit reached" }),
+    );
+    watcher.stop();
+  });
+
+  it("logs inbox watcher startup failures", () => {
+    const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
+    globalRestores.push(() => debug.mockRestore());
+    vi.mocked(watch).mockImplementationOnce(() => {
+      throw new Error("watch unavailable");
+    });
+    const watcher = createInboxWatcher({ getAgentName: () => "test-agent", deliver: vi.fn() });
+    watcher.start(mockCtx);
+
+    expect(debug).toHaveBeenCalledWith(
+      "[messenger] inbox watcher could not start:",
+      expect.objectContaining({ message: "watch unavailable" }),
+    );
+    watcher.stop();
   });
 
   it("session_start joins presence under PI_MESSENGER_NAME when set", async () => {

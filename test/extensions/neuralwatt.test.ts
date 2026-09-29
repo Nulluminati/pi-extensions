@@ -1,6 +1,6 @@
 import { readdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import neuralwattExtension from "../../extensions/neuralwatt/neuralwatt.ts";
 import { MISSING_MODELS_MESSAGE } from "../../extensions/neuralwatt/src/catalog.ts";
 import {
@@ -60,6 +60,7 @@ const EXPECTED_MODEL_IDS = [
 ];
 
 describe("neuralwatt-extension", () => {
+  let debugSpy: MockInstance<typeof console.debug>;
   let mockFetch: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -70,6 +71,12 @@ describe("neuralwatt-extension", () => {
     vi.stubEnv("NEURALWATT_API_KEY", "nw_test_key_123");
     // Default: live public catalog in sync with the static list (no warning).
     mockFetch.mockResolvedValue(mockModelsResponse(STATIC_MODELS));
+    // Capture debug diagnostics so failure-path output stays out of the test log.
+    debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    debugSpy.mockRestore();
   });
 
   describe("file structure", () => {
@@ -575,24 +582,36 @@ describe("neuralwatt-extension", () => {
     await handler({ type: "session_start", reason: "new" }, mockCtx);
 
     expect(mockFetch).not.toHaveBeenCalled();
+    expect(debugSpy).not.toHaveBeenCalled();
     const warnings = mockCtx.ui.notify.mock.calls.filter((c) => c[1] === "warning");
     expect(warnings).toEqual([]);
   });
 
-  it("startup check is silent on network error", async () => {
+  it("startup check logs a diagnostic and still loads flex capabilities on network error", async () => {
     mockFetch.mockRejectedValueOnce(new Error("boom"));
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
+    mockCtx.model = makeModel("glm-5.2");
     await neuralwattExtension(mockPi);
 
     const handler = getEventHandler(mockPi, "session_start");
     await handler({ type: "session_start", reason: "new" }, mockCtx);
 
+    expect(debugSpy).toHaveBeenCalledTimes(1);
+    expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining("neuralwatt"));
+    expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining("boom"));
     const warnings = mockCtx.ui.notify.mock.calls.filter((c) => c[1] === "warning");
     expect(warnings).toEqual([]);
+    // The public catalog failed, but flex discovery still fetched and published.
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    const flexHeaders = mockFetch.mock.calls[1][1].headers as Record<string, string>;
+    expect(flexHeaders.Authorization).toBe("Bearer nw_test_key_123");
+    const emits = mockPi.events.emit.mock.calls.filter((c) => c[0] === FLEX_EVENT);
+    expect(emits.length).toBeGreaterThan(0);
+    expect(emits[emits.length - 1][1]).toEqual({ flexOn: false, flexCapable: false });
   });
 
-  it("startup check is silent when the catalog endpoint errors", async () => {
+  it("startup check logs a diagnostic with the HTTP status when the catalog endpoint errors", async () => {
     mockFetch.mockResolvedValueOnce({ ok: false, status: 401, statusText: "Unauthorized" });
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
@@ -601,6 +620,23 @@ describe("neuralwatt-extension", () => {
     const handler = getEventHandler(mockPi, "session_start");
     await handler({ type: "session_start", reason: "new" }, mockCtx);
 
+    expect(debugSpy).toHaveBeenCalledTimes(1);
+    expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining("neuralwatt"));
+    expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining("401"));
+    const warnings = mockCtx.ui.notify.mock.calls.filter((c) => c[1] === "warning");
+    expect(warnings).toEqual([]);
+  });
+
+  it("startup check logs no diagnostic for a valid empty catalog", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ data: [] }) });
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await neuralwattExtension(mockPi);
+
+    const handler = getEventHandler(mockPi, "session_start");
+    await handler({ type: "session_start", reason: "new" }, mockCtx);
+
+    expect(debugSpy).not.toHaveBeenCalled();
     const warnings = mockCtx.ui.notify.mock.calls.filter((c) => c[1] === "warning");
     expect(warnings).toEqual([]);
   });
