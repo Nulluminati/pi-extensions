@@ -1,25 +1,6 @@
 # Consistency audit — remaining work
 
-Nine read-only review workers audited all 27 extensions (~26,000 lines of TypeScript) against AGENTS.md, the extension-development / extension-structure / shared-helpers skills, and the root README. Baseline: 27/27 extensions validate, tests green.
-
-Original result: 145 findings — 29 high, 49 medium, 67 low.
-
-## Fix phase status
-
-The docs pass and all 29 high-severity findings are resolved. Commits, in order:
-
-- `84746b7` — audit report (superseded by this file)
-- `1d27d31` — stale commands and claims fixed across 11 READMEs
-- `8dcc734` — remaining README fixes + new `background-jobs` and `context` READMEs (all 27 extensions now have one)
-- `21519bb` — status-bar flex listener registered at load time, not per session
-- `32f94da` — web-search failed fetches set `details.isError`; goal UI calls guarded for non-TUI
-- `7407d7a` — btw: `lib/session-utils` extractText, `ctx.signal` on summarize, `resolveSmallModel`-only display
-- `02a1f4e` — context7: `writeJsonAtomic` + `withFileLock` around cache index writes
-- `868cdb6` — context7: `createToolStatus` renderers, typed `renderResult` params
-- `f9387d8` — autoresearch init lock, session-recap resume timer tracked, handoff `extractText`
-- `c86c0c2` — workers status fallback + skip-list entry; voice config via `writeJsonAtomic` under `withFileLock`, `extractText`
-
-Sections 1–3 remain open. Section 4 is complete. Citations come from the audit; line numbers were spot-re-verified against the current tree where marked `(verified)`.
+This list contains the open findings from the audit of 27 extensions. It has 65 findings: 26 medium and 39 low. Paths and line numbers come from the audit; entries marked `(verified)` were checked again.
 
 ---
 
@@ -111,31 +92,3 @@ Sections 1–3 remain open. Section 4 is complete. Citations come from the audit
 - [low] approval-mode/src/jev.ts:5 + src/policy.ts:3 — `// --- Types ---` precedes `// --- Constants ---`; swap
 - [low] status-bar/src/editor.ts:157-160 — `PolishedEditor` doc comment stranded ~55 lines above its class by a section comment
 - [low] status-bar/src/editor.ts:190-200 — per-session prompt-history map grows unbounded per session; bound or prune on `session_shutdown`
-
----
-
-## 4. lib/ extractions (completed)
-
-All 11 candidates now use shared helpers where behavior matches. The workers process runner remains separate: it streams to files and kills a detached process group, unlike one-shot captured commands.
-
-1. `lib/exec.ts` — autoresearch measurement and mission verification. The workers runner stays separate for the reason above.
-2. `lib/fetch-timeout.ts` — Synthetic and Neuralwatt catalog/quota requests, Neuralwatt Flex, code-search, and web-search.
-3. `lib/provider-auth.ts` — Synthetic and Neuralwatt API keys and request headers.
-4. `lib/provider-quota.ts` — Synthetic and Neuralwatt quota requests.
-5. `lib/provider-models.ts` — Synthetic and Neuralwatt static model lists.
-6. `lib/transcript-prompt.ts` — handoff and session-recap prompt lines.
-7. `writeTextAtomic` in `lib/json-atomic.ts` — messenger JSONL mailbox rewrites.
-8. `lib/overlay-options.ts` — todos, context, and background-jobs panels.
-9. `lib/settle-once.ts` — ask-user and approval-mode abortable dialogs.
-10. `lib/arrow-keys.ts` — ask-user and background-jobs raw arrow keys.
-11. `createModelConfigFlow` in `lib/model-picker.ts` — small-model and worker-model configuration.
-
-The original candidate list described code before extraction. The audit history remains in git.
-
-Not recommended for extraction: budget/iteration bookkeeping (autoresearch/missions/goal) — persistence and semantics differ per domain.
-
----
-
-## 5. Verified clean across the audit
-
-One discoverable root entrypoint per extension; async default exports everywhere; direct Pi registrations visible in roots; closure-scoped state in most extensions; no non-null assertions; no `homedir()` or `.pi` literals outside the conventions allowlist; no src-to-root imports; no import cycles; messenger correctly uses presence-shards/file-lock/writeJsonAtomic; codex-image and worker-model correctly use writeJsonAtomic; status-bar and voice correctly use editor-factory layering; missions/autoresearch/goal satisfy the widget-first rules.
