@@ -21,6 +21,10 @@ export interface WorkerRecord {
    *  transcript, not these fields, is the ownership authority. */
   parentPid?: number;
   parentSessionId?: string;
+  /** The parent's process start time: with the pid it forms a durable
+   *  identity that survives pid recycling (see lib/process-identity).
+   *  Legacy records without it keep pid-only classification. */
+  parentProcessStartedAt?: string;
   /** Directory the worker session ran in (worktree path when isolated). */
   cwd: string;
   worktree?: string;

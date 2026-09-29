@@ -3568,6 +3568,28 @@ describe("worker store (session-scoped)", () => {
     expect(sweep.terminalOrphans).toHaveLength(0);
   });
 
+  it("sweepWorkerArtifacts classifies a recycled parent pid as an orphan", async () => {
+    // The parent pid answers kill(0) — some other process owns it now — but
+    // the recorded start time proves the original owner is gone. The record
+    // must be adoptable, not pinned as a foreign live session.
+    await seedRecord(
+      cwd,
+      makeWorkerRecord({
+        id: "w-recycled",
+        name: "recycled",
+        parentPid: process.pid,
+        parentProcessStartedAt: "Mon Jan  2 03:04:05 2001",
+        status: "completed",
+        startedAt: Date.now(),
+        endedAt: Date.now(),
+      }),
+    );
+
+    const sweep = await sweepWorkerArtifacts(cwd, new Set());
+    expect(sweep.foreignLive).toHaveLength(0);
+    expect(sweep.terminalOrphans.map((r) => r.id)).toEqual(["w-recycled"]);
+  });
+
   it("migrateLegacyRegistry imports registry records as parentless artifacts", async () => {
     const dir = join(cwd, CONFIG_DIR_NAME, "workers");
     await mkdir(dir, { recursive: true });

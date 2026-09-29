@@ -57,7 +57,6 @@ describe("presence-shards", () => {
   it("loadShards reads all shards keyed by the stored name", async () => {
     await writeShard(dir, record("agent-a"));
     await writeShard(dir, record("agent-b"));
-
     const registry = await loadShards(dir);
 
     expect(registry["agent-a"]).toBeDefined();
@@ -173,6 +172,43 @@ describe("presence-shards", () => {
 
     expect(registry["gone-agent"]).toBeUndefined();
     expect(existsSync(shardPath(dir, "gone-agent"))).toBe(false);
+  });
+
+  it("writeShard stamps the record with the writer's process start time", async () => {
+    await writeShard(dir, record("stamped-agent"));
+
+    const stored = JSON.parse(await readShard(dir, "stamped-agent").then((r) => JSON.stringify(r)));
+    expect(typeof stored.processStartedAt).toBe("string");
+    expect(stored.processStartedAt.length).toBeGreaterThan(0);
+    // An explicitly provided stamp is preserved, not overwritten.
+    await writeShard(dir, { ...record("fixed-agent"), processStartedAt: "explicit" });
+    expect((await readShard(dir, "fixed-agent"))?.processStartedAt).toBe("explicit");
+  });
+
+  it("loadShards prunes a shard whose live pid is a recycled occupant", async () => {
+    // The pid answers kill(0) (a live process owns it now), but the start
+    // time differs from the stamp: the original owner is long gone.
+    await writeShard(dir, {
+      ...record("recycled-agent", process.pid),
+      processStartedAt: "Mon Jan  2 03:04:05 2001",
+    });
+
+    const registry = await loadShards(dir);
+
+    expect(registry["recycled-agent"]).toBeUndefined();
+    expect(existsSync(shardPath(dir, "recycled-agent"))).toBe(false);
+  });
+
+  it("loadShards keeps a legacy stampless shard whose pid is live", async () => {
+    await writeFileSync(
+      join(dir, "legacy-agent.json"),
+      JSON.stringify(record("legacy-agent")),
+      "utf8",
+    );
+
+    const registry = await loadShards(dir);
+
+    expect(registry["legacy-agent"]).toMatchObject({ name: "legacy-agent", pid: process.pid });
   });
 });
 

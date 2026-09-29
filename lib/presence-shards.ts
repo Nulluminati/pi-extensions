@@ -16,12 +16,18 @@ import { readdir, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { isNodeError } from "./errors.ts";
 import { writeJsonAtomic } from "./json-atomic.ts";
+import { currentProcessStartTime, isRecycledPid, processStartTime } from "./process-identity.ts";
 
 // --- Types ---
 
 export interface ShardRecord {
   name: string;
   pid: number;
+  /** The owning process's start time (see lib/process-identity). Written
+   *  automatically; presence of a pid alone cannot survive pid recycling,
+   *  whose risk scales with the platform's pid churn. Legacy shards without
+   *  a stamp keep pid-only behavior. */
+  processStartedAt?: string;
 }
 
 export interface LoadShardsOptions {
@@ -76,9 +82,20 @@ async function readJson<T>(path: string): Promise<T | undefined> {
 
 // --- Operations ---
 
-/** Write one agent's shard. Never touches another agent's shard. */
+/** Write one agent's shard. Never touches another agent's shard. The record
+ *  is stamped with the start time of the pid it describes (a claim can
+ *  record another process as the holder); an unreadable start time leaves
+ *  the record stampless, which keeps the legacy pid-only behavior. */
 export async function writeShard<T extends ShardRecord>(dir: string, record: T): Promise<void> {
-  await writeJsonAtomic(shardPath(dir, record.name), record);
+  const stamp =
+    record.pid === process.pid
+      ? await currentProcessStartTime()
+      : await processStartTime(record.pid);
+  const stamped: T =
+    record.processStartedAt === undefined && stamp !== undefined
+      ? { ...record, processStartedAt: stamp }
+      : record;
+  await writeJsonAtomic(shardPath(dir, stamped.name), stamped);
 }
 
 /** Read one agent's shard without side effects. */
@@ -145,7 +162,9 @@ export async function loadShards<T extends ShardRecord>(
   }
 
   for (const [name, record] of Object.entries(registry)) {
-    if (!isProcessAlive(record.pid)) {
+    const alive =
+      isProcessAlive(record.pid) && !(await isRecycledPid(record.pid, record.processStartedAt));
+    if (!alive) {
       await removeShard(dir, name);
       delete registry[name];
     }

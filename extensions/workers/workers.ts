@@ -26,6 +26,7 @@ import type { ExtensionAPI, ExtensionContext, ExtensionUIContext } from "pi";
 import { excludeFromGit } from "../../lib/git.ts";
 import { projectStateRelative } from "../../lib/paths.ts";
 import { isProcessAlive } from "../../lib/presence-shards.ts";
+import { isRecycledPid } from "../../lib/process-identity.ts";
 import { setStripWidget, WIDGET_PRIORITY_WORKERS } from "../../lib/widget-strip.ts";
 import {
   cancelWorker,
@@ -480,7 +481,10 @@ export default async function workersExtension(pi: ExtensionAPI) {
         }
         // Live worker without a local RunningWorker: adopted (pi -c) or an
         // orphan from an ended session. Kill by pid and finalize from disk.
-        const parentAlive = record.parentPid !== undefined && isProcessAlive(record.parentPid);
+        const parentAlive =
+          record.parentPid !== undefined &&
+          isProcessAlive(record.parentPid) &&
+          !(await isRecycledPid(record.parentPid, record.parentProcessStartedAt));
         if (parentAlive) {
           throw new Error(
             `Worker ${id} belongs to another live session and cannot be cancelled here (parent pid ${record.parentPid}).`,
@@ -531,7 +535,8 @@ export default async function workersExtension(pi: ExtensionAPI) {
         if (
           !state.branchWorkers.has(id) &&
           record.parentPid !== undefined &&
-          isProcessAlive(record.parentPid)
+          isProcessAlive(record.parentPid) &&
+          !(await isRecycledPid(record.parentPid, record.parentProcessStartedAt))
         ) {
           throw new Error(
             `Worker ${id} belongs to another live session and cannot be removed here.`,

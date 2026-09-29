@@ -111,11 +111,11 @@ describe("file-lock", () => {
     const lockPath = join(dir, "test.lock");
 
     await withFileLock(lockPath, async () => {
-      // First observation happens while the lock is held: the `<pid> <token>`
-      // record must already be there — the lock is never observable empty,
-      // and no staging temp sibling survives acquisition.
+      // First observation happens while the lock is held: the `<pid> <token>
+      // [startedAt]` record must already be there — the lock is never
+      // observable empty, and no staging temp sibling survives acquisition.
       const content = await readFile(lockPath, "utf8");
-      expect(content).toMatch(new RegExp(`^${process.pid} [0-9a-f]+\\n$`));
+      expect(content).toMatch(new RegExp(`^${process.pid} [0-9a-f]+(?: [^\n]+)?\\n$`));
       await expect(readdir(dir)).resolves.toEqual(["test.lock"]);
     });
   });
@@ -310,6 +310,32 @@ describe("file-lock", () => {
       withFileLock(lockPath, async () => "stolen", { staleMs: 1_000, timeoutMs: 300 }),
     ).rejects.toThrow(/Timed out waiting for lock/);
     await expect(stat(lockPath)).resolves.toBeTruthy();
+  });
+
+  it("reclaims a stale lock whose live pid carries a mismatched start stamp", async () => {
+    const lockPath = join(dir, "test.lock");
+    // The pid is live, but the recorded start time differs: the original
+    // holder died and the pid was recycled. The lock is genuinely orphaned.
+    await writeFile(lockPath, `${process.pid} some-token Mon Jan 2 03:04:05 2001\n`);
+    const abandoned = new Date(Date.now() - 120_000);
+    await utimes(lockPath, abandoned, abandoned);
+
+    await expect(withFileLock(lockPath, async () => "reclaimed", { staleMs: 1_000 })).resolves.toBe(
+      "reclaimed",
+    );
+  });
+
+  it("does not reclaim a stale lock whose stamped start time matches the live holder", async () => {
+    const lockPath = join(dir, "test.lock");
+    const { processStartTime } = await import("../../lib/process-identity.ts");
+    const stamp = await processStartTime(process.pid);
+    await writeFile(lockPath, `${process.pid} some-token ${stamp}\n`);
+    const abandoned = new Date(Date.now() - 120_000);
+    await utimes(lockPath, abandoned, abandoned);
+
+    await expect(
+      withFileLock(lockPath, async () => "stolen", { staleMs: 1_000, timeoutMs: 300 }),
+    ).rejects.toThrow(/Timed out waiting for lock/);
   });
 
   it("does not steal a live hold that keeps refreshing its mtime", async () => {

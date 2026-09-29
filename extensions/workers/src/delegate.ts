@@ -12,6 +12,7 @@ import { withFileLock } from "../../../lib/file-lock.ts";
 import { isCaseInsensitiveVolume } from "../../../lib/fs-case.ts";
 import { runGit } from "../../../lib/git.ts";
 import { projectStateRelative } from "../../../lib/paths.ts";
+import { currentProcessStartTime } from "../../../lib/process-identity.ts";
 import { resolveWorkerModelSpec } from "../../../lib/worker-model.ts";
 import { formatWorkerStatus } from "./format.ts";
 import { carryIncludedPaths } from "./provision/carry.ts";
@@ -434,6 +435,10 @@ export async function startDelegatedWorker(
   // so the durable response shows the commit fact (field feedback: notify unseen).
   let configCommittedAtPreflight = false;
   const { workerId, name, task, model, thinkingLevel, timeoutMs, extensionPaths } = plan;
+  // The parent stamp resolves once per delegation: it forms the durable
+  // parent identity on every record written below (pid alone cannot
+  // survive pid recycling). Failure paths in the catch blocks reuse it.
+  const parentProcessStartedAt = await currentProcessStartTime();
 
   // Check and reserve without an await between them. A second spawn_worker
   // cannot take this slot while preflight commits setup files.
@@ -511,6 +516,7 @@ export async function startDelegatedWorker(
       readOnly,
       ...(signal !== undefined ? { signal } : {}),
       parentPid: process.pid,
+      ...(parentProcessStartedAt !== undefined ? { parentProcessStartedAt } : {}),
       parentSessionId: plan.parentSessionId,
       ...(worktree !== undefined ? { worktree } : {}),
       ...(provisionStatus !== undefined ? { provision: provisionStatus } : {}),
@@ -557,6 +563,7 @@ export async function startDelegatedWorker(
             worktree: worktree.path,
             branch: worktree.branch,
             parentPid: process.pid,
+            ...(parentProcessStartedAt !== undefined ? { parentProcessStartedAt } : {}),
             parentSessionId: plan.parentSessionId,
             error: detail,
             startedAt: Date.now(),
@@ -599,6 +606,7 @@ export async function startDelegatedWorker(
         ...(worktree !== undefined ? { worktree: worktree.path, branch: worktree.branch } : {}),
         ...(error instanceof ProvisionRefusal ? { provision: error.provision } : {}),
         parentPid: process.pid,
+        ...(parentProcessStartedAt !== undefined ? { parentProcessStartedAt } : {}),
         parentSessionId: plan.parentSessionId,
         error: error instanceof Error ? error.message : String(error),
         startedAt: Date.now(),

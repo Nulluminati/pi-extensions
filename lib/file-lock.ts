@@ -31,6 +31,7 @@ import type { FileHandle } from "node:fs/promises";
 import { link, mkdir, open, readFile, rename, stat, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 import { isNodeError } from "./errors.ts";
+import { currentProcessStartTime, isRecycledPid } from "./process-identity.ts";
 
 // --- Constants ---
 
@@ -46,6 +47,10 @@ const LOCK_REFRESH_MS = 5_000;
 interface LockOwnership {
   pid: number;
   token: string | undefined;
+  /** Holder's process start time (see lib/process-identity): lets a waiter
+   *  recognize a recycled pid instead of honoring an orphaned lock until
+   *  its timeout. Locks written before stamping keep pid-only behavior. */
+  startedAt?: string;
 }
 
 /** An acquired lock: the still-open handle to the lock inode and the token
@@ -84,10 +89,14 @@ function isProcessAlive(pid: number): boolean {
 }
 
 function parseLockOwner(content: string): LockOwnership | undefined {
-  const [pidField, tokenField] = content.trim().split(/\s+/);
-  const pid = Number.parseInt(pidField ?? "", 10);
+  const fields = content.trim().split(/\s+/);
+  const pid = Number.parseInt(fields[0] ?? "", 10);
   if (!Number.isInteger(pid) || pid <= 0) return undefined;
-  return { pid, token: tokenField };
+  const token = fields[1];
+  // The optional third field is the holder's process start time; the BSD ps
+  // form contains spaces, so everything after the token belongs to it.
+  const startedAt = fields.length > 2 ? fields.slice(2).join(" ") : undefined;
+  return startedAt === undefined ? { pid, token } : { pid, token, startedAt };
 }
 
 /** One owner read, distinguishing a pathname in flux from junk content. */
@@ -127,12 +136,26 @@ async function readLockOwner(lockPath: string): Promise<LockOwnership | undefine
  * unlink race, where a second waiter past its checks unlinked the pathname
  * after a first waiter had already created its fresh replacement.
  */
+/** The `<pid> <token> [startedAt]` ownership line; the stamp is omitted when
+ *  this process's start time cannot be read (keeps pid-only semantics). */
+async function ownershipContent(token: string): Promise<string> {
+  const startedAt = await currentProcessStartTime();
+  const stamp = startedAt === undefined ? "" : ` ${startedAt}`;
+  return `${process.pid} ${token}${stamp}\n`;
+}
+
+/** A holder still owns its lock when its pid is alive and — when the record
+ *  carries a start stamp — is the same process that took it. */
+async function holderOwnsLock(owner: LockOwnership): Promise<boolean> {
+  return isProcessAlive(owner.pid) && !(await isRecycledPid(owner.pid, owner.startedAt));
+}
+
 async function placeClaim(lockPath: string): Promise<string> {
   const token = randomBytes(8).toString("hex");
   const tempPath = `${lockPath}.${process.pid}.${randomBytes(8).toString("hex")}.tmp`;
   const handle = await open(tempPath, "wx", 0o600);
   try {
-    await handle.writeFile(`${process.pid} ${token}\n`, "utf8");
+    await handle.writeFile(await ownershipContent(token), "utf8");
     await rename(tempPath, lockPath);
   } catch (error) {
     await unlink(tempPath).catch(() => {});
@@ -158,7 +181,7 @@ async function createLockFile(lockPath: string): Promise<AcquiredLock | undefine
   let handle: FileHandle | undefined;
   try {
     handle = await open(tempPath, "wx", 0o600);
-    await handle.writeFile(`${process.pid} ${token}\n`, "utf8");
+    await handle.writeFile(await ownershipContent(token), "utf8");
     try {
       await link(tempPath, lockPath);
     } catch (error) {
@@ -216,7 +239,8 @@ async function acquireFileLock(
       // and the pid is the only signal that survives an mtime race.
       const state = await readLockState(lockPath);
       const reclaimable =
-        state.kind === "corrupt" || (state.kind === "owner" && !isProcessAlive(state.owner.pid));
+        state.kind === "corrupt" ||
+        (state.kind === "owner" && !(await holderOwnsLock(state.owner)));
       // A missing pathname means another waiter is mid-replacement; absence
       // is never ownerless. The next create attempt decides who holds.
       if (reclaimable) {
@@ -252,7 +276,7 @@ export async function withFileLock<T>(
     // window. The write goes through the original handle — the inode this
     // holder created — so it updates our own lock even if the pathname was
     // replaced, and can never touch a replacement created by someone else.
-    const buffer = Buffer.from(`${process.pid} ${token}\n`, "utf8");
+    const buffer = Buffer.from(await ownershipContent(token), "utf8");
     refresh = setInterval(() => {
       void handle.write(buffer, 0, buffer.length, 0).catch(() => {
         // Best-effort: a failed refresh (e.g. the handle was closed by an

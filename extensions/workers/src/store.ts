@@ -21,6 +21,7 @@ import { withFileLock } from "../../../lib/file-lock.ts";
 import { writeJsonAtomic } from "../../../lib/json-atomic.ts";
 import { projectStateDir } from "../../../lib/paths.ts";
 import { isProcessAlive } from "../../../lib/presence-shards.ts";
+import { isRecycledPid } from "../../../lib/process-identity.ts";
 import { assertWorkerId, isWorkerId } from "./ids.ts";
 import type { WorkerRecord } from "./types.ts";
 import { discardWorktree, worktreesDir } from "./worktree.ts";
@@ -357,7 +358,10 @@ export async function sweepWorkerArtifacts(
   for (const record of await listRecordFiles(cwd)) {
     recorded.add(record.id);
     if (myWorkerIds.has(record.id)) continue;
-    const parentAlive = record.parentPid !== undefined && isProcessAlive(record.parentPid);
+    const parentAlive =
+      record.parentPid !== undefined &&
+      isProcessAlive(record.parentPid) &&
+      !(await isRecycledPid(record.parentPid, record.parentProcessStartedAt));
     if (parentAlive) {
       sweep.foreignLive.push(record);
       continue;

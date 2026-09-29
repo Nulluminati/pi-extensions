@@ -597,6 +597,7 @@ export interface StartWorkerOptions {
   /** Owning session identity, stamped on the record so artifact files can
    *  be classified after the session ends. */
   parentPid?: number;
+  parentProcessStartedAt?: string;
   parentSessionId?: string;
   /** Provisioning outcome for this worker; appended to the task prompt as
    *  the ENVIRONMENT block and stamped on the record. */
@@ -638,6 +639,9 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
     model: options.model,
     thinkingLevel: options.thinkingLevel,
     ...(options.parentPid !== undefined ? { parentPid: options.parentPid } : {}),
+    ...(options.parentProcessStartedAt !== undefined
+      ? { parentProcessStartedAt: options.parentProcessStartedAt }
+      : {}),
     ...(options.parentSessionId !== undefined ? { parentSessionId: options.parentSessionId } : {}),
     cwd: options.worktree?.path ?? options.cwd,
     ...(options.worktree !== undefined
