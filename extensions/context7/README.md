@@ -132,6 +132,7 @@ The cache lives under `$XDG_CACHE_HOME/pi-context7/` (default `~/.cache/pi-conte
 - **Stale fallback** — If Context7 is unreachable, stale cached docs are still usable. The tool reports the stale status so the LLM knows the data may be outdated.
 - **Auto-resolve with ambiguity guard** — `context7_get_library_docs` can resolve library names automatically, but it refuses to guess when results are ambiguous. This prevents fetching docs for the wrong library.
 - **Config via env or JSON** — The API key can be set via `CONTEXT7_API_KEY` (preferred) or in `~/.pi/agent/context7.json` (`PI_CODING_AGENT_DIR` overrides the agent directory). Cache TTLs are also configurable.
+- **No proxy support** — Requests use the platform `fetch`, which ignores `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`. Proxied environments (common on managed corporate machines) are unsupported; use a transparent proxy or a VPN.
 
 ## Pi APIs Used
 

@@ -44,6 +44,8 @@ Check quota:
 - `headers`: `Referer` and `X-Title`, which Neuralwatt's gateway uses for client attribution (same convention as OpenRouter)
 - `models`: the static catalog
 
+Model requests use the platform `fetch`, which ignores `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`. Proxied environments (common on managed corporate machines) are unsupported; use a transparent proxy or a VPN.
+
 ### Static catalog
 
 The catalog comes from Neuralwatt's `/v1/models` metadata. Pricing is per million tokens.

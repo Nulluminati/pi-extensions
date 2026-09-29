@@ -119,6 +119,7 @@ Both tools use a shared `truncateWithSpill()` helper: output within the 50,000-c
 - **Provider resolves its own auth** — Brave reads `$BRAVE_API_KEY`; Synthetic reuses the same resolution as the synthetic model provider (`modelRegistry.getApiKeyForProvider("synthetic")` then `$SYNTHETIC_API_KEY`), so a single configured key covers both models and search; SearXNG needs only `$SEARXNG_URL` (plus optional `$SEARXNG_API_KEY` for token-protected instances).
 - **No external npm dependencies** — Uses Node built-ins (`fetch`, `fs/promises`, `os`, `path`) and Pi's TUI components only. Pi transpiles extensions directly.
 - **AbortSignal propagation** — The caller's signal is wired into a shared timeout controller across all network call sites (fetch, Brave, Synthetic, SearXNG) so requests cancel promptly.
+- **No proxy support** — Requests use the platform `fetch`, which ignores `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`. Proxied environments (common on managed corporate machines) are unsupported; use a transparent proxy or a VPN.
 
 ## Pi APIs Used
 

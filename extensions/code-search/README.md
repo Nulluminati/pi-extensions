@@ -71,6 +71,7 @@ The tool registers a `renderResult` callback that draws one of four states to th
 - **Structured error results** — Every failure path returns `{ content, details: { isError: true } }` so the agent can read the error without exception unwrapping.
 - **Bounded expansion** — The expanded TUI preview only lists the first 5 repositories; the full result is still in the tool's content for the LLM to read.
 - **Caller signal plumbed through** — The AbortSignal from Pi is wired into the fetch's internal controller, so cancelling an agent turn also cancels the in-flight HTTP request.
+- **No proxy support** — Requests use the platform `fetch`, which ignores `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`. Proxied environments (common on managed corporate machines) are unsupported; use a transparent proxy or a VPN.
 
 ## Pi APIs Used
 
