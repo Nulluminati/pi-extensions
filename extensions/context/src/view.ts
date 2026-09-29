@@ -5,6 +5,7 @@
 
 import type { ExtensionCommandContext } from "pi";
 import { PANEL_OVERLAY_OPTIONS } from "../../../lib/overlay-options.ts";
+import { formatTokenCount as formatSharedTokenCount } from "../../../lib/token-count.ts";
 import {
   type ModalFrameOptions,
   modalContentWidth,
@@ -16,9 +17,7 @@ import type { ContextBreakdown } from "./measure.ts";
 // --- Utilities ---
 
 function formatTokenCount(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}m`;
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
-  return `${n}`;
+  return formatSharedTokenCount(n, { underThousand: "raw", thousands: "fixed", millions: "fixed" });
 }
 
 function formatUsd(cost: number): string {

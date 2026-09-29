@@ -59,6 +59,8 @@ export function createApprovalDialog(options: DialogOptions) {
       noMatch: (text) => theme.fg("warning", text),
     },
   );
+  // Do not use confirmModal here: Enter must never approve by default.
+  // The selector starts on Block and requires review of every command line.
   selector.setSelectedIndex(1);
   let commandLines: string[] = [];
   let lastContentWidth = 0;

@@ -4,7 +4,7 @@ Aliases `/clear` to Pi's built-in `/new` command, for users whose muscle memory 
 
 ## What It Does
 
-Registers a single slash command — `/clear` — that behaves exactly like `/new`. Both commands stay registered; this extension does not unregister anything. The discard confirmation (when the current branch has content) is handled by the underlying `/new` behavior.
+Registers `/clear` as a shortcut to `ctx.newSession()`. Both commands stay registered. In a user interface, `/clear` asks for confirmation before it starts a new session. Pi may also show its own confirmation when the current branch has content.
 
 ## Usage
 
@@ -16,13 +16,13 @@ That's it. The session resets and the editor is ready for a new prompt.
 
 ## How It Works
 
-The extension calls `registerCommand("clear", …)` with a handler that asks for confirmation (in UI mode) and then delegates to `ctx.newSession()`. There's no state, no config, and no event handlers.
+The extension calls `registerCommand("clear", …)` and uses `confirmModal` when a user interface is available. Then it calls `ctx.newSession()`. There is no state, config, or event handler.
 
 ## Key Design Decisions
 
-- **Single responsibility** — One command, one line of behavior. Anything more belongs in `/new`'s own logic, not in a shim.
-- **No state, no overrides** — Any future `/new` semantics are inherited automatically because this extension just calls through.
-- **Confirm first** — Ending the current session is destructive, so the handler runs `ctx.ui.confirm()` before calling through. The extra confirmation from the underlying `/new` behavior is unchanged.
+- **Single command** — `/clear` starts a new session after confirmation in a user interface.
+- **No state** — The extension stores no session data.
+- **Confirm first** — `confirmModal` shows a framed dialog in the terminal. It falls back to `ctx.ui.confirm` outside terminal mode. Pi may show a second confirmation during `ctx.newSession()`.
 
 ## Pi APIs Used
 

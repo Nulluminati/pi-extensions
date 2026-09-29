@@ -269,7 +269,9 @@ export default async function btwExtension(pi: ExtensionAPI) {
         state.status = "idle";
         state.statusText = statusToText("idle", state.lastError);
         ctx.ui.notify(
-          "Summarisation failed — the side thread is preserved for a retry.",
+          state.lastError
+            ? `Summarisation failed (${state.lastError}) — the side thread is preserved for a retry.`
+            : "Summarisation failed — the side thread is preserved for a retry.",
           "warning",
         );
         return;

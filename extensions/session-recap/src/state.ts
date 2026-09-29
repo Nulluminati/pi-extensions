@@ -21,6 +21,7 @@ export function getState(pi: ExtensionAPI): RecapState {
     lastDraftedLeafId: undefined,
     autoDismissTimer: undefined,
     resumeTimer: undefined,
+    backgroundFailureNotified: false,
   };
   stateMap.set(pi, fresh);
   return fresh;
@@ -49,4 +50,5 @@ export function resetState(state: RecapState) {
   state.focusedOutAt = undefined;
   state.pendingRecap = undefined;
   state.lastDraftedLeafId = undefined;
+  state.backgroundFailureNotified = false;
 }

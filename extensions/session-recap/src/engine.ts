@@ -109,6 +109,7 @@ export async function generateAndShow(
       return;
 
     state.lastDraftedLeafId = ctx.sessionManager.getLeafId();
+    state.backgroundFailureNotified = false;
     if (state.idleTimer) {
       clearTimeout(state.idleTimer);
       state.idleTimer = undefined;
@@ -122,10 +123,22 @@ export async function generateAndShow(
     }
   } catch (err) {
     if (!controller.signal.aborted) {
-      if (opts.reason === "manual" && ctx.hasUI) {
-        ctx.ui.notify(err instanceof Error ? err.message : String(err), "error");
+      const message = err instanceof Error ? err.message : String(err);
+      if (opts.reason === "manual") {
+        if (ctx.hasUI) {
+          ctx.ui.notify(message, "error");
+        } else {
+          console.error("[session-recap] failed:", err);
+        }
       } else {
         console.error("[session-recap] failed:", err);
+        // Background failures (idle/focus/resume) notify once per failure
+        // streak so a broken setup does not warn on every trigger. A success
+        // clears the latch in the try block above.
+        if (ctx.hasUI && !state.backgroundFailureNotified) {
+          state.backgroundFailureNotified = true;
+          ctx.ui.notify(`Session recap failed: ${message}`, "warning");
+        }
       }
     }
   } finally {

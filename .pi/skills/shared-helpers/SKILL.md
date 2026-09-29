@@ -44,6 +44,7 @@ import { renderModalFrame } from "../../../lib/tui-frame.ts";
 | Resolve where an extension stores config, state, cache, or project files | `agentConfigPath`, `agentStateDir`, `cacheDir`, `projectStateDir`, `projectStateRelative` | `lib/paths.ts` |
 | Point a user-facing message at Pi's auth file | `authPath` | `lib/paths.ts` |
 | Keep project-local state out of `git status` | `excludeFromGit` | `lib/git.ts` |
+| Format token counts with display-specific precision | `formatTokenCount` | `lib/token-count.ts` |
 | Build a `/smallmodel`-style model picker and config flow | `formatModelDescription`, `selectModelWithSearch`, `createModelConfigFlow` | `lib/model-picker.ts` |
 | Settle an abortable custom dialog once | `createSettleOnce` | `lib/settle-once.ts` |
 | Match terminal arrow-key byte sequences | `isArrowUp`, `isArrowDown`, `isArrowLeft`, `isArrowRight` | `lib/arrow-keys.ts` |
@@ -354,6 +355,10 @@ options?)` runs `fn` holding a `wx`-created lock file. Waiters poll; a lock unto
 domain in the error. Used by `messenger` (registry claims, reservations, mailbox compaction),
 `missions` (mission saves, via an acquire/release adapter in its storage module) and `workers`
 (worker registry read-modify-writes).
+
+## `lib/token-count.ts` — token count labels
+
+`formatTokenCount(value, style?)` formats counts for model metadata, goal status, and context breakdowns. The default style keeps model-picker labels. Goal uses `{ underThousand: "raw", thousands: "rounded", millions: "fixed" }`; context uses `{ underThousand: "raw", thousands: "fixed", millions: "fixed" }`. These styles preserve existing labels rather than changing the user interface.
 
 ## `lib/model-picker.ts` — model picker pieces
 

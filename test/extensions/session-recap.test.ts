@@ -654,6 +654,80 @@ describe("session-recap-extension", () => {
     expect(completeSimple).not.toHaveBeenCalled();
   });
 
+  it("background idle recap failure notifies once with the cause and keeps logging", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.modelRegistry.find = vi.fn(() => undefined);
+    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
+    await sessionRecapExtension(mockPi);
+
+    const sessionStartHandler = getEventHandler(mockPi, "session_start");
+    await sessionStartHandler({ type: "session_start", reason: "new" }, mockCtx);
+    const turnEndHandler = getEventHandler(mockPi, "turn_end");
+
+    // First idle tick fails: the user sees the cause once.
+    await turnEndHandler({ type: "turn_end", turnIndex: 1, message: {}, toolResults: [] }, mockCtx);
+    vi.advanceTimersByTime(46000);
+    await vi.waitFor(() => expect(consoleError).toHaveBeenCalled());
+    expect(mockCtx.ui.notify).toHaveBeenCalledTimes(1);
+    expect(mockCtx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("Global small model not found"),
+      "warning",
+    );
+
+    // Later idle ticks keep the diagnostic log but do not re-notify.
+    await turnEndHandler({ type: "turn_end", turnIndex: 2, message: {}, toolResults: [] }, mockCtx);
+    vi.advanceTimersByTime(46000);
+    await vi.waitFor(() => expect(consoleError).toHaveBeenCalledTimes(2));
+    expect(mockCtx.ui.notify).toHaveBeenCalledTimes(1);
+
+    consoleError.mockRestore();
+  });
+
+  it("a successful recap re-arms the background failure notification", async () => {
+    const { completeSimple } = await import("@earendil-works/pi-ai");
+    vi.mocked(completeSimple).mockResolvedValue({
+      content: [{ type: "text", text: "recap: did some work" }],
+    });
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    const smallModel = {
+      ...mockCtx.model,
+      id: "small-model",
+      provider: "small-provider",
+      reasoning: true,
+    };
+    let modelAvailable = false;
+    mockCtx.modelRegistry.find = vi.fn(() => (modelAvailable ? smallModel : undefined));
+    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
+    await sessionRecapExtension(mockPi);
+
+    const sessionStartHandler = getEventHandler(mockPi, "session_start");
+    await sessionStartHandler({ type: "session_start", reason: "new" }, mockCtx);
+    const turnEndHandler = getEventHandler(mockPi, "turn_end");
+
+    // First idle tick fails: notified once.
+    await turnEndHandler({ type: "turn_end", turnIndex: 1, message: {}, toolResults: [] }, mockCtx);
+    vi.advanceTimersByTime(46000);
+    await vi.waitFor(() => expect(mockCtx.ui.notify).toHaveBeenCalledTimes(1));
+
+    // The model becomes available and a recap succeeds.
+    modelAvailable = true;
+    await turnEndHandler({ type: "turn_end", turnIndex: 2, message: {}, toolResults: [] }, mockCtx);
+    vi.advanceTimersByTime(46000);
+    await vi.waitFor(() => expect(completeSimple).toHaveBeenCalledTimes(1));
+    expect(mockCtx.ui.setWidget).toHaveBeenCalledWith(STRIP_KEY_ABOVE, expect.any(Function));
+
+    // The model disappears again: the next failure notifies a second time.
+    modelAvailable = false;
+    await turnEndHandler({ type: "turn_end", turnIndex: 3, message: {}, toolResults: [] }, mockCtx);
+    vi.advanceTimersByTime(46000);
+    await vi.waitFor(() => expect(mockCtx.ui.notify).toHaveBeenCalledTimes(2));
+  });
+
   it("does not generate recap when there is no meaningful activity", async () => {
     const { completeSimple } = await import("@earendil-works/pi-ai");
     vi.mocked(completeSimple).mockResolvedValueOnce({

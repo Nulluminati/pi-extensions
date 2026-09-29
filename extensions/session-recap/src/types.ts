@@ -25,4 +25,5 @@ export type RecapState = {
   lastDraftedLeafId: string | undefined;
   autoDismissTimer: NodeJS.Timeout | undefined;
   resumeTimer: NodeJS.Timeout | undefined;
+  backgroundFailureNotified: boolean;
 };

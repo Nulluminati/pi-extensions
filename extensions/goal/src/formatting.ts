@@ -1,9 +1,8 @@
+import { formatTokenCount } from "../../../lib/token-count.ts";
 import type { GoalState } from "./types.ts";
 
 export function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}m`;
-  if (n >= 1000) return `${Math.round(n / 1000)}k`;
-  return `${n}`;
+  return formatTokenCount(n, { underThousand: "raw", thousands: "rounded", millions: "fixed" });
 }
 
 export function formatElapsed(ms: number): string {

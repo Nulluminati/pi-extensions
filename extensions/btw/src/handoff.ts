@@ -49,9 +49,10 @@ export async function runSummarize(
   _pi: ExtensionAPI,
   ctx: ExtensionContext,
   state: BtwLiveState,
-  _instructions: string,
+  instructions: string,
   signal?: AbortSignal,
 ): Promise<string | null> {
+  state.lastError = null;
   let resolved: Awaited<ReturnType<typeof resolveSmallModel>>;
   try {
     resolved = await resolveSmallModel(ctx);
@@ -61,7 +62,8 @@ export async function runSummarize(
   }
   const transcript = flattenThreadForHandoff(state.thread);
   if (!transcript.trim()) return null;
-  const prompt = `${SUMMARIZE_GUIDANCE}\n\nSide conversation transcript:\n${transcript.slice(0, 12000)}`;
+  const steer = instructions ? `\n\nSteer the summary: ${instructions}` : "";
+  const prompt = `${SUMMARIZE_GUIDANCE}${steer}\n\nSide conversation transcript:\n${transcript.slice(0, 12000)}`;
   try {
     const response = await completeSimple(
       resolved.model,
@@ -84,7 +86,9 @@ export async function runSummarize(
       .join("\n")
       .trim();
     return text || null;
-  } catch {
+  } catch (error) {
+    // Keep the cause so the caller can surface it instead of a generic warning.
+    state.lastError = error instanceof Error ? error.message : String(error);
     return null;
   }
 }

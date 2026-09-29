@@ -10,6 +10,9 @@ import type { SelectItem } from "@earendil-works/pi-tui";
 import type { ExtensionCommandContext, ThinkingLevel } from "pi";
 import { createSearchableSelectModal } from "./searchable-select.ts";
 import { parseSmallModelSpec } from "./small-model.ts";
+import { formatTokenCount } from "./token-count.ts";
+
+export { formatTokenCount } from "./token-count.ts";
 
 // --- Types ---
 
@@ -23,13 +26,6 @@ export interface ModelMetadata {
 }
 
 // --- Formatting ---
-
-export function formatTokenCount(value: number): string {
-  const units =
-    value >= 1_000_000 ? { divisor: 1_000_000, suffix: "m" } : { divisor: 1_000, suffix: "k" };
-  const scaled = Math.round((value / units.divisor) * 10) / 10;
-  return `${scaled}${units.suffix}`;
-}
 
 export function formatModelDescription(model: ModelMetadata): string {
   const details = [

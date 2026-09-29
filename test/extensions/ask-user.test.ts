@@ -83,7 +83,7 @@ describe("ask-user-extension", () => {
       );
 
       expect(rootTypeScriptFiles).toEqual(["ask-user.ts"]);
-      expect(sourceFiles.sort()).toEqual(["dialog.ts", "result.ts", "schema.ts"]);
+      expect(sourceFiles.sort()).toEqual(["dialog-flow.ts", "dialog.ts", "result.ts", "schema.ts"]);
     });
   });
 

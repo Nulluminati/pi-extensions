@@ -229,6 +229,26 @@ export function normalizeCustomText(value: string): string | undefined {
   return normalized || undefined;
 }
 
+export function extractQuestions(params: unknown): unknown {
+  return typeof params === "object" && params !== null && "questions" in params
+    ? (params as { questions?: unknown }).questions
+    : undefined;
+}
+
+export function safeQuestions(value: unknown): AskUserQuestion[] {
+  const questions = extractQuestions(value);
+  return Array.isArray(questions)
+    ? questions.filter(
+        (question): question is AskUserQuestion =>
+          typeof question === "object" &&
+          question !== null &&
+          typeof (question as { id?: unknown }).id === "string" &&
+          typeof (question as { header?: unknown }).header === "string" &&
+          typeof (question as { question?: unknown }).question === "string",
+      )
+    : [];
+}
+
 function validateDisplayText(
   value: unknown,
   field: string,

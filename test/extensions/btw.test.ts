@@ -813,6 +813,71 @@ describe("btw-extension", () => {
         mockPi.sendUserMessage.mock.calls[mockPi.sendUserMessage.mock.calls.length - 1];
       expect(content).toContain("Decision: use option A");
     });
+
+    it("/btw:summarize steers the summary prompt with the user instructions", async () => {
+      vi.mocked(completeSimple).mockResolvedValue({
+        content: [{ type: "text", text: "- Decision: database" }],
+        // biome-ignore lint/suspicious/noExplicitAny: test mock
+      } as any);
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      const mockPi = createMockPi() as any;
+      const { mockCtx } = setupContext();
+      await registerAll(mockPi);
+      await getCommandHandler(mockPi, "btw")("should we use A or B?", mockCtx);
+      await flush();
+
+      await getCommandHandler(mockPi, "btw:summarize")("focus on the database decision", mockCtx);
+      await flush();
+
+      expect(completeSimple).toHaveBeenCalledTimes(1);
+      const [, params] = vi.mocked(completeSimple).mock.calls[0];
+      const prompt = params.messages[0].content[0].text;
+      expect(prompt).toContain("focus on the database decision");
+    });
+
+    it("/btw:summarize without instructions does not add a steering section", async () => {
+      vi.mocked(completeSimple).mockResolvedValue({
+        content: [{ type: "text", text: "- Decision: database" }],
+        // biome-ignore lint/suspicious/noExplicitAny: test mock
+      } as any);
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      const mockPi = createMockPi() as any;
+      const { mockCtx } = setupContext();
+      await registerAll(mockPi);
+      await getCommandHandler(mockPi, "btw")("should we use A or B?", mockCtx);
+      await flush();
+
+      await getCommandHandler(mockPi, "btw:summarize")("", mockCtx);
+      await flush();
+
+      const [, params] = vi.mocked(completeSimple).mock.calls[0];
+      const prompt = params.messages[0].content[0].text;
+      expect(prompt).not.toContain("steer the summary");
+    });
+
+    it("/btw:summarize reports the failure cause instead of only a generic warning", async () => {
+      vi.mocked(completeSimple).mockRejectedValue(new Error("quota exceeded"));
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      const mockPi = createMockPi() as any;
+      const { mockCtx } = setupContext();
+      await registerAll(mockPi);
+      await getCommandHandler(mockPi, "btw")("should we use A or B?", mockCtx);
+      await flush();
+
+      await getCommandHandler(mockPi, "btw:summarize")("", mockCtx);
+      await flush();
+
+      expect(mockCtx.ui.notify).toHaveBeenCalledWith(
+        expect.stringContaining("quota exceeded"),
+        "warning",
+      );
+      expect(mockCtx.ui.notify).toHaveBeenCalledWith(
+        expect.stringContaining("preserved for a retry"),
+        "warning",
+      );
+      // Failure preserves the thread for a retry.
+      expect(mockPi.sendUserMessage).not.toHaveBeenCalled();
+    });
   });
 
   describe("global small model", () => {

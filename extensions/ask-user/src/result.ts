@@ -1,5 +1,6 @@
-import { truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { truncateToWidth } from "@earendil-works/pi-tui";
 import type { AgentToolResult, Component, Theme } from "pi";
+import { wrapToolText } from "../../../lib/tool-renderer.ts";
 import type { AskUserAnswer, AskUserDetails, AskUserQuestion, AskUserStatus } from "./schema.ts";
 
 export function formatAnswerSummary(
@@ -85,10 +86,7 @@ function textComponent(text: string): Component {
     render(width: number): string[] {
       const safeWidth = Math.max(0, Math.floor(width));
       if (safeWidth === 0) return [];
-      return text
-        .split("\n")
-        .flatMap((line) => (line ? wrapTextWithAnsi(line, safeWidth) : [""]))
-        .map((line) => truncateToWidth(line, safeWidth, "…"));
+      return wrapToolText(text, safeWidth).map((line) => truncateToWidth(line, safeWidth, "…"));
     },
     invalidate() {},
   };

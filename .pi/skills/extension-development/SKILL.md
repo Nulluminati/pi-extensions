@@ -34,7 +34,7 @@ Use `UPPER_SNAKE_CASE` for constants, `PascalCase` for types, and `camelCase` fo
 ## Errors and UI
 
 - Check empty arguments, missing models, missing credentials, and unavailable UI before doing work.
-- Guard TUI-only command handlers at the top with `if (!ctx.hasUI) return;`. Do not send fallback console output in `rpc`, `json`, or `print` mode.
+- Guard TUI-only command handlers at the top with `if (!ctx.hasUI) return;`. Do not send fallback console output in `rpc`, `json`, or `print` mode. The `/context` command is an explicit exception: it sends a plain-text `context` message with `triggerTurn: false` outside TUI mode. Its hidden renderer prevents stale breakdowns on reload; keep its non-TUI tests.
 - Show user-facing failures with `ctx.ui.notify(message, "error")`. Propagate lower-level failures instead of swallowing them.
 - In an async `ui.custom` factory, pass a failure message to `done()` so the dialog does not hang.
 - Do not use non-null assertions. Pass validated values to helpers or handle missing values explicitly.

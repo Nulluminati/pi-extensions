@@ -4,9 +4,12 @@
  * Lets the model collect one or more related user decisions in a reviewable form.
  */
 
+// --- Imports ---
+
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "pi";
 import { createSettleOnce } from "../../lib/settle-once.ts";
 import { QuestionnaireComponent, type QuestionnaireOutcome } from "./src/dialog.ts";
+import { askWithDialogs } from "./src/dialog-flow.ts";
 import {
   createStatusDetails,
   createSubmittedDetails,
@@ -16,17 +19,56 @@ import {
   renderAskResult,
 } from "./src/result.ts";
 import {
-  type AskUserAnswer,
   type AskUserDetails,
   AskUserParameters,
   type AskUserQuestion,
-  normalizeCustomText,
+  extractQuestions,
   normalizeQuestions,
+  safeQuestions,
   validateQuestions,
 } from "./src/schema.ts";
 
+// --- Constants ---
+
 const TOOL_NAME = "ask_user";
-const CUSTOM_OPTION_LABEL = "Type my own answer";
+
+// --- Helpers ---
+
+async function showQuestionnaire(
+  questions: AskUserQuestion[],
+  ctx: ExtensionContext,
+  signal: AbortSignal | undefined,
+): Promise<QuestionnaireOutcome> {
+  return ctx.ui.custom<QuestionnaireOutcome>((tui, theme, keybindings, done) => {
+    const handle = createSettleOnce(done, signal, { status: "aborted" });
+
+    const component = new QuestionnaireComponent({
+      questions,
+      tui,
+      theme,
+      keybindings,
+      done: handle.settle,
+    });
+
+    return {
+      get focused() {
+        return component.focused;
+      },
+      set focused(value: boolean) {
+        component.focused = value;
+      },
+      render: (width) => component.render(width),
+      invalidate: () => component.invalidate(),
+      handleInput: (data) => component.handleInput(data),
+      dispose: () => {
+        handle.dispose();
+        component.dispose();
+      },
+    };
+  });
+}
+
+// --- Extension ---
 
 export default async function askUserExtension(pi: ExtensionAPI) {
   pi.registerTool({
@@ -102,164 +144,4 @@ export default async function askUserExtension(pi: ExtensionAPI) {
       );
     },
   });
-}
-
-async function showQuestionnaire(
-  questions: AskUserQuestion[],
-  ctx: ExtensionContext,
-  signal: AbortSignal | undefined,
-): Promise<QuestionnaireOutcome> {
-  return ctx.ui.custom<QuestionnaireOutcome>((tui, theme, keybindings, done) => {
-    const handle = createSettleOnce(done, signal, { status: "aborted" });
-
-    const component = new QuestionnaireComponent({
-      questions,
-      tui,
-      theme,
-      keybindings,
-      done: handle.settle,
-    });
-
-    return {
-      get focused() {
-        return component.focused;
-      },
-      set focused(value: boolean) {
-        component.focused = value;
-      },
-      render: (width) => component.render(width),
-      invalidate: () => component.invalidate(),
-      handleInput: (data) => component.handleInput(data),
-      dispose: () => {
-        handle.dispose();
-        component.dispose();
-      },
-    };
-  });
-}
-
-async function askWithDialogs(
-  questions: AskUserQuestion[],
-  ctx: ExtensionContext,
-  signal: AbortSignal | undefined,
-): Promise<QuestionnaireOutcome> {
-  const answers: AskUserAnswer[] = [];
-  const dialogOptions = signal ? { signal } : {};
-
-  for (const question of questions) {
-    if (signal?.aborted) return { status: "aborted" };
-    const title = question.context
-      ? `${question.question}\n\nContext: ${question.context}`
-      : question.question;
-
-    if (!question.options) {
-      const customText = normalizeCustomText(
-        (await ctx.ui.input(title, "Type your answer", dialogOptions)) ?? "",
-      );
-      if (!customText) return signal?.aborted ? { status: "aborted" } : { status: "dismissed" };
-      answers.push({ questionId: question.id, selectedValues: [], customText });
-      continue;
-    }
-
-    if (question.multiSelect) {
-      const prompt = `${title}\n\n${formatNumberedOptions(question)}\n\nChoose one or more options.`;
-      const raw = await ctx.ui.input(
-        prompt,
-        "Comma-separated option numbers or custom text",
-        dialogOptions,
-      );
-      if (raw === undefined) {
-        return signal?.aborted ? { status: "aborted" } : { status: "dismissed" };
-      }
-      const answer = parseMultiSelectAnswer(question, raw);
-      if (answer.selectedValues.length === 0 && !answer.customText) return { status: "dismissed" };
-      answers.push(answer);
-      continue;
-    }
-
-    const options = question.options.map((option, index) => `${index + 1}. ${option.label}`);
-    const selected = await ctx.ui.select(title, [...options, CUSTOM_OPTION_LABEL], dialogOptions);
-    if (selected === undefined) {
-      return signal?.aborted ? { status: "aborted" } : { status: "dismissed" };
-    }
-    if (selected === CUSTOM_OPTION_LABEL) {
-      const customText = normalizeCustomText(
-        (await ctx.ui.input(title, "Type your answer", dialogOptions)) ?? "",
-      );
-      if (!customText) return signal?.aborted ? { status: "aborted" } : { status: "dismissed" };
-      answers.push({ questionId: question.id, selectedValues: [], customText });
-      continue;
-    }
-
-    const selectedIndex = options.indexOf(selected);
-    const option = question.options[selectedIndex];
-    if (!option) return { status: "dismissed" };
-    answers.push({ questionId: question.id, selectedValues: [option.value] });
-  }
-
-  const accepted = await ctx.ui.confirm(
-    "Review answers",
-    formatAnswerSummary(questions, answers),
-    dialogOptions,
-  );
-  if (!accepted) return signal?.aborted ? { status: "aborted" } : { status: "dismissed" };
-  return { status: "submitted", answers };
-}
-
-function parseMultiSelectAnswer(question: AskUserQuestion, input: string): AskUserAnswer {
-  const selectedValues: string[] = [];
-  const customParts: string[] = [];
-  const options = question.options ?? [];
-
-  for (const rawPart of input.split(",")) {
-    const part = rawPart.trim();
-    if (!part) continue;
-    const numericIndex = Number.parseInt(part, 10) - 1;
-    const option =
-      /^\d+$/.test(part) && numericIndex >= 0
-        ? options[numericIndex]
-        : options.find(
-            (candidate) =>
-              candidate.value.toLowerCase() === part.toLowerCase() ||
-              candidate.label.toLowerCase() === part.toLowerCase(),
-          );
-    if (option) {
-      if (!selectedValues.includes(option.value)) selectedValues.push(option.value);
-    } else {
-      customParts.push(part);
-    }
-  }
-
-  const customText = normalizeCustomText(customParts.join(", "));
-  return {
-    questionId: question.id,
-    selectedValues,
-    ...(customText ? { customText } : {}),
-  };
-}
-
-function formatNumberedOptions(question: AskUserQuestion): string {
-  return (question.options ?? [])
-    .map((option, index) => `${index + 1}. ${option.label}`)
-    .join("\n");
-}
-
-function extractQuestions(params: unknown): unknown {
-  return typeof params === "object" && params !== null && "questions" in params
-    ? (params as { questions?: unknown }).questions
-    : undefined;
-}
-
-function safeQuestions(value: unknown): AskUserQuestion[] {
-  const questions = extractQuestions(value);
-  return Array.isArray(questions)
-    ? questions.filter(
-        (question): question is AskUserQuestion =>
-          typeof question === "object" &&
-          question !== null &&
-          typeof (question as { id?: unknown }).id === "string" &&
-          typeof (question as { header?: unknown }).header === "string" &&
-          typeof (question as { question?: unknown }).question === "string",
-      )
-    : [];
 }
