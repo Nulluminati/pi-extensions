@@ -1,19 +1,31 @@
 /**
  * Context measurement: estimates how the context window is split between the
- * system prompt (with its embedded context files, skills, and tool schemas),
- * the conversation messages, free space, and the compaction reserve.
+ * system prompt (with its embedded context files and skills section), the
+ * tool schemas sent as the API tools parameter, the conversation messages,
+ * free space, and the compaction reserve.
  *
  * The headline "used" number comes from `ctx.getContextUsage()` — provider
  * usage from the last assistant response plus estimates for trailing
- * messages. The per-category breakdown is estimated independently with
- * pi's own chars/4 heuristic (`estimateTokens`), so rows are labeled as
- * estimates and should be read as relative sizes, not exact counts.
+ * messages. The category rows use pi's chars/4 heuristic (`estimateTokens`):
+ * the system prompt parent is measured from the assembled prompt, and its
+ * sub-rows (base prompt, context files, skills) are measured so they sum to
+ * the parent. Tool schemas are measured separately because pi sends them as
+ * the API `tools` parameter, not inside the prompt text. Rows are estimates;
+ * read them as relative sizes, not exact counts.
  */
 
-import { DEFAULT_COMPACTION_SETTINGS, estimateTokens } from "@earendil-works/pi-coding-agent";
+import {
+  DEFAULT_COMPACTION_SETTINGS,
+  estimateTokens,
+  // TypeScript 7.0.2 (native preview) fails to resolve the skills re-export
+  // line in the shipped index.d.ts and drops every name from it; the runtime
+  // export exists, so the suppression stays until the compiler resolves it.
+  // @ts-expect-error unresolved re-export in pi-coding-agent's declarations
+  formatSkillsForPrompt,
+} from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionCommandContext } from "pi";
 import { extractText } from "../../../lib/session-utils.ts";
-import type { ContextFileInfo, MessageSizeInfo, SessionTotals, SkillInfo } from "./types.ts";
+import type { ContextFileInfo, MessageSizeInfo, SessionTotals } from "./types.ts";
 
 // --- Types ---
 
@@ -27,8 +39,12 @@ export interface ContextBreakdown {
   /** Tokens pi reserves for the autocompact buffer. */
   reserveTokens: number;
   systemPromptTokens: number;
+  /** Prompt remainder after context files and skills: preamble, rules, docs, snippets. */
+  basePromptTokens: number;
   contextFiles: ContextFileInfo[];
-  skills: SkillInfo[];
+  /** Estimated tokens of the skills section exactly as pi embeds it. */
+  skillsTokens: number;
+  skillCount: number;
   toolsTokens: number;
   activeToolCount: number;
   messageCount: number;
@@ -148,15 +164,35 @@ export function measureContext(pi: ExtensionAPI, ctx: ExtensionCommandContext): 
     contextFiles.push({ path: summarizePath(path, ctx.cwd), tokens: estimateTextTokens(content) });
   }
 
-  // Skills: only the descriptions load into the prompt, so measure those.
-  const skills: SkillInfo[] = [];
-  for (const skill of options.skills ?? []) {
-    if (typeof skill !== "object" || skill === null) continue;
-    const s = skill as { name?: unknown; description?: unknown };
+  // Skills: pi embeds a rendered skills section (name, description, and file
+  // path per skill, inside <available_skills> markup) and only when a
+  // file-read tool is active. Measure the section with pi's own formatter so
+  // the row matches what the prompt actually carries.
+  const rawSkills = Array.isArray(options.skills) ? options.skills : [];
+  const skills = rawSkills.flatMap((skill) => {
+    if (typeof skill !== "object" || skill === null) return [];
+    const s = skill as {
+      name?: unknown;
+      description?: unknown;
+      filePath?: unknown;
+      disableModelInvocation?: unknown;
+    };
     const name = typeof s.name === "string" ? s.name : "";
-    const description = typeof s.description === "string" ? s.description : "";
-    if (!name) continue;
-    skills.push({ name, tokens: estimateTextTokens(description) });
+    if (!name) return [];
+    return [
+      {
+        name,
+        description: typeof s.description === "string" ? s.description : "",
+        filePath: typeof s.filePath === "string" ? s.filePath : "",
+        disableModelInvocation: s.disableModelInvocation === true,
+      },
+    ];
+  });
+  const selectedTools = options.selectedTools ?? ["read", "bash", "edit", "write"];
+  const skillFileReadTool = ["read", "bash"].find((tool) => selectedTools.includes(tool));
+  let skillsTokens = 0;
+  if (skillFileReadTool && skills.length > 0) {
+    skillsTokens = estimateTextTokens(formatSkillsForPrompt(skills, skillFileReadTool).trim());
   }
 
   // Tools: active tool definitions (name, description, parameter schema) are
@@ -204,8 +240,15 @@ export function measureContext(pi: ExtensionAPI, ctx: ExtensionCommandContext): 
     freeTokens,
     reserveTokens: DEFAULT_COMPACTION_SETTINGS.reserveTokens,
     systemPromptTokens,
+    // Remainder of the prompt after the measured embedded parts, so the
+    // sub-rows sum to the parent. Clamped in case estimates overshoot.
+    basePromptTokens: Math.max(
+      0,
+      systemPromptTokens - contextFiles.reduce((sum, file) => sum + file.tokens, 0) - skillsTokens,
+    ),
     contextFiles,
-    skills,
+    skillsTokens,
+    skillCount: skills.length,
     toolsTokens,
     activeToolCount: activeTools.length,
     messageCount,

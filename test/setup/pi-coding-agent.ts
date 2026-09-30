@@ -90,6 +90,48 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
     }
     return Math.max(0, Math.ceil(chars / 4));
   });
+  // Mirrors pi's skills section rendering (see formatSkillsForPrompt in the
+  // real package): usage instructions plus one XML-escaped <skill> block per
+  // visible skill inside <available_skills>.
+  const escapeXml = (str: string): string =>
+    str
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&apos;");
+  const formatSkillsForPrompt = vi.fn(
+    (
+      skills: Array<{
+        name: string;
+        description: string;
+        filePath: string;
+        disableModelInvocation?: boolean;
+      }>,
+      fileReadTool: "read" | "bash" = "read",
+    ): string => {
+      const visibleSkills = skills.filter((s) => !s.disableModelInvocation);
+      if (visibleSkills.length === 0) return "";
+      const lines = [
+        "\n\nThe following skills provide specialized instructions for specific tasks.",
+        fileReadTool === "read"
+          ? "Use the read tool to load a skill's file when the task matches its description."
+          : "Use bash to load a skill's file when the task matches its description.",
+        "When a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.",
+        "",
+        "<available_skills>",
+      ];
+      for (const skill of visibleSkills) {
+        lines.push("  <skill>");
+        lines.push(`    <name>${escapeXml(skill.name)}</name>`);
+        lines.push(`    <description>${escapeXml(skill.description)}</description>`);
+        lines.push(`    <location>${escapeXml(skill.filePath)}</location>`);
+        lines.push("  </skill>");
+      }
+      lines.push("</available_skills>");
+      return lines.join("\n");
+    },
+  );
   return {
     BashExecutionComponent,
     CustomEditor,
@@ -104,6 +146,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
       keepRecentTokens: 20000,
     },
     estimateTokens,
+    formatSkillsForPrompt,
     getAgentDir: vi.fn(() => "/home/test/.pi/agent"),
     getSettingsListTheme: vi.fn(() => ({
       label: (text: string) => text,

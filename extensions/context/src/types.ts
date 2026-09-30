@@ -9,12 +9,6 @@ export interface ContextFileInfo {
   tokens: number;
 }
 
-export interface SkillInfo {
-  name: string;
-  /** Estimated tokens of the skill description (what loads into the prompt). */
-  tokens: number;
-}
-
 export interface MessageSizeInfo {
   role: string;
   /** First line of text, whitespace-collapsed, for identification. */

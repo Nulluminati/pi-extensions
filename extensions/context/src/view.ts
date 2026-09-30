@@ -100,9 +100,17 @@ function buildModalLines(theme: any, data: ContextBreakdown, width: number): str
     }
   }
 
-  // Category table
+  // Category table. The system prompt sub-rows (base prompt, context files,
+  // skills) sum to the parent; tools sit outside the prompt because pi sends
+  // them as the API tools parameter.
   lines.push(rule);
   lines.push(row("System prompt", formatTokenCount(data.systemPromptTokens), "est"));
+  const hasPromptChildren = data.contextFiles.length > 0 || data.skillCount > 0;
+  if (hasPromptChildren && data.basePromptTokens > 0) {
+    lines.push(
+      row("  Base prompt", formatTokenCount(data.basePromptTokens), "preamble, rules, docs"),
+    );
+  }
   const fileTokens = data.contextFiles.reduce((sum, file) => sum + file.tokens, 0);
   if (data.contextFiles.length > 0) {
     lines.push(
@@ -116,17 +124,22 @@ function buildModalLines(theme: any, data: ContextBreakdown, width: number): str
       lines.push(row(`    ${file.path}`, formatTokenCount(file.tokens)));
     }
   }
-  const skillTokens = data.skills.reduce((sum, skill) => sum + skill.tokens, 0);
-  if (data.skills.length > 0) {
+  if (data.skillCount > 0) {
     lines.push(
       row(
         "  Skills",
-        formatTokenCount(skillTokens),
-        `${data.skills.length} skill${plural(data.skills.length)}`,
+        formatTokenCount(data.skillsTokens),
+        `${data.skillCount} skill${plural(data.skillCount)}`,
       ),
     );
   }
-  lines.push(row("  Tools", formatTokenCount(data.toolsTokens), `${data.activeToolCount} active`));
+  lines.push(
+    row(
+      "Tools",
+      formatTokenCount(data.toolsTokens),
+      `${data.activeToolCount} active · tools parameter`,
+    ),
+  );
   lines.push(row("Messages", formatTokenCount(data.messageTokens), `${data.messageCount} entries`));
   if (data.freeTokens !== null) {
     lines.push(row("Free space", formatTokenCount(data.freeTokens)));
@@ -243,18 +256,21 @@ export function buildPlainText(data: ContextBreakdown): string {
   }
 
   lines.push(`System prompt: ${formatTokenCount(data.systemPromptTokens)} (est)`);
-  if (data.contextFiles.length > 0) {
+  if (data.contextFiles.length > 0 || data.skillCount > 0) {
+    if (data.basePromptTokens > 0) {
+      lines.push(`  Base prompt: ${formatTokenCount(data.basePromptTokens)}`);
+    }
     lines.push(`  Context files (${data.contextFiles.length}):`);
     for (const file of data.contextFiles) {
       lines.push(`    ${file.path}: ${formatTokenCount(file.tokens)}`);
     }
+    if (data.skillCount > 0) {
+      lines.push(`  Skills (${data.skillCount}): ${formatTokenCount(data.skillsTokens)}`);
+    }
   }
-  if (data.skills.length > 0) {
-    lines.push(
-      `  Skills (${data.skills.length}): ${formatTokenCount(data.skills.reduce((sum, s) => sum + s.tokens, 0))}`,
-    );
-  }
-  lines.push(`  Tools: ${formatTokenCount(data.toolsTokens)} (${data.activeToolCount} active)`);
+  lines.push(
+    `Tools: ${formatTokenCount(data.toolsTokens)} (${data.activeToolCount} active, sent as the API tools parameter)`,
+  );
   lines.push(`Messages: ${formatTokenCount(data.messageTokens)} (${data.messageCount} entries)`);
   if (data.freeTokens !== null) {
     lines.push(`Free space: ${formatTokenCount(data.freeTokens)}`);

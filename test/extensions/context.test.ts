@@ -1,3 +1,8 @@
+import {
+  // @ts-expect-error unresolved re-export in pi-coding-agent's declarations
+  // (TypeScript 7.0.2 preview); the vitest package mock supplies the function.
+  formatSkillsForPrompt,
+} from "@earendil-works/pi-coding-agent";
 import type { ExtensionCommandContext } from "pi";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import contextExtension from "../../extensions/context/context.ts";
@@ -160,15 +165,25 @@ describe("context-extension", () => {
       ]);
     });
 
-    it("measures skill descriptions and active tool definitions", async () => {
+    it("measures the embedded skills section and active tool definitions", async () => {
       const pi = createMockPi();
       const ctx = createMockCommandContext();
+      const skills = [
+        {
+          name: "write-tests",
+          description: "d".repeat(100),
+          filePath: "/home/test/.pi/skills/write-tests/SKILL.md",
+        },
+        {
+          name: "humanizer",
+          description: "e".repeat(40),
+          filePath: "/home/test/.agents/skills/humanizer/SKILL.md",
+        },
+      ];
       ctx.getSystemPromptOptions = vi.fn(() => ({
         cwd: "/home/test",
-        skills: [
-          { name: "write-tests", description: "d".repeat(100) },
-          { name: "humanizer", description: "e".repeat(40) },
-        ],
+        selectedTools: ["read", "bash", "edit", "write"],
+        skills,
       }));
       const readParams = { type: "object", properties: {} };
       const bashParams = { type: "object", properties: {} };
@@ -185,14 +200,70 @@ describe("context-extension", () => {
 
       const breakdown = measureContext(pi, ctx);
 
-      expect(breakdown.skills).toEqual([
-        { name: "write-tests", tokens: 25 },
-        { name: "humanizer", tokens: 10 },
-      ]);
+      const section = formatSkillsForPrompt(skills, "read").trim();
+      expect(breakdown.skillsTokens).toBe(est(section));
+      expect(breakdown.skillCount).toBe(2);
       const readBlob = `read\nRead file contents\n${JSON.stringify(readParams)}`;
       const bashBlob = `bash\nExecute shell commands\n${JSON.stringify(bashParams)}`;
       expect(breakdown.toolsTokens).toBe(est(readBlob) + est(bashBlob));
       expect(breakdown.activeToolCount).toBe(2);
+    });
+
+    it("excludes the skills section when no read or bash tool is selected", async () => {
+      const pi = createMockPi();
+      const ctx = createMockCommandContext();
+      ctx.getSystemPromptOptions = vi.fn(() => ({
+        cwd: "/home/test",
+        selectedTools: ["edit", "write"],
+        skills: [{ name: "write-tests", description: "d".repeat(100), filePath: "/s/SKILL.md" }],
+      }));
+
+      const breakdown = measureContext(pi, ctx);
+
+      expect(breakdown.skillsTokens).toBe(0);
+      expect(breakdown.skillCount).toBe(1);
+    });
+
+    it("derives the base prompt so the system prompt rows reconcile", async () => {
+      const pi = createMockPi();
+      const ctx = createMockCommandContext();
+      const fileContent = "f".repeat(400);
+      const skills = [
+        { name: "write-tests", description: "d".repeat(100), filePath: "/s/SKILL.md" },
+      ];
+      const section = formatSkillsForPrompt(skills, "read").trim();
+      ctx.getSystemPromptOptions = vi.fn(() => ({
+        cwd: "/home/test",
+        selectedTools: ["read"],
+        contextFiles: [{ path: "/home/test/AGENTS.md", content: fileContent }],
+        skills,
+      }));
+      const prompt = `Preamble\n\n${fileContent}\n\n${section}\n\n/home/test`;
+      ctx.getSystemPrompt = vi.fn(() => prompt);
+
+      const breakdown = measureContext(pi, ctx);
+
+      expect(breakdown.systemPromptTokens).toBe(est(prompt));
+      expect(breakdown.basePromptTokens).toBe(
+        breakdown.systemPromptTokens - est(fileContent) - est(section),
+      );
+      expect(breakdown.basePromptTokens).toBeGreaterThan(0);
+    });
+
+    it("clamps the base prompt remainder at zero when estimates overshoot", async () => {
+      const pi = createMockPi();
+      const ctx = createMockCommandContext();
+      ctx.getSystemPrompt = vi.fn(() => "tiny");
+      ctx.getSystemPromptOptions = vi.fn(() => ({
+        cwd: "/home/test",
+        selectedTools: ["read"],
+        contextFiles: [{ path: "/home/test/AGENTS.md", content: "x".repeat(400) }],
+        skills: [{ name: "write-tests", description: "d".repeat(100), filePath: "/s/SKILL.md" }],
+      }));
+
+      const breakdown = measureContext(pi, ctx);
+
+      expect(breakdown.basePromptTokens).toBe(0);
     });
 
     it("counts messages, estimates their tokens, and ranks the largest", async () => {
@@ -420,20 +491,36 @@ describe("context-extension", () => {
         contextWindow: 128_000,
         percent: 19.5,
       }));
-      ctx.getSystemPrompt = vi.fn(() => "x".repeat(400));
+      const fileContent = "f".repeat(400);
+      const skills = [
+        {
+          name: "write-tests",
+          description: "d".repeat(100),
+          filePath: "/home/test/.pi/skills/write-tests/SKILL.md",
+        },
+      ];
+      const section = formatSkillsForPrompt(skills, "read").trim();
+      ctx.getSystemPrompt = vi.fn(
+        () => `Base instructions.\n\n${fileContent}\n\n${section}\n\n/home/test`,
+      );
       ctx.getSystemPromptOptions = vi.fn(() => ({
         cwd: "/home/test",
-        contextFiles: [{ path: "/home/test/AGENTS.md", content: "x".repeat(400) }],
-        skills: [{ name: "write-tests", description: "d".repeat(100) }],
+        selectedTools: ["read", "bash", "edit", "write"],
+        contextFiles: [{ path: "/home/test/AGENTS.md", content: fileContent }],
+        skills,
       }));
       ctx.sessionManager.getBranch = vi.fn(() => SESSION_ENTRIES);
 
       const text = buildPlainText(measureContext(pi, ctx));
 
+      const prompt = ctx.getSystemPrompt();
+      const base = est(prompt) - est(fileContent) - est(section);
       expect(text).toContain("Model: test-provider/test-model");
-      expect(text).toContain("System prompt: 100 (est)");
+      expect(text).toContain(`System prompt: ${est(prompt)} (est)`);
+      expect(text).toContain(`Base prompt: ${base}`);
       expect(text).toContain("    ./AGENTS.md: 100");
-      expect(text).toContain("Skills (1): 25");
+      expect(text).toContain(`Skills (1): ${est(section)}`);
+      expect(text).toContain("Tools: 0 (0 active, sent as the API tools parameter)");
       expect(text).toContain("Free space: 103.0k");
       expect(text).toContain("Compaction buffer: 16.4k (reserved)");
       expect(text).toContain("↑100 ↓20 ↗30 ↘10");
