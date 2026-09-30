@@ -16,7 +16,7 @@ The worker runner passes `--worker-readonly` to Pi for read-only workers. Approv
 
 ## Configuration
 
-Set `TYPESAFE_API_KEY` in the environment that launches Pi. If the key is missing, Pi warns at session startup. Commands that need Jev still block; the warning does not disable the gate. Approval Mode sends the complete command and current directory to TypeSafe, but it does not send conversation text. It detects common credentials and limits request size. Detection cannot identify every secret. Commands containing a recognized credential block rather than being sent with missing text. Jev uses `jev-latest` with a four-second request limit. This extension uses the TypeSafe HTTP API and adds no package dependency.
+The judge runs a Jev classifier through Pi's model registry. Set `TYPESAFE_API_KEY` in the environment that launches Pi, or use an inherited Jev entry on another provider (`OPENROUTER_API_KEY`, `CLOUDFLARE_API_KEY` with `CLOUDFLARE_ACCOUNT_ID`, `AI_GATEWAY_API_KEY`, or `OPENCODE_API_KEY`). Pi picks the first classifier with working credentials: hosted Jev first, in a fixed provider order, then any other available classifier. If no classifier is available, Pi warns at session startup and commands that need review block; the warning does not disable the gate. Approval Mode sends the complete command and current directory to the classifier, but it does not send conversation text. It detects common credentials and limits request size. Detection cannot identify every secret. Commands containing a recognized credential block rather than being sent with missing text. Each classifier attempt uses a four-second request limit with two retries. This extension adds no package dependency.
 
 ## Live calibration
 

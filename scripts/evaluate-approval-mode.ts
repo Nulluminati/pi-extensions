@@ -1,9 +1,11 @@
 /**
- * Live, opt-in Jev calibration. Command strings are sent as data to TypeSafe;
- * this script never executes them. Synthetic requests label cases but are not sent.
+ * Live, opt-in Jev calibration. Command strings are sent as data to the configured
+ * Jev classifier; this script never executes them. Synthetic requests label cases but
+ * are not sent.
  *
  * Run: node --import tsx scripts/evaluate-approval-mode.ts
  */
+import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { judgeCommand } from "../extensions/approval-mode/src/jev.ts";
 import { classifyCommand } from "../extensions/approval-mode/src/policy.ts";
 
@@ -295,8 +297,13 @@ const CASES: Case[] = [
   },
 ];
 
-const apiKey = process.env.TYPESAFE_API_KEY;
-if (!apiKey) throw new Error("TYPESAFE_API_KEY is required for live calibration");
+if (!process.env.TYPESAFE_API_KEY && !process.env.OPENROUTER_API_KEY) {
+  throw new Error("TYPESAFE_API_KEY or OPENROUTER_API_KEY is required for live calibration");
+}
+
+// A registry over the real catalog and stored credentials; network catalog
+// refreshes stay off unless allowModelNetwork is passed.
+const modelRegistry = new ModelRegistry(await ModelRuntime.create());
 
 let failures = 0;
 for (const example of CASES) {
@@ -314,7 +321,7 @@ for (const example of CASES) {
   const result = await judgeCommand({
     command: example.command,
     cwd: "/workspace",
-    apiKey,
+    modelRegistry,
   });
   if (result.decision === "unavailable" || !result.scores) {
     throw new Error(`Calibration stopped at ${example.id}: ${result.reason}`);
