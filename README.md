@@ -10,10 +10,35 @@ Install the entire collection:
 pi install git:github.com/Nulluminati/pi-extensions
 ```
 
-Or try a single extension without installing:
+Install a single extension by pointing a package entry at its file in `~/.pi/agent/settings.json`:
+
+```json
+{
+  "packages": [
+    "~/Projects/pi-extensions/extensions/goal/goal.ts"
+  ]
+}
+```
+
+A file path loads that one extension. Its relative imports, such as shared `lib/` modules and per-extension `src/` files, resolve normally from the repo on disk. A directory path loads the whole package instead. To load the directory but narrow what runs, use the object form with glob filters:
+
+```json
+{
+  "packages": [
+    {
+      "source": "~/Projects/pi-extensions",
+      "extensions": ["+extensions/goal/goal.ts"]
+    }
+  ]
+}
+```
+
+`+path` includes one exact file. `!pattern` excludes a match, and `[]` loads none of a resource type. Run `pi config` to toggle discovered extensions without editing JSON.
+
+Try an extension for one session without changing settings:
 
 ```bash
-pi -e git:github.com/Nulluminati/pi-extensions/extensions/goal/goal.ts
+pi -e extensions/goal/goal.ts
 ```
 
 ## Extensions
@@ -137,13 +162,15 @@ npm run test:watch # Run tests in watch mode
 
 ```
 pi-extensions/
-├── docs/               # Product design specifications
-│   └── specs/          # Per-extension product specs
-├── extensions/         # Extension files
-├── lib/                # Shared validation logic
+├── .github/            # CI workflows (checks, gitleaks)
+├── .husky/             # Git hooks (pre-commit lint-staged and secret scan)
+├── .pi/                # Agent task guides and skills for this repo
+├── extensions/         # Extension files, one directory per extension
+├── lib/                # Shared helper modules: UI, modals, models, session parsing, validation
 ├── scripts/            # CLI entry points
 ├── test/
 │   ├── extensions/     # Per-extension tests
+│   ├── lib/            # Shared helper tests
 │   ├── mocks/          # Shared test mock factories
 │   └── validator.test.ts
 ├── types/              # Ambient type declarations for "pi"
