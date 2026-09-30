@@ -353,6 +353,58 @@ declare module "pi" {
     }>;
     getApiKeyForProvider(providerName: string): Promise<string | undefined>;
     find(providerName: string, modelId: string): Model<any> | undefined;
+    /** Find a model of a non-chat type, e.g. `findOfType("classifier", "typesafe", "jev-latest")`. */
+    findOfType(
+      type: "chat" | "image" | "classifier",
+      providerName: string,
+      modelId: string,
+    ): Model<any> | undefined;
+    /** Every known model of a type, optionally for one provider. */
+    getModelsOfType(type: "chat" | "image" | "classifier", providerName?: string): Model<any>[];
+    /** Models of a type whose provider has working credentials. */
+    getAvailableOfType(
+      type: "chat" | "image" | "classifier",
+      providerName?: string,
+    ): Promise<Model<any>[]>;
+    getModelOfType(
+      type: "chat" | "image" | "classifier",
+      providerName: string,
+      modelId: string,
+    ): Model<any> | undefined;
+    /** Classify structured state with request-time authentication. Never rejects. */
+    classify(
+      model: Model<any>,
+      context: ClassifierContext,
+      options?: { signal?: AbortSignal; timeoutMs?: number; maxRetries?: number },
+    ): Promise<ClassifierResult>;
+  }
+
+  export type ClassifierAnswer =
+    | { type: "choice"; choice: string; probabilities: Record<string, number>; confidence: number }
+    | { type: "score"; score: number; confidence: number }
+    | { type: "bool"; probability: number };
+
+  export interface ClassifierContext {
+    state: Record<string, unknown>;
+    questions: Record<string, ClassifierQuestion>;
+  }
+
+  export interface ClassifierQuestion {
+    type: "choice" | "score" | "bool";
+    instructions: string;
+    /** Answers for a bool question, or option descriptions for a choice. */
+    criteria?: Record<string, string>;
+  }
+
+  export interface ClassifierResult {
+    api: string;
+    provider: string;
+    model: string;
+    answers: Record<string, ClassifierAnswer>;
+    stopReason: "stop" | "error" | "aborted";
+    errorMessage?: string;
+    usage?: { input: number; output: number; totalTokens: number };
+    timestamp: number;
   }
 
   export interface Model<T = any> {
@@ -782,6 +834,21 @@ declare module "@earendil-works/pi-coding-agent" {
     reserveTokens: number;
     keepRecentTokens: number;
   };
+
+  // Registry access for direct classifier calls outside a session context
+  // (see scripts/evaluate-approval-mode.ts and extensions/approval-mode/src/jev.ts).
+  export class ModelRuntime {
+    static create(): Promise<ModelRuntime>;
+  }
+  export class ModelRegistry {
+    constructor(runtime: ModelRuntime);
+    getAvailableOfType(type: "chat" | "image" | "classifier"): Promise<any[]>;
+    classify(
+      model: any,
+      context: any,
+      options?: { signal?: AbortSignal; timeoutMs?: number; maxRetries?: number },
+    ): Promise<any>;
+  }
 
   export class Theme {
     bg(color: string, text: string): string;

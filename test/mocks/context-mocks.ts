@@ -79,6 +79,13 @@ export function createMockContext(): DeepMocked<ExtensionContext> {
     modelRegistry: {
       getAll: vi.fn(() => []),
       getAvailable: vi.fn(() => []),
+      findOfType: vi.fn(() => undefined),
+      getModelsOfType: vi.fn(() => []),
+      getAvailableOfType: vi.fn(() => Promise.resolve([])),
+      getModelOfType: vi.fn(() => undefined),
+      classify: vi.fn(() =>
+        Promise.resolve({ answers: {}, stopReason: "error", timestamp: Date.now() }),
+      ),
       getApiKeyAndHeaders: vi.fn(() =>
         Promise.resolve({ ok: true, apiKey: "test-key", headers: {} }),
       ),
