@@ -32,26 +32,43 @@ The extension does not merge PRs.
 
 Status filters include all statuses, waiting on approvals, failed CI, and ready to merge.
 Author and status filters work together.
-The approvals filter matches GitHub's `REVIEW_REQUIRED` decision, not PRs without a review requirement.
-Type text to search the visible list.
-Press `Ctrl+R` to refresh data without changing the author or status filters.
+GitHub applies author, approval, and failed CI filters before the extension loads a page.
+The approvals filter uses `review:required` and verifies GitHub's `REVIEW_REQUIRED` decision.
+The failed CI filter uses GitHub's `status:failure` search qualifier.
+The ready filter searches non-draft candidates and applies the conservative readiness check to each page.
+A candidate page can contain no ready PRs. Continue to the next page to check more candidates.
+The count shows GitHub's search matches, not the number of locally verified ready PRs.
 
-The list loads up to 100 open PRs.
-At that limit, the overlay shows a warning.
-Filters apply to the loaded list only.
+Type text to search GitHub across the repository, not only the loaded page.
+GitHub search syntax works, including `label:bug` and `created:>=2025-01-01`.
+The extension waits 300 milliseconds after input before it requests results.
+Search and filter changes return to the first page.
+Press `Ctrl+R` to refresh the list from the first page without changing the search or filters.
+
+The extension loads 25 PRs per page.
+Press `Page Down` to load the next page.
+Press `Page Up` to return to the previous page.
+The extension keeps visited pages until you change the search, filters, or refresh the list.
+
+[GitHub limits each search to 1,000 results](https://docs.github.com/en/enterprise-cloud@latest/graphql/reference/search).
+The overlay shows a warning when more results match.
+Narrow the search to reach requests outside this limit.
 
 ## Comments and actions
 
-Select a PR with `Enter` to see its description and comments.
-The detail view includes discussion comments, reviews, and inline review comments.
+Select a PR with `Enter` to open the Description tab.
+Press `Tab` or `Shift+Tab` to switch between Description, Comments, and Checks.
+The Comments tab includes discussion comments, reviews, and inline review comments.
+The Checks tab shows check names, results, and links.
 The extension loads all comment pages that your login can access.
 Comments show author, date, link, and file position when available.
 The detail view formats descriptions and comments as Markdown.
 It hides Hypertext Markup Language (HTML) wrapper tags.
 Code examples keep their literal tags.
 
-Use arrow keys or `Page Up` and `Page Down` to scroll.
-Press `Ctrl+R` to refresh the selected PR.
+Use arrow keys or `Page Up` and `Page Down` to scroll the current tab.
+Each tab keeps its own scroll position.
+Press `Ctrl+R` to refresh the selected PR without changing tabs.
 Press `Escape` to return to the list.
 
 Press `Ctrl+A` in the detail view to choose an agent action.

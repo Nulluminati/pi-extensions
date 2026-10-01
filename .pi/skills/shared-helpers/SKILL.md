@@ -184,6 +184,8 @@ Rules of use:
 - Provide `onSelect` and `onCancel`; both typically call `done`. Resolve with `null`/`undefined` on cancel and treat that as "user aborted."
 - For non-TUI modes (`ctx.mode !== "tui"`), fall back to `ctx.ui.select` — see `web-search`'s `selectProvider` for the dual-path pattern.
 - Use the exported `SearchableSelect` class directly only when you need the selector *without* the modal frame (e.g. embedding it in a larger component).
+- Set `initialQuery` to restore the search input when results change.
+- Supply `onSearchChange(query)` for remote search. The selector sends the input unchanged and does not filter supplied results locally. The owner controls request timing and cleanup.
 
 ## `lib/settle-once.ts` — abortable dialog settlement
 

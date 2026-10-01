@@ -3,7 +3,9 @@
 // overlay consumes summarizePullRequest() for display and filterPullRequests()
 // for list filtering.
 
-import type { Check, PullRequest } from "./client.ts";
+import type { AuthorFilter, Check, PullRequest, StatusFilter } from "./client.ts";
+
+export type { AuthorFilter, StatusFilter } from "./client.ts";
 
 // --- Types ---
 
@@ -15,10 +17,6 @@ export interface PullRequestStatus {
   ready: boolean;
   reasons: string[];
 }
-
-export type AuthorFilter = "all" | "mine" | "others";
-
-export type StatusFilter = "all" | "approvals" | "failed-ci" | "ready";
 
 type SingleCheckState = "passed" | "failed" | "pending" | "unknown";
 

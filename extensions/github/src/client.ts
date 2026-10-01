@@ -12,7 +12,37 @@ export const GH_TIMEOUT_MS = 30_000;
 const PR_LIST_FIELDS =
   "number,title,url,state,isDraft,author,reviewDecision,mergeable,mergeStateStatus,statusCheckRollup";
 const PR_VIEW_FIELDS = `${PR_LIST_FIELDS},body,headRefName,baseRefName`;
-const PR_LIST_LIMIT = 100;
+export const PR_PAGE_SIZE = 25;
+export const PR_SEARCH_LIMIT = 1000;
+const PR_SEARCH_QUERY = `query($search: String!, $first: Int!, $after: String) {
+  search(query: $search, type: ISSUE, first: $first, after: $after) {
+    issueCount
+    pageInfo { hasNextPage endCursor }
+    nodes {
+      ... on PullRequest {
+        number title url state isDraft reviewDecision mergeable mergeStateStatus
+        author { login }
+        repository { nameWithOwner }
+        commits(last: 1) {
+          nodes {
+            commit {
+              statusCheckRollup {
+                contexts(first: 100) {
+                  totalCount
+                  nodes {
+                    __typename
+                    ... on CheckRun { name status conclusion detailsUrl }
+                    ... on StatusContext { context state targetUrl }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}`;
 
 // --- Types ---
 
@@ -46,11 +76,23 @@ export interface PullRequest {
   statusCheckRollup: Check[] | null;
 }
 
+export type AuthorFilter = "all" | "mine" | "others";
+export type StatusFilter = "all" | "approvals" | "failed-ci" | "ready";
+
+export interface GitHubListOptions {
+  author?: AuthorFilter;
+  status?: StatusFilter;
+  search?: string;
+  after?: string;
+}
+
 export interface GitHubSnapshot {
   repository: GitHubRepository;
   viewer: string;
   pullRequests: PullRequest[];
   limited: boolean;
+  totalCount: number;
+  nextCursor: string | null;
 }
 
 export interface GitHubComment {
@@ -72,7 +114,7 @@ export interface PullRequestDetail extends PullRequest {
 }
 
 export interface GitHubClient {
-  load(): Promise<GitHubSnapshot>;
+  load(options?: GitHubListOptions): Promise<GitHubSnapshot>;
   detail(repo: GitHubRepository, number: number): Promise<PullRequestDetail>;
 }
 
@@ -222,9 +264,69 @@ function parsePullRequest(value: unknown, what: string): PullRequest {
   };
 }
 
+function requiredArray(record: Record<string, unknown>, key: string, what: string): unknown[] {
+  const value = record[key];
+  if (!Array.isArray(value))
+    throw new Error(`gh ${what} returned an invalid "${key}": expected an array.`);
+  return value;
+}
+
+function requiredCount(record: Record<string, unknown>, key: string, what: string): number {
+  const value = record[key];
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    throw new Error(`gh ${what} returned an invalid "${key}": expected a non-negative integer.`);
+  }
+  return value;
+}
+
+function parseSearchPullRequest(value: unknown, repository: GitHubRepository): PullRequest {
+  const record = assertObject(value, "search entry");
+  const repo = assertObject(record.repository, "search entry repository");
+  if (repo.nameWithOwner !== repository.nameWithOwner || record.state !== "OPEN") {
+    throw new Error(
+      "gh search returned a pull request outside the current repository's open scope.",
+    );
+  }
+  const commits = assertObject(record.commits, "search entry commits");
+  const nodes = requiredArray(commits, "nodes", "search entry commits");
+  if (nodes.length > 1) throw new Error("gh search returned more than one head commit.");
+  let checks: Check[] | null = null;
+  if (nodes.length > 0) {
+    const commit = assertObject(
+      assertObject(nodes[0], "search entry commit node").commit,
+      "search entry commit",
+    );
+    if (!("statusCheckRollup" in commit))
+      throw new Error("gh search returned a missing statusCheckRollup field.");
+    if (commit.statusCheckRollup !== null) {
+      const rollup = assertObject(commit.statusCheckRollup, "search entry statusCheckRollup");
+      const contexts = assertObject(rollup.contexts, "search entry check contexts");
+      const entries = requiredArray(contexts, "nodes", "search entry check contexts");
+      const total = requiredCount(contexts, "totalCount", "search entry check contexts");
+      if (total < entries.length)
+        throw new Error("gh search returned an inconsistent check count.");
+      checks = entries.map((entry) => parseCheck(entry, "search entry check"));
+      // An incomplete check list must never make an otherwise mergeable PR appear ready.
+      if (total > entries.length)
+        checks.push({ name: "Additional checks not loaded", state: "UNKNOWN" });
+    }
+  }
+  // gh pr view renders an explicit GraphQL null review decision as an empty string.
+  return parsePullRequest(
+    {
+      ...record,
+      reviewDecision: record.reviewDecision === null ? "" : record.reviewDecision,
+      statusCheckRollup: checks,
+    },
+    "search entry",
+  );
+}
+
 // --- Client ---
 
 export function createGitHubClient(exec: ExtensionAPI["exec"], cwd: string): GitHubClient {
+  let context: Promise<{ repository: GitHubRepository; viewer: string }> | undefined;
+
   function assertSlug(nameWithOwner: string): string {
     if (!/^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(nameWithOwner)) {
       throw new Error(
@@ -332,47 +434,89 @@ export function createGitHubClient(exec: ExtensionAPI["exec"], cwd: string): Git
     return comment;
   }
 
-  return {
-    async load(): Promise<GitHubSnapshot> {
-      const repoOut = await run(["repo", "view", "--json", "nameWithOwner,url"], "repo view");
-      const repoRecord = assertObject(parseJsonOutput(repoOut, "repo view"), "repo view");
-      const nameWithOwner = assertSlug(requiredString(repoRecord, "nameWithOwner", "repo view"));
-      const url = requiredString(repoRecord, "url", "repo view");
-      const host = hostFromUrl(url, "repo view");
-      const repository: GitHubRepository = { nameWithOwner, url, host };
-
-      const slug = `${host}/${nameWithOwner}`;
-      const [userOut, listOut] = await Promise.all([
-        run(["api", "user", "--hostname", host], "api user"),
-        run(
-          [
-            "pr",
-            "list",
-            "--repo",
-            slug,
-            "--state",
-            "open",
-            "--limit",
-            String(PR_LIST_LIMIT),
-            "--json",
-            PR_LIST_FIELDS,
-          ],
-          "pr list",
-        ),
-      ]);
-
-      const userRecord = assertObject(parseJsonOutput(userOut, "api user"), "api user");
-      const viewer = requiredString(userRecord, "login", "api user");
-
-      const listParsed = parseJsonOutput(listOut, "pr list");
-      if (!Array.isArray(listParsed)) {
-        throw new Error(
-          `gh pr list returned an unexpected shape: expected a JSON array. ${ghInstallHint()}`,
+  function resolveContext(): Promise<{ repository: GitHubRepository; viewer: string }> {
+    if (!context) {
+      context = (async () => {
+        const repoOut = await run(["repo", "view", "--json", "nameWithOwner,url"], "repo view");
+        const repoRecord = assertObject(parseJsonOutput(repoOut, "repo view"), "repo view");
+        const nameWithOwner = assertSlug(requiredString(repoRecord, "nameWithOwner", "repo view"));
+        const url = requiredString(repoRecord, "url", "repo view");
+        const host = hostFromUrl(url, "repo view");
+        const userOut = await run(["api", "user", "--hostname", host], "api user");
+        const viewer = requiredString(
+          assertObject(parseJsonOutput(userOut, "api user"), "api user"),
+          "login",
+          "api user",
         );
-      }
-      const pullRequests = listParsed.map((entry) => parsePullRequest(entry, "pr list"));
+        return { repository: { nameWithOwner, url, host }, viewer };
+      })().catch((error) => {
+        context = undefined;
+        throw error;
+      });
+    }
+    return context;
+  }
 
-      return { repository, viewer, pullRequests, limited: pullRequests.length >= PR_LIST_LIMIT };
+  return {
+    async load(options: GitHubListOptions = {}): Promise<GitHubSnapshot> {
+      const { repository, viewer } = await resolveContext();
+      const qualifiers = [
+        `repo:${repository.nameWithOwner}`,
+        "is:pr",
+        "is:open",
+        "sort:created-desc",
+      ];
+      if (options.author === "mine") qualifiers.push(`author:${viewer}`);
+      if (options.author === "others") qualifiers.push(`-author:${viewer}`);
+      if (options.status === "approvals") qualifiers.push("review:required");
+      if (options.status === "failed-ci") qualifiers.push("status:failure");
+      if (options.status === "ready") qualifiers.push("draft:false");
+      if (options.search?.trim()) qualifiers.push(options.search.trim());
+      const args = [
+        "api",
+        "graphql",
+        "--method",
+        "POST",
+        "--hostname",
+        repository.host,
+        "-f",
+        `query=${PR_SEARCH_QUERY}`,
+        "-f",
+        `search=${qualifiers.join(" ")}`,
+        "-F",
+        `first=${PR_PAGE_SIZE}`,
+      ];
+      if (options.after) args.push("-f", `after=${options.after}`);
+      const payload = assertObject(parseJsonOutput(await run(args, "search"), "search"), "search");
+      if ("errors" in payload) {
+        const errors = requiredArray(payload, "errors", "search");
+        if (errors.length > 0)
+          throw new Error(
+            `gh search failed: ${errors.map((error) => requiredString(assertObject(error, "search error"), "message", "search error")).join("; ")}`,
+          );
+      }
+      const result = assertObject(assertObject(payload.data, "search data").search, "search");
+      const nodes = requiredArray(result, "nodes", "search");
+      const totalCount = requiredCount(result, "issueCount", "search");
+      const page = assertObject(result.pageInfo, "search pageInfo");
+      if (
+        typeof page.hasNextPage !== "boolean" ||
+        (page.endCursor !== null && typeof page.endCursor !== "string") ||
+        (page.hasNextPage && !page.endCursor)
+      ) {
+        throw new Error("gh search returned invalid pagination data.");
+      }
+      if (nodes.length > PR_PAGE_SIZE || totalCount < nodes.length)
+        throw new Error("gh search returned an inconsistent page count.");
+      const pullRequests = nodes.map((node) => parseSearchPullRequest(node, repository));
+      return {
+        repository,
+        viewer,
+        pullRequests,
+        totalCount,
+        nextCursor: page.hasNextPage ? String(page.endCursor) : null,
+        limited: totalCount > PR_SEARCH_LIMIT,
+      };
     },
 
     async detail(repo: GitHubRepository, number: number): Promise<PullRequestDetail> {

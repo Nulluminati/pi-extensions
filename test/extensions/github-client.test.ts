@@ -8,6 +8,7 @@ import {
   type Check,
   createGitHubClient,
   type GitHubRepository,
+  PR_PAGE_SIZE,
   type PullRequest,
 } from "../../extensions/github/src/client.ts";
 import { filterPullRequests, summarizePullRequest } from "../../extensions/github/src/status.ts";
@@ -102,9 +103,9 @@ function userRoute(stdout: string, overrides: Partial<ExecResult> = {}): Route {
   };
 }
 
-function prListRoute(stdout: string, overrides: Partial<ExecResult> = {}): Route {
+function searchRoute(stdout: string, overrides: Partial<ExecResult> = {}): Route {
   return {
-    match: (args) => args[0] === "pr" && args[1] === "list",
+    match: (args) => args[0] === "api" && args[1] === "graphql",
     respond: () => execResult({ stdout, ...overrides }),
   };
 }
@@ -123,13 +124,70 @@ function apiRoute(endpoint: string, stdout: string, overrides: Partial<ExecResul
   };
 }
 
+function searchNode(record = prFixture()): Record<string, unknown> {
+  const { statusCheckRollup, ...pr } = record;
+  return {
+    ...pr,
+    repository: { nameWithOwner: SLUG },
+    commits: {
+      nodes: [
+        {
+          commit: {
+            statusCheckRollup:
+              statusCheckRollup === undefined
+                ? undefined
+                : statusCheckRollup === null
+                  ? null
+                  : {
+                      contexts: {
+                        totalCount: (statusCheckRollup as unknown[]).length,
+                        nodes: statusCheckRollup,
+                      },
+                    },
+          },
+        },
+      ],
+    },
+  };
+}
+
+function searchOutput(
+  nodes: unknown[] = [],
+  count = nodes.length,
+  cursor: string | null = null,
+): string {
+  return JSON.stringify({
+    data: {
+      search: {
+        issueCount: count,
+        nodes,
+        pageInfo: { hasNextPage: cursor !== null, endCursor: cursor },
+      },
+    },
+  });
+}
+
 function baseRoutes(
-  options: { prList?: unknown[]; repoView?: string; user?: string } = {},
+  options: {
+    prList?: unknown[];
+    repoView?: string;
+    user?: string;
+    count?: number;
+    cursor?: string;
+  } = {},
 ): Route[] {
   return [
     repoViewRoute(options.repoView ?? JSON.stringify({ nameWithOwner: SLUG, url: REPO_URL })),
     userRoute(options.user ?? JSON.stringify({ login: "octocat" })),
-    prListRoute(JSON.stringify(options.prList ?? [])),
+    searchRoute(
+      searchOutput(
+        Array.isArray(options.prList)
+          ? options.prList.map((record) => searchNode(record as Record<string, unknown>))
+          : options.prList,
+        options.count,
+        options.cursor,
+      ),
+    ),
   ];
 }
 
@@ -186,6 +244,8 @@ describe("createGitHubClient().load()", () => {
         },
       ],
       limited: false,
+      totalCount: 2,
+      nextCursor: null,
     });
   });
 
@@ -199,23 +259,27 @@ describe("createGitHubClient().load()", () => {
     }
   });
 
-  it("resolves the repo from a subdirectory and pins the host/owner/repo slug for pr list", async () => {
+  it("resolves the repo from a subdirectory and queries one pinned search page", async () => {
     const { exec, calls } = createExec(baseRoutes({ prList: [] }));
     await createGitHubClient(exec, CWD).load();
     expect(calls[0].args).toEqual(["repo", "view", "--json", "nameWithOwner,url"]);
     expect(calls[1].args).toEqual(["api", "user", "--hostname", HOST]);
     expect(calls[2].args).toEqual([
-      "pr",
-      "list",
-      "--repo",
-      "github.com/octocat/hello-world",
-      "--state",
-      "open",
-      "--limit",
-      "100",
-      "--json",
-      PR_LIST_FIELDS,
+      "api",
+      "graphql",
+      "--method",
+      "POST",
+      "--hostname",
+      HOST,
+      "-f",
+      expect.stringContaining("query="),
+      "-f",
+      "search=repo:octocat/hello-world is:pr is:open sort:created-desc",
+      "-F",
+      `first=${PR_PAGE_SIZE}`,
     ]);
+    expect(calls[2].args.join(" ")).toContain("after: $after");
+    expect(calls[2].args).not.toContain("--paginate");
   });
 
   it("derives the host from an HTTPS URL of a GitHub Enterprise host", async () => {
@@ -226,7 +290,7 @@ describe("createGitHubClient().load()", () => {
     const { exec, calls } = createExec([
       repoViewRoute(repoView),
       userRoute(JSON.stringify({ login: "acme-dev" })),
-      prListRoute("[]"),
+      searchRoute(searchOutput()),
     ]);
     const snapshot = await createGitHubClient(exec, CWD).load();
     expect(snapshot.repository).toEqual({
@@ -235,15 +299,112 @@ describe("createGitHubClient().load()", () => {
       host: "ghe.example.com",
     });
     expect(calls[1].args).toEqual(["api", "user", "--hostname", "ghe.example.com"]);
-    expect(calls[2].args).toContain("ghe.example.com/acme/widgets");
+    expect(calls[2].args).toContain("ghe.example.com");
+    expect(calls[2].args).toContain("search=repo:acme/widgets is:pr is:open sort:created-desc");
   });
 
-  it("marks the snapshot limited when exactly 100 open PRs are returned", async () => {
-    const prs = Array.from({ length: 100 }, (_unused, index) => prFixture({ number: index + 1 }));
-    const { exec } = createExec(baseRoutes({ prList: prs }));
+  it.each([1000, 1001])(
+    "reports the search limit from %s total matches, not page length",
+    async (count) => {
+      const { exec } = createExec(baseRoutes({ prList: [prFixture()], count, cursor: "next" }));
+      const snapshot = await createGitHubClient(exec, CWD).load();
+      expect(snapshot.pullRequests).toHaveLength(1);
+      expect(snapshot.totalCount).toBe(count);
+      expect(snapshot.limited).toBe(count > 1000);
+      expect(snapshot.nextCursor).toBe("next");
+    },
+  );
+
+  it("passes combined filters, search text, and the cursor to GitHub and caches discovery", async () => {
+    const { exec, calls } = createExec(
+      baseRoutes({ prList: [prFixture()], count: 200, cursor: "next" }),
+    );
+    const client = createGitHubClient(exec, CWD);
+    await client.load({ author: "mine", status: "approvals", search: "label:bug" });
+    expect(calls[2].args).toContain(
+      "search=repo:octocat/hello-world is:pr is:open sort:created-desc author:octocat review:required label:bug",
+    );
+    await client.load({ author: "others", status: "failed-ci", search: "test", after: "next" });
+    expect(calls).toHaveLength(4);
+    expect(calls[3].args).toContain(
+      "search=repo:octocat/hello-world is:pr is:open sort:created-desc -author:octocat status:failure test",
+    );
+    expect(calls[3].args).toContain("after=next");
+    expect(calls[3].options).toEqual({ cwd: CWD, timeout: EXEC_TIMEOUT_MS, env: { GH_REPO: "" } });
+  });
+
+  it("queries non-draft ready candidates without excluding requests that need no reviews or checks", async () => {
+    const { exec, calls } = createExec(baseRoutes());
+    await createGitHubClient(exec, CWD).load({ status: "ready" });
+    expect(calls[2].args).toContain(
+      "search=repo:octocat/hello-world is:pr is:open sort:created-desc draft:false",
+    );
+  });
+
+  it("prevents incomplete checks from marking a request ready", async () => {
+    const node = searchNode();
+    const commits = node.commits as {
+      nodes: Array<{ commit: { statusCheckRollup: { contexts: { totalCount: number } } } }>;
+    };
+    commits.nodes[0].commit.statusCheckRollup.contexts.totalCount = 101;
+    const { exec } = createExec([...baseRoutes().slice(0, 2), searchRoute(searchOutput([node]))]);
     const snapshot = await createGitHubClient(exec, CWD).load();
-    expect(snapshot.pullRequests.length).toBe(100);
-    expect(snapshot.limited).toBe(true);
+    expect(snapshot.pullRequests[0].statusCheckRollup).toContainEqual({
+      name: "Additional checks not loaded",
+      state: "UNKNOWN",
+    });
+    expect(summarizePullRequest(snapshot.pullRequests[0]).ready).toBe(false);
+  });
+
+  it.each([{ repository: { nameWithOwner: "another/repo" } }, { state: "CLOSED" }])(
+    "rejects search results outside the current open repository scope: %j",
+    async (override) => {
+      const { exec } = createExec([
+        ...baseRoutes().slice(0, 2),
+        searchRoute(searchOutput([{ ...searchNode(), ...override }])),
+      ]);
+      await expect(createGitHubClient(exec, CWD).load()).rejects.toThrow(/scope/);
+    },
+  );
+
+  it.each([
+    { data: null },
+    { errors: [{ message: "search denied" }] },
+    {
+      data: {
+        search: { nodes: [], issueCount: -1, pageInfo: { hasNextPage: false, endCursor: null } },
+      },
+    },
+    {
+      data: {
+        search: { nodes: [], issueCount: 5, pageInfo: { hasNextPage: true, endCursor: null } },
+      },
+    },
+    {
+      data: {
+        search: { nodes: [], issueCount: 5, pageInfo: { hasNextPage: "yes", endCursor: null } },
+      },
+    },
+  ])("rejects malformed or failed search responses: %j", async (response) => {
+    const { exec } = createExec([
+      ...baseRoutes().slice(0, 2),
+      searchRoute(JSON.stringify(response)),
+    ]);
+    await expect(createGitHubClient(exec, CWD).load()).rejects.toThrow(/search/);
+  });
+
+  it("retries discovery after an authentication failure", async () => {
+    const routes = baseRoutes();
+    let attempts = 0;
+    const user = routes[1];
+    user.respond = () =>
+      ++attempts === 1
+        ? execResult({ code: 1, stderr: "login expired" })
+        : execResult({ stdout: JSON.stringify({ login: "octocat" }) });
+    const { exec } = createExec(routes);
+    const client = createGitHubClient(exec, CWD);
+    await expect(client.load()).rejects.toThrow("login expired");
+    expect((await client.load()).viewer).toBe("octocat");
   });
 
   it("maps CheckRun and StatusContext rollup entries onto the Check shape and drops unknown keys", async () => {
@@ -363,6 +524,13 @@ describe("createGitHubClient().load()", () => {
     await expect(createGitHubClient(exec, CWD).load()).rejects.toThrow("repository");
   });
 
+  it("normalizes an explicit GraphQL null review decision like gh pr view", async () => {
+    const { exec } = createExec(baseRoutes({ prList: [prFixture({ reviewDecision: null })] }));
+    const snapshot = await createGitHubClient(exec, CWD).load({ status: "ready" });
+    expect(snapshot.pullRequests[0].reviewDecision).toBe("");
+    expect(summarizePullRequest(snapshot.pullRequests[0]).ready).toBe(true);
+  });
+
   it("does not assume an absent review decision means reviews are unnecessary", async () => {
     const { exec } = createExec(baseRoutes({ prList: [prFixture({ reviewDecision: undefined })] }));
     const snapshot = await createGitHubClient(exec, CWD).load();
@@ -376,16 +544,16 @@ describe("createGitHubClient().load()", () => {
     await expect(createGitHubClient(exec, CWD).load()).rejects.toThrow(/gh api user.*login/s);
   });
 
-  it("fails when pr list does not return an array", async () => {
+  it("fails when search nodes are not an array", async () => {
     const { exec } = createExec(
       baseRoutes({ prList: { unexpected: true } as unknown as unknown[] }),
     );
-    await expect(createGitHubClient(exec, CWD).load()).rejects.toThrow(/gh pr list.*array/s);
+    await expect(createGitHubClient(exec, CWD).load()).rejects.toThrow(/gh search.*array/s);
   });
 
-  it("fails when a pr list entry is missing a required field", async () => {
+  it("fails when a search entry is missing a required field", async () => {
     const { exec } = createExec(baseRoutes({ prList: [prFixture({ title: undefined })] }));
-    await expect(createGitHubClient(exec, CWD).load()).rejects.toThrow(/gh pr list.*title/s);
+    await expect(createGitHubClient(exec, CWD).load()).rejects.toThrow(/gh search.*title/s);
   });
 });
 

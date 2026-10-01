@@ -35,6 +35,9 @@ export interface SearchableSelectOptions {
   maxVisible: number;
   noMatchText: string;
   searchText?: (item: SelectItem) => string;
+  initialQuery?: string;
+  /** Delegate search to the owner instead of filtering the supplied results locally. */
+  onSearchChange?(query: string): void;
   hint?: string;
   onSelect(value: string): void;
   onCancel(): void;
@@ -87,7 +90,9 @@ export class SearchableSelect {
     this.options = options;
     this.showTitle = showTitle;
     this.filteredItems = options.items;
+    this.input.setValue(options.initialQuery ?? "");
     this.selectList = this.createSelectList();
+    this.applyFilter();
   }
 
   get focused(): boolean {
@@ -148,8 +153,11 @@ export class SearchableSelect {
     } else if (this.options.keybindings.matches(data, "tui.select.cancel")) {
       this.options.onCancel();
     } else {
+      const previousQuery = this.input.getValue();
       this.input.handleInput(data);
       this.applyFilter();
+      const query = this.input.getValue();
+      if (query !== previousQuery) this.options.onSearchChange?.(query);
     }
     this.options.tui.requestRender();
   }
@@ -177,6 +185,7 @@ export class SearchableSelect {
   }
 
   private applyFilter(): void {
+    if (this.options.onSearchChange) return;
     const query = this.input.getValue().trim();
     const searchText =
       this.options.searchText ??

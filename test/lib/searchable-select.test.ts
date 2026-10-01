@@ -1,6 +1,10 @@
 import type { SelectItem } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
-import { createSearchableSelectModal, SearchableSelect } from "../../lib/searchable-select.ts";
+import {
+  createSearchableSelectModal,
+  SearchableSelect,
+  type SearchableSelectOptions,
+} from "../../lib/searchable-select.ts";
 
 const ITEMS: SelectItem[] = [
   { value: "brave", label: "Brave Search", description: "Independent web index" },
@@ -8,7 +12,9 @@ const ITEMS: SelectItem[] = [
 ];
 
 function createSelector(
-  overrides: { onSelect?: (value: string) => void; onCancel?: () => void } = {},
+  overrides: Partial<
+    Pick<SearchableSelectOptions, "onSelect" | "onCancel" | "initialQuery" | "onSearchChange">
+  > = {},
 ) {
   const requestRender = vi.fn();
   const onSelect = overrides.onSelect ?? vi.fn();
@@ -24,6 +30,7 @@ function createSelector(
     title: "Select provider",
     maxVisible: 10,
     noMatchText: "No matching providers",
+    ...overrides,
     onSelect,
     onCancel,
   });
@@ -78,6 +85,31 @@ describe("SearchableSelect", () => {
     const rendered = selector.render(80).join("\n");
     expect(rendered).toContain("Synthetic");
     expect(rendered).not.toContain("Brave Search");
+  });
+
+  it("restores a local query and filters its initial results", () => {
+    const { selector } = createSelector({ initialQuery: "coding" });
+    const rendered = selector.render(80).join("\n");
+    expect(rendered).toContain("coding");
+    expect(rendered).toContain("Synthetic");
+    expect(rendered).not.toContain("Brave Search");
+  });
+
+  it("delegates changed queries without filtering remote results locally", () => {
+    const onSearchChange = vi.fn();
+    const { selector, onSelect } = createSelector({ initialQuery: "body", onSearchChange });
+    expect(onSearchChange).not.toHaveBeenCalled();
+    expect(selector.render(80).join("\n")).toContain("Brave Search");
+    selector.handleInput("x");
+    expect(onSearchChange).toHaveBeenCalledWith("bodyx");
+    selector.handleInput("\x7f");
+    expect(onSearchChange).toHaveBeenLastCalledWith("body");
+    selector.handleInput("\t");
+    expect(onSearchChange).toHaveBeenCalledTimes(2);
+    selector.handleInput(" ");
+    expect(onSearchChange).toHaveBeenLastCalledWith("body ");
+    selector.handleInput("enter");
+    expect(onSelect).toHaveBeenCalledWith("brave");
   });
 
   it("moves through filtered results and selects the highlighted value", () => {

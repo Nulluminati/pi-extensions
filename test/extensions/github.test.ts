@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import githubExtension from "../../extensions/github/github.ts";
 import { buildActionPrompt } from "../../extensions/github/src/actions.ts";
 import { renderGitHubBody } from "../../extensions/github/src/body.ts";
@@ -45,7 +45,10 @@ const snapshot: GitHubSnapshot = {
   viewer: "me",
   pullRequests: [pullRequest],
   limited: false,
+  totalCount: 1,
+  nextCursor: null,
 };
+const overlays: Array<{ dispose(): void }> = [];
 
 function keybindings() {
   return {
@@ -55,6 +58,7 @@ function keybindings() {
         "tui.select.down": "\x1b[B",
         "tui.select.confirm": "\r",
         "tui.select.cancel": "\x1b",
+        "tui.input.tab": "\t",
       })[action] === data,
   };
 }
@@ -76,6 +80,7 @@ function setupOverlay(data = snapshot) {
     done,
     onError,
   });
+  overlays.push(overlay);
   return { overlay, client, done, tui, onError };
 }
 
@@ -86,6 +91,11 @@ async function loaded() {
 }
 
 beforeEach(() => vi.resetAllMocks());
+afterEach(() => {
+  for (const overlay of overlays) overlay.dispose();
+  overlays.length = 0;
+  vi.useRealTimers();
+});
 
 describe("GitHub body rendering", () => {
   it("renders Dependabot release notes without HTML element tags", () => {
@@ -159,7 +169,7 @@ describe("GitHub overlay", () => {
     const { overlay, client } = setupOverlay();
     expect(overlay.render(100).join("\n")).toContain("Loading");
     await loaded();
-    expect(client.load).toHaveBeenCalledWith();
+    expect(client.load).toHaveBeenCalledWith({ author: "all", status: "all", search: "" });
     const text = overlay.render(100).join("\n");
     expect(text).toContain("team/repo");
     expect(text).toContain("#42 Fix tests");
@@ -179,15 +189,23 @@ describe("GitHub overlay", () => {
     overlay.handleInput("\x06"); // Ctrl+F
     overlay.handleInput("\x1b[B");
     overlay.handleInput("\r"); // Mine
+    await loaded();
+    expect(client.load).toHaveBeenLastCalledWith({ author: "mine", status: "all", search: "" });
     expect(overlay.render(100).join("\n")).toContain("Mine");
     expect(overlay.render(100).join("\n")).not.toContain("Other PR");
     overlay.handleInput("\x06");
     for (let i = 0; i < 5; i++) overlay.handleInput("\x1b[B");
     overlay.handleInput("\r"); // Failed CI
+    await loaded();
+    expect(client.load).toHaveBeenLastCalledWith({
+      author: "mine",
+      status: "failed-ci",
+      search: "",
+    });
     expect(overlay.render(100).join("\n")).toContain("Failed CI");
     overlay.handleInput("\x12");
     await loaded();
-    expect(client.load).toHaveBeenCalledTimes(2);
+    expect(client.load).toHaveBeenCalledTimes(4);
     expect(overlay.render(100).join("\n")).toContain("Mine");
     expect(overlay.render(100).join("\n")).toContain("Failed CI");
   });
@@ -198,6 +216,9 @@ describe("GitHub overlay", () => {
     overlay.handleInput("\r");
     await loaded();
     expect(client.detail).toHaveBeenCalledWith(repository, 42);
+    expect(overlay.render(100).join("\n")).toContain("Description");
+    expect(overlay.render(100).join("\n")).not.toContain("Add a test");
+    overlay.handleInput("\t");
     expect(overlay.render(100).join("\n")).toContain("Add a test");
     expect(overlay.render(100).join("\n")).toContain("test.ts:5");
     overlay.handleInput("\x01"); // Ctrl+A
@@ -228,9 +249,13 @@ describe("GitHub overlay", () => {
     await loaded();
     const text = overlay.render(100).join("\n");
     expect(text).toContain("Readable body");
-    expect(text).toContain("Readable comment");
+    expect(text).not.toContain("Readable comment");
     expect(text).not.toContain("<details>");
-    expect(text).not.toContain("<strong>");
+    overlay.handleInput("\t");
+    const comments = overlay.render(100).join("\n");
+    expect(comments).toContain("Readable comment");
+    expect(comments).not.toContain("Readable body");
+    expect(comments).not.toContain("<strong>");
     overlay.handleInput("\x01");
     overlay.handleInput("\r");
     expect(done).toHaveBeenCalledWith({ action: "review", repository, pullRequest: detail });
@@ -271,7 +296,7 @@ describe("GitHub overlay", () => {
     expect(onError).toHaveBeenCalledWith("Permission denied");
     overlay.handleInput("\x12");
     await loaded();
-    expect(overlay.render(80).join("\n")).toContain("Add a test");
+    expect(overlay.render(80).join("\n")).toContain("Description");
   });
 
   it("shows action-specific empty search text", async () => {
@@ -321,11 +346,259 @@ describe("GitHub overlay", () => {
     expect(done).not.toHaveBeenCalled();
   });
 
-  it("shows empty results and the list limit", async () => {
-    const { overlay } = setupOverlay({ ...snapshot, pullRequests: [], limited: true });
+  it("shows empty results and GitHub's search limit", async () => {
+    const { overlay } = setupOverlay({
+      ...snapshot,
+      pullRequests: [],
+      limited: true,
+      totalCount: 5000,
+    });
     await loaded();
     expect(overlay.render(100).join("\n")).toContain("No matching open pull requests");
-    expect(overlay.render(100).join("\n")).toContain("100");
+    expect(overlay.render(100).join("\n")).toContain("1,000");
+    expect(overlay.render(100).join("\n")).toContain("Narrow");
+  });
+
+  it("loads the next server page and reuses previous pages", async () => {
+    const { overlay, client } = setupOverlay({
+      ...snapshot,
+      totalCount: 60,
+      nextCursor: "cursor-1",
+    });
+    await loaded();
+    const second = {
+      ...snapshot,
+      pullRequests: [{ ...pullRequest, number: 43, title: "Page two" }],
+      totalCount: 60,
+      nextCursor: "cursor-2",
+    };
+    client.load.mockResolvedValueOnce(second);
+    overlay.handleInput("\x1b[6~");
+    await loaded();
+    expect(client.load).toHaveBeenLastCalledWith({
+      author: "all",
+      status: "all",
+      search: "",
+      after: "cursor-1",
+    });
+    expect(overlay.render(100).join("\n")).toContain("Page 2");
+    expect(overlay.render(100).join("\n")).toContain("Page two");
+    expect(overlay.render(100).join("\n")).not.toContain("#42 Fix tests");
+    overlay.handleInput("\x1b[5~");
+    expect(overlay.render(100).join("\n")).toContain("Page 1");
+    overlay.handleInput("\x1b[6~");
+    expect(overlay.render(100).join("\n")).toContain("Page two");
+    expect(client.load).toHaveBeenCalledTimes(2);
+    overlay.handleInput("\x12");
+    await loaded();
+    expect(overlay.render(100).join("\n")).toContain("Page 1");
+    expect(client.load).toHaveBeenLastCalledWith({ author: "all", status: "all", search: "" });
+  });
+
+  it("distinguishes ready candidates from locally verified matches and continues across empty pages", async () => {
+    const { overlay, client } = setupOverlay();
+    await loaded();
+    client.load.mockResolvedValueOnce({ ...snapshot, totalCount: 60, nextCursor: "candidate-1" });
+    overlay.handleInput("\x06");
+    for (let i = 0; i < 6; i++) overlay.handleInput("\x1b[B");
+    overlay.handleInput("\r");
+    await loaded();
+    const empty = overlay.render(100).join("\n");
+    expect(empty).toContain("GitHub candidates");
+    expect(empty).toContain("No ready pull requests on this page");
+    client.load.mockResolvedValueOnce({
+      ...snapshot,
+      pullRequests: [
+        {
+          ...pullRequest,
+          number: 43,
+          title: "Ready candidate",
+          reviewDecision: "APPROVED",
+          mergeStateStatus: "CLEAN",
+          statusCheckRollup: [{ status: "COMPLETED", conclusion: "SUCCESS" }],
+        },
+      ],
+      totalCount: 60,
+    });
+    overlay.handleInput("\x1b[6~");
+    await loaded();
+    expect(client.load).toHaveBeenLastCalledWith({
+      author: "all",
+      status: "ready",
+      search: "",
+      after: "candidate-1",
+    });
+    expect(overlay.render(100).join("\n")).toContain("#43 Ready candidate");
+  });
+
+  it("stops pagination at GitHub's 1,000-result limit even if another cursor remains", async () => {
+    const page = (index: number): GitHubSnapshot => ({
+      ...snapshot,
+      totalCount: 1001,
+      limited: true,
+      nextCursor: `cursor-${index + 1}`,
+      pullRequests: Array.from({ length: 25 }, (_, offset) => ({
+        ...pullRequest,
+        number: index * 25 + offset + 1,
+      })),
+    });
+    const { overlay, client } = setupOverlay(page(0));
+    await loaded();
+    for (let index = 1; index < 40; index++) {
+      client.load.mockResolvedValueOnce(page(index));
+      overlay.handleInput("\x1b[6~");
+      await loaded();
+    }
+    expect(overlay.render(100).join("\n")).toContain("Page 40");
+    expect(client.load).toHaveBeenCalledTimes(40);
+    overlay.handleInput("\x1b[6~");
+    expect(client.load).toHaveBeenCalledTimes(40);
+    overlay.handleInput("\x1b[5~");
+    overlay.handleInput("\x1b[6~");
+    expect(overlay.render(100).join("\n")).toContain("Page 40");
+    expect(client.load).toHaveBeenCalledTimes(40);
+  });
+
+  it("does not fetch outside the first or last page", async () => {
+    const { overlay, client } = setupOverlay();
+    await loaded();
+    overlay.handleInput("\x1b[5~");
+    overlay.handleInput("\x1b[6~");
+    expect(client.load).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries a failed next page with the same cursor", async () => {
+    const { overlay, client, onError } = setupOverlay({
+      ...snapshot,
+      nextCursor: "cursor-1",
+      totalCount: 60,
+    });
+    await loaded();
+    client.load.mockRejectedValueOnce(new Error("Page unavailable"));
+    overlay.handleInput("\x1b[6~");
+    await loaded();
+    expect(onError).toHaveBeenCalledWith("Page unavailable");
+    expect(overlay.render(100).join("\n")).toContain("Page unavailable");
+    overlay.handleInput("\x12");
+    await loaded();
+    expect(client.load).toHaveBeenLastCalledWith({
+      author: "all",
+      status: "all",
+      search: "",
+      after: "cursor-1",
+    });
+    expect(overlay.render(100).join("\n")).toContain("Page 2");
+  });
+
+  it("debounces search against GitHub and displays matches outside the old page", async () => {
+    vi.useFakeTimers();
+    const { overlay, client, done } = setupOverlay();
+    await loaded();
+    client.load.mockResolvedValueOnce({
+      ...snapshot,
+      pullRequests: [{ ...pullRequest, number: 900, title: "Outside old page" }],
+    });
+    for (const letter of "remote body") overlay.handleInput(letter);
+    overlay.handleInput("\r");
+    expect(client.detail).not.toHaveBeenCalled();
+    expect(client.load).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(client.load).toHaveBeenLastCalledWith({
+      author: "all",
+      status: "all",
+      search: "remote body",
+    });
+    const text = overlay.render(100).join("\n");
+    expect(text).toContain("remote body");
+    expect(text).toContain("#900 Outside old page");
+    expect(text).not.toContain("#42 Fix tests");
+    expect(done).not.toHaveBeenCalled();
+  });
+
+  it("ignores an old search response while a newer query is pending", async () => {
+    vi.useFakeTimers();
+    const { overlay, client } = setupOverlay();
+    await loaded();
+    let resolveOld: (value: GitHubSnapshot) => void = () => {};
+    client.load.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveOld = resolve;
+        }),
+    );
+    overlay.handleInput("a");
+    await vi.advanceTimersByTimeAsync(300);
+    client.load.mockResolvedValueOnce({
+      ...snapshot,
+      pullRequests: [{ ...pullRequest, number: 901, title: "Latest result" }],
+    });
+    overlay.handleInput("b");
+    resolveOld({ ...snapshot, pullRequests: [{ ...pullRequest, title: "Stale result" }] });
+    await loaded();
+    expect(overlay.render(100).join("\n")).not.toContain("Stale result");
+    await vi.advanceTimersByTimeAsync(300);
+    expect(client.load).toHaveBeenLastCalledWith({ author: "all", status: "all", search: "ab" });
+    expect(overlay.render(100).join("\n")).toContain("Latest result");
+  });
+
+  it("clears pending searches when the overlay closes", async () => {
+    vi.useFakeTimers();
+    const { overlay, client, done } = setupOverlay();
+    await loaded();
+    overlay.handleInput("x");
+    overlay.handleInput("\x1b");
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(client.load).toHaveBeenCalledTimes(1);
+    expect(done).toHaveBeenCalledWith(null);
+  });
+
+  it("keeps comments, checks, and the description on separate tabs", async () => {
+    const { overlay, client } = setupOverlay();
+    await loaded();
+    overlay.handleInput("\r");
+    await loaded();
+    expect(overlay.render(100).join("\n")).not.toContain("Add a test");
+    overlay.handleInput("\t");
+    expect(overlay.render(100).join("\n")).toContain("Add a test");
+    overlay.handleInput("\t");
+    const checks = overlay.render(100).join("\n");
+    expect(checks).toContain("FAILURE");
+    expect(checks).not.toContain("Add a test");
+    expect(client.detail).toHaveBeenCalledTimes(1);
+    overlay.handleInput("\t");
+    expect(overlay.render(100).join("\n")).not.toContain("FAILURE");
+    overlay.handleInput("\x1b[Z");
+    expect(overlay.render(100).join("\n")).toContain("FAILURE");
+    client.detail.mockResolvedValueOnce({
+      ...pullRequest,
+      statusCheckRollup: [{ name: "new check", state: "SUCCESS" }],
+    });
+    overlay.handleInput("\x12");
+    await loaded();
+    expect(overlay.render(100).join("\n")).toContain("new check");
+    expect(overlay.render(100).join("\n")).not.toContain("FAILURE");
+  });
+
+  it("preserves each tab's scroll position and handles empty comments and checks", async () => {
+    const { overlay, client } = setupOverlay();
+    client.detail.mockResolvedValue({
+      ...pullRequest,
+      body: Array.from({ length: 60 }, (_, i) => `Body ${i}`).join("\n"),
+      comments: [],
+      statusCheckRollup: null,
+    });
+    await loaded();
+    overlay.handleInput("\r");
+    await loaded();
+    overlay.render(100);
+    overlay.handleInput("\x1b[B");
+    expect(overlay.render(100).join("\n")).toContain("Lines 2-");
+    overlay.handleInput("\t");
+    expect(overlay.render(100).join("\n")).toContain("No comments.");
+    overlay.handleInput("\t");
+    expect(overlay.render(100).join("\n")).toContain("No checks.");
+    overlay.handleInput("\t");
+    expect(overlay.render(100).join("\n")).toContain("Lines 2-");
   });
 
   it("removes terminal control sequences from GitHub text and fits small terminals", async () => {
@@ -435,6 +708,9 @@ describe("/github command", () => {
     const pi = createMockPi();
     const ctx = createMockCommandContext();
     pi.exec.mockResolvedValue({ stdout: "", stderr: "not logged in", code: 1, killed: false });
+    const notified = new Promise<void>((resolve) => {
+      ctx.ui.notify.mockImplementation(() => resolve());
+    });
     ctx.ui.custom.mockImplementation(async (factory) => {
       const component = await factory(
         { requestRender: vi.fn(), terminal: { rows: 30 } },
@@ -442,7 +718,7 @@ describe("/github command", () => {
         keybindings(),
         vi.fn(),
       );
-      await loaded();
+      await notified;
       component.dispose?.();
       return null;
     });
