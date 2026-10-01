@@ -875,7 +875,11 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
   }
 
   const cancel = async (): Promise<void> => {
-    if (record.status !== "running") return;
+    if (record.status !== "running") {
+      // Terminal status precedes persistence; callers must not remove artifacts during the write.
+      await finishPromise;
+      return;
+    }
     cancelRequested = true;
     const child = await started;
     // A failed spawn resolves `started` to undefined: nothing to signal, and

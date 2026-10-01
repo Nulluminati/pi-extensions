@@ -1184,6 +1184,64 @@ sleep 30
     expect(next.details.worker.status).toBe("completed");
   });
 
+  it.each(["failed", "completed"] as const)(
+    "cancel waits for a %s worker's terminal record write",
+    async (status) => {
+      if (status === "failed") {
+        const streams = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
+        await mkdir(join(streams, ".."), { recursive: true });
+        await writeFile(streams, "not a directory", "utf8");
+      } else {
+        setEnv(
+          "PI_WORKER_COMMAND",
+          await writeFixture(fixtureDir, "persist-worker.sh", SUCCESS_WORKER),
+        );
+      }
+      let releaseWrite: () => void = () => {};
+      const writeAllowed = new Promise<void>((resolve) => {
+        releaseWrite = resolve;
+      });
+      let signalWriteStarted: () => void = () => {};
+      const writeStarted = new Promise<void>((resolve) => {
+        signalWriteStarted = resolve;
+      });
+      const onRecord = vi.fn(async (record: WorkerRecord) => {
+        signalWriteStarted();
+        await writeAllowed;
+        await writeRecordFile(cwd, record);
+      });
+      const events = testEvents();
+      const running = await startWorker({
+        cwd,
+        task: "persist before cleanup",
+        model: "test-model",
+        thinkingLevel: "medium",
+        name: "persist-before-cleanup",
+        timeoutMs: 60_000,
+        workerId: `w-${status}-persist`,
+        extensionPaths: [],
+        events,
+        onRecord,
+      });
+      await writeStarted;
+      expect(running.record.status).toBe(status);
+      const cancelled = vi.fn();
+      const cancellation = running.cancel().then(() => cancelled());
+      try {
+        await Promise.resolve();
+        expect(cancelled).not.toHaveBeenCalled();
+        expect(await loadWorker(cwd, running.record.id)).toBeUndefined();
+      } finally {
+        releaseWrite();
+        await Promise.all([cancellation, running.done]);
+      }
+      expect(cancelled).toHaveBeenCalledWith();
+      expect(onRecord).toHaveBeenCalledTimes(1);
+      expect(onRecord).toHaveBeenCalledWith(expect.objectContaining({ status }));
+      expect((await loadWorker(cwd, running.record.id))?.status).toBe(status);
+    },
+  );
+
   it("workers cancel reports a worker whose spawn never produced a child", async () => {
     // The streams path as a regular file fails the runner's spool mkdir before
     // spawn. Completion marks the record failed; cancellation must preserve it.
