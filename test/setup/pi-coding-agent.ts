@@ -148,6 +148,26 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
     estimateTokens,
     formatSkillsForPrompt,
     getAgentDir: vi.fn(() => "/home/test/.pi/agent"),
+    getMarkdownTheme: vi.fn(() =>
+      Object.fromEntries(
+        [
+          "heading",
+          "link",
+          "linkUrl",
+          "code",
+          "codeBlock",
+          "codeBlockBorder",
+          "quote",
+          "quoteBorder",
+          "hr",
+          "listBullet",
+          "bold",
+          "italic",
+          "strikethrough",
+          "underline",
+        ].map((name) => [name, (text: string) => text]),
+      ),
+    ),
     getSettingsListTheme: vi.fn(() => ({
       label: (text: string) => text,
       value: (text: string) => text,

@@ -797,6 +797,33 @@ declare module "@earendil-works/pi-tui" {
     constructor(text: string, x?: number, y?: number);
   }
 
+  export type MarkdownTheme = Record<
+    | "heading"
+    | "link"
+    | "linkUrl"
+    | "code"
+    | "codeBlock"
+    | "codeBlockBorder"
+    | "quote"
+    | "quoteBorder"
+    | "hr"
+    | "listBullet"
+    | "bold"
+    | "italic"
+    | "strikethrough"
+    | "underline",
+    (text: string) => string
+  > & {
+    highlightCode?: (code: string, lang?: string) => string[];
+    codeBlockIndent?: string;
+  };
+
+  export class Markdown {
+    constructor(text: string, paddingX: number, paddingY: number, theme: MarkdownTheme);
+    render(width: number): string[];
+    invalidate(): void;
+  }
+
   export interface Theme {
     fg: (color: string, text: string) => string;
     bold: (text: string) => string;
@@ -816,6 +843,8 @@ declare module "@earendil-works/pi-tui" {
   // terminal keyboard protocols resolve consistently.
   export const Key: {
     space: string;
+    pageUp: string;
+    pageDown: string;
     alt(key: string): string;
     shift(key: string): string;
     ctrlAlt(key: string): string;
@@ -828,6 +857,7 @@ declare module "@earendil-works/pi-coding-agent" {
   export function getAgentDir(): string;
   export const CONFIG_DIR_NAME: string;
   export function getSettingsListTheme(): any;
+  export function getMarkdownTheme(): import("@earendil-works/pi-tui").MarkdownTheme;
   export function estimateTokens(message: any): number;
   export const DEFAULT_COMPACTION_SETTINGS: {
     enabled: boolean;

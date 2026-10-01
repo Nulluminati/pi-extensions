@@ -18,6 +18,7 @@ class MockInput {
   setValue(v: string): void {
     this.value = v;
   }
+  invalidate(): void {}
   render(width: number): string[] {
     const visible = this.value.length > 0 ? this.value : "ask a side question…";
     const padded = visible.length >= width ? visible : visible + " ".repeat(width - visible.length);
@@ -130,6 +131,10 @@ class MockSelectList {
     this.invalidated = true;
   }
   render(_width: number): string[] {
+    if (this.items.length === 0) {
+      const theme = this._theme as { noMatch: (text: string) => string };
+      return [theme.noMatch("  No matching commands")];
+    }
     return this.items.map((i) => (i.description ? `${i.label} — ${i.description}` : i.label));
   }
   handleInput(_data: string): void {}
@@ -214,7 +219,8 @@ function mockMatchesKey(data: string, keyId: string): boolean {
   return false;
 }
 
-vi.mock("@earendil-works/pi-tui", () => ({
+vi.mock("@earendil-works/pi-tui", async (importOriginal) => ({
+  Markdown: (await importOriginal<typeof import("@earendil-works/pi-tui")>()).Markdown,
   fuzzyFilter: <T>(items: T[], query: string, getText: (item: T) => string): T[] => {
     const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
     return items.filter((item) => {
