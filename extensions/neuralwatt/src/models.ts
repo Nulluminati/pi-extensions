@@ -124,10 +124,10 @@ const DISABLEABLE_BINARY_MAP: ThinkingLevelMap = {
  * alias after Neuralwatt announces a move.
  *
  * The GLM-5.2, Kimi, and Qwen3.6 reasoning/fast pairs share pricing; their
- * "-fast" variants are non-reasoning. glm-5.3-flash and
- * deepseek-v4-flash-speed are the exceptions: reasoning fast/speed variants.
- * Neuralwatt publishes both DeepSeek V4 Flash ids (and the Speed variant) for
- * the same 0731 checkpoint. The glm-5.3 family (gated glm-5.3 preview,
+ * "-fast" variants are non-reasoning. glm-5.3-flash, deepseek-v4-flash-speed,
+ * and deepseek-v4.1-flash-speed are the exceptions: reasoning fast/speed
+ * variants. Neuralwatt publishes both DeepSeek V4 Flash ids (and the Speed
+ * variant) for the same 0731 checkpoint. The glm-5.3 family (gated glm-5.3 preview,
  * glm-5.3-flash) forces always-on thinking (catalog marks reasoning mandatory;
  * see their entries); every other reasoning model is disableable
  * (qwen3.6-35b's previous restriction was lifted in 2026-08, and qwen-3.8-27b
@@ -369,6 +369,30 @@ export const STATIC_MODELS: ProviderModelConfig[] = [
   {
     id: "deepseek-v4.1-flash",
     name: "DeepSeek V4.1 Flash",
+    api: "openai-completions",
+    reasoning: true,
+    thinkingLevelMap: DISABLEABLE_IDENTITY_MAP,
+    input: ["text", "image"],
+    cost: { input: 0.15, output: 0.6, cacheRead: 0.015, cacheWrite: 0 },
+    contextWindow: 1048560,
+    maxTokens: 393216,
+    compat: NEURALWATT_REASONING_COMPAT,
+  },
+
+  // deepseek-v4.1-flash-speed — the same DeepSeek-V4.1-Flash checkpoint as
+  // deepseek-v4.1-flash (identical huggingface_id, pricing, and vision
+  // support) on a "Speed" lane: a dedicated server serving few sessions at
+  // the engine's solo decode rate (private preview). Probed 2026-10: every
+  // effort returns HTTP 200 and `none` produces no thinking, so thinking is
+  // disableable. The catalog aliases medium -> high and minimal -> low but
+  // keeps xhigh and max distinct, exactly like deepseek-v4.1-flash. A
+  // level-compare probe (2000-token reasoning budget) showed max ~= xhigh
+  // (r=8612 vs r=8383, within single-prompt noise and reversed by the
+  // truncated enum probe), so there is no evidence to route xhigh -> max and
+  // the identity map applies like the V4.1 sibling.
+  {
+    id: "deepseek-v4.1-flash-speed",
+    name: "DeepSeek V4.1 Flash (Speed)",
     api: "openai-completions",
     reasoning: true,
     thinkingLevelMap: DISABLEABLE_IDENTITY_MAP,

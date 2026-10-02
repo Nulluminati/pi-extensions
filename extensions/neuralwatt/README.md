@@ -4,7 +4,7 @@ Registers [Neuralwatt](https://neuralwatt.com) as a Pi model provider using thei
 
 ## What It Does
 
-Registers the `neuralwatt` provider so you can use Neuralwatt's hosted open-source models (DeepSeek V4 Flash, DeepSeek V4 Flash (Speed), DeepSeek V4.1 Flash, Gemma 4, GLM-5.2/5.3, Kimi K2.7/K3, MiMo-V2.6-Pro, Qwen3.6/3.8, and the nw-large/nw-flash/nw-small tracking aliases) in Pi. It:
+Registers the `neuralwatt` provider so you can use Neuralwatt's hosted open-source models (DeepSeek V4 Flash, DeepSeek V4 Flash (Speed), DeepSeek V4.1 Flash, DeepSeek V4.1 Flash (Speed), Gemma 4, GLM-5.2/5.3, Kimi K2.7/K3, MiMo-V2.6-Pro, Qwen3.6/3.8, and the nw-large/nw-flash/nw-small tracking aliases) in Pi. It:
 
 1. Registers the provider at load time with a hardcoded catalog of public models, so Pi starts even when the API is unreachable or no key is configured.
 2. On `session_start`, fetches the public `/v1/models` view and warns when Neuralwatt publishes models the static list lacks.
@@ -56,6 +56,7 @@ The catalog comes from Neuralwatt's `/v1/models` metadata. Pricing is per millio
 | deepseek-ai/DeepSeek-V4-Flash | 1M | yes | — | $0.14 / $0.28 |
 | deepseek-v4-flash-speed | 1M | yes | — | $0.14 / $0.28 |
 | deepseek-v4.1-flash | 1M | yes | yes | $0.15 / $0.60 |
+| deepseek-v4.1-flash-speed | 1M | yes | yes | $0.15 / $0.60 |
 | gemma-4-31b | 256K | yes | yes | $0.144 / $0.42 |
 | glm-5.2 | 1M | yes | — | $1.45 / $4.50 |
 | glm-5.2-fast | 1M | no | — | $1.45 / $4.50 |
@@ -75,7 +76,7 @@ The catalog comes from Neuralwatt's `/v1/models` metadata. Pricing is per millio
 | qwen3.6-35b-fast | 128K | no | yes | $0.29 / $1.15 |
 | qwen-3.8-27b | 256K | yes | yes | $0.45 / $3.20 |
 
-The GLM-5.2, Kimi, and Qwen3.6 reasoning models pair with `-fast` non-reasoning variants that share pricing. The nw-* ids are Neuralwatt's tracking aliases: first-class selectable ids that follow the catalog's current model per size tier (nw-large currently tracks Kimi K3, nw-flash DeepSeek V4.1 Flash, nw-small Qwen3.8-27B) with notice before each move, and they match the tracked model's pricing, limits, and reasoning behavior. `glm-5.3-flash` is the exception: a reasoning fast variant (exited preview 2026-09-11) with native vision at its own pricing. `glm-5.3` remains a gated preview at GLM-5.2 parity pricing with no fast variant, and `qwen-3.8-27b` is a dense VL model with no fast variant. Neuralwatt publishes the base and canary DeepSeek V4 Flash ids for the same 0731 checkpoint. The Speed tier uses that checkpoint with speculative decoding. DeepSeek V4.1 Flash has vision and separate pricing. Gemma has no listed fast variant; its catalog metadata lists reasoning support and direct probes confirm levels through `xhigh` are accepted and `none` disables it. Flex siblings are not separate entries because `/neuralwatt:flex` selects that service tier without changing the model id. The K2.5 and K2.6 families were removed from `/v1/models` (K2.5 ids now return HTTP 410 "has been deprecated"), and Qwen3.5 dropped from the catalog, so their entries were removed to mirror the live list.
+The GLM-5.2, Kimi, and Qwen3.6 reasoning models pair with `-fast` non-reasoning variants that share pricing. The nw-* ids are Neuralwatt's tracking aliases: first-class selectable ids that follow the catalog's current model per size tier (nw-large currently tracks Kimi K3, nw-flash DeepSeek V4.1 Flash, nw-small Qwen3.8-27B) with notice before each move, and they match the tracked model's pricing, limits, and reasoning behavior. `glm-5.3-flash` is the exception: a reasoning fast variant (exited preview 2026-09-11) with native vision at its own pricing. `glm-5.3` remains a gated preview at GLM-5.2 parity pricing with no fast variant, and `qwen-3.8-27b` is a dense VL model with no fast variant. Neuralwatt publishes the base and canary DeepSeek V4 Flash ids for the same 0731 checkpoint. The Speed tier uses that checkpoint with speculative decoding. DeepSeek V4.1 Flash has vision and separate pricing, and `deepseek-v4.1-flash-speed` serves that checkpoint on a private-preview dedicated lane (few sessions at the engine's solo decode rate) with the same pricing. Gemma has no listed fast variant; its catalog metadata lists reasoning support and direct probes confirm levels through `xhigh` are accepted and `none` disables it. Flex siblings are not separate entries because `/neuralwatt:flex` selects that service tier without changing the model id. The K2.5 and K2.6 families were removed from `/v1/models` (K2.5 ids now return HTTP 410 "has been deprecated"), and Qwen3.5 dropped from the catalog, so their entries were removed to mirror the live list.
 
 ### Startup staleness check
 
@@ -101,6 +102,7 @@ Reasoning models carry per-model `thinkingLevelMap` values verified by probing t
 | deepseek-ai/DeepSeek-V4-Flash | none | minimal | low | medium | high | xhigh |
 | deepseek-v4-flash-speed | none | minimal | low | medium | high | max |
 | deepseek-v4.1-flash | none | minimal | low | medium | high | xhigh |
+| deepseek-v4.1-flash-speed | none | minimal | low | medium | high | xhigh |
 | gemma-4-31b | none | minimal | low | medium | high | xhigh |
 | glm-5.2 | none | minimal | low | medium | high | max |
 | glm-5.2-short | none | minimal | low | medium | high | max |

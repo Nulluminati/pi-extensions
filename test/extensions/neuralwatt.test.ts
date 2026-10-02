@@ -42,6 +42,7 @@ const EXPECTED_MODEL_IDS = [
   "deepseek-v4-flash",
   "deepseek-v4-flash-speed",
   "deepseek-v4.1-flash",
+  "deepseek-v4.1-flash-speed",
   "gemma-4-31b",
   "glm-5.2",
   "glm-5.2-fast",
@@ -116,15 +117,20 @@ describe("neuralwatt-extension", () => {
 
     expect(introduction).toContain("DeepSeek V4 Flash (Speed)");
     expect(introduction).toContain("DeepSeek V4.1 Flash");
+    expect(introduction).toContain("DeepSeek V4.1 Flash (Speed)");
     expect(introduction).toContain("MiMo-V2.6-Pro");
     expect(catalog).toContain("| deepseek-v4-flash-speed | 1M | yes | — | $0.14 / $0.28 |");
     expect(catalog).toContain("| deepseek-v4.1-flash | 1M | yes | yes | $0.15 / $0.60 |");
+    expect(catalog).toContain("| deepseek-v4.1-flash-speed | 1M | yes | yes | $0.15 / $0.60 |");
     expect(catalog).toContain("| mimo-v2.6-pro | 1M | yes | yes | $0.87 / $1.74 |");
     expect(thinking).toContain(
       "| deepseek-v4-flash-speed | none | minimal | low | medium | high | max |",
     );
     expect(thinking).toContain(
       "| deepseek-v4.1-flash | none | minimal | low | medium | high | xhigh |",
+    );
+    expect(thinking).toContain(
+      "| deepseek-v4.1-flash-speed | none | minimal | low | medium | high | xhigh |",
     );
     expect(thinking).toContain("| mimo-v2.6-pro | none | none | high | high | high | high |");
   });
@@ -345,6 +351,18 @@ describe("neuralwatt-extension", () => {
     // The catalog aliases medium -> high and minimal -> low but keeps xhigh
     // and max distinct, so identity through xhigh is correct.
     expect(byId["deepseek-v4.1-flash"].thinkingLevelMap).toEqual({
+      off: "none",
+      minimal: "minimal",
+      low: "low",
+      medium: "medium",
+      high: "high",
+      xhigh: "xhigh",
+    });
+    // deepseek-v4.1-flash-speed (2026-10 probe): same checkpoint as
+    // deepseek-v4.1-flash on the Speed lane, also disableable. The catalog
+    // keeps xhigh and max distinct (a level-compare probe showed max ~=
+    // xhigh within noise), so identity through xhigh like the V4.1 sibling.
+    expect(byId["deepseek-v4.1-flash-speed"].thinkingLevelMap).toEqual({
       off: "none",
       minimal: "minimal",
       low: "low",
