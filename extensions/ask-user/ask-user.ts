@@ -87,6 +87,8 @@ export default async function askUserExtension(pi: ExtensionAPI) {
     ],
     parameters: AskUserParameters,
     executionMode: "sequential",
+    // Codemode scripts must not be able to call ask_user; only the model does.
+    exposure: "model-only",
 
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const rawQuestions = extractQuestions(params);

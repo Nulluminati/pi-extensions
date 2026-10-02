@@ -126,6 +126,7 @@ function errorResult(
 ): AgentToolResult<CodeSearchDetails> {
   return {
     content: [{ type: "text", text }],
+    isError: true,
     details: {
       query,
       totalResults: 0,

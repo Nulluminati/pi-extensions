@@ -1,5 +1,9 @@
 import { CustomEditor } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth } from "@earendil-works/pi-tui";
+import {
+  type TuiMouseEvent,
+  type TuiMouseEventResult,
+  truncateToWidth,
+} from "@earendil-works/pi-tui";
 import type { ExtensionCommandContext } from "pi";
 import { modalContentWidth, renderModalFrame } from "../../../lib/tui-frame.ts";
 import {
@@ -162,8 +166,8 @@ function mirrorPrompt(sessionId: string, text: string): void {
  * The default Pi editor, framed in the same rounded accent modal box the
  * voice/handoff overlays use, with the model and thinking level shown in the
  * title (top border). Subclasses CustomEditor so all text handling,
- * keybindings, autocomplete, and history are inherited; only render() is
- * overridden to add the frame.
+ * keybindings and autocomplete are inherited. render() adds the frame;
+ * handleMouse() maps framed coordinates back to the base editor.
  */
 export class PolishedEditor extends CustomEditor {
   private readonly uiTheme: any;
@@ -175,6 +179,7 @@ export class PolishedEditor extends CustomEditor {
   private readonly getBorderColor: () => string | undefined;
   private readonly getTitleRight: () => string | undefined;
   private readonly historySessionId: string;
+  private autocompleteStartRow = Number.POSITIVE_INFINITY;
 
   constructor(
     tui: any,
@@ -223,6 +228,7 @@ export class PolishedEditor extends CustomEditor {
     const contentWidth = modalContentWidth(width, MODAL_PADDING_X);
     const baseRendered = super.render(contentWidth);
     const autocompleteCount = this.computeAutocompleteCount(contentWidth);
+    this.autocompleteStartRow = baseRendered.length - autocompleteCount + 2 * MODAL_PADDING_Y;
     const borderColor = this.getBorderColor();
     const titleRight = this.getTitleRight();
     return renderEditorModalFrame({
@@ -233,6 +239,20 @@ export class PolishedEditor extends CustomEditor {
       theme: this.uiTheme,
       ...(borderColor !== undefined ? { borderColor } : {}),
       ...(titleRight !== undefined ? { titleRight } : {}),
+    });
+  }
+
+  override handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+    if (event.width < 4) return super.handleMouse(event);
+    const autocomplete = event.y >= this.autocompleteStartRow;
+    // Autocomplete stays below the frame without horizontal padding. The
+    // frame adds one padding row above the text and two before autocomplete.
+    return super.handleMouse({
+      ...event,
+      x: autocomplete ? event.x : event.x - 1 - MODAL_PADDING_X,
+      y: event.y - (autocomplete ? 2 * MODAL_PADDING_Y : MODAL_PADDING_Y),
+      width: modalContentWidth(event.width, MODAL_PADDING_X),
+      height: event.height - 2 * MODAL_PADDING_Y,
     });
   }
 

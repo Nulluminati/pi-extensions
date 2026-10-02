@@ -222,6 +222,7 @@ declare module "pi" {
     renderShell?: "default" | "self";
     prepareArguments?: (args: unknown) => Static<TParams>;
     executionMode?: ToolExecutionMode;
+    exposure?: "direct" | "model-only" | "codemode" | "deferred" | "hidden";
     execute(
       toolCallId: string,
       params: Static<TParams>,
@@ -266,6 +267,7 @@ declare module "pi" {
     content: (TextContent | ImageContent)[];
     details?: TDetails;
     terminate?: boolean;
+    isError?: boolean;
   }
 
   /**
@@ -620,6 +622,9 @@ declare module "pi" {
     render(width: number): string[];
     invalidate(): void;
     handleInput?(data: string): void;
+    handleMouse?(
+      event: import("@earendil-works/pi-tui").TuiMouseEvent,
+    ): import("@earendil-works/pi-tui").TuiMouseEventResult | undefined;
     dispose?(): void;
     width?: number;
   }
@@ -660,6 +665,29 @@ declare module "typebox" {
 }
 
 declare module "@earendil-works/pi-tui" {
+  export interface TuiMouseEvent {
+    type: "press" | "release" | "move" | "drag" | "click" | "wheel";
+    button: "left" | "middle" | "right" | "none";
+    x: number;
+    y: number;
+    screenX: number;
+    screenY: number;
+    width: number;
+    height: number;
+    shift: boolean;
+    alt: boolean;
+    ctrl: boolean;
+    wheelDelta?: number;
+    clickCount?: number;
+  }
+
+  export interface TuiMouseEventResult {
+    handled?: boolean;
+    capture?: boolean;
+    focus?: boolean;
+    render?: boolean;
+  }
+
   export function truncateToWidth(
     str: string,
     width: number,
@@ -1028,6 +1056,9 @@ declare module "@earendil-works/pi-coding-agent" {
     render(width: number): string[];
     invalidate(): void;
     handleInput(data: string): void;
+    handleMouse(
+      event: import("@earendil-works/pi-tui").TuiMouseEvent,
+    ): import("@earendil-works/pi-tui").TuiMouseEventResult | undefined;
     dispose?(): void;
     getText(): string;
     setText(text: string): void;
@@ -1110,6 +1141,32 @@ declare module "@earendil-works/pi-coding-agent" {
   export function createGrepTool(cwd: string): any;
   export function createFindTool(cwd: string, options?: { operations?: FindOperations }): any;
   export function createLsTool(cwd: string, options?: { operations?: LsOperations }): any;
+
+  export function createReadToolDefinition(
+    cwd: string,
+    options?: { operations?: ReadOperations },
+  ): import("pi").ToolDefinition;
+  export function createWriteToolDefinition(
+    cwd: string,
+    options?: { operations?: WriteOperations },
+  ): import("pi").ToolDefinition;
+  export function createEditToolDefinition(
+    cwd: string,
+    options?: { operations?: EditOperations },
+  ): import("pi").ToolDefinition;
+  export function createBashToolDefinition(
+    cwd: string,
+    options?: { operations?: BashOperations },
+  ): import("pi").ToolDefinition;
+  export function createGrepToolDefinition(cwd: string): import("pi").ToolDefinition;
+  export function createFindToolDefinition(
+    cwd: string,
+    options?: { operations?: FindOperations },
+  ): import("pi").ToolDefinition;
+  export function createLsToolDefinition(
+    cwd: string,
+    options?: { operations?: LsOperations },
+  ): import("pi").ToolDefinition;
 
   // Full-width horizontal rule whose color tracks the terminal width. Used
   // to frame selection dialogs and overlays. Pass an explicit color function

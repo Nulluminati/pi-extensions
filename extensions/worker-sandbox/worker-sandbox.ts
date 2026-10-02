@@ -4,13 +4,13 @@
  */
 
 import {
-  createBashTool,
-  createEditTool,
-  createFindTool,
-  createGrepTool,
-  createLsTool,
-  createReadTool,
-  createWriteTool,
+  createBashToolDefinition,
+  createEditToolDefinition,
+  createFindToolDefinition,
+  createGrepToolDefinition,
+  createLsToolDefinition,
+  createReadToolDefinition,
+  createWriteToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import type { AgentToolUpdateCallback, ExtensionAPI, ExtensionContext } from "pi";
 import { startWorkerSandbox, type WorkerSandboxClient } from "./src/client.ts";
@@ -52,14 +52,17 @@ export default async function workerSandboxExtension(pi: ExtensionAPI) {
     if (running) await running.close();
   });
 
+  // Register the full built-in tool definitions so metadata (promptSnippet,
+  // promptGuidelines) and renderers survive; only execute is replaced to
+  // route every call into the sandbox.
   const tools = [
-    createReadTool(localCwd),
-    createWriteTool(localCwd),
-    createEditTool(localCwd),
-    createBashTool(localCwd),
-    createLsTool(localCwd),
-    createFindTool(localCwd),
-    createGrepTool(localCwd),
+    createReadToolDefinition(localCwd),
+    createWriteToolDefinition(localCwd),
+    createEditToolDefinition(localCwd),
+    createBashToolDefinition(localCwd),
+    createLsToolDefinition(localCwd),
+    createFindToolDefinition(localCwd),
+    createGrepToolDefinition(localCwd),
   ];
   for (const tool of tools) {
     pi.registerTool({

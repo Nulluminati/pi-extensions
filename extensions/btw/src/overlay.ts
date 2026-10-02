@@ -4,6 +4,8 @@ import {
   Input,
   type Theme,
   type TUI,
+  type TuiMouseEvent,
+  type TuiMouseEventResult,
   truncateToWidth,
   visibleWidth,
   wrapTextWithAnsi,
@@ -107,13 +109,13 @@ class BtwOverlayComponent extends Container implements Focusable {
     this.composer.onEscape = () => this.onDismiss();
     this.addChild(this.composer);
 
-    // Enable SGR mouse reporting so wheel events reach handleInput.
-    this.tui.terminal?.write?.("\x1b[?1000h\x1b[?1006h");
     this.refresh();
   }
 
-  override dispose(): void {
-    this.tui.terminal?.write?.("\x1b[?1000l\x1b[?1006l");
+  handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+    if (event.type !== "wheel") return undefined;
+    this.scrollTranscript(event.wheelDelta ?? 0);
+    return { handled: true };
   }
 
   setDraft(value: string): void {

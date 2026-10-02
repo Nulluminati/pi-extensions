@@ -34,6 +34,7 @@ import {
   installEditorFactoryLayer,
   removeEditorFactoryLayer,
 } from "../../lib/editor-factory.ts";
+import { sumSessionUsage } from "../../lib/session-usage.ts";
 import { loadSmallModelConfig, resolveSmallModelConfigPath } from "../../lib/small-model.ts";
 import { formatStatusLine } from "../../lib/ui-format.ts";
 import {
@@ -397,29 +398,7 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
   }
 
   function accumulateTokenUsage(): void {
-    const tu = state.tokenUsage;
-    tu.input = 0;
-    tu.output = 0;
-    tu.cacheRead = 0;
-    tu.cacheWrite = 0;
-    tu.cost = 0;
-
-    for (const entry of getBranch()) {
-      if (
-        entry.type === "message" &&
-        "message" in entry &&
-        (entry.message as any).role === "assistant"
-      ) {
-        const usage = (entry.message as any).usage;
-        if (usage) {
-          tu.input += usage.input ?? 0;
-          tu.output += usage.output ?? 0;
-          tu.cacheRead += usage.cacheRead ?? 0;
-          tu.cacheWrite += usage.cacheWrite ?? 0;
-          tu.cost += usage.cost?.total ?? 0;
-        }
-      }
-    }
+    state.tokenUsage = sumSessionUsage(getBranch());
   }
 
   async function refreshGitStatus(): Promise<void> {

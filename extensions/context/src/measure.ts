@@ -24,6 +24,7 @@ import {
   formatSkillsForPrompt,
 } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionCommandContext } from "pi";
+import { sumSessionUsage } from "../../../lib/session-usage.ts";
 import { extractText } from "../../../lib/session-utils.ts";
 import type { ContextFileInfo, MessageSizeInfo, SessionTotals } from "./types.ts";
 
@@ -75,67 +76,9 @@ function summarizePath(path: string, cwd: string): string {
   return path;
 }
 
-function toNumber(value: unknown): number {
-  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
-  if (typeof value === "string") {
-    const n = Number(value);
-    return Number.isFinite(n) ? n : 0;
-  }
-  return 0;
-}
-
-function extractCostTotal(cost: unknown): number {
-  if (typeof cost === "number") return Number.isFinite(cost) ? cost : 0;
-  if (typeof cost === "string") {
-    const n = Number(cost);
-    return Number.isFinite(n) ? n : 0;
-  }
-  if (typeof cost === "object" && cost !== null) {
-    return toNumber((cost as { total?: unknown }).total);
-  }
-  return 0;
-}
-
 // --- Session usage ---
 
-/** Sum provider-reported usage across all assistant messages in the branch. */
-export function sumSessionUsage(entries: unknown[]): SessionTotals {
-  let input = 0;
-  let output = 0;
-  let cacheRead = 0;
-  let cacheWrite = 0;
-  let cost = 0;
-
-  for (const entry of entries) {
-    if (typeof entry !== "object" || entry === null) continue;
-    const message = (entry as { message?: unknown }).message;
-    if (typeof message !== "object" || message === null) continue;
-    const msg = message as { role?: unknown; usage?: unknown };
-    if (msg.role !== "assistant") continue;
-    if (typeof msg.usage !== "object" || msg.usage === null) continue;
-    const usage = msg.usage as {
-      input?: unknown;
-      output?: unknown;
-      cacheRead?: unknown;
-      cacheWrite?: unknown;
-      cost?: unknown;
-    };
-    input += toNumber(usage.input);
-    output += toNumber(usage.output);
-    cacheRead += toNumber(usage.cacheRead);
-    cacheWrite += toNumber(usage.cacheWrite);
-    cost += extractCostTotal(usage.cost);
-  }
-
-  return {
-    input,
-    output,
-    cacheRead,
-    cacheWrite,
-    totalTokens: input + output + cacheRead + cacheWrite,
-    cost,
-  };
-}
+export { sumSessionUsage };
 
 // --- Breakdown ---
 

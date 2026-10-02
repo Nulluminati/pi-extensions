@@ -37,10 +37,18 @@ interface FakeHandle {
 }
 
 interface CapturedOverlay {
-  component: { render: (width: number) => string[]; handleInput?: (data: string) => void };
+  component: {
+    render: (width: number) => string[];
+    handleInput?: (data: string) => void;
+    handleMouse?: (event: import("@earendil-works/pi-tui").TuiMouseEvent) => unknown;
+    dispose?: () => void;
+  };
   done: ReturnType<typeof vi.fn>;
   handle: FakeHandle;
-  tui: { requestRender: ReturnType<typeof vi.fn> };
+  tui: {
+    requestRender: ReturnType<typeof vi.fn>;
+    terminal: { write: ReturnType<typeof vi.fn> };
+  };
   options: Record<string, unknown>;
 }
 
@@ -188,7 +196,7 @@ function setupContext(confirms: boolean[] = []) {
       hide: vi.fn(),
       setHidden: vi.fn(),
     };
-    const tui = { requestRender: vi.fn() };
+    const tui = { requestRender: vi.fn(), terminal: { write: vi.fn() } };
     let resolveClose: (value?: unknown) => void;
     const done = vi.fn((value?: unknown) => resolveClose(value));
     const promise = new Promise<unknown>((resolve) => {
@@ -1200,6 +1208,46 @@ describe("btw-extension", () => {
       setupTools();
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       vi.mocked(stream).mockReturnValue(makeEventStream(textDoneEvents("ans")) as any);
+    });
+
+    it("leaves terminal mouse reporting under Pi's ownership after close", async () => {
+      const mockPi = createMockPi();
+      const { mockCtx, overlays } = setupContext();
+      await registerAll(mockPi);
+      await getCommandHandler(mockPi, "btw")("", mockCtx);
+      const overlay = getOverlay(overlays);
+      expect(overlay.tui.terminal.write).not.toHaveBeenCalled();
+      overlay.component.handleInput?.("\x1b");
+      overlay.component.dispose?.();
+      expect(overlay.done).toHaveBeenCalledTimes(1);
+      expect(overlay.tui.terminal.write).not.toHaveBeenCalled();
+    });
+
+    it("scrolls its transcript with normalized fullscreen wheel events", async () => {
+      const mockPi = createMockPi();
+      const { mockCtx, overlays } = setupContext();
+      await registerAll(mockPi);
+      await getCommandHandler(mockPi, "btw")("", mockCtx);
+      const overlay = getOverlay(overlays);
+      overlay.component.render(80);
+      overlay.tui.requestRender.mockClear();
+      expect(
+        overlay.component.handleMouse?.({
+          type: "wheel",
+          button: "none",
+          x: 10,
+          y: 5,
+          screenX: 10,
+          screenY: 5,
+          width: 80,
+          height: 30,
+          shift: false,
+          alt: false,
+          ctrl: false,
+          wheelDelta: -3,
+        }),
+      ).toMatchObject({ handled: true });
+      expect(overlay.tui.requestRender).toHaveBeenCalledTimes(1);
     });
 
     it("Esc closes the overlay without clearing the thread", async () => {

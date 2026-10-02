@@ -144,6 +144,7 @@ export default async function webSearchExtension(pi: ExtensionAPI) {
       if (!query) {
         return {
           content: [{ type: "text", text: "Error: query is required" }],
+          isError: true,
           details: { query: "", backend: provider.id, resultCount: 0, isError: true },
         };
       }
@@ -157,6 +158,7 @@ export default async function webSearchExtension(pi: ExtensionAPI) {
               text: `Error: ${provider.label} is not configured. ${provider.authHint} Switch providers with /websearch:select.`,
             },
           ],
+          isError: true,
           details: { query, backend: provider.id, resultCount: 0, isError: true },
         };
       }
@@ -197,6 +199,7 @@ export default async function webSearchExtension(pi: ExtensionAPI) {
         const message = error instanceof Error ? error.message : String(error);
         return {
           content: [{ type: "text", text: `Error: ${message}` }],
+          isError: true,
           details: { query, backend: provider.id, resultCount: 0, isError: true },
         };
       }
@@ -221,6 +224,7 @@ export default async function webSearchExtension(pi: ExtensionAPI) {
       if (!url) {
         return {
           content: [{ type: "text", text: "Error: url is required" }],
+          isError: true,
           details: { url: "", isError: true },
         };
       }
@@ -233,6 +237,7 @@ export default async function webSearchExtension(pi: ExtensionAPI) {
               text: `Error: Invalid URL protocol. Only http and https are supported: ${url}`,
             },
           ],
+          isError: true,
           details: { url, isError: true },
         };
       }
@@ -260,6 +265,7 @@ export default async function webSearchExtension(pi: ExtensionAPI) {
                 text: `Error: Response body too large (${formatBytes(contentLength)}). Maximum is ${formatBytes(MAX_FETCH_CONTENT_LENGTH)}.`,
               },
             ],
+            isError: true,
             details: { url, contentLength, isError: true },
           };
         }
@@ -302,6 +308,7 @@ export default async function webSearchExtension(pi: ExtensionAPI) {
         const message = error instanceof Error ? error.message : String(error);
         return {
           content: [{ type: "text", text: `Error: ${message}` }],
+          isError: true,
           details: { url, isError: true },
         };
       }

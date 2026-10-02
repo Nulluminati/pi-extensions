@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createApprovalDialog, promptApproval } from "../../extensions/approval-mode/src/dialog.ts";
+import { PANEL_OVERLAY_OPTIONS } from "../../lib/overlay-options.ts";
 import { createMockContext } from "../mocks/context-mocks.ts";
 
 describe("Approval Mode confirmation dialog", () => {
@@ -162,6 +163,26 @@ describe("promptApproval abort handling", () => {
 
     expect(choice).toBe("Block");
     expect(dialog.doneCalls).toBe(1);
+  });
+});
+
+describe("promptApproval overlay capture", () => {
+  it("opens a focused panel overlay so page keys reach the dialog", async () => {
+    const ctx = createMockContext();
+    ctx.ui.custom = vi.fn(() => Promise.resolve("Block" as const));
+
+    await promptApproval(ctx, "git push origin main", "reject", "Jev rejected this");
+
+    expect(ctx.ui.custom).toHaveBeenCalledTimes(1);
+    const [factory, options] = ctx.ui.custom.mock.calls[0];
+    expect(factory).toBeTypeOf("function");
+    expect(options).toMatchObject({
+      overlay: true,
+      overlayOptions: { ...PANEL_OVERLAY_OPTIONS, maxHeight: "100%" },
+    });
+    const handle = { focus: vi.fn() };
+    (options?.onHandle as ((focused: { focus: () => void }) => void) | undefined)?.(handle);
+    expect(handle.focus).toHaveBeenCalledTimes(1);
   });
 });
 

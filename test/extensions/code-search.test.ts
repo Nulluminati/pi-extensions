@@ -345,6 +345,41 @@ describe("code-search-extension", () => {
       expect(result.details.isError).toBe(true);
     });
 
+    // --- Pi 1.0 tool contract: failures carry a top-level isError flag ---
+
+    describe("top-level isError flag", () => {
+      it("flags validation failures at the top level and in details", async () => {
+        const mockPi = createMockPi();
+        await codeSearchExtension(mockPi);
+        const tool = getRegisteredTool(mockPi, "code_search");
+        const result = await tool.execute("id-1", { query: "" }, undefined, undefined, {});
+        expect(result.isError).toBe(true);
+        expect(result.details.isError).toBe(true);
+      });
+
+      it("flags runtime failures at the top level and in details", async () => {
+        mockFetch.mockRejectedValueOnce(new Error("Connection refused"));
+        const mockPi = createMockPi();
+        await codeSearchExtension(mockPi);
+        const tool = getRegisteredTool(mockPi, "code_search");
+        const result = await tool.execute("id-1", { query: "foo" }, undefined, undefined, {});
+        expect(result.isError).toBe(true);
+        expect(result.details.isError).toBe(true);
+      });
+
+      it("does not flag successful results", async () => {
+        mockFetch.mockResolvedValueOnce(
+          createStreamResponse([sseEvent("matches", [createMatch()]), sseEvent("done", {})]),
+        );
+        const mockPi = createMockPi();
+        await codeSearchExtension(mockPi);
+        const tool = getRegisteredTool(mockPi, "code_search");
+        const result = await tool.execute("id-1", { query: "hello" }, undefined, undefined, {});
+        expect(result.isError).toBeFalsy();
+        expect(result.details.isError).toBeFalsy();
+      });
+    });
+
     it("resolves from stream chunks without waiting for body EOF", async () => {
       // Regression: Bun's response.text() never resolves on Sourcegraph's SSE
       // stream even after the server finishes sending. The client must stop

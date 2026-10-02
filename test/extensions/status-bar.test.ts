@@ -630,6 +630,107 @@ describe("status-bar-extension", () => {
     expect(lines[0]).toContain("$0.030");
   });
 
+  it("turn_end counts toolResult roll-ups, standalone usage, compaction, and branch summary", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.getContextUsage = vi.fn(() => ({
+      tokens: 5000,
+      contextWindow: 200000,
+      percent: 2.5,
+    }));
+    mockCtx.sessionManager.getBranch = vi.fn(() => [
+      {
+        type: "message",
+        message: {
+          role: "assistant",
+          usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, cost: { total: 0.01 } },
+        },
+      },
+      {
+        // Codemode nested LLM calls (image, classifier, nested tools) roll
+        // their usage into the top-level toolResult.
+        type: "message",
+        message: {
+          role: "toolResult",
+          content: [{ type: "text", text: "ok" }],
+          toolName: "bash",
+          usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, cost: { total: 1 } },
+        },
+      },
+      {
+        type: "usage",
+        usage: { input: 10, output: 0, cacheRead: 0, cacheWrite: 0, cost: { total: 0.001 } },
+      },
+      {
+        type: "compaction",
+        usage: { input: 20, output: 0, cacheRead: 0, cacheWrite: 0, cost: { total: 0.002 } },
+      },
+      {
+        type: "branch_summary",
+        usage: { input: 30, output: 0, cacheRead: 0, cacheWrite: 0, cost: { total: 0.004 } },
+      },
+    ]);
+    await enableBar(mockPi, mockCtx);
+
+    const turnEndHandler = getEventHandler(mockPi, "turn_end");
+    await turnEndHandler({ type: "turn_end", turnIndex: 0, message: {}, toolResults: [] }, mockCtx);
+
+    const component = getFooterFactory(mockCtx)(
+      { requestRender: vi.fn() },
+      plainTheme(),
+      footerData(),
+    );
+    const lines = component.render(160);
+
+    // Every entry counted exactly once: 100+100+10+20+30 in, 50+50 out.
+    expect(lines[0]).toContain("↑260");
+    expect(lines[0]).toContain("↓100");
+    expect(lines[0]).toContain("$1.017");
+  });
+
+  it("does not recount nested codemode usage already rolled into the toolResult", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.getContextUsage = vi.fn(() => ({
+      tokens: 5000,
+      contextWindow: 200000,
+      percent: 2.5,
+    }));
+    mockCtx.sessionManager.getBranch = vi.fn(() => [
+      {
+        type: "message",
+        message: {
+          role: "assistant",
+          usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, cost: { total: 0.01 } },
+        },
+      },
+      {
+        type: "message",
+        message: {
+          role: "toolResult",
+          content: [{ type: "text", text: "ok" }],
+          toolName: "bash",
+          usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, cost: { total: 1 } },
+        },
+      },
+    ]);
+    await enableBar(mockPi, mockCtx);
+
+    const turnEndHandler = getEventHandler(mockPi, "turn_end");
+    await turnEndHandler({ type: "turn_end", turnIndex: 0, message: {}, toolResults: [] }, mockCtx);
+
+    const component = getFooterFactory(mockCtx)(
+      { requestRender: vi.fn() },
+      plainTheme(),
+      footerData(),
+    );
+    const lines = component.render(160);
+
+    expect(lines[0]).toContain("↑110");
+    expect(lines[0]).toContain("↓55");
+    expect(lines[0]).toContain("$1.010");
+  });
+
   it("token details accumulate across multiple assistant messages", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();

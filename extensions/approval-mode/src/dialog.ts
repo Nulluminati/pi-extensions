@@ -1,7 +1,8 @@
 /** Framed, single-call approval with a reviewable command and a safe default. */
 
-import { SelectList, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { SelectList, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { ExtensionContext } from "pi";
+import { PANEL_OVERLAY_OPTIONS } from "../../../lib/overlay-options.ts";
 import { createSettleOnce } from "../../../lib/settle-once.ts";
 import { modalContentWidth, renderModalFrame } from "../../../lib/tui-frame.ts";
 import { formatStyledKeyHints } from "../../../lib/ui-format.ts";
@@ -18,13 +19,15 @@ interface DialogOptions {
   command: string;
   reason: string;
   decision: "reject" | "uncertain";
-  tui: { requestRender(): void };
+  tui: { requestRender(): void; terminal?: { rows: number } };
   theme: DialogTheme;
   keybindings: { matches(data: string, keybinding: string): boolean };
   done(choice: ApprovalChoice): void;
 }
 
 const COMMAND_ROWS = 8;
+// Borders, labels, choices, scroll indicator, and a reserved warning row.
+const REVIEW_CONTROL_ROWS = 12;
 
 function visibleCommand(command: string): string {
   let visible = "";
@@ -63,34 +66,75 @@ export function createApprovalDialog(options: DialogOptions) {
   // The selector starts on Block and requires review of every command line.
   selector.setSelectedIndex(1);
   let commandLines: string[] = [];
+  let commandRows = COMMAND_ROWS;
   let lastContentWidth = 0;
   let scrollTop = 0;
   let reviewedToEnd = false;
+  let reviewAvailable = false;
   let reviewWarning = false;
   let settled = false;
 
   return {
     render(width: number): string[] {
       const frameWidth = Math.max(0, Math.floor(width));
-      if (frameWidth === 0) return [];
+      if (frameWidth === 0) {
+        reviewedToEnd = false;
+        reviewAvailable = false;
+        return [];
+      }
       const contentWidth = modalContentWidth(frameWidth);
+      const hintLines = [
+        formatStyledKeyHints(theme, [
+          ["↑↓", "choose"],
+          ["page up/down", "review command"],
+        ]),
+        formatStyledKeyHints(theme, [
+          ["enter", "select"],
+          ["esc", "block"],
+        ]),
+      ].flatMap((line) => wrapTextWithAnsi(line, contentWidth));
+      const controlRows = REVIEW_CONTROL_ROWS + hintLines.length;
+      const height = tui.terminal?.rows ?? 40;
+      if (height < controlRows + 2 || frameWidth < 12) {
+        reviewedToEnd = false;
+        reviewAvailable = false;
+        return renderModalFrame(
+          theme,
+          frameWidth,
+          wrapTextWithAnsi(
+            "Resize the terminal to review this command. Esc blocks the call.",
+            contentWidth,
+          ),
+          { title: "Approval Mode", paddingY: 0 },
+        );
+      }
+      reviewAvailable = true;
+      const reasonLimit = Math.min(3, height - controlRows - 1);
+      const wrappedReason = wrapTextWithAnsi(reason, contentWidth);
+      const reasonLines = wrappedReason.slice(0, reasonLimit);
+      if (wrappedReason.length > reasonLimit) {
+        reasonLines[reasonLimit - 1] =
+          `${truncateToWidth(reasonLines[reasonLimit - 1] ?? "", contentWidth - 1, "")}…`;
+      }
+      commandRows = Math.max(1, Math.min(COMMAND_ROWS, height - controlRows - reasonLines.length));
       if (lastContentWidth !== contentWidth) {
         commandLines = visibleCommand(command)
           .split("\n")
           .flatMap((line) => wrapTextWithAnsi(line, contentWidth));
         lastContentWidth = contentWidth;
         scrollTop = 0;
-        reviewedToEnd = commandLines.length <= COMMAND_ROWS;
+        reviewedToEnd = commandLines.length <= commandRows;
         reviewWarning = false;
       }
-      const maxScroll = Math.max(0, commandLines.length - COMMAND_ROWS);
+      const maxScroll = Math.max(0, commandLines.length - commandRows);
       scrollTop = Math.min(scrollTop, maxScroll);
-      const end = Math.min(commandLines.length, scrollTop + COMMAND_ROWS);
+      if (commandLines.length <= commandRows) reviewedToEnd = true;
+      const end = Math.min(commandLines.length, scrollTop + commandRows);
       const commandExcerpt = commandLines
         .slice(scrollTop, end)
         .map((line) => theme.fg("text", line));
       const indicator =
-        commandLines.length > COMMAND_ROWS
+        commandLines.length > commandRows
           ? [`${scrollTop + 1}-${end}/${commandLines.length} lines (page up/down to review)`]
           : [];
       const body = [
@@ -98,7 +142,7 @@ export function createApprovalDialog(options: DialogOptions) {
           decision === "reject" ? "error" : "warning",
           `Jev ${decision === "reject" ? "rejected" : "could not confirm"} this command.`,
         ),
-        ...wrapTextWithAnsi(reason, contentWidth).map((line) => theme.fg("muted", line)),
+        ...reasonLines.map((line) => theme.fg("muted", line)),
         "",
         theme.fg("muted", "Command:"),
         ...commandExcerpt,
@@ -110,12 +154,7 @@ export function createApprovalDialog(options: DialogOptions) {
           ? [theme.fg("warning", "Review all command lines before approval.")]
           : []),
         "",
-        formatStyledKeyHints(theme, [
-          ["↑↓", "choose"],
-          ["page up/down", "review command"],
-          ["enter", "select"],
-          ["esc", "block"],
-        ]),
+        ...hintLines,
       ];
       return renderModalFrame(theme, frameWidth, body, { title: "Approval Mode", paddingY: 0 });
     },
@@ -130,9 +169,9 @@ export function createApprovalDialog(options: DialogOptions) {
         keybindings.matches(data, "tui.select.pageDown")
       ) {
         const direction = keybindings.matches(data, "tui.select.pageDown") ? 1 : -1;
-        const maxScroll = Math.max(0, commandLines.length - COMMAND_ROWS);
-        scrollTop = Math.max(0, Math.min(maxScroll, scrollTop + direction * COMMAND_ROWS));
-        if (scrollTop === maxScroll) reviewedToEnd = true;
+        const maxScroll = Math.max(0, commandLines.length - commandRows);
+        scrollTop = Math.max(0, Math.min(maxScroll, scrollTop + direction * commandRows));
+        if (reviewAvailable && scrollTop === maxScroll) reviewedToEnd = true;
       } else if (
         keybindings.matches(data, "tui.select.up") ||
         keybindings.matches(data, "tui.select.down")
@@ -165,22 +204,32 @@ export async function promptApproval(
       ctx.signal ? { signal: ctx.signal } : {},
     ) as Promise<ApprovalChoice | undefined>;
   }
-  return ctx.ui.custom<ApprovalChoice>((tui, theme, keybindings, done) => {
-    const handle = createSettleOnce(done, ctx.signal, "Block");
-    // A signal already aborted before registration never fires its listener;
-    // settle immediately so the dialog cannot hang on a dead context.
-    if (ctx.signal?.aborted) handle.settle("Block");
-    return {
-      ...createApprovalDialog({
-        command,
-        reason,
-        decision,
-        tui,
-        theme,
-        keybindings,
-        done: handle.settle,
-      }),
-      dispose: () => handle.dispose(),
-    };
-  });
+  return ctx.ui.custom<ApprovalChoice>(
+    (tui, theme, keybindings, done) => {
+      const handle = createSettleOnce(done, ctx.signal, "Block");
+      // A signal already aborted before registration never fires its listener;
+      // settle immediately so the dialog cannot hang on a dead context.
+      if (ctx.signal?.aborted) handle.settle("Block");
+      return {
+        ...createApprovalDialog({
+          command,
+          reason,
+          decision,
+          tui,
+          theme,
+          keybindings,
+          done: handle.settle,
+        }),
+        dispose: () => handle.dispose(),
+      };
+    },
+    {
+      // Fullscreen viewports consume PageUp/PageDown before extension input
+      // unless the overlay is focused; a capturing focused overlay is the only
+      // way the dialog receives its page keys.
+      overlay: true,
+      overlayOptions: { ...PANEL_OVERLAY_OPTIONS, maxHeight: "100%" },
+      onHandle: (handle) => handle.focus(),
+    },
+  );
 }

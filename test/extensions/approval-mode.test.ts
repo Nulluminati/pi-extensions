@@ -346,7 +346,10 @@ describe("approval-mode extension", () => {
     expect(await handler({ toolName: "bash", input: { command: "npm test" } }, ctx)).toMatchObject({
       block: true,
     });
-    expect(ctx.ui.custom).toHaveBeenCalledWith(expect.any(Function));
+    expect(ctx.ui.custom).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({ overlay: true, onHandle: expect.any(Function) }),
+    );
     expect(ctx.ui.select).not.toHaveBeenCalled();
 
     ctx.mode = "rpc";

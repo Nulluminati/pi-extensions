@@ -10,11 +10,32 @@ vi.mock("../../extensions/worker-sandbox/src/client.ts", () => ({
 }));
 
 vi.mock("@earendil-works/pi-coding-agent", () => {
-  const names = ["read", "write", "edit", "bash", "ls", "find", "grep"];
+  const tools = [
+    ["Read", "read"],
+    ["Write", "write"],
+    ["Edit", "edit"],
+    ["Bash", "bash"],
+    ["Ls", "ls"],
+    ["Find", "find"],
+    ["Grep", "grep"],
+  ];
   return Object.fromEntries(
-    names.map((name) => [
-      `create${name[0]?.toUpperCase()}${name.slice(1)}Tool`,
-      vi.fn(() => ({ name, label: name, description: name, parameters: {}, execute: vi.fn() })),
+    tools.map(([capitalized, name]) => [
+      `create${capitalized}ToolDefinition`,
+      vi.fn((_cwd: string) => ({
+        name,
+        label: `${name} (full definition)`,
+        description: `${name} description`,
+        promptSnippet: `${name} prompt snippet`,
+        promptGuidelines: [`Prefer ${name} over host execution.`],
+        parameters: { type: "object", properties: {} },
+        renderCall: vi.fn(() => `${name} call`),
+        renderResult: vi.fn(() => `${name} result`),
+        execute: vi.fn(async () => ({
+          content: [{ type: "text" as const, text: `host ${name} execution` }],
+          details: undefined,
+        })),
+      })),
     ]),
   );
 });
@@ -73,7 +94,15 @@ describe("worker sandbox extension", () => {
     await start({ type: "session_start", reason: "startup" }, ctx);
     expect(startWorkerSandbox).toHaveBeenCalledWith(ctx.cwd);
     for (const [tool] of pi.registerTool.mock.calls) {
+      // Full built-in definition metadata and renderers survive the execute replacement.
+      expect(tool.label).toBe(`${tool.name} (full definition)`);
+      expect(tool.promptSnippet).toBe(`${tool.name} prompt snippet`);
+      expect(tool.promptGuidelines).toEqual([`Prefer ${tool.name} over host execution.`]);
+      expect(tool.renderCall).toBeTypeOf("function");
+      expect(tool.renderResult).toBeTypeOf("function");
       const result = await tool.execute("call-1", { path: "file.txt" }, undefined, undefined, ctx);
+      // The definition's own execute would answer "host ... execution"; the
+      // registered tool must route to the sandbox instead.
       expect(result).toEqual({
         content: [{ type: "text", text: "sandbox result" }],
         details: undefined,

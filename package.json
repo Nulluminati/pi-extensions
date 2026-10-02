@@ -29,7 +29,8 @@
     "validate": "node --import tsx scripts/validate-all.ts",
     "validate:one": "node --import tsx scripts/validate-cli.ts",
     "create": "tsx scripts/create-extension.ts",
-    "test": "vitest run",
+    "test": "vitest run && npm run test:runtime",
+    "test:runtime": "vitest run --config vitest.runtime.config.ts",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest"
   },
@@ -53,9 +54,9 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.14",
-    "@earendil-works/pi-ai": "^0.99.0",
-    "@earendil-works/pi-coding-agent": "^0.99.0",
-    "@earendil-works/pi-tui": "^0.99.0",
+    "@earendil-works/pi-ai": "^1.0.0",
+    "@earendil-works/pi-coding-agent": "^1.0.0",
+    "@earendil-works/pi-tui": "^1.0.0",
     "@types/node": "^26.6.3",
     "@vitest/coverage-v8": "^5.0.2",
     "husky": "^9.1.7",

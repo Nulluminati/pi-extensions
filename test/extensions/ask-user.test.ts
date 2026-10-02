@@ -96,6 +96,8 @@ describe("ask-user-extension", () => {
     const tool = getTool(pi);
     expect(tool.name).toBe("ask_user");
     expect(tool.executionMode).toBe("sequential");
+    // Codemode scripts must not be able to call ask_user; only the model does.
+    expect(tool.exposure).toBe("model-only");
     expect(tool.promptSnippet).toContain("questions");
     expect(tool.promptGuidelines).toEqual(
       expect.arrayContaining([
@@ -601,6 +603,7 @@ function firstResultText(result: AgentToolResult<AskUserDetails>): string | unde
 
 interface AskUserTool {
   name: string;
+  exposure?: string;
   executionMode?: string;
   promptSnippet?: string;
   promptGuidelines?: string[];

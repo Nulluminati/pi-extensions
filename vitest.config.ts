@@ -4,6 +4,7 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["test/**/*.test.ts"],
+    exclude: ["test/runtime/**", "node_modules/**", ".pi/worktrees/**"],
     setupFiles: [
       "./test/setup/worker-env.ts",
       "./test/setup/pi-tui.ts",

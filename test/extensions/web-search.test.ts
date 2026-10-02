@@ -1609,6 +1609,88 @@ describe("web-search-extension", () => {
       expect(lines.some((l: string) => l.includes("... and 2 more results"))).toBe(true);
     });
   });
+
+  // --- Pi 1.0 tool contract: failures carry a top-level isError flag ---
+
+  describe("top-level isError flag", () => {
+    async function setupTools() {
+      const mockPi = createMockPi();
+      await webSearchExtension(mockPi);
+      // Synthetic is the default provider; activate brave so search tests
+      // target brave regardless of the configured default.
+      await getCommandHandler(mockPi, "websearch:select")("brave", createMockCommandContext());
+      return {
+        searchTool: getRegisteredTool(mockPi, "web_search"),
+        fetchTool: getRegisteredTool(mockPi, "web_fetch"),
+      };
+    }
+
+    it("flags web_search failures at the top level and in details", async () => {
+      vi.stubEnv("BRAVE_API_KEY", "test-key");
+      const { searchTool } = await setupTools();
+
+      const invalid = await searchTool.execute("id-1", { query: "" }, undefined, undefined, {});
+      expect(invalid.isError).toBe(true);
+      expect(invalid.details.isError).toBe(true);
+
+      mockFetch.mockRejectedValue(new Error("Network failure"));
+      const network = await searchTool.execute("id-1", { query: "test" }, undefined, undefined, {});
+      expect(network.isError).toBe(true);
+      expect(network.details.isError).toBe(true);
+    });
+
+    it("does not flag successful web_search results", async () => {
+      vi.stubEnv("BRAVE_API_KEY", "test-key");
+      mockFetch.mockResolvedValue(
+        braveSearchResponse([
+          { title: "Result 1", url: "https://example.com/1", description: "Description 1" },
+        ]),
+      );
+      const { searchTool } = await setupTools();
+      const result = await searchTool.execute("id-1", { query: "test" }, undefined, undefined, {});
+      expect(result.isError).toBeFalsy();
+      expect(result.details.isError).toBeFalsy();
+    });
+
+    it("flags web_fetch failures at the top level and in details", async () => {
+      const { fetchTool } = await setupTools();
+
+      const invalid = await fetchTool.execute(
+        "id-1",
+        { url: "ftp://example.com" },
+        undefined,
+        undefined,
+        {},
+      );
+      expect(invalid.isError).toBe(true);
+      expect(invalid.details.isError).toBe(true);
+
+      mockFetch.mockRejectedValue(new Error("Connection refused"));
+      const network = await fetchTool.execute(
+        "id-1",
+        { url: "https://example.com" },
+        undefined,
+        undefined,
+        {},
+      );
+      expect(network.isError).toBe(true);
+      expect(network.details.isError).toBe(true);
+    });
+
+    it("does not flag successful web_fetch results", async () => {
+      mockFetch.mockResolvedValue(fetchResponse("<p>Hello</p>", { contentType: "text/html" }));
+      const { fetchTool } = await setupTools();
+      const result = await fetchTool.execute(
+        "id-1",
+        { url: "https://example.com" },
+        undefined,
+        undefined,
+        {},
+      );
+      expect(result.isError).toBeFalsy();
+      expect(result.details.isError).toBeFalsy();
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

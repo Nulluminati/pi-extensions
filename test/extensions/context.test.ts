@@ -287,7 +287,7 @@ describe("context-extension", () => {
       expect(breakdown.largestMessages[0]?.preview).toBe(userText.slice(0, 48));
     });
 
-    it("sums provider usage only from assistant messages", async () => {
+    it("sums usage across assistant, toolResult, usage, compaction, and branch_summary entries", async () => {
       const entries = [
         ...SESSION_ENTRIES,
         {
@@ -305,18 +305,41 @@ describe("context-extension", () => {
             content: [{ type: "text", text: "no usage attached" }],
           },
         },
+        {
+          // Codemode nested LLM calls (image, classifier, nested tools) roll
+          // their usage into the top-level toolResult.
+          type: "message",
+          message: {
+            role: "toolResult",
+            content: "rolled-up nested usage",
+            toolName: "bash",
+            usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, cost: { total: 1 } },
+          },
+        },
+        {
+          type: "usage",
+          usage: { input: 5, output: 0, cacheRead: 0, cacheWrite: 0, cost: { total: 0.0001 } },
+        },
+        {
+          type: "compaction",
+          usage: { input: 7, output: 0, cacheRead: 0, cacheWrite: 0, cost: { total: 0.0002 } },
+        },
+        {
+          type: "branch_summary",
+          usage: { input: 9, output: 0, cacheRead: 0, cacheWrite: 0, cost: { total: 0.0003 } },
+        },
       ];
 
       const totals = sumSessionUsage(entries);
 
-      expect(totals).toEqual({
-        input: 150,
-        output: 25,
-        cacheRead: 30,
-        cacheWrite: 10,
-        totalTokens: 215,
-        cost: 0.5042,
-      });
+      // Each entry counted once; nested usage inside the toolResult roll-up
+      // is not recounted.
+      expect(totals.input).toBe(271);
+      expect(totals.output).toBe(75);
+      expect(totals.cacheRead).toBe(30);
+      expect(totals.cacheWrite).toBe(10);
+      expect(totals.totalTokens).toBe(386);
+      expect(totals.cost).toBeCloseTo(1.5048, 10);
     });
   });
 

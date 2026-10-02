@@ -1,9 +1,8 @@
 import { vi } from "vitest";
 
 /**
- * Mock `@earendil-works/pi-coding-agent` — the package is a peer dependency
- * not installed in the local node_modules, so tests stub the component surface
- * used by extensions in this repository.
+ * Unit tests stub the SDK component surface used by extensions. The runtime
+ * suite loads the installed Pi packages without these mocks.
  */
 vi.mock("@earendil-works/pi-coding-agent", () => {
   class CustomEditor {

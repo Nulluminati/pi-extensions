@@ -24,6 +24,7 @@ import { renderModalFrame } from "../../../lib/tui-frame.ts";
 | You need to… | Use | Module |
 |---|---|---|
 | Read text / tool calls / tool results from `sessionManager.getBranch()` entries | `extractText`, `extractToolCallBlocks`, `extractToolResultBlocks`, `parseContentBlocks` | `lib/session-utils.ts` |
+| Calculate session token usage and cost | `sumSessionUsage` | `lib/session-usage.ts` |
 | Format user, assistant, and tool-result entries for a summary prompt | `formatTranscriptEntry` | `lib/transcript-prompt.ts` |
 | Make a cheap one-off LLM call (summaries, side agents, recaps) | `resolveSmallModel` (+ `complete` / `completeSimple` from `@earendil-works/pi-ai`) | `lib/small-model.ts` |
 | Build a `/smallmodel`-style config command or read the user's saved small-model choice | `loadSmallModelConfig`, `saveSmallModelConfig`, `parseSmallModelSpec` | `lib/small-model.ts` |
@@ -225,6 +226,16 @@ Session message content is `string | Array<block>` where blocks vary by shape. T
 - `extractToolCallBlocks(content)` / `extractToolResultBlocks(content)` — pull tool calls (with `name`, `arguments`) and results.
 
 Reach for these any time you walk `ctx.sessionManager.getBranch()` to build a transcript, recap, or background summary (see `session-recap/src/transcript.ts`). Never hand-roll `typeof content === "string"` / `Array.isArray` filtering per extension.
+
+## `lib/session-usage.ts` — session token/cost totals
+
+`sumSessionUsage(entries)` sums provider-reported token usage and cost for one session branch. It counts assistant and `toolResult` messages, standalone `usage` entries, compaction entries, and branch-summary entries.
+
+Nested calls already contribute to the parent `toolResult` usage. Do not count their details again.
+
+The helper accepts numeric strings. It treats missing and non-finite numbers as zero. Cost accepts a number, a numeric string, or `{ total }`. It returns `{ input, output, cacheRead, cacheWrite, totalTokens, cost }`.
+
+`context` and `status-bar` use this helper. Use it when an extension shows session token usage or cost.
 
 ## `lib/transcript-prompt.ts` — transcript entries for prompts
 
