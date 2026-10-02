@@ -56,7 +56,7 @@ const NEURALWATT_REASONING_COMPAT = {
  */
 
 // Disableable with identity mapping through xhigh (DeepSeek V4 Flash,
-// gemma-4-31b, kimi-k3, qwen3.6-35b, qwen-3.8-27b).
+// gemma-4-31b, kimi-k3, nw-flash, nw-small, qwen3.6-35b, qwen-3.8-27b).
 const DISABLEABLE_IDENTITY_MAP: ThinkingLevelMap = {
   off: "none",
   minimal: "minimal",
@@ -67,8 +67,8 @@ const DISABLEABLE_IDENTITY_MAP: ThinkingLevelMap = {
 };
 
 // Disableable, accepts the full enum including `max` (glm-5.2, glm-5.2-short,
-// kimi-k2.7-code, kimi-k2.7-code-fast). xhigh maps to `max` because the
-// gateway accepts it and it produces deeper reasoning than `xhigh`.
+// kimi-k2.7-code, kimi-k2.7-code-fast, nw-large). xhigh maps to `max` because
+// the gateway accepts it and it produces deeper reasoning than `xhigh`.
 const DISABLEABLE_FULL_MAP: ThinkingLevelMap = {
   off: "none",
   minimal: "minimal",
@@ -116,6 +116,13 @@ const DISABLEABLE_BINARY_MAP: ThinkingLevelMap = {
  * (see the DISABLEABLE map constants below); each map's comment records how
  * that model's levels were probed against the gateway.
  *
+ * The nw-* ids are Neuralwatt's tracking aliases: first-class selectable ids
+ * that follow the catalog's current model per size tier and move to a newer
+ * model with notice (per the tracking aliases guide). They behave exactly like
+ * the model they point at (same defaults, same price); each entry's comment
+ * records the underlying model its probe evidence is based on. Re-probe an
+ * alias after Neuralwatt announces a move.
+ *
  * The GLM-5.2, Kimi, and Qwen3.6 reasoning/fast pairs share pricing; their
  * "-fast" variants are non-reasoning. glm-5.3-flash and
  * deepseek-v4-flash-speed are the exceptions: reasoning fast/speed variants.
@@ -127,6 +134,65 @@ const DISABLEABLE_BINARY_MAP: ThinkingLevelMap = {
  * shipped disableable in 2026-09).
  */
 export const STATIC_MODELS: ProviderModelConfig[] = [
+  // --- Neuralwatt tracking aliases (nw-*) ---
+  // nw-large — large tier (catalog: currently Kimi K3; same pricing and
+  // limits as the kimi-k3 entry). Probed 2026-10: every effort returns HTTP
+  // 200 and `none` produces no thinking, so thinking is disableable. The
+  // catalog aliases xhigh -> max (accepted natively by the gateway) plus
+  // medium -> high and minimal -> low, so DISABLEABLE_FULL_MAP applies like
+  // the other full-enum models.
+  {
+    id: "nw-large",
+    name: "Neuralwatt Large",
+    api: "openai-completions",
+    reasoning: true,
+    thinkingLevelMap: DISABLEABLE_FULL_MAP,
+    input: ["text", "image"],
+    cost: { input: 3.0, output: 15.0, cacheRead: 0.3, cacheWrite: 0 },
+    contextWindow: 1048560,
+    maxTokens: 65536,
+    compat: NEURALWATT_REASONING_COMPAT,
+  },
+
+  // nw-flash — cheap fast tier (catalog: currently DeepSeek V4.1 Flash; same
+  // pricing and limits as the deepseek-v4.1-flash entry). Probed 2026-10:
+  // every effort returns HTTP 200 and `none` produces no thinking, so
+  // thinking is disableable. The catalog aliases medium -> high and
+  // minimal -> low but keeps xhigh distinct, and literal `max` returned 200
+  // with no reasoning output, so xhigh is the real deepest level and
+  // DISABLEABLE_IDENTITY_MAP applies like deepseek-v4.1-flash.
+  {
+    id: "nw-flash",
+    name: "Neuralwatt Flash",
+    api: "openai-completions",
+    reasoning: true,
+    thinkingLevelMap: DISABLEABLE_IDENTITY_MAP,
+    input: ["text", "image"],
+    cost: { input: 0.15, output: 0.6, cacheRead: 0.015, cacheWrite: 0 },
+    contextWindow: 1048560,
+    maxTokens: 393216,
+    compat: NEURALWATT_REASONING_COMPAT,
+  },
+
+  // nw-small — small tier (catalog: currently Qwen3.8-27B; same pricing and
+  // limits as the qwen-3.8-27b entry). Probed 2026-10: every effort returns
+  // HTTP 200 and `none` produces no thinking, so thinking is disableable. The
+  // catalog aliases max/high -> xhigh (plus minimal -> low), so xhigh is the
+  // gateway's real deepest level and DISABLEABLE_IDENTITY_MAP applies like
+  // qwen-3.8-27b.
+  {
+    id: "nw-small",
+    name: "Neuralwatt Small",
+    api: "openai-completions",
+    reasoning: true,
+    thinkingLevelMap: DISABLEABLE_IDENTITY_MAP,
+    input: ["text", "image"],
+    cost: { input: 0.45, output: 3.2, cacheRead: 0.25, cacheWrite: 0 },
+    contextWindow: 262128,
+    maxTokens: 131072,
+    compat: NEURALWATT_REASONING_COMPAT,
+  },
+
   // --- Gemma 4 (Google/NVIDIA) ---
   // Catalog metadata reports reasoning:true with reasoning_effort support and
   // effort aliases that route every level to `max`. A direct probe in 2026-08

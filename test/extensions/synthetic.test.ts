@@ -20,6 +20,7 @@ const EXPECTED_MODEL_IDS = [
   "syn:large:vision",
   "syn:small:vision",
   "hf:zai-org/GLM-5.2",
+  "hf:zai-org/GLM-5.3",
   "hf:zai-org/GLM-5.3-Flash",
   "hf:moonshotai/Kimi-K3",
   "hf:Qwen/Qwen3.6-27B",
@@ -29,6 +30,11 @@ const EXPECTED_MODEL_IDS = [
   "hf:deepseek-ai/DeepSeek-V4.1-Flash",
   "hf:openai/gpt-oss-120b",
 ];
+
+// Reasoning models whose thinking cannot be disabled (probed; see
+// ALWAYS_ON_THINKING_MAP in the extension source). off maps to null so pi
+// hides the off level instead of sending a value the model ignores.
+const ALWAYS_ON_IDS = ["hf:openai/gpt-oss-120b", "hf:zai-org/GLM-5.3"];
 
 describe("synthetic-extension", () => {
   describe("file structure", () => {
@@ -124,6 +130,24 @@ describe("synthetic-extension", () => {
     }
   });
 
+  it("configures GLM-5.3 from live metadata and probed reasoning behavior", () => {
+    const glm = STATIC_MODELS.find((m) => m.id === "hf:zai-org/GLM-5.3");
+    expect(glm).toEqual(
+      expect.objectContaining({
+        name: "GLM-5.3",
+        reasoning: true,
+        input: ["text"],
+        cost: { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 0 },
+        contextWindow: 524288,
+        maxTokens: 65536,
+        // Probed 2026-10: the catalog flags always_on and the disable check
+        // shows thinking even at `none`, so off is hidden (unlike its Flash
+        // sibling, whose probe showed `none` disables thinking).
+        thinkingLevelMap: expect.objectContaining({ off: null, xhigh: "xhigh" }),
+      }),
+    );
+  });
+
   it("maps every reasoning model through the full identity map (incl. medium)", () => {
     // Kimi-K3 briefly rejected `medium` (probed 2026-07) but the 2026-08 probe
     // shows the gateway accepts the full enum again, so no level is hidden.
@@ -140,17 +164,15 @@ describe("synthetic-extension", () => {
   });
 
   it("maps off to null for always-on reasoning models (thinking cannot be disabled)", () => {
-    const alwaysOn = STATIC_MODELS.filter((m) => m.reasoning && m.id === "hf:openai/gpt-oss-120b");
-    expect(alwaysOn.length).toBe(1);
+    const alwaysOn = STATIC_MODELS.filter((m) => m.reasoning && ALWAYS_ON_IDS.includes(m.id));
+    expect(alwaysOn.length).toBe(ALWAYS_ON_IDS.length);
     for (const m of alwaysOn) {
       expect(m.thinkingLevelMap?.off, `${m.id} should map off to null`).toBeNull();
     }
   });
 
   it("maps off to 'none' for the other reasoning models (thinking is disableable)", () => {
-    const disableable = STATIC_MODELS.filter(
-      (m) => m.reasoning && m.id !== "hf:openai/gpt-oss-120b",
-    );
+    const disableable = STATIC_MODELS.filter((m) => m.reasoning && !ALWAYS_ON_IDS.includes(m.id));
     expect(disableable.length).toBeGreaterThan(0);
     for (const m of disableable) {
       expect(m.thinkingLevelMap?.off, `${m.id} should map off to "none"`).toBe("none");

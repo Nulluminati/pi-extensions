@@ -54,6 +54,9 @@ const EXPECTED_MODEL_IDS = [
   "kimi-k3",
   "kimi-k3-fast",
   "mimo-v2.6-pro",
+  "nw-flash",
+  "nw-large",
+  "nw-small",
   "qwen-3.8-27b",
   "qwen3.6-35b",
   "qwen3.6-35b-fast",
@@ -199,6 +202,41 @@ describe("neuralwatt-extension", () => {
     expect(byId["qwen-3.8-27b"]).toEqual(
       expect.objectContaining({
         name: "Qwen3.8 27B",
+        reasoning: true,
+        input: ["text", "image"],
+        cost: { input: 0.45, output: 3.2, cacheRead: 0.25, cacheWrite: 0 },
+        contextWindow: 262128,
+        maxTokens: 131072,
+      }),
+    );
+  });
+
+  it("configures the nw-* tracking aliases from live metadata and probed reasoning behavior", () => {
+    const byId = Object.fromEntries(STATIC_MODELS.map((model) => [model.id, model]));
+
+    expect(byId["nw-large"]).toEqual(
+      expect.objectContaining({
+        name: "Neuralwatt Large",
+        reasoning: true,
+        input: ["text", "image"],
+        cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 0 },
+        contextWindow: 1048560,
+        maxTokens: 65536,
+      }),
+    );
+    expect(byId["nw-flash"]).toEqual(
+      expect.objectContaining({
+        name: "Neuralwatt Flash",
+        reasoning: true,
+        input: ["text", "image"],
+        cost: { input: 0.15, output: 0.6, cacheRead: 0.015, cacheWrite: 0 },
+        contextWindow: 1048560,
+        maxTokens: 393216,
+      }),
+    );
+    expect(byId["nw-small"]).toEqual(
+      expect.objectContaining({
+        name: "Neuralwatt Small",
         reasoning: true,
         input: ["text", "image"],
         cost: { input: 0.45, output: 3.2, cacheRead: 0.25, cacheWrite: 0 },
@@ -426,6 +464,42 @@ describe("neuralwatt-extension", () => {
       medium: "high",
       high: "high",
       xhigh: "high",
+    });
+
+    // nw-large (2026-10 probe): tracking alias for the large tier (currently
+    // Kimi K3). Disableable, and the catalog aliases xhigh -> max (accepted
+    // natively by the gateway), so the full map applies like the other
+    // full-enum models.
+    expect(byId["nw-large"].thinkingLevelMap).toEqual({
+      off: "none",
+      minimal: "minimal",
+      low: "low",
+      medium: "medium",
+      high: "high",
+      xhigh: "max",
+    });
+    // nw-flash (2026-10 probe): tracking alias for the fast tier (currently
+    // DeepSeek V4.1 Flash). Disableable; the catalog keeps xhigh distinct and
+    // literal `max` returned 200 with no reasoning output, so identity
+    // through xhigh is correct.
+    expect(byId["nw-flash"].thinkingLevelMap).toEqual({
+      off: "none",
+      minimal: "minimal",
+      low: "low",
+      medium: "medium",
+      high: "high",
+      xhigh: "xhigh",
+    });
+    // nw-small (2026-10 probe): tracking alias for the small tier (currently
+    // Qwen3.8-27B). Disableable; the catalog aliases max/high -> xhigh, so
+    // identity through xhigh is correct.
+    expect(byId["nw-small"].thinkingLevelMap).toEqual({
+      off: "none",
+      minimal: "minimal",
+      low: "low",
+      medium: "medium",
+      high: "high",
+      xhigh: "xhigh",
     });
   });
 

@@ -50,7 +50,7 @@ The extension calls `pi.registerProvider("synthetic", config)` at load time. The
 
 ### Static model catalog
 
-The extension ships a hardcoded list of always-on, tools-capable models with known pricing and capabilities (priced per million tokens, sourced from the live catalog in 2026-08). The table lists registered ids exactly as the live catalog reports them: `syn:` ids are first-class Synthetic catalog entries, and the rest carry the `hf:` prefix.
+The extension ships a hardcoded list of always-on, tools-capable models with known pricing and capabilities (priced per million tokens, sourced from the live catalog). The table lists registered ids exactly as the live catalog reports them: `syn:` ids are first-class Synthetic catalog entries, and the rest carry the `hf:` prefix.
 
 | Model | Context | Reasoning | Vision | Input/Output Cost |
 |-------|---------|-----------|--------|-------------------|
@@ -59,6 +59,7 @@ The extension ships a hardcoded list of always-on, tools-capable models with kno
 | syn:large:vision | 524K | ✓ | ✓ | $3.00 / $15.00 |
 | syn:small:vision | 262K | ✓ | ✓ | $0.45 / $2.20 |
 | hf:zai-org/GLM-5.2 | 524K | ✓ | — | $1.00 / $3.00 |
+| hf:zai-org/GLM-5.3 | 524K | ✓ (always on) | — | $1.40 / $4.40 |
 | hf:zai-org/GLM-5.3-Flash | 524K | ✓ | ✓ | $0.15 / $0.50 |
 | hf:zai-org/GLM-4.7-Flash | 196K | ✓ | — | $0.10 / $0.50 |
 | hf:moonshotai/Kimi-K3 | 524K | ✓ | ✓ | $3.00 / $15.00 |
@@ -68,7 +69,7 @@ The extension ships a hardcoded list of always-on, tools-capable models with kno
 | hf:deepseek-ai/DeepSeek-V4.1-Flash | 524K | ✓ | — | $0.80 / $1.20 |
 | hf:openai/gpt-oss-120b | 131K | ✓ (always on) | — | $0.10 / $0.10 |
 
-One model (`gpt-oss-120b`) always thinks and cannot be turned off, so its `off` thinking level is hidden. Every other reasoning model accepts the full `none`/`minimal`/`low`/`medium`/`high`/`xhigh` enum. GLM-5.3-Flash, Qwen3.8-27B, and DeepSeek-V4.1-Flash carry an `always_on` flag in the catalog, but probing shows `none` still disables thinking on all three, so they get the normal `off: "none"` map. `Kimi-K2.7-Code` and `MiniMax-M3` were retired by Synthetic (HTTP 404 "no longer supported") and are no longer listed.
+Two models (`gpt-oss-120b` and `GLM-5.3`) always think and cannot be turned off, so their `off` thinking level is hidden. Every other reasoning model accepts the full `none`/`minimal`/`low`/`medium`/`high`/`xhigh` enum. GLM-5.3-Flash, Qwen3.8-27B, and DeepSeek-V4.1-Flash carry an `always_on` flag in the catalog, but probing shows `none` still disables thinking on all three, so they get the normal `off: "none"` map (the full GLM-5.3 behaves the opposite way: its probe shows thinking even at `none`). `Kimi-K2.7-Code` and `MiniMax-M3` were retired by Synthetic (HTTP 404 "no longer supported") and are no longer listed.
 
 ### Startup staleness check
 

@@ -33,9 +33,9 @@ const DISABLEABLE_THINKING_MAP: ThinkingLevelMap = {
 };
 
 /**
- * Thinking map for gpt-oss-120b, whose thinking cannot be disabled. Mapping
- * off to null hides the off level in pi's UI rather than sending a value the
- * model ignores.
+ * Thinking map for models whose thinking cannot be disabled (gpt-oss-120b,
+ * GLM-5.3). Mapping off to null hides the off level in pi's UI rather than
+ * sending a value the model ignores.
  */
 const ALWAYS_ON_THINKING_MAP: ThinkingLevelMap = {
   off: null,
@@ -145,6 +145,25 @@ export const STATIC_MODELS: ProviderModelConfig[] = [
     input: ["text"],
     cost: { input: 0.1, output: 0.5, cacheRead: 0.02, cacheWrite: 0 },
     contextWindow: 196608,
+    maxTokens: 65536,
+    compat: SYNTHETIC_COMPAT,
+  },
+  // GLM-5.3 — full (non-Flash) sibling of GLM-5.3-Flash: text-only, 524K
+  // context. Probed 2026-10: every effort is accepted and every enabled level
+  // engages thinking, but the catalog flags always_on and the disable check
+  // shows thinking even at `none` (rt=301 on the reasoning prompt), so
+  // thinking cannot be turned off: off is hidden (unlike GLM-5.3-Flash, whose
+  // probe showed `none` disables thinking). No `max` tier to exploit here, so
+  // the identity map through xhigh applies.
+  {
+    id: "hf:zai-org/GLM-5.3",
+    name: "GLM-5.3",
+    api: "openai-completions",
+    reasoning: true,
+    thinkingLevelMap: ALWAYS_ON_THINKING_MAP,
+    input: ["text"],
+    cost: { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 0 },
+    contextWindow: 524288,
     maxTokens: 65536,
     compat: SYNTHETIC_COMPAT,
   },
