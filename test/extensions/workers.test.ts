@@ -415,6 +415,69 @@ ${SUCCESS_WORKER}`,
     expect(gatePaths).toHaveLength(1);
   });
 
+  it("relays worker mode and approval requests without putting them in the output spool", async () => {
+    const fixture = await writeFixture(
+      fixtureDir,
+      "approval-worker.mjs",
+      `#!/usr/bin/env node
+import { Socket } from 'node:net';
+const channel = new Socket({ fd: Number(process.env.PI_WORKER_APPROVAL_FD), readable: true, writable: true });
+let buffer = '';
+channel.on('data', chunk => {
+  buffer += chunk.toString();
+  let end;
+  while ((end = buffer.indexOf('\\n')) >= 0) {
+    const reply = JSON.parse(buffer.slice(0, end));
+    buffer = buffer.slice(end + 1);
+    if (reply.id === 'mode') {
+      if (reply.reply.enabled !== false) process.exit(2);
+      channel.write(JSON.stringify({ id: 'approve', request: { kind: 'approval', command: 'npm test', cwd: process.cwd(), toolName: 'bash', decision: 'uncertain', reason: 'Risk is uncertain' } }) + '\\n');
+    } else {
+      if (reply.reply.approved !== true) process.exit(3);
+      console.log(JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'approved once' }] } }));
+      channel.end();
+    }
+  }
+});
+channel.write(JSON.stringify({ id: 'mode', request: { kind: 'mode' } }) + '\\n');
+`,
+    );
+    setEnv("PI_WORKER_COMMAND", fixture);
+    mockPi.events.emit.mockImplementation((name, data) => {
+      if (name !== "approval-mode:worker-request") return;
+      const event = data as {
+        request: { kind: string };
+        respond(reply: { enabled: boolean } | { approved: boolean }): void;
+      };
+      event.respond(event.request.kind === "mode" ? { enabled: false } : { approved: true });
+    });
+    const result = await executeTool("spawn_worker", {
+      task: "research",
+      read_only: true,
+      wait: true,
+    });
+    expect(result.details.worker.status).toBe("completed");
+    expect(result.details.worker.outputText).toBe("approved once");
+    expect(mockPi.events.emit).toHaveBeenCalledWith(
+      "approval-mode:worker-request",
+      expect.objectContaining({
+        worker: expect.objectContaining({ id: result.details.worker.id, cwd }),
+        request: { kind: "mode" },
+        signal: expect.any(AbortSignal),
+        respond: expect.any(Function),
+      }),
+    );
+    expect(mockPi.events.emit).toHaveBeenCalledWith(
+      "approval-mode:worker-request",
+      expect.objectContaining({
+        request: expect.objectContaining({ kind: "approval", command: "npm test" }),
+      }),
+    );
+    const spool = await readFile(streamPath(cwd, result.details.worker.id), "utf8");
+    expect(spool).not.toContain('"kind":"approval"');
+    expect(spool).toContain("approved once");
+  });
+
   it("rejects a read_only worker that also requests an isolated write worktree", async () => {
     await expect(
       executeTool("spawn_worker", { task: "research", read_only: true, isolate: true }),

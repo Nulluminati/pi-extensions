@@ -54,6 +54,7 @@ import { renderModalFrame } from "../../../lib/tui-frame.ts";
 | Apply a fetch timeout and chain a caller abort signal | `createTimeoutController` | `lib/fetch-timeout.ts` |
 | Format a provider's static model list | `formatProviderModelList` | `lib/provider-models.ts` |
 | Share live presence (who is online) between concurrent sessions | `writeShard`, `loadShards`, `removeShard`, `readShard` | `lib/presence-shards.ts` |
+| Connect worker command approvals to the parent UI | `connectWorkerApprovalChannel`, `attachParentApprovalChannel`, `dispatchWorkerApproval` | `lib/worker-approval.ts` |
 
 ---
 
@@ -398,6 +399,14 @@ Live presence shared by concurrent sessions. One shard file per agent: heartbeat
 - `loadShards(dir, { legacyPath? })` → `Record<name, record>` after pruning dead pids.
 - Records must have `name: string` and `pid: number` plus whatever extra fields you need.
 - Never write presence as a single shared JSON file — heartbeats are read-modify-write and concurrent settles clobber each other.
+
+## `lib/worker-approval.ts` — worker approval channel
+
+The worker runner creates a dedicated duplex pipe at descriptor `3` and sets `PI_WORKER_APPROVAL_FD`. Task output remains file-backed. `connectWorkerApprovalChannel` supplies the worker client; `attachParentApprovalChannel` supplies the parent server.
+
+Each command requests live mode. Flagged commands send a separate approval request. The runner supplies trusted worker identity and uses `dispatchWorkerApproval` to emit `approval-mode:worker-request`. Approval Mode handles that event directly through its UI, not through model messages.
+
+Replies apply to one request identifier. Cancellation, disconnection, malformed frames, and timeouts cannot grant approval. Close the channel on shutdown. Do not pass its descriptor to sandboxed command processes. Parent dialogs must use the request's abort signal, not the completed spawn turn's signal.
 
 ## `lib/validate-extension.ts` — repo tooling, not extension code
 

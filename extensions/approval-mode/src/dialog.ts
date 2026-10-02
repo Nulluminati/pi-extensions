@@ -19,6 +19,7 @@ interface DialogOptions {
   command: string;
   reason: string;
   decision: "reject" | "uncertain";
+  source?: string;
   tui: { requestRender(): void; terminal?: { rows: number } };
   theme: DialogTheme;
   keybindings: { matches(data: string, keybinding: string): boolean };
@@ -46,7 +47,8 @@ function visibleCommand(command: string): string {
 }
 
 export function createApprovalDialog(options: DialogOptions) {
-  const { command, reason, decision, tui, theme, keybindings, done } = options;
+  const { command, reason, decision, source, tui, theme, keybindings, done } = options;
+  const reviewText = source ? `${source}\n\n${command}` : command;
   const selector = new SelectList(
     [
       { value: "Approve once", label: "Approve once" },
@@ -110,7 +112,7 @@ export function createApprovalDialog(options: DialogOptions) {
       }
       reviewAvailable = true;
       const reasonLimit = Math.min(3, height - controlRows - 1);
-      const wrappedReason = wrapTextWithAnsi(reason, contentWidth);
+      const wrappedReason = wrapTextWithAnsi(visibleCommand(reason), contentWidth);
       const reasonLines = wrappedReason.slice(0, reasonLimit);
       if (wrappedReason.length > reasonLimit) {
         reasonLines[reasonLimit - 1] =
@@ -118,7 +120,7 @@ export function createApprovalDialog(options: DialogOptions) {
       }
       commandRows = Math.max(1, Math.min(COMMAND_ROWS, height - controlRows - reasonLines.length));
       if (lastContentWidth !== contentWidth) {
-        commandLines = visibleCommand(command)
+        commandLines = visibleCommand(reviewText)
           .split("\n")
           .flatMap((line) => wrapTextWithAnsi(line, contentWidth));
         lastContentWidth = contentWidth;
@@ -144,7 +146,7 @@ export function createApprovalDialog(options: DialogOptions) {
         ),
         ...reasonLines.map((line) => theme.fg("muted", line)),
         "",
-        theme.fg("muted", "Command:"),
+        theme.fg("muted", source ? "Worker request:" : "Command:"),
         ...commandExcerpt,
         ...indicator.map((line) => theme.fg("dim", line)),
         "",
@@ -196,11 +198,12 @@ export async function promptApproval(
   command: string,
   decision: "reject" | "uncertain",
   reason: string,
+  source?: string,
 ): Promise<ApprovalChoice | undefined> {
   if (ctx.mode !== "tui") {
     return ctx.ui.select(
-      `Warning: Jev ${decision === "reject" ? "rejected" : "could not confirm"} this command.\n${reason}\n\n${command}\n\nApprove this call only?`,
-      ["Approve once", "Block"],
+      `Warning: Jev ${decision === "reject" ? "rejected" : "could not confirm"} this command.\n${visibleCommand(reason)}\n\n${source ? `${visibleCommand(source)}\n\n` : ""}${visibleCommand(command)}\n\nApprove this call only?`,
+      ["Block", "Approve once"],
       ctx.signal ? { signal: ctx.signal } : {},
     ) as Promise<ApprovalChoice | undefined>;
   }
@@ -215,6 +218,7 @@ export async function promptApproval(
           command,
           reason,
           decision,
+          ...(source ? { source } : {}),
           tui,
           theme,
           keybindings,

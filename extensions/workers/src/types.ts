@@ -1,6 +1,11 @@
 /** Worker session types for the workers extension. */
 
 import type { ThinkingLevel } from "pi";
+import type {
+  WorkerApprovalReply,
+  WorkerApprovalRequest,
+  WorkerIdentity,
+} from "../../../lib/worker-approval.ts";
 import type { WorkerBlocker } from "../../../lib/worker-blocker.ts";
 import type { ProvisionStatus } from "./provision/types.ts";
 
@@ -95,4 +100,10 @@ export interface WorkerEvents {
   onChange(): void;
   /** Stream activity happened (throttle before republishing the widget). */
   onActivity(): void;
+  /** Direct parent UI channel, independent of model messages and output spools. */
+  requestApproval?(
+    worker: WorkerIdentity,
+    request: WorkerApprovalRequest,
+    signal: AbortSignal,
+  ): Promise<WorkerApprovalReply>;
 }

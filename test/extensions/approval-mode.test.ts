@@ -1,10 +1,24 @@
 import type { ClassifierAnswer, ClassifierContext, ClassifierResult } from "pi";
-import { afterEach, describe, expect, it, type Mock, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import approvalMode from "../../extensions/approval-mode/approval-mode.ts";
 import { judgeCommand } from "../../extensions/approval-mode/src/jev.ts";
 import { classifyCommand } from "../../extensions/approval-mode/src/policy.ts";
+import { connectWorkerApprovalChannel } from "../../lib/worker-approval.ts";
 import { createMockContext } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
+
+const workerChannel = vi.hoisted(() => ({ request: vi.fn(), close: vi.fn() }));
+vi.mock("../../lib/worker-approval.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../lib/worker-approval.ts")>();
+  return { ...actual, connectWorkerApprovalChannel: vi.fn() };
+});
+
+beforeEach(() => {
+  vi.resetAllMocks();
+  vi.stubEnv("PI_WORKER_APPROVAL_FD", "");
+  vi.stubEnv("PI_WORKER", "0");
+  vi.mocked(connectWorkerApprovalChannel).mockReturnValue(workerChannel);
+});
 
 /** Registry classify mock with a declared signature, so mock.calls is a proper tuple. */
 type ClassifyFn = (
@@ -317,6 +331,132 @@ describe("approval-mode classifier resolution", () => {
 });
 
 describe("approval-mode extension", () => {
+  it("shares live mode with workers and resets it at session start", async () => {
+    const { pi, ctx } = await setup();
+    const command = pi.registerCommand.mock.calls.find((call) => call[0] === "approval-mode")?.[1]
+      .handler;
+    expect(await parentRequest(pi, { kind: "mode" })).toEqual({ enabled: true });
+    await command?.("off", ctx);
+    expect(await parentRequest(pi, { kind: "mode" })).toEqual({ enabled: false });
+    await command?.("on", ctx);
+    expect(await parentRequest(pi, { kind: "mode" })).toEqual({ enabled: true });
+    await command?.("off", ctx);
+    const start = pi.on.mock.calls.find((call) => call[0] === "session_start")?.[1];
+    await start?.({ type: "session_start" }, ctx);
+    expect(await parentRequest(pi, { kind: "mode" })).toEqual({ enabled: true });
+  });
+
+  it("shows worker identity and directory in the parent dialog and approves only once", async () => {
+    const { pi, ctx } = await setup();
+    ctx.mode = "rpc";
+    ctx.ui.select.mockResolvedValueOnce("Approve once").mockResolvedValueOnce("Block");
+    const request = workerRequest();
+    expect(await parentRequest(pi, request)).toEqual({ approved: true });
+    expect(await parentRequest(pi, request)).toEqual({ approved: false });
+    expect(ctx.ui.select).toHaveBeenCalledTimes(2);
+    const title = ctx.ui.select.mock.calls[0]?.[0];
+    expect(title).toContain("researcher");
+    expect(title).toContain("w-test");
+    expect(title).toContain("/workspace/worker");
+    expect(title).toContain("npm test");
+    expect(ctx.ui.select).toHaveBeenCalledWith(
+      expect.any(String),
+      ["Block", "Approve once"],
+      expect.any(Object),
+    );
+    expect(pi.sendMessage).not.toHaveBeenCalled();
+    expect(pi.sendUserMessage).not.toHaveBeenCalled();
+  });
+
+  it("serializes worker and main dialogs through one queue", async () => {
+    const { pi, ctx, handler } = await setup({ probabilities: { harm: 0.5, secrets: 0.5 } });
+    const started = deferred<void>();
+    const choice = deferred<string>();
+    ctx.ui.custom
+      .mockImplementationOnce(() => {
+        started.resolve();
+        return choice.promise;
+      })
+      .mockResolvedValueOnce("Block");
+    const workerResult = parentRequest(pi, workerRequest());
+    await started.promise;
+    const mainResult = handler({ toolName: "bash", input: { command: "npm test" } }, ctx);
+    expect(ctx.ui.custom).toHaveBeenCalledTimes(1);
+    choice.resolve("Approve once");
+    expect(await workerResult).toEqual({ approved: true });
+    expect(await mainResult).toMatchObject({ block: true });
+    expect(ctx.ui.custom).toHaveBeenCalledTimes(2);
+  });
+
+  it("cancels an active worker dialog when the parent turns review off", async () => {
+    const { pi, ctx } = await setup();
+    ctx.mode = "rpc";
+    const started = deferred<void>();
+    ctx.ui.select.mockImplementation(
+      (_title, _choices, options) =>
+        new Promise((resolve) => {
+          started.resolve();
+          options?.signal?.addEventListener("abort", () => resolve(undefined), { once: true });
+        }),
+    );
+    const result = parentRequest(pi, workerRequest());
+    await started.promise;
+    const command = pi.registerCommand.mock.calls.find((call) => call[0] === "approval-mode")?.[1]
+      .handler;
+    await command?.("off", ctx);
+    expect(await result).toEqual({ approved: true });
+  });
+
+  it("blocks an active worker dialog when its request is cancelled", async () => {
+    const { pi, ctx } = await setup();
+    ctx.mode = "rpc";
+    const started = deferred<void>();
+    ctx.ui.select.mockImplementation(
+      (_title, _choices, options) =>
+        new Promise((resolve) => {
+          started.resolve();
+          options?.signal?.addEventListener("abort", () => resolve("Approve once"), { once: true });
+        }),
+    );
+    const controller = new AbortController();
+    const result = parentRequest(pi, workerRequest(), controller.signal);
+    await started.promise;
+    controller.abort();
+    expect(await result).toEqual({ approved: false });
+  });
+
+  it("keeps worker hard denies active when shared review is off", async () => {
+    const { pi, ctx } = await setup();
+    const command = pi.registerCommand.mock.calls.find((call) => call[0] === "approval-mode")?.[1]
+      .handler;
+    await command?.("off", ctx);
+    expect(await parentRequest(pi, workerRequest())).toEqual({ approved: true });
+    expect(await parentRequest(pi, { ...workerRequest(), command: "rm -rf /" })).toEqual({
+      approved: false,
+    });
+    expect(ctx.ui.custom).not.toHaveBeenCalled();
+  });
+
+  it("blocks a worker approval with a mismatched execution directory", async () => {
+    const { pi, ctx } = await setup();
+    expect(await parentRequest(pi, { ...workerRequest(), cwd: "/other-project" })).toEqual({
+      approved: false,
+    });
+    expect(ctx.ui.custom).not.toHaveBeenCalled();
+  });
+
+  it("blocks worker approvals without a parent interface or after cancellation", async () => {
+    const { pi, ctx } = await setup({}, false);
+    expect(await parentRequest(pi, workerRequest())).toEqual({ approved: false });
+    ctx.hasUI = true;
+    const controller = new AbortController();
+    controller.abort();
+    expect(await parentRequest(pi, workerRequest(), controller.signal)).toEqual({
+      approved: false,
+    });
+    expect(ctx.ui.custom).not.toHaveBeenCalled();
+  });
+
   it("gates bash, background, and monitor with the same Jev decision", async () => {
     const classify = allowing();
     const { handler, ctx } = await setup({ classify });
@@ -358,7 +498,7 @@ describe("approval-mode extension", () => {
     });
     expect(ctx.ui.select).toHaveBeenCalledWith(
       expect.stringContaining("npm test"),
-      ["Approve once", "Block"],
+      ["Block", "Approve once"],
       expect.any(Object),
     );
   });
@@ -469,6 +609,116 @@ describe("approval-mode extension", () => {
     expect(ctx.ui.select).not.toHaveBeenCalled();
   });
 
+  it("applies parent mode changes to an existing worker before each command", async () => {
+    vi.stubEnv("PI_WORKER", "1");
+    vi.stubEnv("PI_WORKER_APPROVAL_FD", "3");
+    const { handler, ctx, classify } = await setup(
+      { probabilities: { harm: 0.5, secrets: 0.5 } },
+      false,
+    );
+    workerChannel.request
+      .mockResolvedValueOnce({ enabled: false })
+      .mockResolvedValueOnce({ enabled: true })
+      .mockResolvedValueOnce({ approved: false })
+      .mockResolvedValueOnce({ enabled: false });
+    expect(
+      await handler({ toolName: "bash", input: { command: "npm test" } }, ctx),
+    ).toBeUndefined();
+    expect(classify).not.toHaveBeenCalled();
+    expect(await handler({ toolName: "bash", input: { command: "npm test" } }, ctx)).toMatchObject({
+      block: true,
+    });
+    expect(classify).toHaveBeenCalledTimes(1);
+    expect(
+      await handler({ toolName: "bash", input: { command: "npm test" } }, ctx),
+    ).toBeUndefined();
+    expect(classify).toHaveBeenCalledTimes(1);
+    expect(workerChannel.request).toHaveBeenNthCalledWith(1, { kind: "mode" }, undefined);
+  });
+
+  it("relays flagged worker commands and accepts only a matching approval reply", async () => {
+    vi.stubEnv("PI_WORKER", "1");
+    vi.stubEnv("PI_WORKER_APPROVAL_FD", "3");
+    const { handler, ctx } = await setup({ probabilities: { harm: 0.5, secrets: 0.5 } }, false);
+    workerChannel.request
+      .mockResolvedValueOnce({ enabled: true })
+      .mockResolvedValueOnce({ approved: true })
+      .mockResolvedValueOnce({ enabled: true })
+      .mockResolvedValueOnce({ approved: false });
+    expect(
+      await handler({ toolName: "bash", input: { command: "npm test" } }, ctx),
+    ).toBeUndefined();
+    expect(workerChannel.request).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        kind: "approval",
+        command: "npm test",
+        cwd: ctx.cwd,
+        toolName: "bash",
+        decision: "uncertain",
+      }),
+      undefined,
+    );
+    expect(await handler({ toolName: "bash", input: { command: "npm test" } }, ctx)).toMatchObject({
+      block: true,
+    });
+    expect(ctx.ui.custom).not.toHaveBeenCalled();
+    expect(ctx.ui.select).not.toHaveBeenCalled();
+  });
+
+  it("blocks worker commands after parent disconnection and never relays classifier failures", async () => {
+    vi.stubEnv("PI_WORKER", "1");
+    vi.stubEnv("PI_WORKER_APPROVAL_FD", "3");
+    const { handler, ctx } = await setup({ classifiers: [] }, false);
+    workerChannel.request.mockResolvedValueOnce({ error: "Disconnected" });
+    expect(await handler({ toolName: "bash", input: { command: "npm test" } }, ctx)).toMatchObject({
+      block: true,
+    });
+    workerChannel.request.mockResolvedValueOnce({ enabled: true });
+    expect(await handler({ toolName: "bash", input: { command: "npm test" } }, ctx)).toMatchObject({
+      block: true,
+    });
+    expect(workerChannel.request).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves read-only restrictions and hard denies when parent review is off", async () => {
+    vi.stubEnv("PI_WORKER", "1");
+    vi.stubEnv("PI_WORKER_READONLY", "1");
+    vi.stubEnv("PI_WORKER_APPROVAL_FD", "3");
+    const { handler, ctx } = await setup({}, false);
+    workerChannel.request.mockResolvedValue({ enabled: false });
+    expect(
+      await handler({ toolName: "bash", input: { command: "npm test" } }, ctx),
+    ).toBeUndefined();
+    for (const event of [
+      { toolName: "edit", input: {} },
+      { toolName: "background", input: { command: "npm test" } },
+      { toolName: "bash", input: { command: "rm -rf /" } },
+    ]) {
+      expect(await handler(event, ctx)).toMatchObject({ block: true });
+    }
+    expect(workerChannel.request).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes the worker channel and removes the parent listener on shutdown", async () => {
+    const parent = await setup();
+    const parentStop = parent.pi.on.mock.calls.find((call) => call[0] === "session_shutdown")?.[1];
+    await parentStop?.({ type: "session_shutdown" }, parent.ctx);
+    expect(parent.unsubscribe).toHaveBeenCalledTimes(1);
+    expect(parent.pi.events.off).not.toHaveBeenCalled();
+    expect(await parentRequest(parent.pi, workerRequest())).toEqual({ approved: false });
+    const parentStart = parent.pi.on.mock.calls.find((call) => call[0] === "session_start")?.[1];
+    await parentStart?.({ type: "session_start" }, parent.ctx);
+    expect(parent.pi.events.on).toHaveBeenCalledTimes(2);
+    expect(await parentRequest(parent.pi, { kind: "mode" })).toEqual({ enabled: true });
+    vi.stubEnv("PI_WORKER", "1");
+    vi.stubEnv("PI_WORKER_APPROVAL_FD", "3");
+    const worker = await setup({}, false);
+    const workerStop = worker.pi.on.mock.calls.find((call) => call[0] === "session_shutdown")?.[1];
+    await workerStop?.({ type: "session_shutdown" }, worker.ctx);
+    expect(workerChannel.close).toHaveBeenCalledTimes(1);
+  });
+
   it("blocks rejected or uncertain worker commands without a UI", async () => {
     vi.stubEnv("PI_WORKER", "1");
     const { handler, ctx } = await setup({ probabilities: { harm: 0.5, secrets: 0.5 } });
@@ -492,6 +742,44 @@ describe("approval-mode extension", () => {
 });
 
 // --- Helpers ---
+
+function deferred<T>() {
+  let resolve: (value: T) => void = () => {};
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+function workerRequest() {
+  return {
+    kind: "approval",
+    command: "npm test",
+    cwd: "/workspace/worker",
+    toolName: "bash",
+    decision: "uncertain",
+    reason: "Risk is uncertain",
+  };
+}
+
+function parentRequest(
+  pi: ReturnType<typeof createMockPi>,
+  request: Record<string, unknown>,
+  signal = new AbortController().signal,
+): Promise<unknown> {
+  const handler = pi.events.on.mock.calls.find(
+    (call) => call[0] === "approval-mode:worker-request",
+  )?.[1];
+  if (!handler) throw new Error("Worker approval listener missing");
+  return new Promise((respond) => {
+    handler({
+      worker: { id: "w-test", name: "researcher", cwd: "/workspace/worker" },
+      request,
+      signal,
+      respond,
+    });
+  });
+}
 
 function jevModel(provider: string, id: string) {
   return { provider, id, name: id, api: "typesafe-system-one" };
@@ -572,6 +860,8 @@ async function setup(
   hasUI = true,
 ) {
   const pi = createMockPi();
+  const unsubscribe = vi.fn();
+  pi.events.on.mockReturnValue(unsubscribe);
   const ctx = createMockContext();
   ctx.hasUI = hasUI;
   ctx.sessionManager.getBranch = vi.fn(() => [
@@ -591,5 +881,5 @@ async function setup(
   await start?.({ type: "session_start" }, ctx);
   const handler = pi.on.mock.calls.find((call) => call[0] === "tool_call")?.[1];
   if (!handler) throw new Error("tool_call handler missing");
-  return { pi, ctx, handler, classify };
+  return { pi, ctx, handler, classify, unsubscribe };
 }

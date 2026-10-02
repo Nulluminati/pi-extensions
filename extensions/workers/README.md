@@ -40,8 +40,9 @@ You will be woken when a worker exits; read its report with `workers (action=sta
 | `PI_WORKER_TIMEOUT_S` | Hard per-worker timeout (default 900) |
 | `PI_WORKER_COMMAND` | Worker binary override (testing) |
 | `PI_MESSENGER_PROJECT_ROOT` | Internal child-process setting. The parent sets it to the parent project's absolute path for worker sessions, overriding any inherited value. |
+| `PI_WORKER_APPROVAL_FD` | Internal child-process setting. The runner sets it to descriptor `3` for the dedicated parent approval pipe. |
 
-Worker extensions resolve to the spawn_worker `extensions` param → `PI_WORKER_EXTENSIONS` → `<agentDir>/worker-extensions.json` (normally `~/.pi/agent/worker-extensions.json`) → default set `[messenger, code-search, context7, web-search, synthetic, neuralwatt, approval-mode, worker-sandbox]`. Set `PI_WORKER_EXTENSIONS_CONFIG` to use another config file. `messenger`, `worker-blocker`, `approval-mode`, and `worker-sandbox` are mandatory. Workflow extensions (`workers`, `missions`, `autoresearch`, `goal`) are forbidden. `read_only: true` loads the research-tool gate and denies workspace writes in the sandbox. Workers always use the Jev command gate.
+Worker extensions resolve to the spawn_worker `extensions` param → `PI_WORKER_EXTENSIONS` → `<agentDir>/worker-extensions.json` (normally `~/.pi/agent/worker-extensions.json`) → default set `[messenger, code-search, context7, web-search, synthetic, neuralwatt, approval-mode, worker-sandbox]`. Set `PI_WORKER_EXTENSIONS_CONFIG` to use another config file. `messenger`, `worker-blocker`, `approval-mode`, and `worker-sandbox` are mandatory. Workflow extensions (`workers`, `missions`, `autoresearch`, `goal`) are forbidden. `read_only: true` loads the research-tool gate and denies workspace writes in the sandbox. Workers follow the parent's live approval mode. `/approval-mode off` skips Jev review for running and future workers, but hard denies and sandbox limits remain active. Flagged commands pause for approval in the parent's dialog. Approval releases one call inside the same sandbox. A lost parent connection blocks commands that need review. See [Approval Mode](../approval-mode/README.md#worker-approvals).
 
 ## Model tiering
 
@@ -61,6 +62,7 @@ Workers should use a cheap model; keep design decisions, integration, and review
 | `pi.registerTool("spawn_worker" / "workers")` | Worker spawning and management |
 | `pi.sendMessage(..., { triggerTurn: true, deliverAs: "steer" })` | Trusted wake on worker exit |
 | `pi.on("session_start" / "session_shutdown")` | Reconcile orphaned records / cancel running workers |
+| `pi.events.emit("approval-mode:worker-request")` | Requests live mode or a user decision through the parent Approval Mode extension |
 | `pi.events.emit("workers:state")` | Publishes worker state (`{ running, workerCostUsd, workerTokens }`); the status bar subscribes and shows the delegated-worker spend roll-up next to the session cost |
 | `setStripWidget` (`lib/widget-strip.ts`) | Framed panel above the input at `WIDGET_PRIORITY_WORKERS`: running workers (`N running` in the frame corner), cleared when none |
 

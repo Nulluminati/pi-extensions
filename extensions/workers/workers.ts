@@ -28,6 +28,7 @@ import { projectStateRelative } from "../../lib/paths.ts";
 import { isProcessAlive } from "../../lib/presence-shards.ts";
 import { isRecycledPid } from "../../lib/process-identity.ts";
 import { setStripWidget, WIDGET_PRIORITY_WORKERS } from "../../lib/widget-strip.ts";
+import { dispatchWorkerApproval } from "../../lib/worker-approval.ts";
 import {
   cancelWorker,
   collectWorkerPatch,
@@ -277,6 +278,10 @@ export default async function workersExtension(pi: ExtensionAPI) {
 
   function makeEvents(ctx: ExtensionContext): WorkerEvents {
     return {
+      requestApproval(worker, request, signal) {
+        if (shutDown) return Promise.resolve({ error: "Parent session closed" });
+        return dispatchWorkerApproval(pi.events, worker, request, signal);
+      },
       wake(message) {
         try {
           pi.sendMessage(

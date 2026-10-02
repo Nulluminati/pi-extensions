@@ -18,10 +18,15 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { appendFile, mkdir, open } from "node:fs/promises";
 import { join } from "node:path";
+import { Duplex } from "node:stream";
 import type { ThinkingLevel } from "pi";
 import { cleanGitEnv } from "../../../lib/git.ts";
 import { projectStateRelative } from "../../../lib/paths.ts";
 import { isProcessAlive } from "../../../lib/presence-shards.ts";
+import {
+  attachParentApprovalChannel,
+  WORKER_APPROVAL_FD_ENV_VAR,
+} from "../../../lib/worker-approval.ts";
 import {
   BLOCKER_MARKER_TYPE,
   parseBlockerMarker,
@@ -656,11 +661,12 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
     streamFormat: "raw",
   };
 
-  // The child's stdio ARE the worker-directory files: no pipe connects it
-  // to this process, so its output survives this process's death and any
-  // session can read or finalize it. The parent tails the spool file for
-  // live activity instead of reading a pipe.
+  // The child's stdout and stderr ARE the worker-directory files, so output
+  // survives this process's death and any session can read or finalize it.
+  // A separate fd carries approval requests only, never task output.
+  // The parent tails the spool file for live activity.
   const childRef: { value?: ChildProcess } = {};
+  let approvalChannel: ReturnType<typeof attachParentApprovalChannel> | undefined;
   let spawnError: Error | undefined;
   const assertNotAborted = () => {
     if (options.signal?.aborted)
@@ -690,6 +696,7 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
           ...cleanGitEnv(),
           PI_WORKER: "1",
           PI_WORKER_READONLY: options.readOnly ? "1" : "0",
+          [WORKER_APPROVAL_FD_ENV_VAR]: "3",
           // Stable messenger identity: the worker is addressable in the mesh
           // by its workers-registry name instead of a generated themed name.
           PI_MESSENGER_NAME: options.name,
@@ -704,8 +711,20 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
         detached: true,
         // The child holds its own dups of these descriptors; the parent closes
         // its copies right after spawn.
-        stdio: ["ignore", spoolHandle.fd, stderrHandle.fd],
+        stdio: ["ignore", spoolHandle.fd, stderrHandle.fd, "pipe"],
       });
+      const approvalStream = child.stdio[3];
+      if (approvalStream instanceof Duplex) {
+        approvalChannel = attachParentApprovalChannel(
+          approvalStream,
+          (request, signal) =>
+            events.requestApproval?.(
+              { id: record.id, name: record.name, cwd: record.cwd },
+              request,
+              signal,
+            ) ?? Promise.resolve({ error: "Parent approval handler unavailable" }),
+        );
+      }
       // Exit wiring BEFORE any await: the child may outpace handle cleanup.
       wireChildEvents(child);
       childRef.value = child;
@@ -852,12 +871,15 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
     const timeoutSeconds = Math.round(options.timeoutMs / 1000);
     const timer = setTimeout(() => {
       timedOut = true;
+      approvalChannel?.close();
       // A spawn failure leaves child.pid undefined; killing is impossible
       // and killPidTree refuses non-positive pids anyway.
       if (child.pid !== undefined) void killPidTree(child.pid);
     }, options.timeoutMs);
     timer.unref?.();
+    child.once("exit", () => approvalChannel?.close());
     child.on("close", () => {
+      approvalChannel?.close();
       clearTimeout(timer);
       const timedOutError = `worker exceeded ${timeoutSeconds}s timeout`;
       void finish(
@@ -866,6 +888,7 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
       ).then(settle);
     });
     child.on("error", (err) => {
+      approvalChannel?.close();
       clearTimeout(timer);
       // The error override reaches finalizeWorker before persistence and
       // notification, so the saved record, the notify, and the caller all
@@ -881,6 +904,7 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
       return;
     }
     cancelRequested = true;
+    approvalChannel?.close();
     const child = await started;
     // A failed spawn resolves `started` to undefined: nothing to signal, and
     // finish settles the failed record once below.
