@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -89,10 +90,11 @@ describe("real Pi tool contracts", () => {
     const { wrapRegisteredTool } = await import(
       pathToFileURL(resolve(agentDist, "core/extensions/wrapper.js")).href
     );
+    const agentCoreManifest = createRequire(
+      import.meta.resolve("@earendil-works/pi-coding-agent"),
+    ).resolve("@earendil-works/pi-agent-core/package.json");
     const { runToolCall } = await import(
-      pathToFileURL(
-        resolve(agentDist, "../node_modules/@earendil-works/pi-agent-core/dist/agent-loop.js"),
-      ).href
+      pathToFileURL(resolve(dirname(agentCoreManifest), "dist/index.js")).href
     );
     const tool = wrapRegisteredTool(extension.tools.get("web_fetch"), {
       createToolContext: () => ({ hasUI: false, mode: "json" }),

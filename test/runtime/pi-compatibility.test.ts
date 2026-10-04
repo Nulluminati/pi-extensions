@@ -52,11 +52,16 @@ function click(x: number, y: number, width = 40, height = 5) {
 afterEach(() => vi.unstubAllEnvs());
 
 describe("unmocked Pi compatibility", () => {
-  it.each(["pi-coding-agent", "pi-ai", "pi-tui"])("uses the 1.x %s development package", (name) => {
-    const entry = fileURLToPath(import.meta.resolve(`@earendil-works/${name}`));
-    const manifest = JSON.parse(readFileSync(resolve(dirname(entry), "../package.json"), "utf8"));
-    expect(manifest.version).toMatch(/^1\./);
-  });
+  it.each(["pi-coding-agent", "pi-ai", "pi-tui"])(
+    "uses at least the 1.0.2 %s development package within 1.x",
+    (name) => {
+      const entry = fileURLToPath(import.meta.resolve(`@earendil-works/${name}`));
+      const manifest = JSON.parse(readFileSync(resolve(dirname(entry), "../package.json"), "utf8"));
+      expect(manifest.version).toMatch(/^1\./);
+      const [, minor, patch] = manifest.version.split(".").map(Number);
+      if (minor === 0) expect(patch).toBeGreaterThanOrEqual(2);
+    },
+  );
 
   it("loads every extension with the real Pi loader", async () => {
     vi.stubEnv("PI_WORKER", "");
