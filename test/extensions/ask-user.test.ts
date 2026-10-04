@@ -495,6 +495,98 @@ describe("ask-user-extension", () => {
   });
 });
 
+describe("ask-user Herdr blocked events", () => {
+  it.each(["submitted", "dismissed", "aborted"])(
+    "balances blocked events when a TUI questionnaire is %s",
+    async (status) => {
+      const pi = createMockPi();
+      const ctx = createMockContext();
+      let finish: (value: unknown) => void = () => {};
+      ctx.ui.custom = vi.fn(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+      await askUserExtension(pi);
+
+      const pending = executeTool(pi, { questions: QUESTIONS }, ctx);
+      expect(pi.events.emit).toHaveBeenNthCalledWith(1, "herdr:blocked", {
+        active: true,
+        label: "Ask User",
+      });
+      expect(pi.events.emit).toHaveBeenCalledTimes(1);
+      finish(status === "submitted" ? { status, answers: [] } : { status });
+      await pending;
+      expect(pi.events.emit).toHaveBeenNthCalledWith(2, "herdr:blocked", { active: false });
+      expect(pi.events.emit).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it("clears the blocked event when the dialog rejects", async () => {
+    const pi = createMockPi();
+    const ctx = createMockContext();
+    ctx.ui.custom.mockRejectedValue(new Error("Dialog failed"));
+    await askUserExtension(pi);
+    await expect(executeTool(pi, { questions: QUESTIONS }, ctx)).rejects.toThrow("Dialog failed");
+    expect(pi.events.emit).toHaveBeenNthCalledWith(1, "herdr:blocked", {
+      active: true,
+      label: "Ask User",
+    });
+    expect(pi.events.emit).toHaveBeenNthCalledWith(2, "herdr:blocked", { active: false });
+    expect(pi.events.emit).toHaveBeenCalledTimes(2);
+  });
+
+  it("balances each overlapping questionnaire independently", async () => {
+    const pi = createMockPi();
+    const ctx = createMockContext();
+    const finishers: Array<(value: unknown) => void> = [];
+    ctx.ui.custom = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          finishers.push(resolve);
+        }),
+    );
+    await askUserExtension(pi);
+    const first = executeTool(pi, { questions: QUESTIONS }, ctx);
+    const second = executeTool(pi, { questions: QUESTIONS }, ctx);
+    expect(pi.events.emit).toHaveBeenCalledTimes(2);
+    expect(pi.events.emit).toHaveBeenNthCalledWith(2, "herdr:blocked", {
+      active: true,
+      label: "Ask User",
+    });
+    finishers[0]({ status: "dismissed" });
+    await first;
+    expect(pi.events.emit).toHaveBeenCalledTimes(3);
+    expect(pi.events.emit).toHaveBeenNthCalledWith(3, "herdr:blocked", { active: false });
+    finishers[1]({ status: "aborted" });
+    await second;
+    expect(pi.events.emit).toHaveBeenCalledTimes(4);
+    expect(pi.events.emit).toHaveBeenNthCalledWith(4, "herdr:blocked", { active: false });
+  });
+
+  it.each(["rpc", "json", "print", "invalid", "pre-aborted"])(
+    "does not emit blocked events for %s requests",
+    async (scenario) => {
+      const pi = createMockPi();
+      const ctx = createMockContext();
+      const controller = new AbortController();
+      if (scenario === "pre-aborted") controller.abort();
+      if (scenario === "rpc" || scenario === "json" || scenario === "print") ctx.mode = scenario;
+      ctx.ui.select.mockResolvedValue(undefined);
+      await askUserExtension(pi);
+      await executeTool(
+        pi,
+        { questions: scenario === "invalid" ? [] : QUESTIONS },
+        ctx,
+        controller.signal,
+      );
+      expect(pi.events.emit).not.toHaveBeenCalled();
+      expect(ctx.ui.custom).not.toHaveBeenCalled();
+    },
+  );
+});
+
 describe("ask-user schema and state", () => {
   it("rejects terminal control characters and duplicate option values", () => {
     expect(

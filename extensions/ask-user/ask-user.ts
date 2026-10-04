@@ -115,10 +115,17 @@ export default async function askUserExtension(pi: ExtensionAPI) {
         return createTerminatingResult("Questionnaire aborted before it opened.", "aborted");
       }
 
-      const outcome =
-        ctx.mode === "tui"
-          ? await showQuestionnaire(questions, ctx, signal)
-          : await askWithDialogs(questions, ctx, signal);
+      let outcome: QuestionnaireOutcome;
+      if (ctx.mode === "tui") {
+        pi.events.emit("herdr:blocked", { active: true, label: "Ask User" });
+        try {
+          outcome = await showQuestionnaire(questions, ctx, signal);
+        } finally {
+          pi.events.emit("herdr:blocked", { active: false });
+        }
+      } else {
+        outcome = await askWithDialogs(questions, ctx, signal);
+      }
 
       if (outcome.status === "aborted") {
         return createTerminatingResult("Questionnaire aborted.", "aborted");

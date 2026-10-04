@@ -69,7 +69,14 @@ export default async function approvalMode(pi: ExtensionAPI) {
       if (ctx.signal?.aborted) return false;
       if (!enabled) return true;
       if (signal.aborted || !ctx.hasUI) return false;
-      const choice = await promptApproval({ ...ctx, signal }, command, decision, reason, source);
+      const reportBlocked = ctx.mode === "tui";
+      if (reportBlocked) pi.events.emit("herdr:blocked", { active: true, label: "Approval Mode" });
+      let choice: Awaited<ReturnType<typeof promptApproval>>;
+      try {
+        choice = await promptApproval({ ...ctx, signal }, command, decision, reason, source);
+      } finally {
+        if (reportBlocked) pi.events.emit("herdr:blocked", { active: false });
+      }
       if (ctx.signal?.aborted) return false;
       return !enabled || (!signal.aborted && choice === "Approve once");
     } finally {

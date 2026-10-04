@@ -741,6 +741,108 @@ describe("approval-mode extension", () => {
   });
 });
 
+describe("approval-mode Herdr blocked events", () => {
+  it("reports only the active TUI approval, not requests still queued", async () => {
+    const { pi, ctx } = await setup();
+    pi.events.emit.mockClear();
+    const opened = deferred<void>();
+    const firstChoice = deferred<string>();
+    const secondOpened = deferred<void>();
+    const secondChoice = deferred<string>();
+    ctx.ui.custom
+      .mockImplementationOnce(() => {
+        opened.resolve();
+        return firstChoice.promise;
+      })
+      .mockImplementationOnce(() => {
+        secondOpened.resolve();
+        return secondChoice.promise;
+      });
+    const first = parentRequest(pi, workerRequest());
+    await opened.promise;
+    const second = parentRequest(pi, workerRequest());
+    expect(pi.events.emit).toHaveBeenCalledTimes(1);
+    expect(pi.events.emit).toHaveBeenNthCalledWith(1, "herdr:blocked", {
+      active: true,
+      label: "Approval Mode",
+    });
+    firstChoice.resolve("Approve once");
+    expect(await first).toEqual({ approved: true });
+    await secondOpened.promise;
+    expect(pi.events.emit).toHaveBeenNthCalledWith(2, "herdr:blocked", { active: false });
+    expect(pi.events.emit).toHaveBeenNthCalledWith(3, "herdr:blocked", {
+      active: true,
+      label: "Approval Mode",
+    });
+    secondChoice.resolve("Block");
+    expect(await second).toEqual({ approved: false });
+    expect(pi.events.emit).toHaveBeenNthCalledWith(4, "herdr:blocked", { active: false });
+    expect(pi.events.emit).toHaveBeenCalledTimes(4);
+  });
+
+  it("clears blocked state and releases the approval queue after a dialog error", async () => {
+    const { pi, ctx } = await setup();
+    pi.events.emit.mockClear();
+    ctx.ui.custom.mockRejectedValueOnce(new Error("Dialog failed")).mockResolvedValueOnce("Block");
+    expect(await parentRequest(pi, workerRequest())).toEqual({ approved: false });
+    expect(pi.events.emit).toHaveBeenNthCalledWith(2, "herdr:blocked", { active: false });
+    expect(await parentRequest(pi, workerRequest())).toEqual({ approved: false });
+    expect(pi.events.emit).toHaveBeenNthCalledWith(3, "herdr:blocked", {
+      active: true,
+      label: "Approval Mode",
+    });
+    expect(pi.events.emit).toHaveBeenNthCalledWith(4, "herdr:blocked", { active: false });
+    expect(pi.events.emit).toHaveBeenCalledTimes(4);
+  });
+
+  it("clears blocked state when an active approval is cancelled", async () => {
+    const { pi, ctx } = await setup();
+    pi.events.emit.mockClear();
+    const opened = deferred<void>();
+    ctx.ui.custom.mockImplementation(() => {
+      opened.resolve();
+      return new Promise((resolve) => {
+        const factory = ctx.ui.custom.mock.calls.at(-1)?.[0];
+        if (!factory) throw new Error("Missing dialog factory");
+        factory({ requestRender: vi.fn() }, ctx.ui.theme, { matches: () => false }, resolve);
+      });
+    });
+    const controller = new AbortController();
+    const pending = parentRequest(pi, workerRequest(), controller.signal);
+    await opened.promise;
+    expect(pi.events.emit).toHaveBeenNthCalledWith(1, "herdr:blocked", {
+      active: true,
+      label: "Approval Mode",
+    });
+    controller.abort();
+    expect(await pending).toEqual({ approved: false });
+    expect(pi.events.emit).toHaveBeenNthCalledWith(2, "herdr:blocked", { active: false });
+    expect(pi.events.emit).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["rpc", "no-ui", "pre-aborted", "hard-deny", "known-safe"])(
+    "does not report blocked state for %s requests",
+    async (scenario) => {
+      const { pi, ctx, handler } = await setup();
+      pi.events.emit.mockClear();
+      if (scenario === "rpc") ctx.mode = "rpc";
+      if (scenario === "no-ui") ctx.hasUI = false;
+      if (scenario === "hard-deny" || scenario === "known-safe") {
+        await handler(
+          { toolName: "bash", input: { command: scenario === "hard-deny" ? "rm -rf /" : "pwd" } },
+          ctx,
+        );
+      } else {
+        const controller = new AbortController();
+        if (scenario === "pre-aborted") controller.abort();
+        await parentRequest(pi, workerRequest(), controller.signal);
+      }
+      expect(pi.events.emit).not.toHaveBeenCalledWith("herdr:blocked", expect.anything());
+      expect(ctx.ui.custom).not.toHaveBeenCalled();
+    },
+  );
+});
+
 // --- Helpers ---
 
 function deferred<T>() {
