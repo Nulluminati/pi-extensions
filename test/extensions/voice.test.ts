@@ -125,11 +125,23 @@ beforeEach(() => {
   vi.stubEnv("PI_SMALL_MODEL_THINKING", "minimal");
 });
 
+/** Every mkdtemp directory this suite creates; afterEach removes them. */
+const tempDirs: string[] = [];
+
+function tempDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  tempDirs.push(dir);
+  return dir;
+}
+
 afterEach(() => {
   vi.mocked(completeSimple).mockReset();
   vi.unstubAllEnvs();
   vi.useRealTimers();
   vi.mocked(isKittyProtocolActive).mockReturnValue(false);
+  // Test fixtures build stub model trees under /tmp; remove them so repeated
+  // runs do not accumulate thousands of leftover directories.
+  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
 describe("voice-extension", () => {
@@ -630,7 +642,7 @@ describe("voice-extension", () => {
 
     it("opens voice from the global terminal hook when the editor misses Space", async () => {
       vi.useFakeTimers();
-      const modelsDir = mkdtempSync(join(tmpdir(), "pi-voice-global-hold-"));
+      const modelsDir = tempDir("pi-voice-global-hold-");
       vi.stubEnv("PI_VOICE_MODELS", modelsDir);
       const mockPi = createMockPi();
       const ctx = createMockCommandContext();
@@ -658,7 +670,7 @@ describe("voice-extension", () => {
     it("keeps holding across NX release-press repeat pairs", async () => {
       vi.useFakeTimers();
       vi.mocked(isKittyProtocolActive).mockReturnValue(true);
-      const modelsDir = mkdtempSync(join(tmpdir(), "pi-voice-nx-hold-"));
+      const modelsDir = tempDir("pi-voice-nx-hold-");
       vi.stubEnv("PI_VOICE_MODELS", modelsDir);
       const mockPi = createMockPi();
       const ctx = createMockCommandContext();
@@ -725,7 +737,7 @@ describe("voice-extension", () => {
 
     it("does not reopen the overlay from a held Space after it closes", async () => {
       vi.useFakeTimers();
-      const modelsDir = mkdtempSync(join(tmpdir(), "pi-voice-holdreopen-"));
+      const modelsDir = tempDir("pi-voice-holdreopen-");
       vi.stubEnv("PI_VOICE_MODELS", modelsDir);
       const mockPi = createMockPi();
       const ctx = createMockCommandContext();
@@ -766,7 +778,7 @@ describe("voice-extension", () => {
     it("does not reopen the overlay during cooldown after a close in kitty mode", async () => {
       vi.useFakeTimers();
       vi.mocked(isKittyProtocolActive).mockReturnValue(true);
-      const modelsDir = mkdtempSync(join(tmpdir(), "pi-voice-reopen-kitty-"));
+      const modelsDir = tempDir("pi-voice-reopen-kitty-");
       vi.stubEnv("PI_VOICE_MODELS", modelsDir);
       const mockPi = createMockPi();
       const ctx = createMockCommandContext();
@@ -1045,7 +1057,7 @@ describe("voice-extension", () => {
     });
 
     it("accepts a downloaded Inflect model for speech", async () => {
-      const dir = mkdtempSync(join(tmpdir(), "pi-voice-inflect-"));
+      const dir = tempDir("pi-voice-inflect-");
       const modelDir = join(dir, "inflect-nano-v2-onnx");
       mkdirSync(modelDir);
       writeFileSync(join(modelDir, "duration.onnx"), "stub");
@@ -1068,7 +1080,7 @@ describe("voice-extension", () => {
     });
 
     it("accepts a downloaded Supertonic model for speech", async () => {
-      const dir = mkdtempSync(join(tmpdir(), "pi-voice-supertonic-"));
+      const dir = tempDir("pi-voice-supertonic-");
       const modelDir = join(dir, "sherpa-onnx-supertonic-3-tts-int8-2026-05-11");
       mkdirSync(modelDir);
       for (const file of [
@@ -1116,7 +1128,7 @@ describe("voice-extension", () => {
         { type: "message", message: { role: "assistant", content: "Answer" } },
       ]);
       await runVoiceSpeak("", ctx, {
-        modelsDir: mkdtempSync(join(tmpdir(), "pi-voice-no-tts-")),
+        modelsDir: tempDir("pi-voice-no-tts-"),
         summarize: vi.fn(),
         speak: vi.fn(),
         speakerId: 0,
@@ -1307,13 +1319,13 @@ describe("voice-extension", () => {
     });
 
     it("modelIsDownloaded is false when files are missing", () => {
-      const dir = mkdtempSync(join(tmpdir(), "pi-voice-empty-"));
+      const dir = tempDir("pi-voice-empty-");
       const model = getModel("moonshine-base-int8")!;
       expect(modelIsDownloaded(dir, model)).toBe(false);
     });
 
     it("modelIsDownloaded is true when every required file exists", () => {
-      const dir = mkdtempSync(join(tmpdir(), "pi-voice-full-"));
+      const dir = tempDir("pi-voice-full-");
       const model = getModel("whisper-tiny-en-int8")!;
       mkdirSync(join(dir, model.dirName), { recursive: true });
       for (const file of model.files) {
@@ -1435,7 +1447,7 @@ describe("voice-extension", () => {
       expect(capped.fake.vadConfigs).toEqual([]); // no VAD model in dir, so none built
 
       const sherpa = chunkingFakeSherpa("text");
-      const dir = mkdtempSync(join(tmpdir(), "pi-voice-vad-"));
+      const dir = tempDir("pi-voice-vad-");
       writeFileSync(join(dir, "silero_vad.onnx"), "stub");
       transcribeFile(sherpa.asSherpa(), model, dir, "/audio.wav");
       expect(sherpa.fake.vadConfigs).toEqual([MAX_SEC]);
@@ -1462,19 +1474,19 @@ describe("voice-extension", () => {
 
   describe("speaker persistence", () => {
     it("restores a numeric Supertonic speaker index within range", () => {
-      const configPath = join(mkdtempSync(join(tmpdir(), "pi-voice-speaker-")), "config.json");
+      const configPath = join(tempDir("pi-voice-speaker-"), "config.json");
       writeFileSync(configPath, JSON.stringify({ ttsModel: "supertonic-3-int8", voice: 3 }));
       expect(loadActiveSpeakerId(configPath)).toBe(3);
     });
 
     it("clamps an out-of-range numeric speaker index to the first voice", () => {
-      const configPath = join(mkdtempSync(join(tmpdir(), "pi-voice-speaker-")), "config.json");
+      const configPath = join(tempDir("pi-voice-speaker-"), "config.json");
       writeFileSync(configPath, JSON.stringify({ ttsModel: "supertonic-3-int8", voice: 42 }));
       expect(loadActiveSpeakerId(configPath)).toBe(0);
     });
 
     it("still restores named Kitten voices", () => {
-      const configPath = join(mkdtempSync(join(tmpdir(), "pi-voice-speaker-")), "config.json");
+      const configPath = join(tempDir("pi-voice-speaker-"), "config.json");
       writeFileSync(
         configPath,
         JSON.stringify({ ttsModel: "kitten-nano-en-v0_8-int8", voice: "expr-voice-4-f" }),
@@ -1485,11 +1497,7 @@ describe("voice-extension", () => {
 
   describe("voice config writes", () => {
     it("writes config atomically through the public save path", async () => {
-      const configPath = join(
-        mkdtempSync(join(tmpdir(), "pi-voice-config-")),
-        "nested",
-        "config.json",
-      );
+      const configPath = join(tempDir("pi-voice-config-"), "nested", "config.json");
 
       await saveActiveVoice(configPath, "expr-voice-4-f");
 
@@ -1641,7 +1649,7 @@ describe("voice-extension", () => {
     }
 
     it("runs the offline path for a whisper model", () => {
-      const dir = mkdtempSync(join(tmpdir(), "pi-voice-offline-"));
+      const dir = tempDir("pi-voice-offline-");
       const model = getModel("whisper-tiny-en-int8")!;
       mkdirSync(join(dir, model.dirName), { recursive: true });
       for (const file of model.files) writeFileSync(join(dir, model.dirName, file), "stub");
@@ -1651,7 +1659,7 @@ describe("voice-extension", () => {
     });
 
     it("throws on empty audio", () => {
-      const dir = mkdtempSync(join(tmpdir(), "pi-voice-empty-audio-"));
+      const dir = tempDir("pi-voice-empty-audio-");
       const model = getModel("moonshine-base-int8")!;
       mkdirSync(join(dir, model.dirName), { recursive: true });
       for (const file of model.files) writeFileSync(join(dir, model.dirName, file), "stub");
@@ -1828,7 +1836,7 @@ describe("voice-extension", () => {
     });
 
     it("rejects a missing model and restores the previous selection", async () => {
-      const modelsDir = mkdtempSync(join(tmpdir(), "pi-voice-missing-"));
+      const modelsDir = tempDir("pi-voice-missing-");
       const ctx = createMockCommandContext();
       const onModelSelect = vi.fn();
       let component:
@@ -2059,7 +2067,7 @@ describe("voice-extension", () => {
 
   describe("handler wiring", () => {
     it("/voice opens the dictation overlay like holding Space", async () => {
-      const modelsDir = mkdtempSync(join(tmpdir(), "pi-voice-empty-models-"));
+      const modelsDir = tempDir("pi-voice-empty-models-");
       vi.stubEnv("PI_VOICE_MODELS", modelsDir);
       const mockPi = createMockPi();
       await voiceExtension(mockPi);
@@ -2075,7 +2083,7 @@ describe("voice-extension", () => {
     });
 
     it("/voice:settings persists dictation, speech, and Kitten voice settings", async () => {
-      const configPath = join(mkdtempSync(join(tmpdir(), "pi-voice-config-")), "config.json");
+      const configPath = join(tempDir("pi-voice-config-"), "config.json");
       const modelsDir = createDownloadedVoiceModels(false);
       vi.stubEnv("PI_VOICE_CONFIG", configPath);
       vi.stubEnv("PI_VOICE_MODELS", modelsDir);
@@ -2142,10 +2150,10 @@ describe("voice-extension", () => {
         }),
       ],
     ])("/voice:settings uses defaults for %s", async (_case, contents) => {
-      const configPath = join(mkdtempSync(join(tmpdir(), "pi-voice-config-")), "config.json");
+      const configPath = join(tempDir("pi-voice-config-"), "config.json");
       writeFileSync(configPath, contents);
       vi.stubEnv("PI_VOICE_CONFIG", configPath);
-      vi.stubEnv("PI_VOICE_MODELS", mkdtempSync(join(tmpdir(), "pi-voice-empty-models-")));
+      vi.stubEnv("PI_VOICE_MODELS", tempDir("pi-voice-empty-models-"));
       const mockPi = createMockPi();
       await voiceExtension(mockPi);
       const handler = getCommandHandler(mockPi, "voice:settings");
@@ -2161,7 +2169,7 @@ describe("voice-extension", () => {
     });
 
     it("/voice:settings reports config write failures and restores the displayed value", async () => {
-      const configDir = mkdtempSync(join(tmpdir(), "pi-voice-config-"));
+      const configDir = tempDir("pi-voice-config-");
       const blockingFile = join(configDir, "not-a-directory");
       writeFileSync(blockingFile, "blocked");
       vi.stubEnv("PI_VOICE_CONFIG", join(blockingFile, "config.json"));
@@ -2200,10 +2208,7 @@ describe("voice-extension", () => {
       sherpaHarness.createAsync.mockClear();
       const modelsDir = createDownloadedVoiceModels();
       vi.stubEnv("PI_VOICE_MODELS", modelsDir);
-      vi.stubEnv(
-        "PI_VOICE_CONFIG",
-        join(mkdtempSync(join(tmpdir(), "pi-voice-config-")), "config.json"),
-      );
+      vi.stubEnv("PI_VOICE_CONFIG", join(tempDir("pi-voice-config-"), "config.json"));
       const mockPi = createMockPi();
       await voiceExtension(mockPi);
       const ctx = createMockCommandContext();
@@ -2334,7 +2339,7 @@ describe("voice-extension", () => {
 });
 
 function createDownloadedTtsModel(): string {
-  const dir = mkdtempSync(join(tmpdir(), "pi-voice-tts-"));
+  const dir = tempDir("pi-voice-tts-");
   const model = TTS_MODELS[0];
   if (!model) throw new Error("Missing test TTS model definition");
   mkdirSync(join(dir, model.dirName, "espeak-ng-data"), { recursive: true });
@@ -2346,7 +2351,7 @@ function createDownloadedTtsModel(): string {
 }
 
 function createDownloadedVoiceModels(includeDefaultDictationModel = true): string {
-  const dir = mkdtempSync(join(tmpdir(), "pi-voice-models-"));
+  const dir = tempDir("pi-voice-models-");
   for (const model of [...MODELS, ...TTS_MODELS]) {
     if (!includeDefaultDictationModel && model.id === "moonshine-v2-base-en") continue;
     mkdirSync(join(dir, model.dirName), { recursive: true });
