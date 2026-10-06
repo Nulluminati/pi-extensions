@@ -13,6 +13,7 @@ export type MetadataTokens = Record<string, string | null>;
 
 export function emptyTokens(): MetadataTokens {
   return {
+    pi_session_name: null,
     pi_mission: null,
     pi_mission_status: null,
     pi_workers: null,
@@ -45,6 +46,11 @@ function text(value: unknown): string | null {
     .replace(/\s+/g, " ")
     .trim();
   return normalized ? [...normalized].slice(0, 80).join("") : null;
+}
+
+export function sessionNameToken(name: unknown): string | null {
+  if (typeof name !== "string") return null;
+  return text(name.replace(/\s+/gu, " ").replace(/[\p{Cc}\p{Cf}]/gu, ""));
 }
 
 export function readWorkerCost(data: unknown): number | undefined {

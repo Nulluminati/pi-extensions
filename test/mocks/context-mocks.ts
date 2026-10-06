@@ -77,6 +77,7 @@ export function createMockContext(): DeepMocked<ExtensionContext> {
       getSessionFile: vi.fn(() => undefined),
     },
     modelRegistry: {
+      streamSimple: vi.fn(),
       getAll: vi.fn(() => []),
       getAvailable: vi.fn(() => []),
       findOfType: vi.fn(() => undefined),

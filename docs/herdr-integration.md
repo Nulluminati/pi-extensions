@@ -1,6 +1,6 @@
 # Herdr integration plan
 
-Section 2 is complete. Sections 3 and 4 describe proposed work.
+The status adapter, session names, and read-only worker monitors are complete. Interactive worker launches and section 4 remain proposed work.
 
 Use Herdr for terminal layout and visibility. Keep Pi and this repository responsible for agent behavior and worker safety.
 
@@ -22,11 +22,12 @@ The adapter subscribes to events that existing extensions publish. It sends disp
 | `workers:state` | Running worker count, worker cost, and worker tokens |
 | `todos:changed` | Completed and total tasks |
 | `goal:state-change` | Goal iteration and limit |
-| `messenger:state` | Session name and unread messages |
+| `messenger:state` | Messenger name and unread messages |
+| `session_start`, `session_info_changed` | Saved Pi session name |
 
 Herdr supports [pane and workspace metadata](https://herdr.dev/docs/socket-api/#agent-state-reporting). These values can appear beside agents without changing their activity state.
 
-Keep the [official Pi integration](https://herdr.dev/docs/integrations/#pi) responsible for activity state and session restore. The adapter publishes display metadata only.
+Keep the [official Pi integration](https://herdr.dev/docs/integrations/#pi) responsible for activity state and session restore. The adapter publishes display metadata and mirrors Pi session names onto their owning panes.
 
 The adapter does nothing outside an interactive Herdr pane. It does not report headless workers as occupants of their parent's pane.
 
@@ -35,6 +36,26 @@ Metadata expiry and sequence numbers prevent stale or out-of-order display updat
 The `pi_cost` token combines active-branch session cost with worker cost. The `pi_worker_cost` token remains worker-only.
 
 The adapter adds unrounded values before formatting the combined total. It uses the same session accounting as the status bar.
+
+### Session names: complete
+
+The [session-name extension](../extensions/session-name/README.md) names all unnamed interactive Pi sessions, including sessions outside Herdr.
+
+Each session starts with `Pi · project · short-id`. The global small model supplies a topic name after the first user message.
+
+Naming runs beside the main turn. Existing and manual names remain unchanged. Session replacement and manual rename cancel pending work.
+
+The Herdr adapter mirrors startup names and native `session_info_changed` events. It resolves moved pane aliases before each change.
+
+Only the owning pane changes. Parent tabs, workspaces, and the dedicated Workers tab keep their labels.
+
+The `pi_session_name` metadata token lets optional Agents sidebar rows display the saved Pi name. It follows automatic and manual name changes.
+
+Empty names and shutdown clear the token. The adapter limits it to 80 Unicode code points and removes control characters.
+
+See the [optional sidebar row](../extensions/herdr/README.md#session-names). The extension does not change Herdr configuration.
+
+The installed Pi Software Development Kit (SDK) and Herdr passed a live test for automatic names, manual names, persistent ownership, and unchanged conversation messages.
 
 ### Blocked dialogs: complete
 
@@ -69,9 +90,11 @@ The [workers extension](../extensions/workers/README.md) maintains these control
 
 Keep these controls in the existing runner.
 
-### Start with read-only monitor panes
+### Read-only monitor panes: complete
 
-Add Herdr panes that display existing worker records and event files:
+The [Herdr extension](../extensions/herdr/README.md) opens one dedicated Workers tab per Herdr workspace. Each worker gets a separate read-only transcript pane.
+
+The panes read existing worker records and event files:
 
 ```text
 .pi/workers/records/<id>.json
@@ -79,20 +102,60 @@ Add Herdr panes that display existing worker records and event files:
 .pi/workers/streams/<id>.stderr.log
 ```
 
-The monitor would show worker status, recent activity, and bounded output. It would not launch workers or change their records.
+Each transcript shows captured task text, messages, recorded thinking, and complete tool text. It also shows reports and errors.
 
-The existing runner would continue to launch, supervise, and finalize every worker. The parent would still inspect reports and collect patches through the `workers` tool.
+The viewer does not launch workers or change their records. Hidden provider reasoning and output that Pi omitted remain unavailable.
 
-Implement the monitor in this order:
+The existing runner continues to launch, supervise, and finalize every worker. The parent still inspects reports and collects patches through the `workers` tool.
 
-1. Add a read-only viewer for worker records and event files.
-2. Open the viewer in a Herdr pane without changing keyboard focus.
-3. Track the returned pane identifier so cleanup affects only owned panes.
-4. Verify that closing a monitor leaves the worker running.
+The extension uses this monitor behavior:
 
-Monitor output must remain display-only. Do not inject it automatically into the parent conversation.
+1. Open one dedicated Workers tab automatically when the first monitored worker appears in a workspace.
+2. Add one transcript pane per project path and worker identifier without changing keyboard focus.
+3. Close successfully completed worker panes automatically. Keep failed, timed-out, and cancelled worker panes for inspection.
+4. Close validated owned monitor panes when the last contributing Pi session ends.
 
-Tests must cover missing files, partial event records, completed workers, and pane cleanup. Verify that monitor operations do not change worker artifacts.
+Herdr removes the empty Workers tab. Cleanup preserves any user-added panes and their tab.
+
+The Workers tab belongs to the contributor's workspace. Other tabs and project directories share it. Matching project paths and identifiers share a pane.
+
+At startup, each session registers its running workers only. Historical finished workers remain excluded. Separate workspaces and Herdr servers keep separate panes.
+
+Closing one worker pane leaves the worker running. The extension suppresses that worker's pane while other owned panes remain.
+
+Manually closing all owned worker panes suppresses new monitors until every contributor leaves. Cleanup preserves operator-added panes.
+
+Automatic completion cleanup does not suppress later workers. It preserves worker records, reports, and patches for the existing `workers` tool.
+
+Monitor output remains display-only. The extension never injects it into the parent conversation.
+
+The viewer reads bounded record, event, and standard error data once per second. It removes terminal control sequences before display.
+
+History uses 512-kibibyte windows. A single event or worker record has an 8-mebibyte safety limit. The viewer reports oversized or unavailable data.
+
+Earlier history remains available. Arrow keys scroll; Page keys load adjacent history. Home shows the first page; End resumes live follow.
+
+Press `e` to switch to standard error history. Press `q` to exit only the viewer.
+
+Pi's Markdown renderer and scrolling component format the transcript. The worker runner remains unchanged.
+
+Parents share registration files under the Pi agent directory. A file lock protects pane creation and combined-list updates across processes.
+
+The list contains project paths, worker identifiers, and parent process identities. It contains no worker state or output. Worker artifacts remain authoritative.
+
+Dead parents release registration. Expired heartbeats hide output without releasing a live parent's ownership. The last contributor removes the list and pane record.
+
+Tests cover full event replay, historical paging, live writes, terminal controls, and unchanged worker artifacts.
+
+Ownership tests cover workspace isolation, concurrent starts, shared shutdown, individual closure, legacy migration, and tab and terminal identity checks.
+
+A live test used separate processes and project directories in an isolated Herdr server. It verified one named Workers tab per workspace and unchanged focus.
+
+Live tests also verified dead-parent recovery and worker survival after monitor closure. Automatic successful-completion cleanup leaves reports available in worker artifacts.
+
+Tab cleanup tests verified removal of empty tabs and preservation of user-added panes.
+
+Monitor panes require Linux or macOS with a compatible shell. Interactive worker launches remain deferred.
 
 ### Defer interactive worker launches
 
@@ -152,6 +215,6 @@ Tests must cover project-path selection, command arguments, pane ownership, and 
 
 ## First implementation scope
 
-Status metadata and blocked-dialog events are complete. Next, add read-only worker monitors. Keep worker execution unchanged.
+Status metadata, blocked-dialog events, and read-only worker monitors are complete. Worker execution remains unchanged.
 
-Next: define the worker viewer's command and pane lifecycle.
+Next: define section 4's first action, which opens Pi in the selected project.

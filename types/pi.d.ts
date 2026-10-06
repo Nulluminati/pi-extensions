@@ -344,6 +344,7 @@ declare module "pi" {
   }
 
   export interface ModelRegistry {
+    streamSimple(model: Model<any>, context: any, options?: any): { result(): Promise<any> };
     getAll(): Model<any>[];
     getAvailable(): Model<any>[];
     getApiKeyAndHeaders(model: any): Promise<{
@@ -488,6 +489,7 @@ declare module "pi" {
   export interface ExtensionEventMap {
     resources_discover: { type: "resources_discover"; cwd: string; reason: "startup" | "reload" };
     session_start: { type: "session_start"; reason: string; previousSessionFile?: string };
+    session_info_changed: { type: "session_info_changed"; name: string | undefined };
     session_before_switch: {
       type: "session_before_switch";
       reason: "new" | "resume";
@@ -823,6 +825,23 @@ declare module "@earendil-works/pi-tui" {
 
   export class Text {
     constructor(text: string, x?: number, y?: number);
+  }
+
+  export class ScrollView extends Container {
+    constructor(
+      component: { render(width: number): string[]; invalidate(): void },
+      options?: {
+        follow?: "none" | "end";
+        scrollbar?: "hidden" | "auto" | "always";
+      },
+    );
+    readonly scrollTop: number;
+    readonly isFollowingEnd: boolean;
+    scrollBy(lines: number): number;
+    scrollTo(scrollTop: number, options?: { disableFollow?: boolean }): void;
+    scrollToStart(): void;
+    scrollToEnd(): void;
+    updateLayout(contentHeight: number, viewportHeight: number, requestRender: () => void): void;
   }
 
   export type MarkdownTheme = Record<

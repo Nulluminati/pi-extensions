@@ -221,6 +221,7 @@ function mockMatchesKey(data: string, keyId: string): boolean {
 
 vi.mock("@earendil-works/pi-tui", async (importOriginal) => ({
   Markdown: (await importOriginal<typeof import("@earendil-works/pi-tui")>()).Markdown,
+  ScrollView: (await importOriginal<typeof import("@earendil-works/pi-tui")>()).ScrollView,
   fuzzyFilter: <T>(items: T[], query: string, getText: (item: T) => string): T[] => {
     const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
     return items.filter((item) => {
