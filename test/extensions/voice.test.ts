@@ -120,6 +120,7 @@ vi.mock("../../extensions/voice/src/native.ts", () => ({
 }));
 
 beforeEach(() => {
+  vi.stubEnv("HERDR_ENV", "");
   vi.stubEnv("PI_SMALL_MODEL", "test-provider/test-model");
   vi.stubEnv("PI_SMALL_MODEL_THINKING", "minimal");
 });
@@ -147,6 +148,68 @@ describe("voice-extension", () => {
   });
 
   describe("hold-to-voice editor", () => {
+    it("inserts Space in Herdr when Kitty is active but no key release arrives", () => {
+      vi.useFakeTimers();
+      vi.stubEnv("HERDR_ENV", "1");
+      vi.mocked(isKittyProtocolActive).mockReturnValue(true);
+      const handleInput = vi.fn();
+      const onHold = vi.fn();
+      const editor = addHoldToVoice({ handleInput }, onHold, {
+        isSpace: (data) => data === " ",
+        isRelease: () => false,
+        isRepeat: () => false,
+      });
+      editor.handleInput("a");
+      editor.handleInput(" ");
+      editor.handleInput("b");
+      vi.advanceTimersByTime(1100);
+      expect(handleInput).toHaveBeenNthCalledWith(1, "a");
+      expect(handleInput).toHaveBeenNthCalledWith(2, " ");
+      expect(handleInput).toHaveBeenNthCalledWith(3, "b");
+      expect(onHold).not.toHaveBeenCalled();
+    });
+
+    it("ignores optional Space releases in Herdr's repeat-based hold mode", () => {
+      vi.useFakeTimers();
+      vi.stubEnv("HERDR_ENV", "1");
+      vi.mocked(isKittyProtocolActive).mockReturnValue(true);
+      const handleInput = vi.fn();
+      const onHold = vi.fn();
+      const editor = addHoldToVoice({ handleInput }, onHold, {
+        isSpace: (data) => data === " " || data === "release",
+        isRelease: (data) => data === "release",
+        isRepeat: () => false,
+      });
+      editor.handleInput(" ");
+      editor.handleInput("release");
+      editor.handleInput("b");
+      vi.advanceTimersByTime(1100);
+      expect(handleInput).toHaveBeenCalledTimes(2);
+      expect(handleInput).toHaveBeenNthCalledWith(1, " ");
+      expect(handleInput).toHaveBeenNthCalledWith(2, "b");
+      expect(onHold).not.toHaveBeenCalled();
+    });
+
+    it("keeps repeat-based hold-to-dictate working inside Herdr with Kitty active", () => {
+      vi.useFakeTimers();
+      vi.stubEnv("HERDR_ENV", "1");
+      vi.mocked(isKittyProtocolActive).mockReturnValue(true);
+      const handleInput = vi.fn();
+      const onHold = vi.fn();
+      const editor = addHoldToVoice({ handleInput }, onHold, {
+        isSpace: (data) => data === " ",
+        isRelease: () => false,
+        isRepeat: () => false,
+      });
+      editor.handleInput(" ");
+      vi.advanceTimersByTime(300);
+      editor.handleInput(" ");
+      vi.advanceTimersByTime(700);
+      expect(onHold).toHaveBeenCalledTimes(1);
+      // The burst's first Space typed immediately and the trigger removed it.
+      expect(handleInput.mock.calls.map((c) => c[0])).toEqual([" ", "\x7f"]);
+    });
+
     it("opens voice after holding Space for one second", () => {
       vi.useFakeTimers();
       const handleInput = vi.fn();
@@ -202,7 +265,7 @@ describe("voice-extension", () => {
       expect(handleInput).toHaveBeenCalledWith(" ");
     });
 
-    it("commits a single Space shortly after press when key-release reporting is unavailable", () => {
+    it("types a lone Space immediately when key-release reporting is unavailable", () => {
       vi.useFakeTimers();
       const handleInput = vi.fn();
       const editor = addHoldToVoice({ handleInput }, vi.fn(), {
@@ -213,12 +276,9 @@ describe("voice-extension", () => {
       });
 
       editor.handleInput(" ");
-      expect(handleInput).not.toHaveBeenCalled(); // buffered: a hold must not type text
-      vi.advanceTimersByTime(399);
-      expect(handleInput).not.toHaveBeenCalled();
-      vi.advanceTimersByTime(1);
-
-      expect(handleInput).toHaveBeenCalledWith(" ");
+      expect(handleInput).toHaveBeenCalledWith(" "); // typed at once: no typing lag
+      vi.advanceTimersByTime(1000);
+      expect(handleInput).toHaveBeenCalledTimes(1);
     });
 
     it("opens voice from Space auto-repeat without key-release reporting", () => {
@@ -413,7 +473,7 @@ describe("voice-extension", () => {
       expect(onHold).not.toHaveBeenCalled();
     });
 
-    it("fires a hold without inserting or deleting editor text", () => {
+    it("types the first Space at once and removes it when the hold fires", () => {
       vi.useFakeTimers();
       const handleInput = vi.fn();
       const onHold = vi.fn();
@@ -432,8 +492,76 @@ describe("voice-extension", () => {
       vi.advanceTimersByTime(800);
 
       expect(onHold).toHaveBeenCalledTimes(1);
-      expect(handleInput).not.toHaveBeenCalledWith(" ");
-      expect(handleInput).not.toHaveBeenCalledWith("\x7f");
+      // The burst's first Space was typed immediately, so the trigger removes it.
+      expect(handleInput.mock.calls.map((c) => c[0])).toEqual([" ", "\x7f"]);
+    });
+
+    it("keeps the typed Space when the hold does not fire because the key was already released", () => {
+      vi.useFakeTimers();
+      let keyDown = true;
+      const handleInput = vi.fn();
+      const onHold = vi.fn();
+      const editor = addHoldToVoice({ handleInput }, onHold, {
+        isSupported: () => false,
+        isSpace: (data) => data === " ",
+        isRelease: () => false,
+        isRepeat: () => false,
+        isKeyDown: () => keyDown,
+      });
+
+      editor.handleInput(" ");
+      vi.advanceTimersByTime(100);
+      editor.handleInput(" ");
+      keyDown = false;
+      vi.advanceTimersByTime(1000);
+
+      expect(onHold).not.toHaveBeenCalled();
+      expect(handleInput).toHaveBeenCalledTimes(1);
+      expect(handleInput).toHaveBeenCalledWith(" ");
+    });
+
+    it("removes the burst Space once when the terminal hook opens voice first", () => {
+      vi.useFakeTimers();
+      const handleInput = vi.fn();
+      const onHold = vi.fn();
+      const editor = addHoldToVoice({ handleInput }, onHold, {
+        isSupported: () => false,
+        isSpace: (data) => data === " ",
+        isRelease: () => false,
+        isRepeat: () => false,
+      });
+
+      editor.handleInput(" ");
+      vi.advanceTimersByTime(100);
+      editor.handleInput(" ");
+      editor.purgeHoldSpaces?.();
+      editor.purgeHoldSpaces?.(); // idempotent: only one removal
+      vi.advanceTimersByTime(1000);
+
+      expect(onHold).toHaveBeenCalledTimes(1);
+      expect(handleInput.mock.calls.map((c) => c[0])).toEqual([" ", "\x7f"]);
+    });
+
+    it("starts a fresh Space burst after the repeat window passes", () => {
+      vi.useFakeTimers();
+      const handleInput = vi.fn();
+      const onHold = vi.fn();
+      const editor = addHoldToVoice({ handleInput }, onHold, {
+        isSupported: () => false,
+        isSpace: (data) => data === " ",
+        isRelease: () => false,
+        isRepeat: () => false,
+      });
+
+      editor.handleInput(" ");
+      vi.advanceTimersByTime(500);
+      editor.handleInput(" ");
+      vi.advanceTimersByTime(1000);
+
+      expect(handleInput).toHaveBeenCalledTimes(2);
+      expect(handleInput).toHaveBeenNthCalledWith(1, " ");
+      expect(handleInput).toHaveBeenNthCalledWith(2, " ");
+      expect(onHold).not.toHaveBeenCalled();
     });
   });
 
@@ -554,6 +682,29 @@ describe("voice-extension", () => {
         expect.stringContaining("Open /voice:settings"),
         "error",
       );
+    });
+
+    it("does not open voice from a lone Herdr Space even when Kitty is active", async () => {
+      vi.useFakeTimers();
+      vi.stubEnv("HERDR_ENV", "1");
+      vi.mocked(isKittyProtocolActive).mockReturnValue(true);
+      const mockPi = createMockPi();
+      const ctx = createMockCommandContext();
+      await voiceExtension(mockPi);
+      await getEventHandler(mockPi, "session_start")(
+        { type: "session_start", reason: "startup" },
+        ctx,
+      );
+      const inputHandler = ctx.ui.onTerminalInput.mock.calls[0]?.[0];
+      if (!inputHandler) throw new Error("Terminal input handler was not installed");
+      inputHandler(" ");
+      vi.advanceTimersByTime(1100);
+      expect(ctx.ui.notify).not.toHaveBeenCalled();
+      await getEventHandler(mockPi, "session_shutdown")(
+        { type: "session_shutdown", reason: "exit" },
+        ctx,
+      );
+      expect(vi.getTimerCount()).toBe(0);
     });
 
     it("does not open voice after a single Space with no repeat", async () => {

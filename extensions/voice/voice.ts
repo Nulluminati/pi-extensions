@@ -21,13 +21,7 @@
  */
 
 import { CustomEditor } from "@earendil-works/pi-coding-agent";
-import {
-  isKeyRelease,
-  isKeyRepeat,
-  isKittyProtocolActive,
-  Key,
-  matchesKey,
-} from "@earendil-works/pi-tui";
+import { isKeyRelease, isKeyRepeat, Key, matchesKey } from "@earendil-works/pi-tui";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "pi";
 import {
   type EditorFactory,
@@ -52,7 +46,7 @@ import {
   HOLD_TO_VOICE_MS,
   KITTEN_VOICES,
 } from "./src/constants.ts";
-import { addHoldToVoice } from "./src/hold.ts";
+import { addHoldToVoice, supportsKeyReleaseReporting } from "./src/hold.ts";
 import type { InflectTtsEngine as InflectTtsEngineType } from "./src/inflect.ts";
 import { InflectTtsEngine } from "./src/inflect.ts";
 import { buildTtsConfig, modelDirPath, TTS_MODELS } from "./src/models.ts";
@@ -137,6 +131,10 @@ export default async function voiceExtension(pi: ExtensionAPI) {
   let terminalReleaseTimer: ReturnType<typeof setTimeout> | null = null;
   let terminalRepeatCount = 0;
   let voiceOpen = false;
+  // Removes the Space typed by the hold-editor burst (see addHoldToVoice).
+  // The terminal-level trigger calls it before opening the overlay so the
+  // editor is left clean no matter which trigger fires first.
+  let purgeHoldSpaces: (() => void) | null = null;
   // True once a Space hold has opened the overlay, until the key is released.
   // Prevents the same hold from reopening the overlay after it closes. The
   // terminal input listener (which sees every keystroke) clears it on release.
@@ -204,7 +202,8 @@ export default async function voiceExtension(pi: ExtensionAPI) {
       return;
     }
     resetTerminalRepeat();
-    if (!isKittyProtocolActive()) spaceConsumed = true;
+    purgeHoldSpaces?.();
+    if (!supportsKeyReleaseReporting()) spaceConsumed = true;
     openVoice(ctx);
   };
 
@@ -214,7 +213,7 @@ export default async function voiceExtension(pi: ExtensionAPI) {
       terminalHoldTimer = null;
       // In kitty mode a release is observable even when the editor missed it;
       // don't open the overlay from a key that was already released.
-      if (isKittyProtocolActive() && !spaceDown) {
+      if (supportsKeyReleaseReporting() && !spaceDown) {
         resetTerminalRepeat();
         return;
       }
@@ -229,7 +228,8 @@ export default async function voiceExtension(pi: ExtensionAPI) {
       const space = data === " " || matchesKey(data, Key.space);
       const release = isKeyRelease(data);
       const repeat = isKeyRepeat(data);
-      const kitty = isKittyProtocolActive();
+      const kitty = supportsKeyReleaseReporting();
+      if (!kitty && release) return;
 
       // This listener fires for every keystroke regardless of focus, so it is
       // the only handler that can observe Space release while the overlay is
@@ -321,10 +321,10 @@ export default async function voiceExtension(pi: ExtensionAPI) {
             theme as ConstructorParameters<typeof CustomEditor>[1],
             keybindings as ConstructorParameters<typeof CustomEditor>[2],
           );
-        return addHoldToVoice(
+        const wrapped = addHoldToVoice(
           editor,
           () => {
-            if (!isKittyProtocolActive()) spaceConsumed = true;
+            if (!supportsKeyReleaseReporting()) spaceConsumed = true;
             openVoice(ctx);
           },
           {
@@ -333,6 +333,8 @@ export default async function voiceExtension(pi: ExtensionAPI) {
             isKeyDown: () => spaceDown,
           },
         );
+        purgeHoldSpaces = () => wrapped.purgeHoldSpaces?.();
+        return wrapped;
       },
     );
     ctx.ui.setEditorComponent(holdEditorFactory);
@@ -359,6 +361,7 @@ export default async function voiceExtension(pi: ExtensionAPI) {
     spaceConsumed = false;
     spaceDown = false;
     cooldownUntil = 0;
+    purgeHoldSpaces = null;
     resetTerminalRepeat();
     terminalInputUnsubscribe?.();
     terminalInputUnsubscribe = null;

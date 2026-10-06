@@ -114,7 +114,9 @@ A missing model stays visible but cannot be selected. Download it with the comma
 
 Hold Space for one second to dictate. A short Space press still inserts a normal space in the editor. `/voice` opens the same overlay directly.
 
-Hold detection errs on the side of typing: typing any other key cancels an armed hold, a hold only fires while Space is still physically held, and after the overlay closes a 1.5 second cooldown keeps Space inserting normally so the key press that just closed the panel cannot reopen it. In terminals without key-release reporting, a lone Space is committed after a short buffering delay to tell a tap from a hold without ever writing hold text into the editor.
+Inside Herdr, hold detection uses Space auto-repeat. Herdr can report Kitty protocol support even when its outer terminal sends no key-release events. A Space press types immediately, so normal typing never lags. The extension ignores optional release events in this mode.
+
+Hold detection errs on the side of typing: typing any other key cancels an armed hold, a hold only fires while Space is still physically held, and after the overlay closes a 1.5 second cooldown keeps Space inserting normally so the key press that just closed the panel cannot reopen it. In terminals without key-release reporting, a repeat that follows a Space within 400 milliseconds marks the press as a hold. The hold removes the one Space it typed before it opens the overlay, so dictation never leaves hold text behind.
 
 The overlay shows the input level, elapsed recording time, and a partial transcript. Use:
 

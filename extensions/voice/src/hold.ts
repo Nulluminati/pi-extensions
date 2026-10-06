@@ -9,16 +9,21 @@ import {
   HOLD_REPEAT_GAP_MS,
   HOLD_REPEAT_MIN_EVENTS,
   HOLD_TO_VOICE_MS,
-  SPACE_COMMIT_DELAY_MS,
+  SPACE_REPEAT_WINDOW_MS,
 } from "./constants.ts";
+
+/** Herdr's child protocol can report Kitty support without upstream key releases. */
+export function supportsKeyReleaseReporting(): boolean {
+  return process.env.HERDR_ENV !== "1" && isKittyProtocolActive();
+}
 
 export function addHoldToVoice<T extends HoldToVoiceEditor>(
   editor: T,
   onHold: () => void,
   deps: HoldToVoiceDeps = {},
-): T {
+): T & { purgeHoldSpaces?: () => void } {
   const {
-    isSupported = isKittyProtocolActive,
+    isSupported = supportsKeyReleaseReporting,
     isSpace = (data: string) => data === " " || matchesKey(data, Key.space),
     isRelease = isKeyRelease,
     isRepeat = isKeyRepeat,
@@ -30,12 +35,13 @@ export function addHoldToVoice<T extends HoldToVoiceEditor>(
   const originalDispose = editor.dispose?.bind(editor);
   let holdTimer: ReturnType<typeof setTimeout> | null = null;
   let repeatGapTimer: ReturnType<typeof setTimeout> | null = null;
-  // Legacy mode (no key-release reporting): Space events are buffered instead
-  // of typed immediately, so a hold never puts text into the editor and a
-  // trigger never needs to delete text. A lone Space is committed after
-  // SPACE_COMMIT_DELAY_MS; a repeat arriving within that window marks a hold.
+  // Legacy mode (no key-release reporting): the first Space of a burst types
+  // immediately so normal typing never lags. A repeat arriving within
+  // SPACE_REPEAT_WINDOW_MS is a hold candidate: it is buffered instead of
+  // typed, and enough buffered repeats arm the hold trigger, which then
+  // removes the burst's typed Space before opening the overlay.
+  let insertedSpaces = 0;
   let pendingSpaces = 0;
-  let pendingSpaceTimer: ReturnType<typeof setTimeout> | null = null;
   let repeatStartedAt = 0;
   let triggered = false;
   let wasSuppressed = false;
@@ -48,13 +54,8 @@ export function addHoldToVoice<T extends HoldToVoiceEditor>(
     if (repeatGapTimer) clearTimeout(repeatGapTimer);
     repeatGapTimer = null;
   };
-  const clearPendingSpaceTimer = (): void => {
-    if (pendingSpaceTimer) clearTimeout(pendingSpaceTimer);
-    pendingSpaceTimer = null;
-  };
-  /** Commit buffered Spaces in order, as real typing. */
+  /** Commit buffered repeat Spaces in order, as real typing. */
   const commitPendingSpaces = (): void => {
-    clearPendingSpaceTimer();
     for (let i = 0; i < pendingSpaces; i++) originalHandleInput(" ");
     pendingSpaces = 0;
   };
@@ -62,11 +63,25 @@ export function addHoldToVoice<T extends HoldToVoiceEditor>(
   const resetHoldTracking = (): void => {
     clearHoldTimer();
     clearRepeatGapTimer();
-    clearPendingSpaceTimer();
+    insertedSpaces = 0;
     pendingSpaces = 0;
     repeatStartedAt = 0;
     triggered = false;
   };
+  /** Remove the typed Space of an unresolved hold burst; a no-op otherwise. */
+  const purgeHoldSpaces = (): void => {
+    const text = (editor as { getText?: () => string }).getText?.();
+    // A moved cursor means the burst Space may no longer sit behind it.
+    if (typeof text === "string" && !text.endsWith(" ")) {
+      insertedSpaces = 0;
+      pendingSpaces = 0;
+      return;
+    }
+    for (; insertedSpaces > 0; insertedSpaces--) originalHandleInput("\x7f");
+    pendingSpaces = 0;
+  };
+  const wrapped = editor as T & { purgeHoldSpaces?: () => void };
+  wrapped.purgeHoldSpaces = purgeHoldSpaces;
   const scheduleTriggeredReset = (): void => {
     clearRepeatGapTimer();
     repeatGapTimer = setTimeout(() => {
@@ -80,13 +95,16 @@ export function addHoldToVoice<T extends HoldToVoiceEditor>(
       () => {
         holdTimer = null;
         clearRepeatGapTimer();
-        clearPendingSpaceTimer();
         pendingSpaces = 0;
         repeatStartedAt = 0;
         if (!isSupported()) scheduleTriggeredReset();
         // Only fire when the key is genuinely still held and holds are armed.
         // The key-down check covers releases the editor itself never saw.
         if (isKeyDown() && canArm()) {
+          // The burst's first Space was typed immediately, so a trigger takes
+          // it back rather than leaving text behind.
+          for (; insertedSpaces > 0; insertedSpaces--) originalHandleInput("\x7f");
+          insertedSpaces = 0;
           triggered = true;
           onHold();
         } else {
@@ -101,6 +119,8 @@ export function addHoldToVoice<T extends HoldToVoiceEditor>(
   editor.handleInput = (data: string): void => {
     const supported = isSupported();
     const space = isSpace(data);
+    // Repeat-based detection must not treat optional releases as more presses.
+    if (!supported && isRelease(data)) return;
 
     // A hold already opened the overlay from this key press. The overlay steals
     // focus, so this editor never sees the Space release; the extension re-enables
@@ -142,26 +162,27 @@ export function addHoldToVoice<T extends HoldToVoiceEditor>(
       // timer would cancel the pending hold).
       if (holdTimer) return;
 
-      if (pendingSpaceTimer === null) {
-        // First event of a burst: buffer it instead of inserting, so a hold
-        // never puts text into the editor.
-        pendingSpaces = 1;
+      // A stale burst (no repeat within the window) is plain typing again.
+      if (
+        (insertedSpaces > 0 || pendingSpaces > 0) &&
+        Date.now() - repeatStartedAt > SPACE_REPEAT_WINDOW_MS
+      )
+        resetHoldTracking();
+
+      if (insertedSpaces === 0 && pendingSpaces === 0) {
+        // First Space of a burst: type it immediately so normal typing never
+        // waits. A following repeat classifies the burst as a hold candidate.
+        insertedSpaces = 1;
         repeatStartedAt = Date.now();
-        pendingSpaceTimer = setTimeout(() => {
-          pendingSpaceTimer = null;
-          commitPendingSpaces();
-          resetHoldTracking();
-        }, SPACE_COMMIT_DELAY_MS);
+        originalHandleInput(" ");
         return;
       }
 
-      // A repeat arrived before the buffered Space committed: this is a hold
-      // candidate. Never commit the buffered events; count them instead.
+      // A repeat within the window is a hold candidate: buffer it instead of
+      // typing it, and arm the hold once the burst is long enough.
       pendingSpaces++;
-      clearPendingSpaceTimer();
-      if (pendingSpaces >= HOLD_REPEAT_MIN_EVENTS) {
+      if (insertedSpaces + pendingSpaces >= HOLD_REPEAT_MIN_EVENTS)
         startHoldTimer(Date.now() - repeatStartedAt);
-      }
       return;
     }
 
@@ -188,15 +209,15 @@ export function addHoldToVoice<T extends HoldToVoiceEditor>(
   editor.dispose = (): void => {
     clearHoldTimer();
     clearRepeatGapTimer();
-    clearPendingSpaceTimer();
     originalDispose?.();
   };
-  return editor;
+  return wrapped;
 }
 
 interface HoldToVoiceEditor {
   handleInput(data: string): void;
   wantsKeyRelease?: boolean;
+  getText?: () => string;
   dispose?: () => void;
 }
 

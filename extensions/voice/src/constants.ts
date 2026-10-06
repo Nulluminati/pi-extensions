@@ -6,10 +6,10 @@ export const HOLD_TO_VOICE_MS = 1000;
 
 export const HOLD_RELEASE_DEBOUNCE_MS = 75;
 
-// Delay before a lone Space (no repeat following it) is committed to the
-// editor in terminals without key-release reporting. Lets a repeat arrive in
-// time to classify a press as a hold without ever typing hold text.
-export const SPACE_COMMIT_DELAY_MS = 400;
+// Window within which a second Space event counts as an auto-repeat of a
+// held key instead of a fresh press. Lets a repeat classify a press as a
+// hold without typing hold text; a lone press types immediately.
+export const SPACE_REPEAT_WINDOW_MS = 400;
 
 // Window after the voice overlay closes during which Space presses insert
 // normally instead of arming a hold, so the key press that opened (or closed)
