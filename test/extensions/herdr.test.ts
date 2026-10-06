@@ -699,7 +699,7 @@ describe("Herdr historical worker transcript reader", () => {
 
   it("shows complete stderr text with the same safe historical paging", async () => {
     const { cwd, id, paths } = await workerArtifacts();
-    const text = "FIRST-ERROR\n" + "Diagnostic text\n".repeat(40_000) + "LAST-ERROR\n";
+    const text = `FIRST-ERROR\n${"Diagnostic text\n".repeat(40_000)}LAST-ERROR\n`;
     await writeFile(paths[2], text);
     const latest = await readTranscriptPage(cwd, id, { channel: "stderr" });
     expect(latest.blocks.at(-1)?.kind).toBe("error");
@@ -1882,14 +1882,18 @@ describe("Herdr automatic worker monitors", () => {
     await vi.waitFor(() => expect(paneRequests("pane.send_input")).toHaveLength(2));
     expect(paneRequests("tab.create")).toHaveLength(1);
     expect(paneRequests("pane.split")[0].params.target_pane_id).toBe("w1:p2");
-    const replacement = requests.findIndex(
-      (request) => request.method === "pane.send_input" && request.params.pane_id === "w1:p3",
-    );
-    const removal = requests.findIndex(
-      (request) => request.method === "pane.close" && request.params.pane_id === "w1:p2",
-    );
-    expect(replacement).toBeGreaterThanOrEqual(0);
-    expect(removal).toBeGreaterThan(replacement);
+    // The legacy close follows the replacement launch in the same update; on
+    // slow machines the send_input request can log between the two writes.
+    await vi.waitFor(() => {
+      const replacement = requests.findIndex(
+        (request) => request.method === "pane.send_input" && request.params.pane_id === "w1:p3",
+      );
+      const removal = requests.findIndex(
+        (request) => request.method === "pane.close" && request.params.pane_id === "w1:p2",
+      );
+      expect(replacement).toBeGreaterThanOrEqual(0);
+      expect(removal).toBeGreaterThan(replacement);
+    });
     // The replacement launch precedes the legacy close and final slot write.
     await vi.waitFor(async () => {
       const slot = JSON.parse(await readFile(state, "utf8"));
