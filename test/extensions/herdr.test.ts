@@ -1890,8 +1890,12 @@ describe("Herdr automatic worker monitors", () => {
     );
     expect(replacement).toBeGreaterThanOrEqual(0);
     expect(removal).toBeGreaterThan(replacement);
+    // The replacement launch precedes the legacy close and final slot write.
+    await vi.waitFor(async () => {
+      const slot = JSON.parse(await readFile(state, "utf8"));
+      expect(slot.pane).toBeUndefined();
+    });
     const slot = JSON.parse(await readFile(state, "utf8"));
-    expect(slot.pane).toBeUndefined();
     expect(Object.values(slot.workers)).toHaveLength(1);
   });
 
