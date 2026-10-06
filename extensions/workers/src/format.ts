@@ -3,7 +3,7 @@
 import { createFramedWidget, type FramedWidgetFactory } from "../../../lib/framed-widget.ts";
 import { formatStatusLine } from "../../../lib/ui-format.ts";
 import { BLOCKER_MARKER_TYPE } from "../../../lib/worker-blocker.ts";
-import { assistantTextFromContent, summarizeStreamValue } from "./runner.ts";
+import { assistantTextFromContent, summarizeStreamValue } from "./stream-values.ts";
 import type { WorkerRecord } from "./types.ts";
 
 // --- Constants ---
@@ -22,7 +22,7 @@ const MAX_WIDGET_WORKERS = 5;
 
 // --- Formatting ---
 
-const STATUS_ICONS: Record<WorkerRecord["status"], string> = {
+export const STATUS_ICONS: Record<WorkerRecord["status"], string> = {
   running: "◌",
   completed: "✓",
   failed: "✗",

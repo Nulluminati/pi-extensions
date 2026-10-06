@@ -35,14 +35,24 @@ import {
 import { abortReason, SetupHookCancelled } from "./provision/hook.ts";
 import type { ProvisionStatus } from "./provision/types.ts";
 import { stderrLogPath, streamPath, patchPath as workerPatchPath } from "./store.ts";
+import {
+  assistantTextFromContent,
+  STREAM_SUMMARY_CHARS,
+  summarizeStreamValue,
+} from "./stream-values.ts";
+
 import type { WorkerActivity, WorkerEvents, WorkerRecord } from "./types.ts";
 import { captureWorktreePatch } from "./worktree.ts";
+
+export {
+  assistantTextFromContent,
+  STREAM_SUMMARY_CHARS,
+  summarizeStreamValue,
+} from "./stream-values.ts";
 
 // --- Constants ---
 
 export const CANCEL_GRACE_MS = 4_000;
-/** Arg/result summaries in stream displays stay one line and short. */
-export const STREAM_SUMMARY_CHARS = 200;
 /** How often the parent tails the spool for live activity. */
 const INGEST_POLL_MS = 400;
 const STDERR_TAIL_BYTES = 4 * 1024;
@@ -58,31 +68,6 @@ interface AgentSpoolMarker {
   task?: string;
   status?: WorkerRecord["status"];
   error?: string;
-}
-
-// --- Stream summaries ---
-
-/** One-line summary of tool args or results: prefer the common location /
- *  command keys, fall back to a truncated JSON dump. Never multi-line. */
-export function summarizeStreamValue(value: unknown): string | undefined {
-  if (value === undefined || value === null) return undefined;
-  const preferred =
-    typeof value === "object" && value !== null
-      ? ((value as Record<string, unknown>).path ??
-        (value as Record<string, unknown>).file_path ??
-        (value as Record<string, unknown>).command ??
-        (value as Record<string, unknown>).pattern ??
-        (value as Record<string, unknown>).url ??
-        (value as Record<string, unknown>).query ??
-        (value as Record<string, unknown>).task)
-      : value;
-  if (typeof preferred === "string" && !preferred.trim()) return undefined;
-  const raw = typeof preferred === "string" && preferred.trim() ? preferred : JSON.stringify(value);
-  const oneLine = raw.replace(/\\?\n/g, " ").replace(/\s+/g, " ").trim();
-  if (!oneLine) return undefined;
-  return oneLine.length > STREAM_SUMMARY_CHARS
-    ? `${oneLine.slice(0, STREAM_SUMMARY_CHARS)}…`
-    : oneLine;
 }
 
 // --- Spool IO ---
@@ -204,23 +189,6 @@ export function ingestStreamEvent(jsonLine: string, record: WorkerRecord): "bloc
 }
 
 // --- Parsing ---
-
-/** Concatenated text-block text from an assistant message's content; empty
- *  when the content is not an array of text blocks. */
-export function assistantTextFromContent(content: unknown): string {
-  if (!Array.isArray(content)) return "";
-  return content
-    .filter(
-      (block): block is { type: string; text?: string } =>
-        typeof block === "object" &&
-        block !== null &&
-        (block as { type?: string }).type === "text" &&
-        typeof (block as { text?: unknown }).text === "string",
-    )
-    .map((block) => block.text ?? "")
-    .join("")
-    .trim();
-}
 
 /**
  * Extract the last assistant text from a pi JSON event stream. Each line is
