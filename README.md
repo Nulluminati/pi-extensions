@@ -78,6 +78,12 @@ pi -e extensions/goal/goal.ts
 
 Per-extension configuration (flags, env vars, config files) lives in each extension's own `README.md` under the **Configuration** section.
 
+## Herdr plugins
+
+| Plugin | Description |
+|--------|-------------|
+| [`mission-board/`](plugins/mission-board/README.md) | Read-only Herdr pane showing a project's missions from `.pi/missions/`: newest mission expanded, others summarized, corrupt files reported. Run the **Mission board** action from a workspace or open the pane directly. Requires Herdr 0.9.0+, Linux/macOS, and Node 22.19+ on `PATH`.
+
 ## Development
 
 ### Type declarations

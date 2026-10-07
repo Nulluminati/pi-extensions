@@ -175,16 +175,26 @@ Keep the current worker runner as the default. Do not replace it as part of the 
 
 ## 4. Add Herdr workflow actions
 
-A small Herdr plugin could provide actions around the existing Pi workflow:
+A Herdr plugin in [plugins/mission-board](../plugins/mission-board/README.md)
+provides the first workflow action today:
 
-| Proposed action or pane | Behavior |
-| --- | --- |
-| Open Pi | Start Pi in the selected project with its normal extension configuration |
-| Mission board | Display the project's existing mission state in a separate terminal pane |
-| Worker monitors | Open read-only monitor tabs for existing workers |
-| Project layout | Open a layout with Pi, tests, and server logs |
+| Action or pane | Behavior | Status |
+| --- | --- | --- |
+| Mission board | Display the project's existing mission state in a separate terminal pane | Complete |
+| Open Pi | Start Pi in the selected project with its normal extension configuration | Next |
+| Worker monitors | Open read-only monitor tabs for existing workers | Planned |
+| Project layout | Open a layout with Pi, tests, and server logs | Planned |
 
-Herdr plugins use a `herdr-plugin.toml` manifest and executable commands. They do not require a separate software development kit.
+The plugin ships a `herdr-plugin.toml` manifest and plain TypeScript commands
+that run under strip-only Node. The **Mission board** action opens a pane
+bound to the selected workspace: a split beside the focused pane when the
+runtime context provides one, otherwise Herdr's default overlay. The pane
+reads `<project>/.pi/missions/` through the missions extension's own storage
+module, repaints once per second, and exits on `q` or Ctrl+C. It never
+writes mission state.
+
+Herdr plugins use a `herdr-plugin.toml` manifest and executable commands.
+They do not require a separate software development kit.
 
 See [Herdr plugins](https://herdr.dev/docs/plugins/) for actions, terminal panes, event hooks, and invocation context.
 
@@ -204,8 +214,8 @@ Herdr actions must not provide an unreviewed route around Approval Mode. Define 
 
 ### Add actions incrementally
 
-1. Add an action that opens Pi in the selected project.
-2. Add a read-only mission board.
+1. Add a read-only mission board pane bound to the selected workspace. Complete.
+2. Add an action that opens Pi in the selected project.
 3. Connect the worker viewer to plugin pane entrypoints.
 4. Add an explicit project-layout action.
 
@@ -215,6 +225,8 @@ Tests must cover project-path selection, command arguments, pane ownership, and 
 
 ## First implementation scope
 
-Status metadata, blocked-dialog events, and read-only worker monitors are complete. Worker execution remains unchanged.
+Status metadata, blocked-dialog events, read-only worker monitors, and the
+mission board plugin are complete. Worker execution remains unchanged.
 
-Next: define section 4's first action, which opens Pi in the selected project.
+Next: define section 4's Open Pi action, which starts Pi in the selected
+project.

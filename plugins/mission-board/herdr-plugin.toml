@@ -1,0 +1,17 @@
+id = "pi.mission-board"
+name = "Pi Mission Board"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+description = "Read-only mission board for the selected project"
+platforms = ["linux", "macos"]
+
+[[actions]]
+id = "open"
+title = "Mission board"
+contexts = ["workspace"]
+command = ["node", "open-board.ts"]
+
+[[panes]]
+id = "board"
+title = "Mission board"
+command = ["node", "mission-board.ts"]
