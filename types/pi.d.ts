@@ -827,23 +827,6 @@ declare module "@earendil-works/pi-tui" {
     constructor(text: string, x?: number, y?: number);
   }
 
-  export class ScrollView extends Container {
-    constructor(
-      component: { render(width: number): string[]; invalidate(): void },
-      options?: {
-        follow?: "none" | "end";
-        scrollbar?: "hidden" | "auto" | "always";
-      },
-    );
-    readonly scrollTop: number;
-    readonly isFollowingEnd: boolean;
-    scrollBy(lines: number): number;
-    scrollTo(scrollTop: number, options?: { disableFollow?: boolean }): void;
-    scrollToStart(): void;
-    scrollToEnd(): void;
-    updateLayout(contentHeight: number, viewportHeight: number, requestRender: () => void): void;
-  }
-
   export type MarkdownTheme = Record<
     | "heading"
     | "link"

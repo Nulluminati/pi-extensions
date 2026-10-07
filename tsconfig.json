@@ -12,12 +12,6 @@
     "allowImportingTsExtensions": true,
     "noEmit": true
   },
-  "include": [
-    "extensions/**/*.ts",
-    "plugins/**/*.ts",
-    "lib/**/*.ts",
-    "scripts/**/*.ts",
-    "types/**/*.ts"
-  ],
+  "include": ["extensions/**/*.ts", "lib/**/*.ts", "scripts/**/*.ts", "types/**/*.ts"],
   "exclude": ["node_modules"]
 }

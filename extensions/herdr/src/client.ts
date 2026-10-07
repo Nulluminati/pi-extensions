@@ -25,15 +25,6 @@ export async function reportMetadata(
   });
 }
 
-export class HerdrRequestError extends Error {
-  readonly code: unknown;
-
-  constructor(message: string, code?: unknown) {
-    super(message);
-    this.code = code;
-  }
-}
-
 export function requestHerdr(
   socketPath: string,
   method: string,
@@ -111,11 +102,7 @@ export function requestHerdr(
                   : label === "metadata"
                     ? "Herdr rejected the metadata report"
                     : "Herdr rejected the pane request";
-              const code =
-                typeof error === "object" && error !== null && "code" in error
-                  ? error.code
-                  : undefined;
-              finish(new HerdrRequestError(message, code));
+              finish(new Error(message));
             } else if (typeof frame.result === "object" && frame.result !== null) {
               finish(undefined, frame.result as Record<string, unknown>);
             } else {

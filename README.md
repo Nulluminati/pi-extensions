@@ -72,17 +72,11 @@ pi -e extensions/goal/goal.ts
 | [`small-model/`](extensions/small-model/README.md) | One global model for handoff, BTW, session names, session recap, and voice summaries. Use `/smallmodel` to select it; the current choice appears in the input bar. |
 | [`missions/`](extensions/missions/README.md) | Durable missions: long-lived objectives with a task graph, checkpoints, decisions, and budget, persisted in the project across restarts. `reconcile` re-runs done tasks' verification commands and flags regressions. |
 | [`messenger/`](extensions/messenger/README.md) | File-based coordination between Pi sessions sharing a project: presence, mailboxes with automatic delivery into the conversation, and path reservations that block other sessions' edits. |
-| [`herdr/`](extensions/herdr/README.md) | Mirror Pi session names onto owning panes. Display Pi state and combined session/worker cost as expiring Herdr pane tokens. Open one unfocused Workers tab per Herdr workspace, with one read-only transcript pane per worker. Pi sessions across projects share these panes. Keeps the official Pi integration responsible for activity state and session restore. Ask User and Approval Mode report blocked dialogs through that integration. |
+| [`herdr/`](extensions/herdr/README.md) | Mirror Pi session names onto owning panes. Display Pi state and combined session/worker cost as expiring Herdr pane tokens. Keeps the official Pi integration responsible for activity state and session restore. Ask User and Approval Mode report blocked dialogs through that integration. |
 | [`workers/`](extensions/workers/README.md) | Multi-worker workflows: spawn bounded tasks as worker sessions whose tools run in the OS sandbox. Isolated workers are provisioned by the project-owned setup hook `.pi/provision-worktree` (bounded, sandboxed, log-pointer failure) after `.worktreeinclude` paths are carried; their `.pi/sandbox.json` governs read/write/network policy. Mutating workers use isolated git worktrees. `read_only: true` starts an investigation worker with research tools and a read-only workspace sandbox. Collect reports and patches through the durable worker registry. |
 | [`autoresearch/`](extensions/autoresearch/README.md) | Autonomous experiment loop: measure a metric, keep improvements (commit), discard regressions (revert), repeat with correctness gates and descriptive spread scoring. |
 
 Per-extension configuration (flags, env vars, config files) lives in each extension's own `README.md` under the **Configuration** section.
-
-## Herdr plugins
-
-| Plugin | Description |
-|--------|-------------|
-| [`mission-board/`](plugins/mission-board/README.md) | Read-only Herdr **Missions** tab showing a project's missions from `.pi/missions/`: newest mission expanded, others summarized, corrupt files reported. Run the **Mission board** action from a workspace to open or focus it. Requires Herdr 0.9.0+, Linux/macOS, and Node 22.19+ on `PATH`.
 
 ## Development
 

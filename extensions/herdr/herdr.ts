@@ -12,7 +12,6 @@ import {
   sessionNameToken,
 } from "./src/metadata.ts";
 import { createPaneNameSync } from "./src/pane-name.ts";
-import { createWorkerMonitors } from "./src/worker-monitors.ts";
 
 // --- Constants ---
 
@@ -32,7 +31,6 @@ export default async function herdrExtension(pi: ExtensionAPI) {
   let tokens = emptyTokens();
   let workerCostUsd = 0;
   let context: ExtensionContext | undefined;
-  let monitors: ReturnType<typeof createWorkerMonitors> | undefined;
   let nameSync: ReturnType<typeof createPaneNameSync> | undefined;
   let sequence = Date.now() * 1_000;
   let failed = false;
@@ -88,12 +86,11 @@ export default async function herdrExtension(pi: ExtensionAPI) {
   function publish(): Promise<void> {
     if (!context) return Promise.resolve();
     const branch = context.sessionManager.getBranch();
-    const monitorUpdate = monitors?.refresh(branch);
     const sessionCost = sumSessionUsage(branch).cost;
     tokens.pi_cost = `$${(sessionCost + workerCostUsd).toFixed(3)}`;
     pending = { ...tokens };
     inFlight ??= drain();
-    return Promise.all([inFlight, monitorUpdate]).then(() => {});
+    return inFlight;
   }
 
   function scheduleUpdate(): void {
@@ -110,9 +107,6 @@ export default async function herdrExtension(pi: ExtensionAPI) {
     for (const event of METADATA_EVENTS) {
       unsubscribers.push(
         pi.events.on(event, (data: unknown) => {
-          if (event === "workers:state" && context) {
-            monitors?.refresh(context.sessionManager.getBranch());
-          }
           const patch = eventTokens(event, data);
           if (!patch) return;
           const cost = event === "workers:state" ? (readWorkerCost(data) ?? 0) : workerCostUsd;
@@ -129,9 +123,7 @@ export default async function herdrExtension(pi: ExtensionAPI) {
 
   async function stop(): Promise<void> {
     const ctx = context;
-    const workerMonitors = monitors;
     const paneNames = nameSync;
-    monitors = undefined;
     nameSync = undefined;
     context = undefined;
     if (debounce) clearTimeout(debounce);
@@ -143,7 +135,6 @@ export default async function herdrExtension(pi: ExtensionAPI) {
     controller.abort();
     await inFlight;
     await paneNames?.stop();
-    await workerMonitors?.stop();
     tokens = emptyTokens();
     workerCostUsd = 0;
     if (!ctx) return;
@@ -170,15 +161,6 @@ export default async function herdrExtension(pi: ExtensionAPI) {
     failed = false;
     nameFailed = false;
     context = ctx;
-    monitors = createWorkerMonitors({
-      socketPath,
-      parentPaneId: paneId,
-      cwd: ctx.cwd,
-      warn: (error) => {
-        const message = error instanceof Error ? error.message : String(error);
-        ctx.ui.notify(`Herdr worker monitor unavailable: ${message}`, "warning");
-      },
-    });
     nameSync = createPaneNameSync({
       socketPath,
       parentPaneId: paneId,
