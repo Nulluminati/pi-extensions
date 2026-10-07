@@ -1,25 +1,25 @@
 #!/usr/bin/env node
 /** Read-only Herdr pane that renders a project's missions from
- *  `<project>/.pi/missions/`. The missions extension owns that state; this
- *  board only reads it. Runs under strip-only Node without a build step.
+ *  `<project>/.pi/missions/` in the worker-cards visual language. The
+ *  missions extension owns that state; this board only reads it. Runs under
+ *  strip-only Node without a build step.
  *
  *  Usage (from the manifest pane entrypoint): the project comes from
  *  HERDR_PLUGIN_CONTEXT_JSON (workspace_cwd, then focused_pane_cwd).
  *  `--project <path>` overrides both for manual runs.
  */
 
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { pathToFileURL } from "node:url";
+import { renderModalFrame, modalContentWidth } from "../../lib/tui-frame.ts";
+import { formatStyledKeyHints } from "../../lib/ui-format.ts";
+import { workerViewTheme } from "../../extensions/herdr/src/worker-cards.ts";
 import { listMissionSummaries, loadMission } from "../../extensions/missions/src/storage.ts";
 import type { Mission, MissionSummary } from "../../extensions/missions/src/types.ts";
-import { pathToFileURL } from "node:url";
 
 // --- Constants ---
 
-const DIM = "\x1b[2m";
-const BOLD = "\x1b[1m";
-const CYAN = "\x1b[36m";
-const GREEN = "\x1b[32m";
-const YELLOW = "\x1b[33m";
-const RESET = "\x1b[0m";
+const theme = workerViewTheme;
 
 const TASK_STATUS_ORDER = [
   "in_progress",
@@ -30,13 +30,21 @@ const TASK_STATUS_ORDER = [
   "done",
 ] as const;
 
-const TASK_STATUS_MARKS: Record<string, string> = {
-  in_progress: "\u25b8",
-  blocked: "\u26d4",
-  regressed: "\u26a0",
-  failed: "\u2717",
-  todo: "\u00b7",
-  done: "\u2713",
+const TASK_STATUS_MARKS: Record<string, readonly [string, string]> = {
+  in_progress: ["\u25b8", "accent"],
+  blocked: ["\u26d4", "warning"],
+  regressed: ["\u26a0", "error"],
+  failed: ["\u2717", "error"],
+  todo: ["\u00b7", "text"],
+  done: ["\u2713", "success"],
+};
+
+const MISSION_STATES: Record<string, readonly [string, string]> = {
+  planning: ["\u25cb", "muted"],
+  active: ["\u25c8", "accent"],
+  paused: ["\u2022", "warning"],
+  complete: ["\u2713", "success"],
+  aborted: ["\u2717", "error"],
 };
 
 // --- Text helpers ---
@@ -45,25 +53,226 @@ const TASK_STATUS_MARKS: Record<string, string> = {
 function clean(text: string): string {
   return text
     .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")
-    // eslint-disable-next-line no-control-regex
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "");
 }
 
 function dim(text: string): string {
-  return `${DIM}${text}${RESET}`;
-}
-
-function bold(text: string): string {
-  return `${BOLD}${text}${RESET}`;
-}
-
-function statusMark(status: string): string {
-  const mark = TASK_STATUS_MARKS[status] ?? "\u00b7";
-  return status === "done" ? `${GREEN}${mark}${RESET}` : mark;
+  return theme.fg("dim", text);
 }
 
 function taskTotal(summary: MissionSummary): number {
   return Object.values(summary.taskCounts).reduce((total, count) => total + count, 0);
+}
+
+function missionState(status: string): readonly [string, string] {
+  return MISSION_STATES[status] ?? ["\u00b7", "muted"];
+}
+
+function progressText(counts: Record<string, number>, total: number): string {
+  const done = counts.done ?? 0;
+  const failing = (counts.failed ?? 0) + (counts.regressed ?? 0);
+  const parts = [`tasks ${done}/${total}`];
+  if (failing > 0) parts.push(`${failing} failing`);
+  return parts.join(" \u00b7 ");
+}
+
+// --- Board data ---
+
+export interface BoardData {
+  project: string;
+  newest?: Mission | undefined;
+  rest: MissionSummary[];
+  skipped: string[];
+}
+
+export async function loadBoardData(project: string): Promise<BoardData> {
+  const { summaries, skipped } = await listMissionSummaries(project);
+  const [newestSummary, ...rest] = summaries;
+  let newest: Mission | undefined;
+  if (newestSummary) {
+    try {
+      newest = await loadMission(project, newestSummary.id);
+    } catch {
+      newest = undefined;
+    }
+  }
+  return { project, newest, rest, skipped };
+}
+
+// --- Rendering ---
+
+function expandedCard(mission: Mission, width: number, rows: number): string[] {
+  const [icon, color] = missionState(mission.status);
+  const done = mission.tasks.filter((task) => task.status === "done").length;
+  const failing = mission.tasks.filter(
+    (task) => task.status === "failed" || task.status === "regressed",
+  ).length;
+  const progress = [`tasks ${done}/${mission.tasks.length}`];
+  if (failing > 0) progress.push(`${failing} failing`);
+  const { maxIterations = 0, maxTokens = 0 } = mission.budget ?? {};
+  const budget = [
+    `${mission.spent.iterations}${maxIterations ? `/${maxIterations}` : ""} iterations`,
+    `${mission.spent.tokens.toLocaleString("en-US")} tokens`,
+  ].join(" \u00b7 ");
+
+  const body: string[] = [
+    theme.fg("text", truncateToWidth(clean(mission.objective), Math.max(1, width - 4))),
+    dim(progress.join(" \u00b7 ")),
+    dim(
+      `budget ${budget}${mission.updatedAt ? ` \u00b7 updated ${new Date(mission.updatedAt).toISOString().slice(0, 10)}` : ""}`,
+    ),
+  ];
+  let shown = 0;
+  for (const status of TASK_STATUS_ORDER) {
+    for (const task of mission.tasks.filter((candidate) => candidate.status === status)) {
+      if (body.length >= rows) break;
+      const [mark, markColor] = TASK_STATUS_MARKS[task.status] ?? ["\u00b7", "text"];
+      const parts = [
+        `${theme.fg(markColor, mark)} ${task.id} ${truncateToWidth(clean(task.title), Math.max(1, width - 12))}`,
+      ];
+      if (task.dependsOn.length > 0)
+        parts.push(dim(`(after ${task.dependsOn.join(", ")})`));
+      if (task.owner) parts.push(dim(`(owner ${task.owner})`));
+      body.push(theme.fg("text", truncateToWidth(parts.join(" "), Math.max(1, width - 4))));
+      shown += 1;
+    }
+  }
+  const remaining = mission.tasks.length - shown;
+  if (remaining > 0) body.push(dim(`\u2026 ${remaining} more tasks`));
+  const checkpoint = mission.checkpoints.at(-1);
+  if (checkpoint && body.length < rows) {
+    const commit = checkpoint.commit ? ` (${clean(checkpoint.commit)})` : "";
+    body.push(
+      truncateToWidth(
+        `${theme.fg("accent", "\u25c8")} ${clean(checkpoint.label)} ${dim(clean(checkpoint.summary) + commit)}`,
+        Math.max(1, width - 4),
+      ),
+    );
+  }
+  const decision = mission.decisions.at(-1);
+  if (decision && body.length < rows) {
+    body.push(
+      truncateToWidth(
+        `${theme.fg("accent", "\u2023")} ${clean(decision.text)}`,
+        Math.max(1, width - 4),
+      ),
+    );
+  }
+  return body.slice(0, rows);
+}
+
+function summaryCard(summary: MissionSummary, width: number, rows: number): string[] {
+  const [icon, color] = missionState(summary.status);
+  const title = truncateToWidth(
+    clean(summary.title),
+    Math.max(1, width - visibleWidth(icon) - 10),
+  );
+  const head = `${theme.fg(color, icon)} ${theme.fg("accent", title)}`;
+  const detail = dim(
+    `${summary.status} \u00b7 ${progressText(summary.taskCounts, taskTotal(summary))}`,
+  );
+  return [head, truncateToWidth(detail, Math.max(1, width - 4))].slice(0, Math.max(1, rows));
+}
+
+/** Render the framed board lines for a project. */
+export function renderBoardFrame(
+  data: BoardData,
+  width: number,
+  height: number,
+): string[] {
+  const hints = formatStyledKeyHints(theme, [
+    ["q", "close"],
+    ["1s", "refresh"],
+  ]);
+  const summary = theme.fg(
+    "muted",
+    `Read-only \u00b7 ${data.rest.length + (data.newest ? 1 : 0)} missions \u00b7 ${truncateToWidth(data.project, Math.max(1, width - 30))}`,
+  );
+  if (height < 4 || width < 4) {
+    return [summary].slice(0, Math.max(0, height - 1)).concat(hints);
+  }
+
+  const body: string[] = [summary];
+  if (!data.newest && data.rest.length === 0) {
+    body.push("", theme.fg("dim", "No missions. Start one with the mission tool (action=create)."), "", hints);
+    return renderModalFrame(theme, width, body, { title: "Missions", paddingX: 1, paddingY: 0 }).slice(0, height);
+  }
+
+  const cardWidth = modalContentWidth(width, 1);
+  if (width < 34 || height < 12) {
+    // Compact rows for tight panes.
+    if (data.newest) {
+      const counts: Record<string, number> = {};
+      for (const task of data.newest.tasks) counts[task.status] = (counts[task.status] ?? 0) + 1;
+      body.push(
+        truncateToWidth(
+          `${theme.fg(missionState(data.newest.status)[1], missionState(data.newest.status)[0])} ${theme.fg("accent", clean(data.newest.title))} ${dim(`${data.newest.status} \u00b7 ${progressText(counts, data.newest.tasks.length)}`)}`,
+          width - 2,
+        ),
+      );
+      body.push(truncateToWidth(dim(clean(data.newest.objective)), width - 2));
+    }
+    for (const other of data.rest) {
+      body.push(truncateToWidth(summaryLineText(other), width - 2));
+    }
+    if (data.skipped.length > 0)
+      body.push(theme.fg("warning", `skipped ${data.skipped.length} corrupt file(s)`));
+    body.push(hints);
+    return renderModalFrame(theme, width, body, { title: "Missions", paddingX: 1, paddingY: 0 }).slice(0, height);
+  }
+
+  if (data.newest) {
+    const [icon, color] = missionState(data.newest.status);
+    const cardHeight = Math.min(12, Math.max(6, height - data.rest.length * 5 - 8));
+    body.push("");
+    body.push(
+      ...renderModalFrame(theme, cardWidth, expandedCard(data.newest, cardWidth, cardHeight - 2), {
+        title: `${theme.fg(color, icon)} ${theme.fg("accent", truncateToWidth(clean(data.newest.title), Math.max(1, cardWidth - 8)))}`,
+        rawTitle: true,
+        titleRight: theme.fg(color, data.newest.status),
+        borderColor: "borderMuted",
+        paddingX: 1,
+        paddingY: 0,
+        fixedBodyRows: cardHeight - 2,
+      }),
+    );
+  }
+  for (const other of data.rest) {
+    body.push("");
+    body.push(...summaryCard(other, cardWidth, 2));
+  }
+  if (data.skipped.length > 0) {
+    const skippedList = truncateToWidth(
+      data.skipped.join(", "),
+      Math.max(1, width - 30),
+    );
+    body.push(
+      theme.fg("warning", `skipped ${data.skipped.length} corrupt mission file(s): ${skippedList}`),
+    );
+  }
+  body.push("", hints);
+  // Keep the close hint on screen, even with many missions.
+  const budget = Math.max(1, height - 1);
+  if (body.length > budget) body.splice(Math.max(0, budget - 1), body.length, hints);
+  return renderModalFrame(theme, width, body, {
+    title: "Missions",
+    paddingX: 1,
+    paddingY: 0,
+  }).slice(0, height);
+}
+
+function summaryLineText(summary: MissionSummary): string {
+  const [icon, color] = missionState(summary.status);
+  return `${theme.fg(color, icon)} ${clean(summary.title)} ${dim(`${summary.status} \u00b7 ${progressText(summary.taskCounts, taskTotal(summary))}`)}`;
+}
+
+/** Render the full board frame for a project directory. */
+export async function renderBoard(
+  project: string,
+  options: { width?: number; height?: number } = {},
+): Promise<string> {
+  const data = await loadBoardData(project);
+  return `${renderBoardFrame(data, options.width ?? 100, options.height ?? 30).join("\n")}\n`;
 }
 
 // --- Project resolution ---
@@ -94,89 +303,6 @@ export function resolveProject(argv: readonly string[], env: NodeJS.ProcessEnv):
   );
 }
 
-// --- Rendering ---
-
-function missionLines(mission: Mission): string[] {
-  const lines: string[] = [];
-  lines.push(`${bold(clean(mission.title))}  ${dim(clean(mission.status))}`);
-  const done = mission.tasks.filter((task) => task.status === "done").length;
-  const failing = mission.tasks.filter(
-    (task) => task.status === "failed" || task.status === "regressed",
-  ).length;
-  const progressParts = [`tasks ${done}/${mission.tasks.length}`];
-  if (failing > 0) progressParts.push(`${failing} failing`);
-  lines.push(`  ${dim(progressParts.join(" \u00b7 "))}`);
-  lines.push(`  ${clean(mission.objective)}`);
-  const { maxIterations = 0, maxTokens = 0 } = mission.budget ?? {};
-  const budgetParts = [
-    `${mission.spent.iterations}${maxIterations ? `/${maxIterations}` : ""} iterations spent`,
-    `${mission.spent.tokens.toLocaleString("en-US")} tokens spent${maxTokens ? ` of ${maxTokens.toLocaleString("en-US")}` : ""}`,
-  ];
-  lines.push(`  ${dim(budgetParts.join(" \u00b7 "))}`);
-  for (const status of TASK_STATUS_ORDER) {
-    for (const task of mission.tasks.filter((candidate) => candidate.status === status)) {
-      const parts = [`${statusMark(task.status)} ${task.id} ${clean(task.title)}`];
-      if (task.dependsOn.length > 0)
-        parts.push(dim(`(after ${task.dependsOn.join(", ")})`));
-      if (task.owner) parts.push(dim(`(owner ${task.owner})`));
-      lines.push(`  ${parts.join(" ")}`);
-    }
-  }
-  for (const checkpoint of mission.checkpoints) {
-    const commit = checkpoint.commit ? ` (${clean(checkpoint.commit)})` : "";
-    lines.push(
-      `  ${CYAN}\u25c8${RESET} ${clean(checkpoint.label)} \u2014 ${dim(clean(checkpoint.summary))}${dim(commit)}`,
-    );
-  }
-  for (const decision of mission.decisions.slice(-5)) {
-    lines.push(`  ${CYAN}\u2023${RESET} ${clean(decision.text)}`);
-  }
-  return lines;
-}
-
-function summaryLine(summary: MissionSummary): string {
-  const done = summary.taskCounts.done ?? 0;
-  const failing = (summary.taskCounts.failed ?? 0) + (summary.taskCounts.regressed ?? 0);
-  const parts = [`tasks ${done}/${taskTotal(summary)}`];
-  if (failing > 0) parts.push(`${failing} failing`);
-  return `  ${clean(summary.title)}  ${dim(`${clean(summary.status)} \u00b7 ${parts.join(" \u00b7 ")}`)}`;
-}
-
-/** Render the full board frame for a project directory. */
-export async function renderBoard(project: string): Promise<string> {
-  const { summaries, skipped } = await listMissionSummaries(project);
-  const lines: string[] = [];
-  lines.push(`${bold("Mission board")}  ${dim(project)}`);
-  if (summaries.length === 0) {
-    lines.push("");
-    lines.push("No missions. Start one with the mission tool (action=create).");
-  } else {
-    const [newest, ...rest] = summaries;
-    let mission: Mission | undefined;
-    if (newest) {
-      try {
-        mission = await loadMission(project, newest.id);
-      } catch {
-        mission = undefined;
-      }
-    }
-    lines.push("");
-    lines.push(...(mission ? missionLines(mission) : newest ? [summaryLine(newest)] : []));
-    if (rest.length > 0) {
-      lines.push("");
-      lines.push(dim(`Other missions (${rest.length}):`));
-      for (const summary of rest) lines.push(summaryLine(summary));
-    }
-  }
-  if (skipped.length > 0) {
-    lines.push("");
-    lines.push(
-      `${YELLOW}skipped${RESET} ${skipped.length} corrupt mission file(s): ${skipped.join(", ")}`,
-    );
-  }
-  return `${lines.join("\n")}\n`;
-}
-
 // --- Refresh loop ---
 
 export interface BoardStreams {
@@ -189,7 +315,7 @@ export interface BoardStreams {
     setRawMode(raw: boolean): unknown;
     isTTY?: boolean;
   };
-  output: { write(text: string): unknown };
+  output: { write(text: string): unknown; columns?: number; rows?: number };
   refreshMs?: number;
 }
 
@@ -197,17 +323,19 @@ export interface BoardStreams {
 export async function runBoard(streams: BoardStreams): Promise<void> {
   const { project, input, output } = streams;
   const refreshMs = streams.refreshMs ?? 1_000;
-  const isTTY = input.isTTY === true;
-  let frame = "";
+  let resolved = false;
+  let resolveRun: () => void = () => {};
 
   const draw = async (): Promise<void> => {
-    let next: string;
+    let frame: string;
     try {
-      next = await renderBoard(project);
+      const data = await loadBoardData(project);
+      const width = output.columns ?? 100;
+      const height = output.rows ?? 30;
+      frame = `\u001b[H\u001b[J${renderBoardFrame(data, width, height).join("\n")}\n`;
     } catch (error) {
-      next = `Mission board failed: ${(error as Error).message}\n`;
+      frame = `Mission board failed: ${(error as Error).message}\n`;
     }
-    frame = `\u001b[H\u001b[J${next}`;
     output.write(frame);
   };
 
@@ -233,8 +361,6 @@ export async function runBoard(streams: BoardStreams): Promise<void> {
     }
   };
 
-  let resolveRun: () => void = () => {};
-  let resolved = false;
   const timer = setInterval(() => {
     void draw();
   }, refreshMs);

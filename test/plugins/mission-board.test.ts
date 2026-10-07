@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -12,6 +13,14 @@ import { runOpenBoard } from "../../plugins/mission-board/open-board.ts";
 import { BOARD_ENTRYPOINT, PLUGIN_ID } from "../../plugins/mission-board/plugin.ts";
 
 // --- Fixtures ---
+
+const stateDirs: string[] = [];
+
+function stateDir(): string {
+  const dir = mkdtempSync(join(tmpdir(), "pi-mission-board-state-"));
+  stateDirs.push(dir);
+  return dir;
+}
 
 function missionProject(): Promise<string> {
   return mkdtemp(join(tmpdir(), "pi-mission-board-"));
@@ -55,11 +64,16 @@ async function writeMission(project: string, value: Record<string, unknown>): Pr
   return file;
 }
 
-function ttyOutput(): { write: (text: string) => void; columns: number } {
-  return { write: vi.fn(() => {}), columns: 100 };
+function plain(text: string): string {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control bytes is the point
+  return text.replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, "");
 }
 
-function ttyInput(): EventEmitter & {
+function ttyOutput(): { write: (text: string) => void; columns: number; rows: number } {
+  return { write: vi.fn(() => {}), columns: 100, rows: 30 };
+}
+
+function ttyInput(): {
   on: (event: string, handler: (data: string | Buffer) => void) => void;
   removeListener: (event: string, handler: (data: string | Buffer) => void) => void;
   isTTY: boolean;
@@ -67,7 +81,7 @@ function ttyInput(): EventEmitter & {
   setRawMode: (raw: boolean) => void;
   resume: () => void;
   pause: () => void;
-} {
+} & EventEmitter {
   const input = Object.assign(new EventEmitter(), {
     isTTY: true,
     isRaw: false,
@@ -78,10 +92,8 @@ function ttyInput(): EventEmitter & {
   return input;
 }
 
-const globalRestores: Array<() => void> = [];
-
 afterEach(() => {
-  for (const restore of globalRestores.splice(0)) restore();
+  for (const dir of stateDirs.splice(0)) rm(dir, { recursive: true, force: true }).catch(() => {});
   vi.useRealTimers();
 });
 
@@ -89,14 +101,7 @@ afterEach(() => {
 
 describe("Herdr mission board plugin", () => {
   describe("board rendering", () => {
-    it("shows a friendly empty state when the project has no missions", async () => {
-      const project = await missionProject();
-      const text = await renderBoard(project);
-      expect(text).toContain("No missions");
-      expect(text).toContain(project);
-    });
-
-    it("expands the newest mission and summarizes the rest", async () => {
+    it("renders a worker-cards frame with the newest mission expanded", async () => {
       const project = await missionProject();
       await writeMission(
         project,
@@ -106,6 +111,7 @@ describe("Herdr mission board plugin", () => {
           objective: "Older objective that must stay hidden",
           status: "complete",
           updatedAt: 10,
+          tasks: [{ id: "task-zzz009", title: "Wrapped up", status: "done", dependsOn: [] }],
         }),
       );
       await writeMission(
@@ -139,21 +145,33 @@ describe("Herdr mission board plugin", () => {
           decisions: [{ text: "Reuse the worker viewer loop", at: 6 }],
         }),
       );
-      const text = await renderBoard(project);
+      const text = plain(await renderBoard(project));
+      expect(text).toContain("╭");
+      expect(text).toContain("Missions");
       expect(text).toContain("Newest mission");
       expect(text).toContain("Render the probe board");
-      expect(text).toContain("Running task");
-      expect(text).toContain("task-bbb002");
+      expect(text).toContain("tasks 1/5");
+      expect(text).toContain("▸ task-bbb002 Running task");
       expect(text).toContain("after task-aaa001");
-      expect(text).toContain("worker:builder");
+      expect(text).toContain("owner worker:builder");
+      expect(text).toContain("✗ task-ddd004 Failed task");
       expect(text).toContain("Reader done");
       expect(text).toContain("abc1234");
       expect(text).toContain("Reuse the worker viewer loop");
       expect(text).toContain("3/10 iterations");
       expect(text).toContain("1,500 tokens");
       expect(text).toContain("Older mission");
-      expect(text).toContain("tasks 1/5");
+      expect(text).toContain("tasks 1/1");
       expect(text).not.toContain("Older objective that must stay hidden");
+      expect(text).toContain("close");
+    });
+
+    it("shows a friendly empty state when the project has no missions", async () => {
+      const project = await missionProject();
+      const text = plain(await renderBoard(project));
+      expect(text).toContain("No missions");
+      expect(text).toContain(project);
+      expect(text).toContain("close");
     });
 
     it("reports corrupt mission files instead of failing the board", async () => {
@@ -161,10 +179,10 @@ describe("Herdr mission board plugin", () => {
       await writeMission(project, mission({ title: "Good mission" }));
       const dir = join(project, ".pi", "missions");
       await writeFile(join(dir, "mission-test-00000000000000ff.json"), "{ not json");
-      const text = await renderBoard(project);
+      const text = plain(await renderBoard(project));
       expect(text).toContain("Good mission");
       expect(text).toContain("mission-test-00000000000000ff.json");
-      expect(text).toContain("skipped");
+      expect(text.toLowerCase()).toContain("skipped");
     });
 
     it("strips terminal escape sequences from mission text", async () => {
@@ -173,9 +191,18 @@ describe("Herdr mission board plugin", () => {
         project,
         mission({ title: "\u001b[31mRed title\u001b[0m", objective: "plain" }),
       );
-      const text = await renderBoard(project);
+      const text = plain(await renderBoard(project));
       expect(text).toContain("Red title");
       expect(text).not.toContain("\u001b[31m");
+    });
+
+    it("degrades to compact lines in narrow panes", async () => {
+      const project = await missionProject();
+      await writeMission(project, mission({ title: "Narrow mission", updatedAt: 5 }));
+      const text = plain(await renderBoard(project, { width: 24, height: 12 }));
+      console.log("NARROW-DEBUG", JSON.stringify(text));
+      expect(text).toContain("Narrow mission");
+      expect(text.split("\n").every((line) => line.length <= 24)).toBe(true);
     });
   });
 
@@ -259,16 +286,20 @@ describe("Herdr mission board plugin", () => {
   // --- Open action ---
 
   describe("open action", () => {
-    it("opens a split pane beside the focused pane through HERDR_BIN_PATH", async () => {
-      const spawn = vi.fn(() => ({ status: 0 }));
+    it("opens a Missions tab in the selected workspace and remembers the pane", async () => {
+      const dir = stateDir();
+      const spawn = vi.fn((_command: string, _args: string[]) => ({
+        status: 0,
+        stdout: JSON.stringify({
+          plugin_pane: { pane: { pane_id: "w9:p9", workspace_id: "w9", tab_id: "w9:t2" } },
+        }),
+      }));
       const stderr = vi.fn();
       const code = await runOpenBoard({
         env: {
           HERDR_BIN_PATH: "/opt/herdr",
-          HERDR_PLUGIN_CONTEXT_JSON: JSON.stringify({
-            workspace_id: "w9",
-            focused_pane_id: "w9:p4",
-          }),
+          HERDR_PLUGIN_STATE_DIR: dir,
+          HERDR_PLUGIN_CONTEXT_JSON: JSON.stringify({ workspace_id: "w9" }),
         },
         spawn,
         stderr,
@@ -286,61 +317,101 @@ describe("Herdr mission board plugin", () => {
           "--entrypoint",
           BOARD_ENTRYPOINT,
           "--placement",
-          "split",
-          "--target-pane",
-          "w9:p4",
+          "tab",
+          "--workspace",
+          "w9",
         ],
         expect.objectContaining({ shell: false }),
       );
+      const stored = JSON.parse(await readFile(join(dir, "panes.json"), "utf8"));
+      expect(stored.workspaces.w9).toBe("w9:p9");
       expect(stderr).not.toHaveBeenCalled();
     });
 
-    it("falls back to the overlay when the split target is refused", async () => {
-      const spawn = vi
-        .fn((_command: string, _args: string[]) => ({ status: 1 }))
-        .mockReturnValueOnce({ status: 1 })
-        .mockReturnValueOnce({ status: 0 });
+    it("focuses the stored pane when it is still open", async () => {
+      const dir = stateDir();
+      await writeFile(join(dir, "panes.json"), JSON.stringify({ workspaces: { w9: "w9:p9" } }));
+      const spawn = vi.fn((_command: string, _args: string[]) => ({ status: 0 }));
       const code = await runOpenBoard({
         env: {
-          HERDR_PLUGIN_CONTEXT_JSON: JSON.stringify({ focused_pane_id: "w9:p4" }),
+          HERDR_BIN_PATH: "/opt/herdr",
+          HERDR_PLUGIN_STATE_DIR: dir,
+          HERDR_PLUGIN_CONTEXT_JSON: JSON.stringify({ workspace_id: "w9" }),
+        },
+        spawn,
+        stderr: vi.fn(),
+      });
+      expect(code).toBe(0);
+      expect(spawn).toHaveBeenCalledTimes(1);
+      expect(spawn).toHaveBeenCalledWith(
+        "/opt/herdr",
+        ["plugin", "pane", "focus", "w9:p9"],
+        expect.objectContaining({ shell: false }),
+      );
+    });
+
+    it("opens a new tab when the stored pane is gone", async () => {
+      const dir = stateDir();
+      await writeFile(join(dir, "panes.json"), JSON.stringify({ workspaces: { w9: "w9:p9" } }));
+      const spawn = vi.fn((_command: string, _args: string[]) => {
+        if (spawn.mock.calls.length === 1) return { status: 1 };
+        return {
+          status: 0,
+          stdout: JSON.stringify({ plugin_pane: { pane: { pane_id: "w9:p7" } } }),
+        };
+      });
+      const code = await runOpenBoard({
+        env: {
+          HERDR_BIN_PATH: "/opt/herdr",
+          HERDR_PLUGIN_STATE_DIR: dir,
+          HERDR_PLUGIN_CONTEXT_JSON: JSON.stringify({ workspace_id: "w9" }),
         },
         spawn,
         stderr: vi.fn(),
       });
       expect(code).toBe(0);
       expect(spawn).toHaveBeenCalledTimes(2);
-      const retryArgs = spawn.mock.calls[1][1];
-      expect(retryArgs).not.toContain("--placement");
-      expect(retryArgs).not.toContain("--target-pane");
+      expect(spawn.mock.calls[0][1]).toEqual(["plugin", "pane", "focus", "w9:p9"]);
+      expect(spawn.mock.calls[1][1]).toContain("--placement");
+      expect(spawn.mock.calls[1][1]).toContain("tab");
+      const stored = JSON.parse(await readFile(join(dir, "panes.json"), "utf8"));
+      expect(stored.workspaces.w9).toBe("w9:p7");
     });
 
-    it("opens the default overlay when the context has no focused pane", async () => {
-      const spawn = vi.fn((_command: string, _args: string[]) => ({ status: 0 }));
+    it("opens the default overlay when the context has no workspace", async () => {
+      const spawn = vi.fn((command: string, args: string[]) => {
+        expect(command).toBe("/opt/herdr");
+        return { status: 0 };
+      });
       const code = await runOpenBoard({
-        env: {
-          HERDR_PLUGIN_CONTEXT_JSON: JSON.stringify({ workspace_id: "w7" }),
-        },
+        env: { HERDR_BIN_PATH: "/opt/herdr" },
         spawn,
         stderr: vi.fn(),
       });
       expect(code).toBe(0);
       const args = spawn.mock.calls[0][1];
+      expect(args).toContain("open");
       expect(args).not.toContain("--placement");
-      expect(args).not.toContain("--target-pane");
       expect(args).not.toContain("--workspace");
     });
 
     it("falls back to the herdr command on PATH without HERDR_BIN_PATH", async () => {
-      const spawn = vi.fn((command: string, _args: string[]) => ({ status: 0 }));
-      await runOpenBoard({ env: {}, spawn, stderr: vi.fn() });
-      expect(spawn.mock.calls[0][0]).toBe("herdr");
+      const dir = stateDir();
+      const spawn = vi.fn((_command: string, _args: string[]) => ({ status: 0 }));
+      await runOpenBoard({
+        env: { HERDR_PLUGIN_STATE_DIR: dir },
+        spawn,
+        stderr: vi.fn(),
+      });
+      expect(vi.mocked(spawn).mock.calls[0][0]).toBe("herdr");
     });
 
     it("reports a failed open on stderr and exits nonzero", async () => {
-      const spawn = vi.fn(() => ({ status: 3 }));
+      const dir = stateDir();
+      const spawn = vi.fn((_command: string, _args: string[]) => ({ status: 3 }));
       const stderr = vi.fn();
       const code = await runOpenBoard({
-        env: { HERDR_BIN_PATH: "/opt/herdr", HERDR_PLUGIN_CONTEXT_JSON: "{}" },
+        env: { HERDR_BIN_PATH: "/opt/herdr", HERDR_PLUGIN_STATE_DIR: dir },
         spawn,
         stderr,
       });
@@ -352,7 +423,7 @@ describe("Herdr mission board plugin", () => {
   // --- Manifest contract ---
 
   describe("manifest", () => {
-    it("declares the plugin, action, and board pane contract", async () => {
+    it("declares the plugin, action, and board tab contract", async () => {
       const manifest = await readFile(
         new URL("../../plugins/mission-board/herdr-plugin.toml", import.meta.url),
         "utf8",
@@ -365,7 +436,7 @@ describe("Herdr mission board plugin", () => {
         /\[\[actions\]\][\s\S]*?id = "open"[\s\S]*?contexts = \["workspace"\][\s\S]*?command = \["node", "open-board.ts"\]/,
       );
       expect(manifest).toMatch(
-        /\[\[panes\]\][\s\S]*?id = "board"[\s\S]*?command = \["node", "mission-board.ts"\]/,
+        /\[\[panes\]\][\s\S]*?id = "board"[\s\S]*?placement = "tab"[\s\S]*?command = \["node", "mission-board.ts"\]/,
       );
       expect(BOARD_ENTRYPOINT).toBe("board");
     });

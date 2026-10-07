@@ -82,7 +82,7 @@ Per-extension configuration (flags, env vars, config files) lives in each extens
 
 | Plugin | Description |
 |--------|-------------|
-| [`mission-board/`](plugins/mission-board/README.md) | Read-only Herdr pane showing a project's missions from `.pi/missions/`: newest mission expanded, others summarized, corrupt files reported. Run the **Mission board** action from a workspace or open the pane directly. Requires Herdr 0.9.0+, Linux/macOS, and Node 22.19+ on `PATH`.
+| [`mission-board/`](plugins/mission-board/README.md) | Read-only Herdr **Missions** tab showing a project's missions from `.pi/missions/`: newest mission expanded, others summarized, corrupt files reported. Run the **Mission board** action from a workspace to open or focus it. Requires Herdr 0.9.0+, Linux/macOS, and Node 22.19+ on `PATH`.
 
 ## Development
 

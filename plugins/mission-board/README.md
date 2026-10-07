@@ -17,8 +17,8 @@ Requires Herdr 0.9.0 or newer, Linux or macOS, and Node 22.19+ on `PATH`
 
 1. Select a workspace in Herdr.
 2. Run the **Mission board** action.
-3. The board opens as a split pane beside the focused pane (or as an
-   overlay when the context has no focused pane).
+3. The board opens as its own **Missions** tab in that workspace. Running
+   the action again focuses the existing board instead of opening another.
 
 You can also open it directly:
 
@@ -37,6 +37,13 @@ herdr plugin pane open --plugin pi.mission-board --entrypoint board
 Mission state lives in the project. Which mission a Pi session is working
 on is session state, so the board expands the newest-updated mission rather
 than guessing a session's active pointer.
+
+## Design
+
+The board reuses the Workers tab's visual language: rounded terminal-palette
+frames, status icons and colors, key hints, and compact fallbacks for narrow
+or short panes. History is not paged — the board always shows the current
+state.
 
 ## Controls
 

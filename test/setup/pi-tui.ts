@@ -238,7 +238,23 @@ vi.mock("@earendil-works/pi-tui", async (importOriginal) => ({
       return str;
     }
     const ellip = ellipsis !== undefined ? ellipsis : "…";
-    return str.slice(0, width - ellip.length) + ellip;
+    const keep = Math.max(0, width - ellip.length);
+    // Walk escape sequences (free) and printable characters (charged) so
+    // styled strings truncate by visible width like the real implementation.
+    const tokens =
+      str.match(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m|[\\s\\S]`, "gu")) ?? [];
+    let out = "";
+    let used = 0;
+    for (const token of tokens) {
+      if (token.startsWith(String.fromCharCode(27))) {
+        out += token;
+        continue;
+      }
+      if (used >= keep) continue;
+      out += token;
+      used += 1;
+    }
+    return out + ellip;
   },
   visibleWidth: (str: string): number => str.replace(ANSI_RE, "").length,
   wrapTextWithAnsi: (str: string, width: number): string[] => {

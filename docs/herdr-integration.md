@@ -186,12 +186,14 @@ provides the first workflow action today:
 | Project layout | Open a layout with Pi, tests, and server logs | Planned |
 
 The plugin ships a `herdr-plugin.toml` manifest and plain TypeScript commands
-that run under strip-only Node. The **Mission board** action opens a pane
-bound to the selected workspace: a split beside the focused pane when the
-runtime context provides one, otherwise Herdr's default overlay. The pane
-reads `<project>/.pi/missions/` through the missions extension's own storage
-module, repaints once per second, and exits on `q` or Ctrl+C. It never
-writes mission state.
+that run under strip-only Node. The **Mission board** action opens a
+**Missions** tab bound to the selected workspace; running the action again
+focuses the existing board instead of opening another (the pane id is kept
+in the plugin's state directory). The pane reads `<project>/.pi/missions/`
+through the missions extension's own storage module, repaints once per
+second, and exits on `q` or Ctrl+C. It never writes mission state. The
+visual language matches the Workers tab: rounded frames, status icons and
+colors, key hints, and compact fallbacks.
 
 Herdr plugins use a `herdr-plugin.toml` manifest and executable commands.
 They do not require a separate software development kit.
@@ -214,7 +216,7 @@ Herdr actions must not provide an unreviewed route around Approval Mode. Define 
 
 ### Add actions incrementally
 
-1. Add a read-only mission board pane bound to the selected workspace. Complete.
+1. Add a read-only mission board tab bound to the selected workspace. Complete.
 2. Add an action that opens Pi in the selected project.
 3. Connect the worker viewer to plugin pane entrypoints.
 4. Add an explicit project-layout action.
