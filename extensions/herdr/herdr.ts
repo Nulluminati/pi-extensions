@@ -4,6 +4,7 @@ import type { ExtensionAPI, ExtensionContext } from "pi";
 import { sumSessionUsage } from "../../lib/session-usage.ts";
 import { reportMetadata } from "./src/client.ts";
 import {
+  contextToken,
   emptyTokens,
   eventTokens,
   METADATA_EVENTS,
@@ -88,6 +89,7 @@ export default async function herdrExtension(pi: ExtensionAPI) {
     const branch = context.sessionManager.getBranch();
     const sessionCost = sumSessionUsage(branch).cost;
     tokens.pi_cost = `$${(sessionCost + workerCostUsd).toFixed(3)}`;
+    tokens.pi_context = contextToken(context.getContextUsage());
     pending = { ...tokens };
     inFlight ??= drain();
     return inFlight;

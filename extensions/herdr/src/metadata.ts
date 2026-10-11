@@ -20,6 +20,7 @@ export function emptyTokens(): MetadataTokens {
     pi_worker_cost: null,
     pi_worker_tokens: null,
     pi_cost: null,
+    pi_context: null,
     pi_todos: null,
     pi_goal: null,
     pi_messenger: null,
@@ -51,6 +52,14 @@ function text(value: unknown): string | null {
 export function sessionNameToken(name: unknown): string | null {
   if (typeof name !== "string") return null;
   return text(name.replace(/\s+/gu, " ").replace(/[\p{Cc}\p{Cf}]/gu, ""));
+}
+
+/** Matches the Claude sidebar row: "ctx 19%". Unknown usage (such as right after compaction) clears it. */
+export function contextToken(usage: { percent: number | null } | undefined): string | null {
+  const percent = usage?.percent;
+  return typeof percent === "number" && Number.isFinite(percent)
+    ? `ctx ${Math.round(percent)}%`
+    : null;
 }
 
 export function readWorkerCost(data: unknown): number | undefined {

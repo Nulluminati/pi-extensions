@@ -79,6 +79,7 @@ The adapter clears a pane label only after it set a name during the active sessi
 | `pi_mission_status` | `missions:state` | Mission status |
 | `pi_workers` | `workers:state` | Running worker count |
 | `pi_cost` | Session lifecycle and `workers:state` | Main-session cost plus worker cost in dollars, with three decimal places |
+| `pi_context` | Session lifecycle | Context window use, such as `ctx 19%`. Unset while Pi does not know the usage, such as right after compaction |
 | `pi_worker_cost` | `workers:state` | Worker-only cost in dollars, with four decimal places |
 | `pi_worker_tokens` | `workers:state` | Worker token total |
 | `pi_todos` | `todos:changed` | Completed tasks divided by total tasks, such as `2/5` |

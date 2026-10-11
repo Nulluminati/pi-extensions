@@ -200,6 +200,7 @@ describe("Herdr status adapter", () => {
         pi_worker_cost: null,
         pi_worker_tokens: null,
         pi_cost: "$0.000",
+        pi_context: null,
         pi_todos: null,
         pi_goal: null,
         pi_messenger: null,
@@ -317,6 +318,24 @@ describe("Herdr status adapter", () => {
     expect(latestRequest().params.tokens.pi_cost).toBe("$0.004");
   });
 
+  it("reports context use in the same format as the Claude sidebar row", async () => {
+    const fixture = await setup();
+    fixture.ctx.getContextUsage.mockReturnValue({
+      tokens: 37_200,
+      contextWindow: 200_000,
+      percent: 18.6,
+    });
+    await fixture.start();
+    expect(latestRequest().params.tokens.pi_context).toBe("ctx 19%");
+    fixture.ctx.getContextUsage.mockReturnValue({
+      tokens: null,
+      contextWindow: 200_000,
+      percent: null,
+    });
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(latestRequest().params.tokens.pi_context).toBeNull();
+  });
+
   it("does not read session usage or schedule cost reports after shutdown", async () => {
     const fixture = await setup();
     await fixture.start();
@@ -349,6 +368,7 @@ describe("Herdr status adapter", () => {
       pi_worker_cost: "$0.1250",
       pi_worker_tokens: "1200",
       pi_cost: "$0.125",
+      pi_context: null,
       pi_todos: "1/2",
       pi_goal: "active 3/25",
       pi_messenger: "auth-parent",
