@@ -250,6 +250,21 @@ function spoolEndStatus(lines: string[]): { status?: string; error?: string } {
   return {};
 }
 
+/** The latest native settlement determines whether Pi cancelled its run. */
+function spoolRunAborted(lines: string[]): boolean {
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i];
+    if (line === undefined) continue;
+    try {
+      const event = JSON.parse(line) as { type?: string; aborted?: unknown };
+      if (event.type === "agent_settled" && typeof event.aborted === "boolean") {
+        return event.aborted;
+      }
+    } catch {}
+  }
+  return false;
+}
+
 /** Read only the end of stderr so a noisy worker cannot exhaust memory
  *  during finalization. Keep the last error text, not the start of the tail. */
 async function readStderrTail(cwd: string, workerId: string): Promise<string> {
@@ -300,7 +315,8 @@ export interface FinalizeOptions {
  * Terminalize a worker from its on-disk artifacts. Idempotent: a record
  * already terminal is returned untouched. Status inference: an explicit
  * override (cancel/timeout) wins; an end marker in the spool is honored;
- * otherwise a final assistant report means completed and its absence means
+ * an aborted native settlement means cancelled. Otherwise a final assistant
+ * report means completed and its absence means
  * failed (with the stderr tail as the error detail). The spool is read as
  * a bounded tail, so absence is only trusted for a spool that fits the
  * window: a truncated spool without a readable report fails with explicit
@@ -337,6 +353,9 @@ export async function finalizeWorker(options: FinalizeOptions): Promise<WorkerRe
   } else if (endMark.status !== undefined) {
     status = endMark.status as WorkerRecord["status"];
     error = endMark.error;
+  } else if (record.streamFormat === "raw" && spoolRunAborted(lines)) {
+    status = "cancelled";
+    error = "worker run aborted";
   } else if (outputText !== "") {
     status = "completed";
   } else {

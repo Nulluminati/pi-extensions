@@ -3922,6 +3922,95 @@ describe("worker store (session-scoped)", () => {
     expect(sweep.unownedWorktrees).toEqual(["w-unowned"]);
   });
 
+  it.each(["", "earlier report"])(
+    "finalizeWorker records native cancellation with report %j without announcing success",
+    async (report) => {
+      const record = makeWorkerRecord({
+        id: "w-aborted",
+        name: "aborted",
+        status: "running",
+        streamFormat: "raw",
+        worktree: join(cwd, "unavailable-worktree"),
+        branch: "workers/w-aborted",
+      });
+      const path = streamPath(cwd, record.id);
+      await mkdir(join(path, ".."), { recursive: true });
+      const message = JSON.stringify({
+        type: "message_end",
+        message: { role: "assistant", content: [{ type: "text", text: report }] },
+      });
+      await writeFile(path, `${message}\n{"type":"agent_settled","aborted":true}\n`, "utf8");
+      const events = { wake: vi.fn(), notify: vi.fn(), onChange: vi.fn(), onActivity: vi.fn() };
+      const onRecord = vi.fn((finalized: WorkerRecord) => writeRecordFile(cwd, finalized));
+
+      const finalized = await finalizeWorker({ cwd, record, events, onRecord });
+
+      expect(finalized.status).toBe("cancelled");
+      expect(finalized.error).toBe("worker run aborted");
+      expect(finalized.outputText).toBe(report || undefined);
+      expect(finalized.patchPath).toBeUndefined();
+      expect(onRecord).toHaveBeenCalledWith(expect.objectContaining({ status: "cancelled" }));
+      expect(await loadWorker(cwd, record.id)).toMatchObject({ status: "cancelled" });
+      expect(await readFile(path, "utf8")).toContain('"status":"cancelled"');
+      expect(events.wake).not.toHaveBeenCalled();
+      expect(events.notify).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    [{ type: "agent_settled", aborted: false }],
+    [{ type: "agent_settled" }],
+    [{ type: "agent_settled", aborted: "true" }],
+    [
+      { type: "agent_settled", aborted: true },
+      { type: "agent_settled", aborted: false },
+    ],
+  ])(
+    "finalizeWorker preserves completion for non-aborted or legacy settlements %j",
+    async (...settlements) => {
+      const record = makeWorkerRecord({ id: "w-settled", status: "running", streamFormat: "raw" });
+      const path = streamPath(cwd, record.id);
+      await mkdir(join(path, ".."), { recursive: true });
+      await writeFile(
+        path,
+        `${JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "final report" }] } })}\n${settlements.map((event) => JSON.stringify(event)).join("\n")}\n`,
+        "utf8",
+      );
+
+      const finalized = await finalizeWorker({ cwd, record });
+
+      expect(finalized.status).toBe("completed");
+      expect(finalized.outputText).toBe("final report");
+      expect(finalized.error).toBeUndefined();
+    },
+  );
+
+  it.each([
+    { statusOverride: "timeout" as const, marker: undefined, expected: "timeout" },
+    { statusOverride: undefined, marker: "failed", expected: "failed" },
+    { statusOverride: "cancelled" as const, marker: "failed", expected: "cancelled" },
+  ])(
+    "finalizeWorker gives explicit status priority over native cancellation: $expected",
+    async ({ statusOverride, marker, expected }) => {
+      const record = makeWorkerRecord({ id: "w-priority", status: "running", streamFormat: "raw" });
+      const path = streamPath(cwd, record.id);
+      await mkdir(join(path, ".."), { recursive: true });
+      const end = marker
+        ? `${JSON.stringify({ type: "workers_end", status: marker, error: "explicit failure" })}\n`
+        : "";
+      await writeFile(path, `{"type":"agent_settled","aborted":true}\n${end}`, "utf8");
+
+      const finalized = await finalizeWorker({
+        cwd,
+        record,
+        ...(statusOverride !== undefined ? { statusOverride } : {}),
+      });
+
+      expect(finalized.status).toBe(expected);
+      expect(finalized.error).not.toBe("worker run aborted");
+    },
+  );
+
   it("finalizeWorker infers completed from a raw spool and captures the patch", async () => {
     await initGitRepo(cwd);
     const wt = await createWorktree(cwd, "w-salvage");
