@@ -748,5 +748,7 @@ function createRenderContext(args: unknown): ToolRenderContext<Record<string, ne
     expanded: false,
     showImages: false,
     isError: false,
+    durationMs: undefined,
+    outputPad: 1,
   };
 }

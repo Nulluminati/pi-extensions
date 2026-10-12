@@ -267,6 +267,95 @@ describe("approval-mode classifier resolution", () => {
     expect(result.decision).toBe("allow");
   });
 
+  it("prefers hosted Jev over Luna and native llama.cpp decision models", async () => {
+    const { classify, registry } = registryAnswering({ harm: 0.03, secrets: 0.02 }, [
+      { ...jevModel("openai", "gpt-6-luna"), api: "openai-decisions" },
+      jevModel("llama-cpp", "Julia-1"),
+      jevModel("llama-cpp", "OpenJev"),
+      jevModel("typesafe", "jev-latest"),
+    ]);
+
+    await judgeCommand({ command: "npm test", cwd: "/workspace", modelRegistry: registry });
+
+    expect(classify).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: "typesafe", id: "jev-latest" }),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it("prefers native OpenJev over other classifiers when hosted Jev is unavailable", async () => {
+    const { classify, registry } = registryAnswering({ harm: 0.03, secrets: 0.02 }, [
+      { ...jevModel("openai", "gpt-6-luna"), api: "openai-decisions" },
+      jevModel("llama-cpp", "Julia-1"),
+      jevModel("llama-cpp", "OpenJev"),
+    ]);
+
+    const result = await judgeCommand({
+      command: "npm test",
+      cwd: "/workspace",
+      modelRegistry: registry,
+    });
+
+    expect(classify).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: "llama-cpp", id: "OpenJev" }),
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(result.decision).toBe("allow");
+  });
+
+  it.each([
+    ["openai", "gpt-6-luna", "openai-decisions"],
+    ["llama-cpp", "Julia-1", "typesafe-system-one"],
+    ["llama-cpp", "Laya", "typesafe-system-one"],
+    ["llama-cpp", "Kev", "typesafe-system-one"],
+    ["llama-cpp", "lev", "typesafe-system-one"],
+  ])("uses %s/%s through the registry with validated bool answers", async (provider, id, api) => {
+    const model = { ...jevModel(provider, id), api };
+    const { classify, registry } = registryAnswering({ harm: 0.03, secrets: 0.02 }, [model]);
+
+    const result = await judgeCommand({
+      command: "npm test",
+      cwd: "/workspace",
+      modelRegistry: registry,
+    });
+
+    expect(classify).toHaveBeenCalledWith(model, expect.anything(), expect.anything());
+    expect(result).toMatchObject({
+      decision: "allow",
+      scores: { harm: 0.03, secrets: 0.02, externalChange: 0.01 },
+    });
+    const context = classify.mock.calls[0][1];
+    expect(Object.values(context.questions).every((question) => question.type === "bool")).toBe(
+      true,
+    );
+    expect(context.images).toBeUndefined();
+  });
+
+  it("does not change classifiers after a failed judgment", async () => {
+    const { classify, registry } = registryAnswering(
+      { harm: 0.03, secrets: 0.02 },
+      [
+        jevModel("typesafe", "jev-latest"),
+        { ...jevModel("openai", "gpt-6-luna"), api: "openai-decisions" },
+      ],
+      undefined,
+      { stopReason: "error", errorMessage: "Classifier unavailable" },
+    );
+
+    const result = await judgeCommand({
+      command: "npm test",
+      cwd: "/workspace",
+      modelRegistry: registry,
+    });
+
+    expect(result.decision).toBe("unavailable");
+    expect(result.reason).toContain("Classifier unavailable");
+    expect(classify).toHaveBeenCalledTimes(1);
+    expect(classify.mock.calls[0][0]).toMatchObject({ provider: "typesafe", id: "jev-latest" });
+  });
+
   it("fails closed when no classifier has working credentials", async () => {
     const { classify, registry } = registryAnswering({ harm: 0.03, secrets: 0.02 }, []);
     const result = await judgeCommand({

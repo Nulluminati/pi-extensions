@@ -256,6 +256,10 @@ declare module "pi" {
     expanded: boolean;
     showImages: boolean;
     isError: boolean;
+    /** Recorded execution time; undefined for running, blocked, or older results. */
+    durationMs: number | undefined;
+    /** Horizontal padding; renderers with renderShell: "self" apply it themselves. */
+    outputPad: number;
   }
 
   export interface ToolRenderResultOptions {
@@ -389,6 +393,8 @@ declare module "pi" {
 
   export interface ClassifierContext {
     state: Record<string, unknown>;
+    /** Only classifiers whose input includes "image" accept image blocks. */
+    images?: ImageContent[];
     questions: Record<string, ClassifierQuestion>;
   }
 
@@ -533,7 +539,7 @@ declare module "pi" {
     };
     agent_start: { type: "agent_start" };
     agent_end: { type: "agent_end"; messages: any[] };
-    agent_settled: { type: "agent_settled" };
+    agent_settled: { type: "agent_settled"; aborted: boolean };
     turn_start: { type: "turn_start"; turnIndex: number; timestamp: number };
     turn_end: { type: "turn_end"; turnIndex: number; message: any; toolResults: any[] };
     message_start: { type: "message_start"; message: any };
@@ -558,6 +564,8 @@ declare module "pi" {
       toolName: string;
       result: any;
       isError: boolean;
+      /** Recorded execution time; absent when the tool did not run. */
+      durationMs?: number;
     };
     model_select: {
       type: "model_select";
@@ -596,7 +604,7 @@ declare module "pi" {
 
   export type MessageRenderer<T = unknown> = (
     message: any,
-    options: { expanded: boolean },
+    options: { expanded: boolean; outputPad: number },
     theme: Theme,
   ) => any | undefined;
 
