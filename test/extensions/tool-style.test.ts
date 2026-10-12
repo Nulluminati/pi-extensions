@@ -164,6 +164,15 @@ describe("tool-style-extension", () => {
     expect(component.renderedWidth).toBe(1);
   });
 
+  it("renders direct shell output safely in a one-column terminal", async () => {
+    const { ctx } = await startExtension();
+    const component = createBashComponent();
+    component.lines = ["", "────", "$ true", "output", "────"];
+
+    expect(component.render(1)).toEqual(["", "<bashMode>▏</bashMode>", "<bashMode>▏</bashMode>"]);
+    expect(ctx.ui.theme.bg).toHaveBeenCalledWith("toolPendingBg", "<bashMode>▏</bashMode>");
+  });
+
   it("hides a tool block whose render throws instead of crashing the session", async () => {
     const pi = createMockPi();
     const ctx = createStyledContext();

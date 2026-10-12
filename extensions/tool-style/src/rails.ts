@@ -148,7 +148,8 @@ function addRail(
     if (!styleDirectCommand) return normalizedWidth === 1 ? rail : `${rail}${line}`;
 
     const content = normalizedWidth === 1 ? "" : line;
-    const padding = " ".repeat(Math.max(0, innerWidth - visibleWidth(content)));
+    const padding =
+      normalizedWidth === 1 ? "" : " ".repeat(Math.max(0, innerWidth - visibleWidth(content)));
     return theme.bg(getBashBackground(instance), `${rail}${content}${padding}`);
   });
 }
