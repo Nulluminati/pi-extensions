@@ -209,11 +209,39 @@ export function extractAssistantText(jsonLine: string, current: string): string 
   }
 }
 
+/** Stop reason of the most recent assistant message_end: "length" marks a
+ *  run that ended on the model output limit. A message without a stopReason
+ *  field (older event formats) resets it, so absence never implies
+ *  truncation. */
+export function extractAssistantStopReason(
+  jsonLine: string,
+  current: string | undefined,
+): string | undefined {
+  try {
+    const event = JSON.parse(jsonLine) as {
+      type?: string;
+      message?: { role?: string; stopReason?: unknown };
+    };
+    if (event.type !== "message_end" || event.message?.role !== "assistant") return current;
+    const stopReason = event.message.stopReason;
+    return typeof stopReason === "string" ? stopReason : undefined;
+  } catch {
+    return current;
+  }
+}
+
 /** Final assistant text from a raw (child-written) spool. */
 function extractFinalTextRaw(lines: string[]): string {
   let text = "";
   for (const line of lines) text = extractAssistantText(line, text);
   return text;
+}
+
+/** Final assistant stop reason from a raw (child-written) spool. */
+function extractFinalStopReason(lines: string[]): string | undefined {
+  let stopReason: string | undefined;
+  for (const line of lines) stopReason = extractAssistantStopReason(line, stopReason);
+  return stopReason;
 }
 
 /** Final assistant text from a legacy parent-projected spool. */
@@ -349,8 +377,12 @@ export interface FinalizeOptions {
  * already terminal is returned untouched. Status inference: an explicit
  * override (cancel/timeout) wins; an end marker in the spool is honored;
  * an aborted native settlement means cancelled. A final assistant message
+ * an aborted native settlement means cancelled. A final assistant message
  * settled with stopReason "error" (provider failure) means failed, with
- * the message's errorMessage — then the stderr tail — as the detail.
+ * the message's errorMessage — then the stderr tail — as the detail. A
+ * final assistant message stopped at the output limit (stopReason
+ * "length") means failed with the output-limit cause: its partial text is
+ * kept on the record and an isolated worktree's patch is still captured.
  * Otherwise a final assistant report means completed and its absence
  * means failed (with the stderr tail as the error detail). The spool is read as
  * a bounded tail, so absence is only trusted for a spool that fits the
@@ -371,6 +403,8 @@ export async function finalizeWorker(options: FinalizeOptions): Promise<WorkerRe
   const spool = await readTailLines(streamPath(cwd, record.id), STREAM_TAIL_BYTES);
   const lines = spool.lines;
   const outputText = extractFinalText(lines, record.streamFormat);
+  const outputTruncated =
+    record.streamFormat === "raw" && extractFinalStopReason(lines) === "length";
   const endMark = spoolEndStatus(lines);
   const settlement = record.streamFormat === "raw" ? spoolAssistantSettlement(lines) : undefined;
 
@@ -399,6 +433,12 @@ export async function finalizeWorker(options: FinalizeOptions): Promise<WorkerRe
     error =
       summarizeStreamValue(settlement.errorMessage) ??
       ((await readStderrTail(cwd, record.id)) || "provider request failed");
+  } else if (outputTruncated) {
+    // The run settled on the model output limit: the report is partial by
+    // definition, so the outcome is failed with the cause named, however
+    // clean the child's exit was.
+    status = "failed";
+    error = "worker hit the output limit (stopReason: length); the final report is incomplete";
   } else if (outputText !== "") {
     status = "completed";
   } else {
@@ -423,7 +463,10 @@ export async function finalizeWorker(options: FinalizeOptions): Promise<WorkerRe
   if (error !== undefined) record.error = error;
   else delete record.error;
 
-  if (worktree !== undefined && (status === "completed" || status === "timeout")) {
+  if (
+    worktree !== undefined &&
+    (status === "completed" || status === "timeout" || (status === "failed" && outputTruncated))
+  ) {
     const patchPath = workerPatchPath(cwd, record.id);
     try {
       await captureWorktreePatch(worktree.path, patchPath);
@@ -472,7 +515,7 @@ export async function finalizeWorker(options: FinalizeOptions): Promise<WorkerRe
         `worker ${record.name} (${record.id}) failed: ${error ?? "unknown error"}`,
       );
       events.wake(
-        `[worker ${record.name} (${record.id}) failed]. Use the workers tool (action=status, id=${record.id}) for details.`,
+        `[worker ${record.name} (${record.id}) failed${outputTruncated ? " (output limit)" : ""}]. Use the workers tool (action=status, id=${record.id}) for details.`,
       );
     } else if (status === "timeout") {
       events.notify("warning", `worker ${record.name} (${record.id}) timed out`);

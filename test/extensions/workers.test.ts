@@ -36,6 +36,7 @@ import {
 import {
   armAdoptedTimeout,
   assistantTextFromContent,
+  extractAssistantStopReason,
   extractAssistantText,
   finalizeWorker,
   ingestStreamEvent,
@@ -2876,6 +2877,33 @@ describe("workers-units", () => {
     expect(text).toBe("second");
   });
 
+  it("extractAssistantStopReason keeps the last assistant stop reason", () => {
+    let reason: string | undefined;
+    reason = extractAssistantStopReason("not json", reason);
+    expect(reason).toBeUndefined();
+    reason = extractAssistantStopReason(
+      '{"type":"message_end","message":{"role":"user","content":"hi","stopReason":"length"}}',
+      reason,
+    );
+    expect(reason).toBeUndefined();
+    // No stopReason field (older records): the reason stays unknown.
+    reason = extractAssistantStopReason(
+      '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"first"}]}}',
+      reason,
+    );
+    expect(reason).toBeUndefined();
+    reason = extractAssistantStopReason(
+      '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"truncated"}],"stopReason":"length"}}',
+      reason,
+    );
+    expect(reason).toBe("length");
+    reason = extractAssistantStopReason(
+      '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"done"}],"stopReason":"stop"}}',
+      reason,
+    );
+    expect(reason).toBe("stop");
+  });
+
   it("assistantTextFromContent joins text blocks and ignores other content", () => {
     expect(
       assistantTextFromContent([
@@ -4356,6 +4384,153 @@ describe("worker store (session-scoped)", () => {
     // The adoption/timeout path still surfaces why the worker got stuck.
     expect(finalized.status).toBe("timeout");
     expect(finalized.blocker).toEqual({ reason: "stuck on missing credentials", at: 9 });
+  });
+
+  it("finalizeWorker reports failed with an output-limit reason when the final report is truncated", async () => {
+    const record = makeWorkerRecord({
+      id: "w-truncated",
+      name: "truncated",
+      status: "running",
+      streamFormat: "raw",
+    });
+    const spoolDir = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
+    await mkdir(spoolDir, { recursive: true });
+    // A final assistant report cut off by the model output limit: the child
+    // exits zero and the partial text is present, but the run never settled
+    // normally.
+    await writeFile(
+      join(spoolDir, "w-truncated.jsonl"),
+      `${JSON.stringify({
+        type: "message_end",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "The auth module uses JWT to" }],
+          stopReason: "length",
+        },
+      })}\n`,
+      "utf8",
+    );
+    const events = { wake: vi.fn(), notify: vi.fn(), onChange: vi.fn(), onActivity: vi.fn() };
+
+    const finalized = await finalizeWorker({ cwd, record, events });
+
+    // Truncation never reads as completed, even with a nonempty report and
+    // a zero exit code.
+    expect(finalized.status).toBe("failed");
+    expect(finalized.error).toContain("output limit");
+    // The partial report stays readable for status inspection.
+    expect(finalized.outputText).toBe("The auth module uses JWT to");
+    // Status and wake messages identify the output-limit cause.
+    expect(events.notify).toHaveBeenCalledWith("error", expect.stringContaining("output limit"));
+    expect(events.wake).toHaveBeenCalledWith(expect.stringContaining("output limit"));
+  });
+
+  it("finalizeWorker captures the patch when the report is truncated so the worktree stays recoverable", async () => {
+    await initGitRepo(cwd);
+    const wt = await createWorktree(cwd, "w-trunc-patch");
+    await writeFile(join(wt.path, "TRUNCATED.md"), "partial work\n", "utf8");
+    const record = makeWorkerRecord({
+      id: "w-trunc-patch",
+      name: "trunc-patch",
+      status: "running",
+      worktree: wt.path,
+      branch: wt.branch,
+      streamFormat: "raw",
+    });
+    const spoolDir = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
+    await mkdir(spoolDir, { recursive: true });
+    await writeFile(
+      join(spoolDir, "w-trunc-patch.jsonl"),
+      `${JSON.stringify({
+        type: "message_end",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "partial report, cut off mid-sentence" }],
+          stopReason: "length",
+        },
+      })}\n`,
+      "utf8",
+    );
+
+    const finalized = await finalizeWorker({ cwd, record });
+
+    expect(finalized.status).toBe("failed");
+    expect(finalized.error).toContain("output limit");
+    expect(finalized.outputText).toBe("partial report, cut off mid-sentence");
+    // The captured patch applies to the parent tree, so the worker's real
+    // changes remain collectible despite the failed outcome.
+    expect(finalized.patchPath).toBeDefined();
+    await expect(readFile(finalized.patchPath as string, "utf8")).resolves.toContain(
+      "TRUNCATED.md",
+    );
+  });
+
+  it.each([
+    ["no stopReason field (older records)", {}],
+    ["stopReason stop", { stopReason: "stop" }],
+  ])("finalizeWorker keeps completion for a final report with %s", async (_label, extra) => {
+    const record = makeWorkerRecord({
+      id: "w-stop-reason",
+      name: "stop-reason",
+      status: "running",
+      streamFormat: "raw",
+    });
+    const spoolDir = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
+    await mkdir(spoolDir, { recursive: true });
+    await writeFile(
+      join(spoolDir, "w-stop-reason.jsonl"),
+      `${JSON.stringify({
+        type: "message_end",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "final report" }],
+          ...extra,
+        },
+      })}\n`,
+      "utf8",
+    );
+
+    const finalized = await finalizeWorker({ cwd, record });
+
+    expect(finalized.status).toBe("completed");
+    expect(finalized.outputText).toBe("final report");
+    expect(finalized.error).toBeUndefined();
+  });
+
+  it("finalizeWorker keeps completion when only a mid-stream message hit the output limit", async () => {
+    const record = makeWorkerRecord({
+      id: "w-recovered",
+      name: "recovered",
+      status: "running",
+      streamFormat: "raw",
+    });
+    const spoolDir = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
+    await mkdir(spoolDir, { recursive: true });
+    // A length stop mid-run followed by a normal final settlement: the run
+    // continued past the limit and finished, so the worker completed.
+    const truncated = JSON.stringify({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "partial" }],
+        stopReason: "length",
+      },
+    });
+    const finished = JSON.stringify({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "the final report" }],
+        stopReason: "stop",
+      },
+    });
+    await writeFile(join(spoolDir, "w-recovered.jsonl"), `${truncated}\n${finished}\n`, "utf8");
+
+    const finalized = await finalizeWorker({ cwd, record });
+
+    expect(finalized.status).toBe("completed");
+    expect(finalized.outputText).toBe("the final report");
+    expect(finalized.error).toBeUndefined();
   });
 });
 
