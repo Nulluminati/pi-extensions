@@ -37,7 +37,7 @@ import {
   armAdoptedTimeout,
   assistantTextFromContent,
   extractAssistantOwnText,
-  extractAssistantStopReason,
+  extractAssistantSettlement,
   extractAssistantText,
   finalizeWorker,
   ingestStreamEvent,
@@ -2878,29 +2878,40 @@ describe("workers-units", () => {
     expect(text).toBe("second");
   });
 
-  it("extractAssistantStopReason returns an assistant message's stop reason", () => {
-    expect(extractAssistantStopReason("not json")).toBeUndefined();
+  it("extractAssistantSettlement returns an assistant message's stop reason and error detail", () => {
+    expect(extractAssistantSettlement("not json")).toBeUndefined();
     expect(
-      extractAssistantStopReason(
+      extractAssistantSettlement(
         '{"type":"message_end","message":{"role":"user","content":"hi","stopReason":"length"}}',
       ),
     ).toBeUndefined();
-    // No stopReason field (older records): the reason stays unknown.
+    // No stopReason field (older records): the settlement stays unknown.
     expect(
-      extractAssistantStopReason(
+      extractAssistantSettlement(
         '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"first"}]}}',
       ),
     ).toBeUndefined();
     expect(
-      extractAssistantStopReason(
+      extractAssistantSettlement(
         '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"truncated"}],"stopReason":"length"}}',
       ),
-    ).toBe("length");
+    ).toEqual({ stopReason: "length" });
     expect(
-      extractAssistantStopReason(
+      extractAssistantSettlement(
         '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"done"}],"stopReason":"stop"}}',
       ),
-    ).toBe("stop");
+    ).toEqual({ stopReason: "stop" });
+    // A provider error carries its detail; a blank one is omitted.
+    expect(
+      extractAssistantSettlement(
+        '{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"Request failed: 503"}}',
+      ),
+    ).toEqual({ stopReason: "error", errorMessage: "Request failed: 503" });
+    expect(
+      extractAssistantSettlement(
+        '{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"   "}}',
+      ),
+    ).toEqual({ stopReason: "error" });
   });
 
   it("extractAssistantOwnText returns only an assistant message's own text", () => {

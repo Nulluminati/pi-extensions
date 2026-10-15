@@ -215,42 +215,63 @@ export function extractAssistantText(jsonLine: string, current: string): string 
   return extractAssistantOwnText(jsonLine) || current;
 }
 
-/** Stop reason of one line's assistant message: undefined when the line is
- *  not an assistant message_end or carries no stopReason field (older event
- *  formats), so absence never implies truncation. */
-export function extractAssistantStopReason(jsonLine: string): string | undefined {
+/** Stop reason and provider error detail of one line's assistant message.
+ *  Undefined when the line is not an assistant message_end or carries no
+ *  stopReason field (older event formats), so absence never implies
+ *  failure or truncation. stopReason "length" marks the model output
+ *  limit; "error" marks a provider failure, with `errorMessage` naming
+ *  the cause when the message carries one. */
+export function extractAssistantSettlement(
+  jsonLine: string,
+): { stopReason: string; errorMessage?: string } | undefined {
   try {
     const event = JSON.parse(jsonLine) as {
       type?: string;
-      message?: { role?: string; stopReason?: unknown };
+      message?: { role?: string; stopReason?: unknown; errorMessage?: unknown };
     };
     if (event.type !== "message_end" || event.message?.role !== "assistant") return undefined;
     const stopReason = event.message.stopReason;
-    return typeof stopReason === "string" ? stopReason : undefined;
+    if (typeof stopReason !== "string") return undefined;
+    return {
+      stopReason,
+      ...(typeof event.message.errorMessage === "string" && event.message.errorMessage.trim() !== ""
+        ? { errorMessage: event.message.errorMessage }
+        : {}),
+    };
   } catch {
     return undefined;
   }
 }
 
 /** Final report from a raw (child-written) spool, folded in one pass so the
- *  text and its stop reason come from the same last assistant message.
+ *  text and its settlement come from the same last assistant message.
  *  `truncated` marks a last message that settled on the model output limit
  *  (stopReason "length"). `text` is the report to store: the last message's
  *  own text when truncated — earlier text would mislabel a mid-run message
- *  as the partial report — otherwise the most recent nonempty text. */
-function extractFinalReportRaw(lines: string[]): { text: string; truncated: boolean } {
+ *  as the partial report — otherwise the most recent nonempty text.
+ *  `settlement` carries the last message's native stopReason and provider
+ *  error detail; undefined when it has no stopReason field (legacy spool). */
+function extractFinalReportRaw(lines: string[]): {
+  text: string;
+  truncated: boolean;
+  settlement?: { stopReason: string; errorMessage?: string };
+} {
   let ownText = "";
   let report = "";
-  let stopReason: string | undefined;
+  let settlement: { stopReason: string; errorMessage?: string } | undefined;
   for (const line of lines) {
     const own = extractAssistantOwnText(line);
     if (own === undefined) continue;
     ownText = own;
     if (own) report = own;
-    stopReason = extractAssistantStopReason(line);
+    settlement = extractAssistantSettlement(line);
   }
-  const truncated = stopReason === "length";
-  return { text: truncated ? ownText : report, truncated };
+  const truncated = settlement?.stopReason === "length";
+  return {
+    text: truncated ? ownText : report,
+    truncated,
+    ...(settlement !== undefined ? { settlement } : {}),
+  };
 }
 
 /** Final assistant text from a legacy parent-projected spool. */
@@ -296,39 +317,6 @@ function spoolRunAborted(lines: string[]): boolean {
     } catch {}
   }
   return false;
-}
-
-/** Native settlement of the last raw assistant message: its stopReason and
- *  provider error detail. stopReason "error" marks a provider failure — a
- *  failed run even when partial text streamed out — with `errorMessage`
- *  naming the cause when the message carries one. Undefined when the last
- *  assistant message has no stopReason field (legacy spool): absence never
- *  implies failure. */
-function spoolAssistantSettlement(
-  lines: string[],
-): { stopReason: string; errorMessage?: string } | undefined {
-  for (let i = lines.length - 1; i >= 0; i -= 1) {
-    const line = lines[i];
-    if (line === undefined) continue;
-    let event: {
-      type?: string;
-      message?: { role?: string; stopReason?: unknown; errorMessage?: unknown };
-    };
-    try {
-      event = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    if (event.type !== "message_end" || event.message?.role !== "assistant") continue;
-    if (typeof event.message.stopReason !== "string") return undefined;
-    return {
-      stopReason: event.message.stopReason,
-      ...(typeof event.message.errorMessage === "string" && event.message.errorMessage.trim() !== ""
-        ? { errorMessage: event.message.errorMessage }
-        : {}),
-    };
-  }
-  return undefined;
 }
 
 /** Read only the end of stderr so a noisy worker cannot exhaust memory
@@ -383,7 +371,6 @@ export interface FinalizeOptions {
  * already terminal is returned untouched. Status inference: an explicit
  * override (cancel/timeout) wins; an end marker in the spool is honored;
  * an aborted native settlement means cancelled. A final assistant message
- * an aborted native settlement means cancelled. A final assistant message
  * settled with stopReason "error" (provider failure) means failed, with
  * the message's errorMessage — then the stderr tail — as the detail. A
  * final assistant message stopped at the output limit (stopReason
@@ -411,16 +398,17 @@ export async function finalizeWorker(options: FinalizeOptions): Promise<WorkerRe
   const lines = spool.lines;
   let outputText: string;
   let outputTruncated: boolean;
+  let settlement: { stopReason: string; errorMessage?: string } | undefined;
   if (record.streamFormat === "raw") {
     const report = extractFinalReportRaw(lines);
     outputText = report.text;
     outputTruncated = report.truncated;
+    settlement = report.settlement;
   } else {
     outputText = extractFinalTextProjected(lines);
     outputTruncated = false;
   }
   const endMark = spoolEndStatus(lines);
-  const settlement = record.streamFormat === "raw" ? spoolAssistantSettlement(lines) : undefined;
 
   // A blocker reported while nobody was watching (adoption, janitor sweep)
   // lives in the spool tail; recover it so the terminal record keeps the why.
