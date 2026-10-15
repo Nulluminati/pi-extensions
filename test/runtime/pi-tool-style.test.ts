@@ -63,7 +63,7 @@ function customMessage(outputPad: number) {
   );
 }
 
-describe("Tool Style with real Pi 1.1.0 renderers", () => {
+describe("Tool Style with real Pi 1.2.0 renderers", () => {
   it.each([0, 1, 2])("preserves outputPad=%i for tool, shell, and custom output", (outputPad) => {
     const toolComponent = tool(outputPad);
     toolComponent.updateResult({

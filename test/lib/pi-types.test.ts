@@ -1,7 +1,7 @@
 import type { ClassifierContext, ExtensionEventMap, MessageRenderer, ToolRenderContext } from "pi";
 import { describe, expectTypeOf, it } from "vitest";
 
-describe("Pi 1.1.0 interface declarations", () => {
+describe("Pi 1.2.0 interface declarations", () => {
   it("exposes recorded tool duration and output padding to renderers", () => {
     expectTypeOf<ToolRenderContext>()
       .toHaveProperty("durationMs")
