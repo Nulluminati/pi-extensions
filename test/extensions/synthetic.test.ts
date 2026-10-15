@@ -29,6 +29,7 @@ const EXPECTED_MODEL_IDS = [
   "hf:nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4",
   "hf:deepseek-ai/DeepSeek-V4.1-Flash",
   "hf:openai/gpt-oss-120b",
+  "infinite:small:vision",
 ];
 
 // Reasoning models whose thinking cannot be disabled (probed; see

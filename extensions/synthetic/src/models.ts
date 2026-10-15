@@ -123,6 +123,31 @@ export const STATIC_MODELS: ProviderModelConfig[] = [
     compat: SYNTHETIC_COMPAT,
   },
 
+  // --- infinite:* aliases (Big subscription tier) ---
+  // infinite:small:vision — aliases DeepSeek-V4.1-Flash with vision enabled,
+  // billed at $0 per token (included with the Big subscription plan). The
+  // catalog declares efforts [none, low, high, xhigh, max], but that field is
+  // a tier hint, not a hard enum (GLM-5.3-Flash catalogs [low, high, max] yet
+  // accepts every pi level), so the map mirrors the aliased model's 2026-09
+  // probe: none disables thinking and every pi level is accepted. A fresh
+  // probe of this id is blocked: the gateway returns HTTP 402 "Infinite
+  // models require an active Big plan subscription" for lower plans before
+  // the effort value is even validated. Infinite models reject non-streaming
+  // requests ("Infinite models require streaming"); pi always streams
+  // openai-completions requests, so this is transparent in use.
+  {
+    id: "infinite:small:vision",
+    name: "infinite:small:vision",
+    api: "openai-completions",
+    reasoning: true,
+    thinkingLevelMap: DISABLEABLE_THINKING_MAP,
+    input: ["text", "image"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 524288,
+    maxTokens: 65536,
+    compat: SYNTHETIC_COMPAT,
+  },
+
   // --- Z.AI GLM family ---
   {
     id: "hf:zai-org/GLM-5.2",
