@@ -31,6 +31,7 @@ import {
   BLOCKER_MARKER_TYPE,
   parseBlockerMarker,
   WORKER_STREAM_ENV_VAR,
+  type WorkerBlocker,
 } from "../../../lib/worker-blocker.ts";
 import { abortReason, SetupHookCancelled } from "./provision/hook.ts";
 import type { ProvisionStatus } from "./provision/types.ts";
@@ -56,8 +57,9 @@ export const CANCEL_GRACE_MS = 4_000;
 /** How often the parent tails the spool for live activity. */
 const INGEST_POLL_MS = 400;
 const STDERR_TAIL_BYTES = 4 * 1024;
-/** Tail reads are bounded: the tail display and finalization never load
- *  more than this much of a spool, however much the child wrote. */
+/** Tail reads are bounded: the tail display never loads more than this
+ *  much of a spool, however much the child wrote; finalization streams the
+ *  whole spool with bounded memory instead. */
 export const STREAM_TAIL_BYTES = 512 * 1024;
 
 /** Parent-appended markers in the raw spool (distinguishable from pi JSON
@@ -243,80 +245,126 @@ export function extractAssistantSettlement(
   }
 }
 
-/** Final report from a raw (child-written) spool, folded in one pass so the
- *  text and its settlement come from the same last assistant message.
- *  `truncated` marks a last message that settled on the model output limit
- *  (stopReason "length"). `text` is the report to store: the last message's
- *  own text when truncated — earlier text would mislabel a mid-run message
- *  as the partial report — otherwise the most recent nonempty text.
- *  `settlement` carries the last message's native stopReason and provider
- *  error detail; undefined when it has no stopReason field (legacy spool). */
-function extractFinalReportRaw(lines: string[]): {
-  text: string;
-  truncated: boolean;
+/** How much one streaming read pulls from the spool, and the largest
+ *  single line the scan retains. Only this chunk plus one pending line
+ *  ever sit in memory; a line beyond the cap (an oversized tool result,
+ *  never a finalization-relevant event) is skipped. */
+const STREAM_SCAN_CHUNK_BYTES = 256 * 1024;
+const STREAM_SCAN_MAX_LINE_BYTES = 4 * STREAM_TAIL_BYTES;
+
+/** Stream a spool file as complete lines without loading it whole: memory
+ *  stays bounded however much the child wrote, so trailing oversized
+ *  events cannot hide the final assistant message from finalization. A
+ *  trailing partial line without a newline is still yielded, matching
+ *  readTailLines; lines beyond the per-line cap are skipped. */
+export async function* streamSpoolLines(path: string): AsyncGenerator<string> {
+  let handle: import("node:fs/promises").FileHandle;
+  try {
+    handle = await open(path, "r");
+  } catch {
+    return;
+  }
+  try {
+    const chunk = Buffer.alloc(STREAM_SCAN_CHUNK_BYTES);
+    let pending = Buffer.alloc(0);
+    for (;;) {
+      const { bytesRead } = await handle.read(chunk, 0, chunk.length, null);
+      if (bytesRead === 0) break;
+      pending =
+        pending.length === 0
+          ? Buffer.from(chunk.subarray(0, bytesRead))
+          : Buffer.concat([pending, chunk.subarray(0, bytesRead)]);
+      if (pending.length > STREAM_SCAN_MAX_LINE_BYTES) {
+        // No newline within the cap: skip the oversized line's bytes up to
+        // its newline (or the buffer end; the tail fails to parse anyway).
+        const newline = pending.indexOf(0x0a);
+        pending = pending.subarray(newline === -1 ? pending.length : newline + 1);
+      }
+      let start = 0;
+      for (;;) {
+        const newline = pending.indexOf(0x0a, start);
+        if (newline === -1) break;
+        yield pending.toString("utf8", start, newline);
+        start = newline + 1;
+      }
+      pending = pending.subarray(start);
+    }
+    if (pending.length > 0) yield pending.toString("utf8");
+  } finally {
+    await handle.close().catch(() => {});
+  }
+}
+
+/** Everything finalization needs from a spool, folded in one streaming
+ *  pass over every line: the report text and native settlement (raw
+ *  format), the parent end marker, the native abort flag, and the last
+ *  reported blocker. The scan sees the whole spool, so trailing oversized
+ *  events cannot push the final assistant message out of sight. */
+async function scanSpool(
+  path: string,
+  streamFormat: WorkerRecord["streamFormat"],
+): Promise<{
+  outputText: string;
+  outputTruncated: boolean;
   settlement?: { stopReason: string; errorMessage?: string };
-} {
+  endMark: { status?: string; error?: string };
+  runAborted: boolean;
+  blocker?: WorkerBlocker;
+}> {
   let ownText = "";
   let report = "";
   let settlement: { stopReason: string; errorMessage?: string } | undefined;
-  for (const line of lines) {
-    const own = extractAssistantOwnText(line);
-    if (own === undefined) continue;
-    ownText = own;
-    if (own) report = own;
-    settlement = extractAssistantSettlement(line);
-  }
-  const truncated = settlement?.stopReason === "length";
-  return {
-    text: truncated ? ownText : report,
-    truncated,
-    ...(settlement !== undefined ? { settlement } : {}),
-  };
-}
-
-/** Final assistant text from a legacy parent-projected spool. */
-function extractFinalTextProjected(lines: string[]): string {
-  let text = "";
-  for (const line of lines) {
+  let endMark: { status?: string; error?: string } = {};
+  let runAborted = false;
+  let blocker: WorkerBlocker | undefined;
+  for await (const line of streamSpoolLines(path)) {
+    // Blocker markers: the last report wins.
+    const marker = parseBlockerMarker(line);
+    if (marker !== undefined) blocker = marker;
+    if (streamFormat === "raw") {
+      const own = extractAssistantOwnText(line);
+      if (own !== undefined) {
+        ownText = own;
+        if (own) report = own;
+        settlement = extractAssistantSettlement(line);
+      }
+    } else {
+      // Legacy parent-projected spool events carry text directly.
+      try {
+        const event = JSON.parse(line) as { kind?: string; text?: unknown };
+        if (event.kind === "assistant" && typeof event.text === "string" && event.text) {
+          report = event.text;
+        }
+      } catch {}
+    }
     try {
-      const event = JSON.parse(line) as { kind?: string; text?: unknown };
-      if (event.kind === "assistant" && typeof event.text === "string") text = event.text;
-    } catch {}
-  }
-  return text;
-}
-
-/** Terminal status recorded in the spool's end marker, when present. */
-function spoolEndStatus(lines: string[]): { status?: string; error?: string } {
-  for (let i = lines.length - 1; i >= 0; i -= 1) {
-    const line = lines[i];
-    if (line === undefined) continue;
-    try {
-      const event = JSON.parse(line) as AgentSpoolMarker;
+      const event = JSON.parse(line) as {
+        type?: string;
+        status?: unknown;
+        error?: unknown;
+        aborted?: unknown;
+      };
       if (event.type === "workers_end") {
-        return {
-          ...(event.status !== undefined ? { status: event.status } : {}),
-          ...(event.error !== undefined ? { error: event.error } : {}),
+        // The end marker is terminal: the last one wins.
+        endMark = {
+          ...(typeof event.status === "string" ? { status: event.status } : {}),
+          ...(typeof event.error === "string" ? { error: event.error } : {}),
         };
+      } else if (event.type === "agent_settled" && typeof event.aborted === "boolean") {
+        // The latest native settlement determines whether Pi cancelled.
+        runAborted = event.aborted;
       }
     } catch {}
   }
-  return {};
-}
-
-/** The latest native settlement determines whether Pi cancelled its run. */
-function spoolRunAborted(lines: string[]): boolean {
-  for (let i = lines.length - 1; i >= 0; i -= 1) {
-    const line = lines[i];
-    if (line === undefined) continue;
-    try {
-      const event = JSON.parse(line) as { type?: string; aborted?: unknown };
-      if (event.type === "agent_settled" && typeof event.aborted === "boolean") {
-        return event.aborted;
-      }
-    } catch {}
-  }
-  return false;
+  const outputTruncated = settlement?.stopReason === "length";
+  return {
+    outputText: outputTruncated ? ownText : report,
+    outputTruncated,
+    ...(settlement !== undefined ? { settlement } : {}),
+    endMark,
+    runAborted,
+    ...(blocker !== undefined ? { blocker } : {}),
+  };
 }
 
 /** Read only the end of stderr so a noisy worker cannot exhaust memory
@@ -378,10 +426,9 @@ export interface FinalizeOptions {
  * text is kept on the record (a truncated message with no text stores
  * none) and an isolated worktree's patch is still captured. Otherwise a
  * final assistant report means completed and its absence means failed
- * (with the stderr tail as the error detail). The spool is read as
- * a bounded tail, so absence is only trusted for a spool that fits the
- * window: a truncated spool without a readable report fails with explicit
- * truncation detail, since the report may live in the cut bytes.
+ * (with the stderr tail as the error detail). The spool is streamed in
+ * one bounded-memory pass over every line, so no event is invisible:
+ * a spool without a readable report means the worker never wrote one.
  */
 export async function finalizeWorker(options: FinalizeOptions): Promise<WorkerRecord> {
   const { cwd, record, statusOverride, errorOverride, exitCode, events, onRecord } = options;
@@ -394,28 +441,15 @@ export async function finalizeWorker(options: FinalizeOptions): Promise<WorkerRe
       ? { path: record.worktree, branch: record.branch ?? "" }
       : undefined);
 
-  const spool = await readTailLines(streamPath(cwd, record.id), STREAM_TAIL_BYTES);
-  const lines = spool.lines;
-  let outputText: string;
-  let outputTruncated: boolean;
-  let settlement: { stopReason: string; errorMessage?: string } | undefined;
-  if (record.streamFormat === "raw") {
-    const report = extractFinalReportRaw(lines);
-    outputText = report.text;
-    outputTruncated = report.truncated;
-    settlement = report.settlement;
-  } else {
-    outputText = extractFinalTextProjected(lines);
-    outputTruncated = false;
-  }
-  const endMark = spoolEndStatus(lines);
+  const scan = await scanSpool(streamPath(cwd, record.id), record.streamFormat);
+  const outputText = scan.outputText;
+  const outputTruncated = scan.outputTruncated;
+  const settlement = scan.settlement;
+  const endMark = scan.endMark;
 
   // A blocker reported while nobody was watching (adoption, janitor sweep)
-  // lives in the spool tail; recover it so the terminal record keeps the why.
-  for (const line of lines) {
-    const blocker = parseBlockerMarker(line);
-    if (blocker !== undefined) record.blocker = blocker;
-  }
+  // lives in the spool; recover it so the terminal record keeps the why.
+  if (scan.blocker !== undefined) record.blocker = scan.blocker;
 
   let status: WorkerRecord["status"];
   let error: string | undefined;
@@ -425,7 +459,7 @@ export async function finalizeWorker(options: FinalizeOptions): Promise<WorkerRe
   } else if (endMark.status !== undefined) {
     status = endMark.status as WorkerRecord["status"];
     error = endMark.error;
-  } else if (record.streamFormat === "raw" && spoolRunAborted(lines)) {
+  } else if (scan.runAborted) {
     status = "cancelled";
     error = "worker run aborted";
   } else if (settlement?.stopReason === "error") {
@@ -445,16 +479,7 @@ export async function finalizeWorker(options: FinalizeOptions): Promise<WorkerRe
     status = "completed";
   } else {
     status = "failed";
-    const stderrTail = await readStderrTail(cwd, record.id);
-    if (spool.truncated) {
-      // The window cut bytes away, so an unreadable report cannot be
-      // distinguished from a missing one: name the truncation instead of
-      // claiming the worker never reported.
-      error = `no report in the retained tail; the spool exceeds the finalization read window (${STREAM_TAIL_BYTES} bytes) and earlier output was truncated`;
-      if (stderrTail) error += `; stderr: ${stderrTail}`;
-    } else {
-      error = stderrTail || "worker exited without producing a report";
-    }
+    error = (await readStderrTail(cwd, record.id)) || "worker exited without producing a report";
   }
 
   record.status = status;

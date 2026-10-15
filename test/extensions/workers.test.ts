@@ -4218,7 +4218,7 @@ describe("worker store (session-scoped)", () => {
     expect(events.wake).toHaveBeenCalledWith(expect.not.stringContaining("collect"));
   });
 
-  it("finalizeWorker infers completed from a report within a bounded tail of an oversized spool", async () => {
+  it("finalizeWorker infers completed from the last report of an oversized spool", async () => {
     const record = makeWorkerRecord({
       id: "w-oversized",
       name: "oversized",
@@ -4227,8 +4227,8 @@ describe("worker store (session-scoped)", () => {
     });
     const spoolDir = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
     await mkdir(spoolDir, { recursive: true });
-    // Noise well past the finalization read window, then two reports: the
-    // most recent one must win.
+    // Noise well past the finalization scan's read chunk, then two reports:
+    // the most recent one must win.
     const noise = `{"type":"tool_execution_start","toolName":"bash","args":{"command":"${"x".repeat(512)}"}}\n`;
     const oversized = noise.repeat(Math.ceil((STREAM_TAIL_BYTES * 2) / noise.length));
     await writeFile(
@@ -4243,7 +4243,7 @@ describe("worker store (session-scoped)", () => {
     expect(finalized.outputText).toBe("the final report");
   });
 
-  it("finalizeWorker fails with truncation detail when an oversized report straddles the read window", async () => {
+  it("finalizeWorker records a complete report even when one line exceeds the old read window", async () => {
     const record = makeWorkerRecord({
       id: "w-straddle",
       name: "straddle",
@@ -4252,8 +4252,8 @@ describe("worker store (session-scoped)", () => {
     });
     const spoolDir = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
     await mkdir(spoolDir, { recursive: true });
-    // The only report is one huge JSON line larger than the read window: the
-    // window boundary lands inside it, so no valid report is recoverable.
+    // The streaming scan sees the whole spool, so a single report line
+    // larger than any window is still a readable report.
     const hugeReport = `{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"${"y".repeat(STREAM_TAIL_BYTES)} the whole report"}]}}\n`;
     await writeFile(
       join(spoolDir, "w-straddle.jsonl"),
@@ -4263,12 +4263,12 @@ describe("worker store (session-scoped)", () => {
 
     const finalized = await finalizeWorker({ cwd, record });
 
-    expect(finalized.status).toBe("failed");
-    expect(finalized.error).toContain("truncat");
-    expect(finalized.outputText).toBeUndefined();
+    expect(finalized.status).toBe("completed");
+    expect(finalized.outputText).toContain("the whole report");
+    expect(finalized.outputText?.length).toBeGreaterThan(STREAM_TAIL_BYTES);
   });
 
-  it("finalizeWorker fails with truncation detail when the only report was cut off by the read window", async () => {
+  it("finalizeWorker keeps an early report when later noise exceeds the read window", async () => {
     const record = makeWorkerRecord({
       id: "w-head-report",
       name: "head-report",
@@ -4277,7 +4277,8 @@ describe("worker store (session-scoped)", () => {
     });
     const spoolDir = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
     await mkdir(spoolDir, { recursive: true });
-    // The report sits at the spool head; noise pushes it past the window.
+    // The report sits at the spool head; the streaming scan must still see
+    // it however much noise follows.
     const report =
       '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"early report"}]}}\n';
     const noise = `{"type":"tool_execution_start","toolName":"bash","args":{"command":"${"x".repeat(512)}"}}\n`;
@@ -4289,15 +4290,59 @@ describe("worker store (session-scoped)", () => {
 
     const finalized = await finalizeWorker({ cwd, record });
 
-    // Truncation must not read as "exited without producing a report": the
-    // report may exist in the bytes the window cut away.
-    expect(finalized.status).toBe("failed");
-    expect(finalized.error).toContain("truncat");
-    expect(finalized.error).not.toContain("without producing a report");
-    expect(finalized.outputText).toBeUndefined();
+    expect(finalized.status).toBe("completed");
+    expect(finalized.outputText).toBe("early report");
   });
 
-  it("finalizeWorker honors an end marker within the tail of an oversized spool", async () => {
+  it("finalizeWorker recovers an output-limit report that trailing spool events push past the read window", async () => {
+    await initGitRepo(cwd);
+    const wt = await createWorktree(cwd, "w-trailer");
+    await writeFile(join(wt.path, "TRAILER.md"), "trailer work\n", "utf8");
+    const record = makeWorkerRecord({
+      id: "w-trailer",
+      name: "trailer",
+      status: "running",
+      worktree: wt.path,
+      branch: wt.branch,
+      streamFormat: "raw",
+    });
+    const spoolDir = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
+    await mkdir(spoolDir, { recursive: true });
+    // pi writes trailing events after the final assistant message, and
+    // agent_end repeats the whole run conversation: a long run makes it the
+    // biggest line in the spool. Finalization must still see the truncated
+    // report and its stopReason.
+    const truncated = JSON.stringify({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "partial report, cut off" }],
+        stopReason: "length",
+      },
+    });
+    const agentEnd = JSON.stringify({
+      type: "agent_end",
+      messages: [
+        { role: "user", content: [{ type: "text", text: "x".repeat(STREAM_TAIL_BYTES * 2) }] },
+      ],
+    });
+    await writeFile(
+      join(spoolDir, "w-trailer.jsonl"),
+      `${truncated}\n{"type":"agent_settled","aborted":false}\n${agentEnd}\n`,
+      "utf8",
+    );
+    const events = { wake: vi.fn(), notify: vi.fn(), onChange: vi.fn(), onActivity: vi.fn() };
+
+    const finalized = await finalizeWorker({ cwd, record, events });
+
+    expect(finalized.status).toBe("failed");
+    expect(finalized.error).toContain("output limit");
+    expect(finalized.outputText).toBe("partial report, cut off");
+    expect(finalized.patchPath).toBeDefined();
+    expect(events.wake).toHaveBeenCalledWith(expect.stringContaining("output limit"));
+  });
+
+  it("finalizeWorker honors an end marker in an oversized spool", async () => {
     const record = makeWorkerRecord({
       id: "w-marked-huge",
       name: "marked-huge",
