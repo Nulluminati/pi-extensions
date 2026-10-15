@@ -265,6 +265,39 @@ function spoolRunAborted(lines: string[]): boolean {
   return false;
 }
 
+/** Native settlement of the last raw assistant message: its stopReason and
+ *  provider error detail. stopReason "error" marks a provider failure — a
+ *  failed run even when partial text streamed out — with `errorMessage`
+ *  naming the cause when the message carries one. Undefined when the last
+ *  assistant message has no stopReason field (legacy spool): absence never
+ *  implies failure. */
+function spoolAssistantSettlement(
+  lines: string[],
+): { stopReason: string; errorMessage?: string } | undefined {
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i];
+    if (line === undefined) continue;
+    let event: {
+      type?: string;
+      message?: { role?: string; stopReason?: unknown; errorMessage?: unknown };
+    };
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (event.type !== "message_end" || event.message?.role !== "assistant") continue;
+    if (typeof event.message.stopReason !== "string") return undefined;
+    return {
+      stopReason: event.message.stopReason,
+      ...(typeof event.message.errorMessage === "string" && event.message.errorMessage.trim() !== ""
+        ? { errorMessage: event.message.errorMessage }
+        : {}),
+    };
+  }
+  return undefined;
+}
+
 /** Read only the end of stderr so a noisy worker cannot exhaust memory
  *  during finalization. Keep the last error text, not the start of the tail. */
 async function readStderrTail(cwd: string, workerId: string): Promise<string> {
@@ -315,9 +348,11 @@ export interface FinalizeOptions {
  * Terminalize a worker from its on-disk artifacts. Idempotent: a record
  * already terminal is returned untouched. Status inference: an explicit
  * override (cancel/timeout) wins; an end marker in the spool is honored;
- * an aborted native settlement means cancelled. Otherwise a final assistant
- * report means completed and its absence means
- * failed (with the stderr tail as the error detail). The spool is read as
+ * an aborted native settlement means cancelled. A final assistant message
+ * settled with stopReason "error" (provider failure) means failed, with
+ * the message's errorMessage — then the stderr tail — as the detail.
+ * Otherwise a final assistant report means completed and its absence
+ * means failed (with the stderr tail as the error detail). The spool is read as
  * a bounded tail, so absence is only trusted for a spool that fits the
  * window: a truncated spool without a readable report fails with explicit
  * truncation detail, since the report may live in the cut bytes.
@@ -337,6 +372,7 @@ export async function finalizeWorker(options: FinalizeOptions): Promise<WorkerRe
   const lines = spool.lines;
   const outputText = extractFinalText(lines, record.streamFormat);
   const endMark = spoolEndStatus(lines);
+  const settlement = record.streamFormat === "raw" ? spoolAssistantSettlement(lines) : undefined;
 
   // A blocker reported while nobody was watching (adoption, janitor sweep)
   // lives in the spool tail; recover it so the terminal record keeps the why.
@@ -356,6 +392,13 @@ export async function finalizeWorker(options: FinalizeOptions): Promise<WorkerRe
   } else if (record.streamFormat === "raw" && spoolRunAborted(lines)) {
     status = "cancelled";
     error = "worker run aborted";
+  } else if (settlement?.stopReason === "error") {
+    // A provider failure is a failed run even when partial text streamed
+    // out; the message's own detail names the cause when present.
+    status = "failed";
+    error =
+      summarizeStreamValue(settlement.errorMessage) ??
+      ((await readStderrTail(cwd, record.id)) || "provider request failed");
   } else if (outputText !== "") {
     status = "completed";
   } else {

@@ -3986,6 +3986,88 @@ describe("worker store (session-scoped)", () => {
   );
 
   it.each([
+    {
+      stopReason: "error",
+      errorMessage: "Request failed: 503 Service Unavailable",
+      expectedError: "Request failed: 503 Service Unavailable",
+    },
+    {
+      stopReason: "error",
+      errorMessage: undefined,
+      expectedError: "provider request failed",
+    },
+  ])(
+    "finalizeWorker fails a worker whose final message settles with stopReason %s",
+    async ({ stopReason, errorMessage, expectedError }) => {
+      const record = makeWorkerRecord({
+        id: "w-provider-error",
+        name: "flaky",
+        status: "running",
+        streamFormat: "raw",
+      });
+      const path = streamPath(cwd, record.id);
+      await mkdir(join(path, ".."), { recursive: true });
+      await writeFile(
+        path,
+        `${JSON.stringify({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "partial report" }],
+            stopReason,
+            ...(errorMessage !== undefined ? { errorMessage } : {}),
+          },
+        })}\n{"type":"agent_settled","aborted":false}\n`,
+        "utf8",
+      );
+      const events = { wake: vi.fn(), notify: vi.fn(), onChange: vi.fn(), onActivity: vi.fn() };
+
+      const finalized = await finalizeWorker({ cwd, record, events });
+
+      expect(finalized.status).toBe("failed");
+      expect(finalized.error).toBe(expectedError);
+      expect(finalized.outputText).toBe("partial report");
+      expect(events.notify).toHaveBeenCalledWith("error", expect.stringContaining(expectedError));
+      expect(events.wake).toHaveBeenCalledWith(expect.stringContaining("failed"));
+      expect(await readFile(path, "utf8")).toContain('"status":"failed"');
+    },
+  );
+
+  it("finalizeWorker stays completed when a provider error precedes a successful final message", async () => {
+    const record = makeWorkerRecord({ id: "w-retry", status: "running", streamFormat: "raw" });
+    const path = streamPath(cwd, record.id);
+    await mkdir(join(path, ".."), { recursive: true });
+    const failedAttempt = JSON.stringify({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [],
+        stopReason: "error",
+        errorMessage: "Request failed: 503 Service Unavailable",
+      },
+    });
+    const finalAttempt = JSON.stringify({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "final report" }],
+        stopReason: "stop",
+      },
+    });
+    await writeFile(
+      path,
+      `${failedAttempt}\n${finalAttempt}\n{"type":"agent_settled","aborted":false}\n`,
+      "utf8",
+    );
+
+    const finalized = await finalizeWorker({ cwd, record });
+
+    expect(finalized.status).toBe("completed");
+    expect(finalized.outputText).toBe("final report");
+    expect(finalized.error).toBeUndefined();
+  });
+
+  it.each([
     { statusOverride: "timeout" as const, marker: undefined, expected: "timeout" },
     { statusOverride: undefined, marker: "failed", expected: "failed" },
     { statusOverride: "cancelled" as const, marker: "failed", expected: "cancelled" },
