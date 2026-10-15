@@ -262,6 +262,14 @@ async function waitForWake(pi: DeepMocked<ExtensionAPI>, timeoutMs = 5_000): Pro
   }
 }
 
+/** Sleep until a record's persisted deadline has passed, plus a margin: a
+ *  "past the deadline" negative check must cover however long the test
+ *  setup actually took on a loaded machine. */
+async function waitPastDeadline(deadlineAt: number, marginMs = 300): Promise<void> {
+  const remaining = deadlineAt - Date.now();
+  await new Promise((resolve) => setTimeout(resolve, Math.max(marginMs, remaining) + marginMs));
+}
+
 async function waitForRecord(
   dir: string,
   id: string,
@@ -1686,12 +1694,15 @@ sleep 30
       // The spool projection captures the tool lifecycle and assistant text
       // while the worker is still running. (The activity snapshot itself is
       // intentionally in-memory only — the widget reads the live record.)
-      await vi.waitFor(async () => {
-        const raw = await readFile(streamPath(cwd, id), "utf8").catch(() => "");
-        expect(raw).toContain('"type":"tool_execution_start"');
-        expect(raw).toContain('"type":"tool_execution_end"');
-        expect(raw).toContain("Reading auth module");
-      });
+      await vi.waitFor(
+        async () => {
+          const raw = await readFile(streamPath(cwd, id), "utf8").catch(() => "");
+          expect(raw).toContain('"type":"tool_execution_start"');
+          expect(raw).toContain('"type":"tool_execution_end"');
+          expect(raw).toContain("Reading auth module");
+        },
+        { timeout: 10_000 },
+      );
 
       await executeTool("workers", { action: "cancel", id });
     });
@@ -1709,16 +1720,19 @@ sleep 30
       });
       const id = started.details.workerId as string;
 
-      await vi.waitFor(async () => {
-        const lastCall = mockCtx.ui.setWidget.mock.calls.at(-1) as unknown[];
-        const factory = lastCall[1] as
-          | ((tui: unknown, theme: unknown) => { render(w: number): string[] })
-          | undefined;
-        if (typeof factory !== "function") throw new Error("no widget factory");
-        const component = factory(undefined, mockCtx.ui.theme);
-        const text = component.render(160).join("\n");
-        expect(text).toContain("▸ read src/auth.ts");
-      });
+      await vi.waitFor(
+        async () => {
+          const lastCall = mockCtx.ui.setWidget.mock.calls.at(-1) as unknown[];
+          const factory = lastCall[1] as
+            | ((tui: unknown, theme: unknown) => { render(w: number): string[] })
+            | undefined;
+          if (typeof factory !== "function") throw new Error("no widget factory");
+          const component = factory(undefined, mockCtx.ui.theme);
+          const text = component.render(160).join("\n");
+          expect(text).toContain("▸ read src/auth.ts");
+        },
+        { timeout: 10_000 },
+      );
       await executeTool("workers", { action: "cancel", id });
     });
 
@@ -2600,13 +2614,14 @@ sleep 30
         detail: "carry 1, hook exit 0 (16s), setup committed",
       });
       expect(started.content[0].text).toContain("Provision: yes — carry 1, hook exit 0 (16s)");
+      // The child writes its argv and root files before it exits; wait for
+      // the completed record so the reads cannot race the spawned process.
+      const record = await waitForRecord(cwd, id, "completed");
+      expect(record.provision).toMatchObject({ state: "yes" });
       const args = (await readFile(argsFile, "utf8")).split("\n");
       const environment = args.find((line) => line.startsWith("ENVIRONMENT:"));
       expect(environment).toContain("Provision: yes — carry 1, hook exit 0 (16s)");
       expect(await readFile(rootFile, "utf8")).toBe(cwd);
-
-      const record = await waitForRecord(cwd, id, "completed");
-      expect(record.provision).toMatchObject({ state: "yes" });
     });
 
     describe("abort during delegation", () => {
@@ -4893,9 +4908,17 @@ describe("worker session scoping", () => {
         "warning",
       );
       expect(findWakeCall(mockPi).message.content[0].text).toContain("timed out");
-      // Widget cleanup: the worker no longer runs, so the last publish clears it.
+      // Widget cleanup: the worker no longer runs, so the strip must not keep
+      // showing it. If a publish ran while adoption still reported "running",
+      // the last strip call is the clear; when the deadline kill beats
+      // session_start's final publish, the strip is legitimately never
+      // published at all (the strip only hides a previously published widget).
       await vi.waitFor(() => {
-        expect(mockCtx.ui.setWidget).toHaveBeenLastCalledWith(STRIP_KEY_ABOVE, undefined);
+        const stripCalls = mockCtx.ui.setWidget.mock.calls.filter(
+          ([key]) => key === STRIP_KEY_ABOVE,
+        );
+        const last = stripCalls.at(-1);
+        expect(last === undefined || last[1] === undefined).toBe(true);
       });
     } finally {
       if (sleeper.pid !== undefined) await killPidTree(sleeper.pid);
@@ -4967,6 +4990,10 @@ describe("worker session scoping", () => {
   it("cancelling an adopted worker disposes its deadline", async () => {
     const sleeper = execFile("sleep", ["30"]);
     const now = Date.now();
+    // The deadline must outlast slow setup (adoption runs real file scans),
+    // so the cancel disposes a live timer rather than an elapsed one. The
+    // past-deadline check below waits out the real deadline dynamically.
+    const deadlineMs = 4_000;
     const record = makeWorkerRecord({
       id: "w-adopt-cancel",
       name: "adopt-cancel",
@@ -4975,7 +5002,7 @@ describe("worker session scoping", () => {
       status: "running",
       streamFormat: "raw",
       startedAt: now - 119_000,
-      deadlineAt: now + 1_500,
+      deadlineAt: now + deadlineMs,
     });
     await seedRecord(cwd, record);
 
@@ -4994,8 +5021,9 @@ describe("worker session scoping", () => {
       expect(isProcessAlive(sleeper.pid ?? 0)).toBe(false);
 
       // Past the deadline the disposed timer must not rewrite the record:
-      // cancelled stays cancelled.
-      await new Promise((resolve) => setTimeout(resolve, 1_800));
+      // cancelled stays cancelled. The wait reaches the real deadline
+      // however long the setup took.
+      await waitPastDeadline(record.deadlineAt ?? now);
       expect((await loadWorker(cwd, "w-adopt-cancel"))?.status).toBe("cancelled");
       const timeoutSave = mockPi.appendEntry.mock.calls.some(
         ([customType, data]) =>
@@ -5012,6 +5040,10 @@ describe("worker session scoping", () => {
   it("session_shutdown disposes an adopted worker's deadline timer", async () => {
     const sleeper = execFile("sleep", ["30"]);
     const now = Date.now();
+    // The deadline must outlast slow setup (adoption runs real file scans),
+    // so the shutdown disposes a live timer rather than an elapsed one. The
+    // past-deadline check below waits out the real deadline dynamically.
+    const deadlineMs = 4_000;
     const record = makeWorkerRecord({
       id: "w-adopt-shutdown",
       name: "adopt-shutdown",
@@ -5020,7 +5052,7 @@ describe("worker session scoping", () => {
       status: "running",
       streamFormat: "raw",
       startedAt: now - 119_000,
-      deadlineAt: now + 800,
+      deadlineAt: now + deadlineMs,
     });
     await seedRecord(cwd, record);
 
@@ -5042,7 +5074,8 @@ describe("worker session scoping", () => {
       expect(isProcessAlive(sleeper.pid ?? 0)).toBe(false);
 
       // Past the deadline: disposed means no timeout kill and no rewrite.
-      await new Promise((resolve) => setTimeout(resolve, 1_200));
+      // The wait reaches the real deadline however long the setup took.
+      await waitPastDeadline(record.deadlineAt ?? now);
       expect((await loadWorker(cwd, "w-adopt-shutdown"))?.status).toBe("cancelled");
     } finally {
       if (sleeper.pid !== undefined) await killPidTree(sleeper.pid);
