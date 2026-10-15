@@ -215,24 +215,20 @@ export function extractAssistantText(jsonLine: string, current: string): string 
   return extractAssistantOwnText(jsonLine) || current;
 }
 
-/** Stop reason of the most recent assistant message_end: "length" marks a
- *  run that ended on the model output limit. A message without a stopReason
- *  field (older event formats) resets it, so absence never implies
- *  truncation. */
-export function extractAssistantStopReason(
-  jsonLine: string,
-  current: string | undefined,
-): string | undefined {
+/** Stop reason of one line's assistant message: undefined when the line is
+ *  not an assistant message_end or carries no stopReason field (older event
+ *  formats), so absence never implies truncation. */
+export function extractAssistantStopReason(jsonLine: string): string | undefined {
   try {
     const event = JSON.parse(jsonLine) as {
       type?: string;
       message?: { role?: string; stopReason?: unknown };
     };
-    if (event.type !== "message_end" || event.message?.role !== "assistant") return current;
+    if (event.type !== "message_end" || event.message?.role !== "assistant") return undefined;
     const stopReason = event.message.stopReason;
     return typeof stopReason === "string" ? stopReason : undefined;
   } catch {
-    return current;
+    return undefined;
   }
 }
 
@@ -251,7 +247,7 @@ function extractFinalReportRaw(lines: string[]): { text: string; truncated: bool
     if (own === undefined) continue;
     ownText = own;
     if (own) report = own;
-    stopReason = extractAssistantStopReason(line, stopReason);
+    stopReason = extractAssistantStopReason(line);
   }
   const truncated = stopReason === "length";
   return { text: truncated ? ownText : report, truncated };
@@ -373,7 +369,8 @@ export interface FinalizeOptions {
   errorOverride?: string;
   /** Exit code, when the finalizer is the spawning parent. */
   exitCode?: number | null;
-  /** Isolated worktree; patch captured for completed/timeout outcomes. */
+  /** Isolated worktree; patch captured for completed, timeout, and
+   *  output-limit failed outcomes. */
   worktree?: { path: string; branch: string };
   events?: WorkerEvents;
   /** Terminal persistence (transcript entry + record file for the owner;
@@ -480,6 +477,7 @@ export async function finalizeWorker(options: FinalizeOptions): Promise<WorkerRe
   if (error !== undefined) record.error = error;
   else delete record.error;
 
+  let patchCaptured = false;
   if (
     worktree !== undefined &&
     (status === "completed" || status === "timeout" || (status === "failed" && outputTruncated))
@@ -488,6 +486,7 @@ export async function finalizeWorker(options: FinalizeOptions): Promise<WorkerRe
     try {
       await captureWorktreePatch(worktree.path, patchPath);
       record.patchPath = patchPath;
+      patchCaptured = true;
     } catch (err) {
       // Capture refuses before storing a patch. Point the record at the
       // absent patch path so collect and retention treat the worktree as
@@ -524,7 +523,7 @@ export async function finalizeWorker(options: FinalizeOptions): Promise<WorkerRe
   if (events) {
     if (status === "completed") {
       events.wake(
-        `[worker ${record.name} (${record.id}) finished]. Use the workers tool (action=status, id=${record.id}) to read its report${record.patchPath ? " and (action=collect) to apply its patch" : ""}.`,
+        `[worker ${record.name} (${record.id}) finished]. Use the workers tool (action=status, id=${record.id}) to read its report${patchCaptured ? " and (action=collect) to apply its patch" : ""}.`,
       );
     } else if (status === "failed") {
       events.notify(
@@ -532,7 +531,7 @@ export async function finalizeWorker(options: FinalizeOptions): Promise<WorkerRe
         `worker ${record.name} (${record.id}) failed: ${error ?? "unknown error"}`,
       );
       events.wake(
-        `[worker ${record.name} (${record.id}) failed${outputTruncated ? " (output limit)" : ""}]. Use the workers tool (action=status, id=${record.id}) for details${record.patchPath ? " and (action=collect) to apply its patch" : ""}.`,
+        `[worker ${record.name} (${record.id}) failed${outputTruncated ? " (output limit)" : ""}]. Use the workers tool (action=status, id=${record.id}) for details${patchCaptured ? " and (action=collect) to apply its patch" : ""}.`,
       );
     } else if (status === "timeout") {
       events.notify("warning", `worker ${record.name} (${record.id}) timed out`);

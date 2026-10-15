@@ -2878,31 +2878,29 @@ describe("workers-units", () => {
     expect(text).toBe("second");
   });
 
-  it("extractAssistantStopReason keeps the last assistant stop reason", () => {
-    let reason: string | undefined;
-    reason = extractAssistantStopReason("not json", reason);
-    expect(reason).toBeUndefined();
-    reason = extractAssistantStopReason(
-      '{"type":"message_end","message":{"role":"user","content":"hi","stopReason":"length"}}',
-      reason,
-    );
-    expect(reason).toBeUndefined();
+  it("extractAssistantStopReason returns an assistant message's stop reason", () => {
+    expect(extractAssistantStopReason("not json")).toBeUndefined();
+    expect(
+      extractAssistantStopReason(
+        '{"type":"message_end","message":{"role":"user","content":"hi","stopReason":"length"}}',
+      ),
+    ).toBeUndefined();
     // No stopReason field (older records): the reason stays unknown.
-    reason = extractAssistantStopReason(
-      '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"first"}]}}',
-      reason,
-    );
-    expect(reason).toBeUndefined();
-    reason = extractAssistantStopReason(
-      '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"truncated"}],"stopReason":"length"}}',
-      reason,
-    );
-    expect(reason).toBe("length");
-    reason = extractAssistantStopReason(
-      '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"done"}],"stopReason":"stop"}}',
-      reason,
-    );
-    expect(reason).toBe("stop");
+    expect(
+      extractAssistantStopReason(
+        '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"first"}]}}',
+      ),
+    ).toBeUndefined();
+    expect(
+      extractAssistantStopReason(
+        '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"truncated"}],"stopReason":"length"}}',
+      ),
+    ).toBe("length");
+    expect(
+      extractAssistantStopReason(
+        '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"done"}],"stopReason":"stop"}}',
+      ),
+    ).toBe("stop");
   });
 
   it("extractAssistantOwnText returns only an assistant message's own text", () => {
@@ -4352,15 +4350,64 @@ describe("worker store (session-scoped)", () => {
       '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"the report"}]}}\n',
       "utf8",
     );
+    const events = { wake: vi.fn(), notify: vi.fn(), onChange: vi.fn(), onActivity: vi.fn() };
 
-    const finalized = await finalizeWorker({ cwd, record });
+    const finalized = await finalizeWorker({ cwd, record, events });
 
     expect(finalized.status).toBe("completed");
     expect(finalized.patchPath).toBeDefined();
     await expect(stat(finalized.patchPath as string)).rejects.toMatchObject({ code: "ENOENT" });
     expect(finalized.error).toContain("patch capture failed");
+    // No patch was stored, so the completed wake must not tell the parent
+    // to collect one.
+    expect(events.wake).toHaveBeenCalledWith(expect.not.stringContaining("collect"));
     // The record points at the absent patch, so collect and retention treat
     // the worktree as the only remaining copy of the worker's changes.
+    expect(existsSync(wt.path)).toBe(true);
+    await expect(discardWorktree(cwd, finalized)).resolves.toBe("kept");
+  });
+
+  it("finalizeWorker keeps the worktree recoverable when a truncated report's patch capture refuses", async () => {
+    await initGitRepo(cwd);
+    const wt = await createWorktree(cwd, "w-trunc-uncaptured");
+    await writeFile(join(cwd, "README.md"), "# parent drifted\n", "utf8");
+    await writeFile(join(wt.path, "README.md"), "# worker edit\n", "utf8");
+    const record = makeWorkerRecord({
+      id: "w-trunc-uncaptured",
+      name: "trunc-uncaptured",
+      status: "running",
+      worktree: wt.path,
+      branch: wt.branch,
+      streamFormat: "raw",
+    });
+    const spoolDir = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
+    await mkdir(spoolDir, { recursive: true });
+    await writeFile(
+      join(spoolDir, "w-trunc-uncaptured.jsonl"),
+      `${JSON.stringify({
+        type: "message_end",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "partial report, cut off" }],
+          stopReason: "length",
+        },
+      })}\n`,
+      "utf8",
+    );
+    const events = { wake: vi.fn(), notify: vi.fn(), onChange: vi.fn(), onActivity: vi.fn() };
+
+    const finalized = await finalizeWorker({ cwd, record, events });
+
+    expect(finalized.status).toBe("failed");
+    expect(finalized.error).toContain("output limit");
+    expect(finalized.error).toContain("patch capture failed");
+    expect(finalized.patchPath).toBeDefined();
+    await expect(stat(finalized.patchPath as string)).rejects.toMatchObject({ code: "ENOENT" });
+    // The wake names the output-limit cause but must not offer a collect
+    // for a patch that was never stored.
+    expect(events.wake).toHaveBeenCalledWith(expect.stringContaining("output limit"));
+    expect(events.wake).toHaveBeenCalledWith(expect.not.stringContaining("collect"));
+    // The worktree keeps the changes for recovery.
     expect(existsSync(wt.path)).toBe(true);
     await expect(discardWorktree(cwd, finalized)).resolves.toBe("kept");
   });
@@ -4445,6 +4492,8 @@ describe("worker store (session-scoped)", () => {
     // Status and wake messages identify the output-limit cause.
     expect(events.notify).toHaveBeenCalledWith("error", expect.stringContaining("output limit"));
     expect(events.wake).toHaveBeenCalledWith(expect.stringContaining("output limit"));
+    // A non-isolated worker has no patch, so the wake carries no collect hint.
+    expect(events.wake).toHaveBeenCalledWith(expect.not.stringContaining("collect"));
   });
 
   it("finalizeWorker captures the patch when the report is truncated so the worktree stays recoverable", async () => {
