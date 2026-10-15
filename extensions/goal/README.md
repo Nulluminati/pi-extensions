@@ -67,7 +67,7 @@ Cancels the goal entirely, clears the status line, and resets all internal state
 
 1. **Start** — `/goal:new <objective>` creates a `GoalState` object and persists it via `appendEntry("goal-state", ...)`. A follow-up user message is sent with the objective and persistence rules.
 
-2. **Per-turn reminder** — On every `before_agent_start`, if a goal is active, the extension injects a tail-position message (custom type `goal-context`) carrying the objective and goal-mode rules. A `context` handler strips all stale copies, so the request prefix stays byte-stable across turns — the system prompt is never modified, which keeps provider prompt caching intact.
+2. **Per-turn reminder** — On every `before_agent_start`, if a goal is active, the extension injects a tail-position message (custom type `goal-context`) carrying the objective and goal-mode rules. A `context` handler keeps the newest copy while the goal is active and strips older copies (all copies once no goal is active), so the request prefix stays byte-stable across turns — the system prompt is never modified, which keeps provider prompt caching intact.
 
 3. **Evaluation** — On `agent_end`, while the goal is active and no messages are pending, the extension sends the objective plus a bounded recent transcript to the global small model (`lib/small-model.ts`) via `completeSimple`. The verdict must be a JSON object: `{"status":"met"|"not_met"|"impossible","reason":"..."}`.
 
@@ -109,7 +109,7 @@ The extension keeps state in closure variables (`state`, `continuationQueued`, `
 | `pi.appendEntry("goal-state")` | Persists goal state to the session branch |
 | `pi.sendUserMessage()` | Sends start, resume, edit, and continuation prompts |
 | `pi.on("before_agent_start")` | Injects the per-turn goal-context message |
-| `pi.on("context")` | Strips stale goal-context copies from history |
+| `pi.on("context")` | Keeps the newest goal-context copy and strips stale copies from history |
 | `pi.on("agent_end")` | Runs the evaluator; queues continuation or completes/pauses |
 | `pi.on("message_end")` | Pauses goal on abort/error |
 | `pi.on("turn_end")` | Tracks token spend and elapsed time |

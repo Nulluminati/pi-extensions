@@ -352,6 +352,29 @@ describe("goal-extension", () => {
       expect(JSON.stringify(result.messages)).not.toContain("goal-context");
     });
 
+    it("context event keeps only the newest goal-context copy while a goal is active", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await goalExtension(mockPi);
+      await getCommandHandler(mockPi, "goal:new")("implement snake game", mockCtx);
+
+      const contextHandler = getEventHandler(mockPi, "context");
+      const result = (await contextHandler({
+        type: "context",
+        messages: [
+          { role: "user", content: "hello" },
+          { customType: "goal-context", content: [{ type: "text", text: "old copy" }] },
+          { role: "assistant", content: "hi" },
+          { role: "user", content: "continue" },
+          { customType: "goal-context", content: [{ type: "text", text: "current copy" }] },
+        ],
+      })) as { messages?: unknown[] };
+
+      expect(result.messages).toHaveLength(4);
+      expect(JSON.stringify(result.messages)).not.toContain("old copy");
+      expect(JSON.stringify(result.messages)).toContain("current copy");
+    });
+
     it("context event returns undefined when there are no goal-context copies", async () => {
       const mockPi = createMockPi();
       const _mockCtx = createMockCommandContext();

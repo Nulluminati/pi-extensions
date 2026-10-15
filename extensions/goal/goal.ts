@@ -173,18 +173,22 @@ export default async function goalExtension(pi: ExtensionAPI) {
   });
 
   // Goal reminders are re-injected fresh every turn, so stale copies from
-  // earlier turns are dropped from context unconditionally. Nothing to strip
-  // when no goal is active, so skip the allocation.
+  // earlier turns are dropped from context. While a goal is active the newest
+  // copy is the current run's reminder and stays; otherwise every copy is
+  // stale. Nothing to strip when no copy exists, so skip the allocation.
   pi.on("context", async (event) => {
-    const stales = (event.messages as Array<{ customType?: string }>).some(
-      (message) => message.customType === GOAL_CONTEXT_TYPE,
+    const messages = event.messages as Array<{ customType?: string }>;
+    let newest = -1;
+    for (let index = messages.length - 1; index >= 0 && newest === -1; index--) {
+      if (messages[index]?.customType === GOAL_CONTEXT_TYPE) newest = index;
+    }
+    if (newest === -1) return undefined;
+    const keep = state?.status === "active" ? newest : -1;
+    const filtered = messages.filter(
+      (message, index) => message.customType !== GOAL_CONTEXT_TYPE || index === keep,
     );
-    if (!stales) return undefined;
-    return {
-      messages: (event.messages as Array<{ customType?: string }>).filter(
-        (message) => message.customType !== GOAL_CONTEXT_TYPE,
-      ),
-    };
+    if (filtered.length === messages.length) return undefined;
+    return { messages: filtered };
   });
 
   pi.on("turn_end", async (_event, ctx) => {
