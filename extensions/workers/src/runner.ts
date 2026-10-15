@@ -190,23 +190,29 @@ export function ingestStreamEvent(jsonLine: string, record: WorkerRecord): "bloc
 
 // --- Parsing ---
 
-/**
- * Extract the last assistant text from a pi JSON event stream. Each line is
- * a JSON event; we keep the text of the most recent assistant message_end so
- * the final response wins.
- */
-export function extractAssistantText(jsonLine: string, current: string): string {
+/** Own text of one line's assistant message: undefined when the line is not
+ *  an assistant message_end, otherwise its text block text ("" when it has
+ *  none, e.g. a message cut off during thinking or a tool call). */
+export function extractAssistantOwnText(jsonLine: string): string | undefined {
   try {
     const event = JSON.parse(jsonLine) as {
       type?: string;
       message?: { role?: string; content?: unknown };
     };
-    if (event.type !== "message_end" || event.message?.role !== "assistant") return current;
-    const text = assistantTextFromContent(event.message.content);
-    return text || current;
+    if (event.type !== "message_end" || event.message?.role !== "assistant") return undefined;
+    return assistantTextFromContent(event.message.content);
   } catch {
-    return current;
+    return undefined;
   }
+}
+
+/**
+ * Extract the last assistant text from a pi JSON event stream. Each line is
+ * a JSON event; we keep the text of the most recent assistant message_end so
+ * the final response wins. A message with no text keeps the previous text.
+ */
+export function extractAssistantText(jsonLine: string, current: string): string {
+  return extractAssistantOwnText(jsonLine) || current;
 }
 
 /** Stop reason of the most recent assistant message_end: "length" marks a
@@ -230,18 +236,25 @@ export function extractAssistantStopReason(
   }
 }
 
-/** Final assistant text from a raw (child-written) spool. */
-function extractFinalTextRaw(lines: string[]): string {
-  let text = "";
-  for (const line of lines) text = extractAssistantText(line, text);
-  return text;
-}
-
-/** Final assistant stop reason from a raw (child-written) spool. */
-function extractFinalStopReason(lines: string[]): string | undefined {
+/** Final report from a raw (child-written) spool, folded in one pass so the
+ *  text and its stop reason come from the same last assistant message.
+ *  `truncated` marks a last message that settled on the model output limit
+ *  (stopReason "length"). `text` is the report to store: the last message's
+ *  own text when truncated — earlier text would mislabel a mid-run message
+ *  as the partial report — otherwise the most recent nonempty text. */
+function extractFinalReportRaw(lines: string[]): { text: string; truncated: boolean } {
+  let ownText = "";
+  let report = "";
   let stopReason: string | undefined;
-  for (const line of lines) stopReason = extractAssistantStopReason(line, stopReason);
-  return stopReason;
+  for (const line of lines) {
+    const own = extractAssistantOwnText(line);
+    if (own === undefined) continue;
+    ownText = own;
+    if (own) report = own;
+    stopReason = extractAssistantStopReason(line, stopReason);
+  }
+  const truncated = stopReason === "length";
+  return { text: truncated ? ownText : report, truncated };
 }
 
 /** Final assistant text from a legacy parent-projected spool. */
@@ -254,10 +267,6 @@ function extractFinalTextProjected(lines: string[]): string {
     } catch {}
   }
   return text;
-}
-
-function extractFinalText(lines: string[], format: WorkerRecord["streamFormat"]): string {
-  return format === "raw" ? extractFinalTextRaw(lines) : extractFinalTextProjected(lines);
 }
 
 /** Terminal status recorded in the spool's end marker, when present. */
@@ -381,10 +390,11 @@ export interface FinalizeOptions {
  * settled with stopReason "error" (provider failure) means failed, with
  * the message's errorMessage — then the stderr tail — as the detail. A
  * final assistant message stopped at the output limit (stopReason
- * "length") means failed with the output-limit cause: its partial text is
- * kept on the record and an isolated worktree's patch is still captured.
- * Otherwise a final assistant report means completed and its absence
- * means failed (with the stderr tail as the error detail). The spool is read as
+ * "length") means failed with the output-limit cause: its own partial
+ * text is kept on the record (a truncated message with no text stores
+ * none) and an isolated worktree's patch is still captured. Otherwise a
+ * final assistant report means completed and its absence means failed
+ * (with the stderr tail as the error detail). The spool is read as
  * a bounded tail, so absence is only trusted for a spool that fits the
  * window: a truncated spool without a readable report fails with explicit
  * truncation detail, since the report may live in the cut bytes.
@@ -402,9 +412,16 @@ export async function finalizeWorker(options: FinalizeOptions): Promise<WorkerRe
 
   const spool = await readTailLines(streamPath(cwd, record.id), STREAM_TAIL_BYTES);
   const lines = spool.lines;
-  const outputText = extractFinalText(lines, record.streamFormat);
-  const outputTruncated =
-    record.streamFormat === "raw" && extractFinalStopReason(lines) === "length";
+  let outputText: string;
+  let outputTruncated: boolean;
+  if (record.streamFormat === "raw") {
+    const report = extractFinalReportRaw(lines);
+    outputText = report.text;
+    outputTruncated = report.truncated;
+  } else {
+    outputText = extractFinalTextProjected(lines);
+    outputTruncated = false;
+  }
   const endMark = spoolEndStatus(lines);
   const settlement = record.streamFormat === "raw" ? spoolAssistantSettlement(lines) : undefined;
 
@@ -515,7 +532,7 @@ export async function finalizeWorker(options: FinalizeOptions): Promise<WorkerRe
         `worker ${record.name} (${record.id}) failed: ${error ?? "unknown error"}`,
       );
       events.wake(
-        `[worker ${record.name} (${record.id}) failed${outputTruncated ? " (output limit)" : ""}]. Use the workers tool (action=status, id=${record.id}) for details.`,
+        `[worker ${record.name} (${record.id}) failed${outputTruncated ? " (output limit)" : ""}]. Use the workers tool (action=status, id=${record.id}) for details${record.patchPath ? " and (action=collect) to apply its patch" : ""}.`,
       );
     } else if (status === "timeout") {
       events.notify("warning", `worker ${record.name} (${record.id}) timed out`);

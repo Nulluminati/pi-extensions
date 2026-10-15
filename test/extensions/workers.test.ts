@@ -36,6 +36,7 @@ import {
 import {
   armAdoptedTimeout,
   assistantTextFromContent,
+  extractAssistantOwnText,
   extractAssistantStopReason,
   extractAssistantText,
   finalizeWorker,
@@ -2904,6 +2905,24 @@ describe("workers-units", () => {
     expect(reason).toBe("stop");
   });
 
+  it("extractAssistantOwnText returns only an assistant message's own text", () => {
+    expect(extractAssistantOwnText("not json")).toBeUndefined();
+    expect(
+      extractAssistantOwnText('{"type":"message_end","message":{"role":"user","content":"hi"}}'),
+    ).toBeUndefined();
+    expect(
+      extractAssistantOwnText(
+        '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"first"}]}}',
+      ),
+    ).toBe("first");
+    // A message with no text block has empty own text (not undefined).
+    expect(
+      extractAssistantOwnText(
+        '{"type":"message_end","message":{"role":"assistant","content":[{"type":"thinking","thinking":"h"}]}}',
+      ),
+    ).toBe("");
+  });
+
   it("assistantTextFromContent joins text blocks and ignores other content", () => {
     expect(
       assistantTextFromContent([
@@ -4180,11 +4199,14 @@ describe("worker store (session-scoped)", () => {
     const spoolDir = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
     await mkdir(spoolDir, { recursive: true });
     await writeFile(join(spoolDir, "w-quiet.stderr.log"), "boom went the worker\n", "utf8");
+    const events = { wake: vi.fn(), notify: vi.fn(), onChange: vi.fn(), onActivity: vi.fn() };
 
-    const finalized = await finalizeWorker({ cwd, record });
+    const finalized = await finalizeWorker({ cwd, record, events });
 
     expect(finalized.status).toBe("failed");
     expect(finalized.error).toContain("boom went the worker");
+    // An ordinary failure has no patch, so the wake carries no collect hint.
+    expect(events.wake).toHaveBeenCalledWith(expect.not.stringContaining("collect"));
   });
 
   it("finalizeWorker infers completed from a report within a bounded tail of an oversized spool", async () => {
@@ -4451,8 +4473,9 @@ describe("worker store (session-scoped)", () => {
       })}\n`,
       "utf8",
     );
+    const events = { wake: vi.fn(), notify: vi.fn(), onChange: vi.fn(), onActivity: vi.fn() };
 
-    const finalized = await finalizeWorker({ cwd, record });
+    const finalized = await finalizeWorker({ cwd, record, events });
 
     expect(finalized.status).toBe("failed");
     expect(finalized.error).toContain("output limit");
@@ -4463,6 +4486,9 @@ describe("worker store (session-scoped)", () => {
     await expect(readFile(finalized.patchPath as string, "utf8")).resolves.toContain(
       "TRUNCATED.md",
     );
+    // The failed wake points at the recoverable patch, like the completed
+    // wake does.
+    expect(events.wake).toHaveBeenCalledWith(expect.stringContaining("(action=collect)"));
   });
 
   it.each([
@@ -4531,6 +4557,107 @@ describe("worker store (session-scoped)", () => {
     expect(finalized.status).toBe("completed");
     expect(finalized.outputText).toBe("the final report");
     expect(finalized.error).toBeUndefined();
+  });
+
+  it("finalizeWorker drops stale earlier text when the truncated final message has none", async () => {
+    const record = makeWorkerRecord({
+      id: "w-trunc-quiet",
+      name: "trunc-quiet",
+      status: "running",
+      streamFormat: "raw",
+    });
+    const spoolDir = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
+    await mkdir(spoolDir, { recursive: true });
+    // The limit cut the final message during thinking: it carries no text
+    // block. The earlier mid-run text must not surface as the report.
+    const midRun = JSON.stringify({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "Reading auth module." }],
+        stopReason: "toolUse",
+      },
+    });
+    const truncated = JSON.stringify({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "thinking", thinking: "half-formed thought" }],
+        stopReason: "length",
+      },
+    });
+    await writeFile(join(spoolDir, "w-trunc-quiet.jsonl"), `${midRun}\n${truncated}\n`, "utf8");
+
+    const finalized = await finalizeWorker({ cwd, record });
+
+    expect(finalized.status).toBe("failed");
+    expect(finalized.error).toContain("output limit");
+    // The earlier mid-run text is not the partial report; only the spool
+    // tail keeps it.
+    expect(finalized.outputText).toBeUndefined();
+  });
+
+  it.each([
+    { override: "timeout" as const, expected: "timeout" },
+    { override: "cancelled" as const, expected: "cancelled" },
+  ])(
+    "finalizeWorker keeps an explicit override over output-limit truncation: $expected",
+    async ({ override, expected }) => {
+      const record = makeWorkerRecord({
+        id: "w-trunc-override",
+        name: "trunc-override",
+        status: "running",
+        streamFormat: "raw",
+      });
+      const spoolDir = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
+      await mkdir(spoolDir, { recursive: true });
+      await writeFile(
+        join(spoolDir, "w-trunc-override.jsonl"),
+        `${JSON.stringify({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "partial report" }],
+            stopReason: "length",
+          },
+        })}\n`,
+        "utf8",
+      );
+
+      const finalized = await finalizeWorker({ cwd, record, statusOverride: override });
+
+      expect(finalized.status).toBe(expected);
+      expect(finalized.error ?? "").not.toContain("output limit");
+    },
+  );
+
+  it("finalizeWorker keeps native cancellation over output-limit truncation", async () => {
+    const record = makeWorkerRecord({
+      id: "w-trunc-aborted",
+      name: "trunc-aborted",
+      status: "running",
+      streamFormat: "raw",
+    });
+    const spoolDir = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
+    await mkdir(spoolDir, { recursive: true });
+    const truncated = JSON.stringify({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "partial report" }],
+        stopReason: "length",
+      },
+    });
+    await writeFile(
+      join(spoolDir, "w-trunc-aborted.jsonl"),
+      `${truncated}\n{"type":"agent_settled","aborted":true}\n`,
+      "utf8",
+    );
+
+    const finalized = await finalizeWorker({ cwd, record });
+
+    expect(finalized.status).toBe("cancelled");
+    expect(finalized.error).toBe("worker run aborted");
   });
 });
 
