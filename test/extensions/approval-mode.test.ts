@@ -107,7 +107,7 @@ describe("approval-mode command policy", () => {
 
 describe("approval-mode Jev diagnostics", () => {
   it("reports validated scores to the local evaluator without changing the decision", async () => {
-    const { classify, registry } = registryAnswering({ harm: 0.3, secrets: 0.05 });
+    const { classify, registry } = registryAnswering({ harm: 0.31, secrets: 0.05 });
     const result = await judgeCommand({
       command: "npm run check",
       cwd: "/workspace",
@@ -115,7 +115,7 @@ describe("approval-mode Jev diagnostics", () => {
     });
     expect(result).toMatchObject({
       decision: "uncertain",
-      scores: { harm: 0.3, secrets: 0.05, externalChange: 0.01 },
+      scores: { harm: 0.31, secrets: 0.05, externalChange: 0.01 },
     });
     expect(classify).toHaveBeenCalledTimes(1);
   });
@@ -206,14 +206,43 @@ describe("approval-mode Jev diagnostics", () => {
       command: "npx biome check --write src/auth.ts",
       cwd: "/workspace",
     };
-    const lowRisk = registryAnswering({ harm: 0.04, secrets: 0.2 });
+    const lowRisk = registryAnswering({ harm: 0.04, secrets: 0.3 });
     expect((await judgeCommand({ ...options, modelRegistry: lowRisk.registry })).decision).toBe(
       "allow",
     );
-    const escalated = registryAnswering({ harm: 0.04, secrets: 0.21 });
+    const escalated = registryAnswering({ harm: 0.04, secrets: 0.31 });
     expect((await judgeCommand({ ...options, modelRegistry: escalated.registry })).decision).toBe(
       "uncertain",
     );
+  });
+
+  it("allows residual harm and outside-change scores up to their limits", async () => {
+    const options = { command: "node /tmp/probe.mjs", cwd: "/workspace" };
+    for (const [probabilities, decision] of [
+      [{ harm: 0.3, secrets: 0.01, externalChange: 0.4 }, "allow"],
+      [{ harm: 0.31, secrets: 0.01, externalChange: 0.01 }, "uncertain"],
+      [{ harm: 0.01, secrets: 0.01, externalChange: 0.41 }, "uncertain"],
+    ] as const) {
+      const { registry } = registryAnswering(probabilities);
+      expect((await judgeCommand({ ...options, modelRegistry: registry })).decision).toBe(decision);
+    }
+  });
+
+  it("tells the judge which routine work is not risk", async () => {
+    const { classify, registry } = registryAnswering({ harm: 0.01, secrets: 0.01 });
+    await judgeCommand({
+      command: "node /tmp/probe.mjs",
+      cwd: "/workspace",
+      modelRegistry: registry,
+    });
+    const { questions } = classify.mock.calls[0][1];
+    expect(questions.harm.instructions).toMatch(/local script.*source is not shown/i);
+    expect(questions.harm.instructions).toMatch(/temporary.*not serious damage/i);
+    expect(questions.secrets.instructions).toMatch(
+      /environment variables that are not credentials/i,
+    );
+    expect(questions.externalChange.instructions).toMatch(/herdboard/);
+    expect(questions.externalChange.instructions).toMatch(/herdr/);
   });
 
   it("rejects concrete secret disclosure and keeps borderline secret risk uncertain", async () => {
@@ -225,7 +254,7 @@ describe("approval-mode Jev diagnostics", () => {
     expect((await judgeCommand({ ...options, modelRegistry: exposing.registry })).decision).toBe(
       "reject",
     );
-    const borderline = registryAnswering({ harm: 0.01, secrets: 0.3 });
+    const borderline = registryAnswering({ harm: 0.01, secrets: 0.5 });
     expect((await judgeCommand({ ...options, modelRegistry: borderline.registry })).decision).toBe(
       "uncertain",
     );
