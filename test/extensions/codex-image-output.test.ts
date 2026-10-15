@@ -9,6 +9,7 @@ import {
   MAX_INPUT_IMAGES,
   saveImage,
 } from "../../extensions/codex-image/src/output.ts";
+import { cleanGitEnv } from "../../lib/git.ts";
 import { projectStateRelative } from "../../lib/paths.ts";
 
 // --- Test fixtures ---
@@ -204,7 +205,7 @@ describe("saveImage", () => {
 
   it("excludes the images directory from git status", async () => {
     const dir = await tempDir("codex-image-git-");
-    execFileSync("git", ["init", "-q"], { cwd: dir });
+    execFileSync("git", ["init", "-q"], { cwd: dir, env: cleanGitEnv() });
 
     await saveImage(PNG_BYTES.toString("base64"), dir, "tracked? no");
 

@@ -4,7 +4,7 @@ import os from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
-import { excludeFromGit } from "../lib/git.ts";
+import { cleanGitEnv, excludeFromGit } from "../lib/git.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -18,7 +18,7 @@ afterEach(async () => {
 async function initRepo(): Promise<string> {
   tmp = await mkdtemp(join(os.tmpdir(), "git-exclude-test-"));
   const cwd = tmp;
-  await execFileAsync("git", ["init", "-q"], { cwd });
+  await execFileAsync("git", ["init", "-q"], { cwd, env: cleanGitEnv() });
   return cwd;
 }
 

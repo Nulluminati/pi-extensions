@@ -15,6 +15,7 @@ import {
   carryIncludedPaths,
   readIncludePatterns,
 } from "../../extensions/workers/src/provision/carry.ts";
+import { cleanGitEnv } from "../../lib/git.ts";
 
 const roots: string[] = [];
 
@@ -106,6 +107,6 @@ function temporaryDirectory(): string {
 function project(): { source: string; worktree: string } {
   const source = temporaryDirectory();
   const worktree = temporaryDirectory();
-  execFileSync("git", ["init", "-q"], { cwd: source });
+  execFileSync("git", ["init", "-q"], { cwd: source, env: cleanGitEnv() });
   return { source, worktree };
 }

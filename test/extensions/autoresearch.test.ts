@@ -394,7 +394,7 @@ describe("autoresearch-extension", () => {
     expect(kept?.commit).toBeTruthy();
     expect(await readFile(join(cwd, "metric.txt"), "utf8")).toContain("90");
 
-    const gitLog = await execFileAsync("git", ["log", "--oneline"], { cwd });
+    const gitLog = await execFileAsync("git", ["log", "--oneline"], gitOpts(cwd));
     expect(gitLog.stdout).toContain("autoresearch");
   });
 
