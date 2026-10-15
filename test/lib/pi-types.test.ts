@@ -35,3 +35,30 @@ describe("Pi 1.1.0 interface declarations", () => {
     >();
   });
 });
+
+describe("Pi 1.2.0 interface declarations", () => {
+  type BeforeAgentStart = ExtensionEventMap["before_agent_start"];
+
+  it("narrows before_agent_start user runs to the prompt and images", () => {
+    type UserRun = Extract<BeforeAgentStart, { messageType: "user" }>;
+    expectTypeOf<UserRun>().toHaveProperty("prompt").toEqualTypeOf<string>();
+    expectTypeOf<UserRun>()
+      .toHaveProperty("images")
+      .toEqualTypeOf<{ type: "image"; data: string; mimeType: string }[] | undefined>();
+    expectTypeOf<UserRun>().not.toHaveProperty("message");
+  });
+
+  it("narrows before_agent_start custom runs to the starting message", () => {
+    type CustomRun = Extract<BeforeAgentStart, { messageType: "custom" }>;
+    expectTypeOf<CustomRun>()
+      .toHaveProperty("message")
+      .toHaveProperty("customType")
+      .toEqualTypeOf<string>();
+    expectTypeOf<CustomRun>().not.toHaveProperty("prompt");
+  });
+
+  it("shares the system prompt and run kind across before_agent_start events", () => {
+    expectTypeOf<BeforeAgentStart["systemPrompt"]>().toEqualTypeOf<string>();
+    expectTypeOf<BeforeAgentStart["messageType"]>().toEqualTypeOf<"user" | "custom">();
+  });
+});

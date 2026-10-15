@@ -492,6 +492,34 @@ declare module "pi" {
 
   // --- Event map ---
 
+  interface BeforeAgentStartEventBase {
+    type: "before_agent_start";
+    /** The current system prompt, rendered from systemPromptOptions and earlier handler changes. */
+    readonly systemPrompt: string;
+    /** Mutable prompt sections. Later handlers observe mutations made by earlier handlers. */
+    systemPromptOptions: any;
+  }
+
+  /** A run started by a submitted prompt, RPC prompt, or `pi.sendUserMessage()`. */
+  export interface BeforeAgentStartUserEvent extends BeforeAgentStartEventBase {
+    messageType: "user";
+    prompt: string;
+    images?: ImageContent[];
+  }
+
+  /** A run started by `pi.sendMessage(..., { triggerTurn: true })` while idle. */
+  export interface BeforeAgentStartCustomEvent extends BeforeAgentStartEventBase {
+    messageType: "custom";
+    message: {
+      role: "custom";
+      customType: string;
+      content: string | (TextContent | ImageContent)[];
+      display: boolean;
+      details?: unknown;
+      timestamp: number;
+    };
+  }
+
   export interface ExtensionEventMap {
     resources_discover: { type: "resources_discover"; cwd: string; reason: "startup" | "reload" };
     session_start: { type: "session_start"; reason: string; previousSessionFile?: string };
@@ -530,13 +558,7 @@ declare module "pi" {
       status: number;
       headers: Record<string, string>;
     };
-    before_agent_start: {
-      type: "before_agent_start";
-      prompt: string;
-      images?: ImageContent[];
-      systemPrompt: string;
-      systemPromptOptions: any;
-    };
+    before_agent_start: BeforeAgentStartUserEvent | BeforeAgentStartCustomEvent;
     agent_start: { type: "agent_start" };
     agent_end: { type: "agent_end"; messages: any[] };
     agent_settled: { type: "agent_settled"; aborted: boolean };

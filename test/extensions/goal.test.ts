@@ -273,7 +273,12 @@ describe("goal-extension", () => {
 
       const beforeStartHandler = getEventHandler(mockPi, "before_agent_start");
       const result = (await beforeStartHandler(
-        { type: "before_agent_start", prompt: "test", systemPrompt: "base prompt" },
+        {
+          type: "before_agent_start",
+          messageType: "user",
+          prompt: "test",
+          systemPrompt: "base prompt",
+        },
         mockCtx,
       )) as { systemPrompt?: string; message?: { customType?: string; content: unknown[] } };
 
@@ -285,13 +290,44 @@ describe("goal-extension", () => {
       expect(text).toContain("Goal-mode rules");
     });
 
+    it("before_agent_start injects goal context into runs started by a custom message", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await goalExtension(mockPi);
+      await getCommandHandler(mockPi, "goal:new")("implement snake game", mockCtx);
+
+      const beforeStartHandler = getEventHandler(mockPi, "before_agent_start");
+      const result = (await beforeStartHandler(
+        {
+          type: "before_agent_start",
+          messageType: "custom",
+          message: {
+            role: "custom",
+            customType: "other-extension",
+            content: "wake up",
+            display: false,
+            timestamp: 0,
+          },
+          systemPrompt: "base prompt",
+        },
+        mockCtx,
+      )) as { message?: { customType?: string } };
+
+      expect(result.message?.customType).toBe("goal-context");
+    });
+
     it("before_agent_start returns undefined when no goal is active", async () => {
       const mockPi = createMockPi();
       const mockCtx = createMockCommandContext();
       await goalExtension(mockPi);
       const beforeStartHandler = getEventHandler(mockPi, "before_agent_start");
       const result = await beforeStartHandler(
-        { type: "before_agent_start", prompt: "test", systemPrompt: "base prompt" },
+        {
+          type: "before_agent_start",
+          messageType: "user",
+          prompt: "test",
+          systemPrompt: "base prompt",
+        },
         mockCtx,
       );
       expect(result).toBeUndefined();
