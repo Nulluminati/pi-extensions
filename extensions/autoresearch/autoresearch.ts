@@ -82,6 +82,7 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
 
   pi.registerTool({
     name: "autoresearch",
+    exposure: "model-only",
     label: "Autoresearch",
     description:
       "Autonomous experiment loop: init a measurable optimization (metric + measure command), then repeat — edit code, run (action=run), log keep-or-discard (action=log). Keeps are git commits, discards revert everything. Use for optimizing measurable targets: test speed, build time, bundle size, benchmark scores.",
