@@ -198,7 +198,9 @@ describe("approval-mode Jev diagnostics", () => {
     expect(context.questions.secrets.instructions).toMatch(
       /specific.*credential|credential.*specific/i,
     );
-    expect(context.questions.secrets.criteria?.false).toMatch(/incidental/i);
+    const secrets = context.questions.secrets;
+    if (secrets.type !== "bool") throw new Error("Expected a bool secret question");
+    expect(secrets.criteria.false).toMatch(/incidental/i);
   });
 
   it("allows low concrete secret risk but escalates higher scores", async () => {

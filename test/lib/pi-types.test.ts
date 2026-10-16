@@ -1,4 +1,14 @@
-import type { ClassifierContext, ExtensionEventMap, MessageRenderer, ToolRenderContext } from "pi";
+import type {
+  AgentToolResult,
+  ClassifierContext,
+  ClassifierQuestion,
+  ClassifierResult,
+  ExtensionEventMap,
+  MessageRenderer,
+  ModelUsage,
+  ToolDefinition,
+  ToolRenderContext,
+} from "pi";
 import { describe, expectTypeOf, it } from "vitest";
 
 describe("Pi 1.2.0 interface declarations", () => {
@@ -22,6 +32,24 @@ describe("Pi 1.2.0 interface declarations", () => {
     expectTypeOf<Parameters<MessageRenderer>[1]>()
       .toHaveProperty("outputPad")
       .toEqualTypeOf<number>();
+  });
+
+  it("accepts ordered score criteria and typed bool criteria", () => {
+    expectTypeOf<Extract<ClassifierQuestion, { type: "score" }>["criteria"]>().toEqualTypeOf<
+      string[]
+    >();
+    expectTypeOf<Extract<ClassifierQuestion, { type: "bool" }>["criteria"]>().toEqualTypeOf<{
+      true: string;
+      false: string;
+    }>();
+  });
+
+  it("exposes structured tool output and classifier usage accounting", () => {
+    expectTypeOf<ToolDefinition>().toHaveProperty("outputSchema");
+    expectTypeOf<ToolDefinition>().toHaveProperty("annotations");
+    expectTypeOf<AgentToolResult>().toHaveProperty("structuredContent");
+    expectTypeOf<AgentToolResult["usage"]>().toEqualTypeOf<ModelUsage | undefined>();
+    expectTypeOf<ClassifierResult["usage"]>().toEqualTypeOf<ModelUsage | undefined>();
   });
 
   it("accepts image blocks in classifier context", () => {

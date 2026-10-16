@@ -219,6 +219,14 @@ declare module "pi" {
     promptSnippet?: string;
     promptGuidelines?: string[];
     parameters: TParams;
+    /** JSON Schema for data returned to programmatic callers. */
+    outputSchema?: TSchema;
+    annotations?: {
+      readOnlyHint?: boolean;
+      destructiveHint?: boolean;
+      idempotentHint?: boolean;
+      openWorldHint?: boolean;
+    };
     renderShell?: "default" | "self";
     prepareArguments?: (args: unknown) => Static<TParams>;
     executionMode?: ToolExecutionMode;
@@ -270,6 +278,10 @@ declare module "pi" {
   export interface AgentToolResult<TDetails = unknown> {
     content: (TextContent | ImageContent)[];
     details?: TDetails;
+    /** Machine-readable data matching outputSchema. */
+    structuredContent?: unknown;
+    /** Usage from nested model calls, counted in session totals. */
+    usage?: ModelUsage;
     terminate?: boolean;
     isError?: boolean;
   }
@@ -398,11 +410,26 @@ declare module "pi" {
     questions: Record<string, ClassifierQuestion>;
   }
 
-  export interface ClassifierQuestion {
-    type: "choice" | "score" | "bool";
-    instructions: string;
-    /** Answers for a bool question, or option descriptions for a choice. */
-    criteria?: Record<string, string>;
+  /** Answers for a bool question, or option descriptions for a choice.
+   * Score criteria are ordered level descriptions. */
+  export type ClassifierQuestion =
+    | { type: "choice"; instructions: string; criteria: Record<string, string> }
+    | { type: "score"; instructions: string; criteria: string[] }
+    | { type: "bool"; instructions: string; criteria: { true: string; false: string } };
+
+  export interface ModelUsage {
+    input: number;
+    output: number;
+    totalTokens: number;
+    cacheRead?: number;
+    cacheWrite?: number;
+    cost?: {
+      input: number;
+      output: number;
+      cacheRead: number;
+      cacheWrite: number;
+      total: number;
+    };
   }
 
   export interface ClassifierResult {
@@ -412,7 +439,7 @@ declare module "pi" {
     answers: Record<string, ClassifierAnswer>;
     stopReason: "stop" | "error" | "aborted";
     errorMessage?: string;
-    usage?: { input: number; output: number; totalTokens: number };
+    usage?: ModelUsage;
     timestamp: number;
   }
 
@@ -678,7 +705,7 @@ declare module "pi" {
 
 declare module "typebox" {
   export const Type: {
-    Object(properties: Record<string, any>): any;
+    Object(properties: Record<string, any>, options?: any): any;
     String(options?: any): any;
     Number(options?: any): any;
     Boolean(options?: any): any;
@@ -688,7 +715,7 @@ declare module "typebox" {
     Union<T extends any[]>(schemas: [...T]): any;
     Literal<T extends string | number | boolean>(value: T): any;
     Enum<T extends Record<string, string | number>>(values: T): any;
-    Record<K, V>(key: K, value: V): any;
+    Record<K, V>(key: K, value: V, options?: any): any;
     Tuple<T extends any[]>(items: [...T]): any;
     Any(): any;
     Null(): any;
