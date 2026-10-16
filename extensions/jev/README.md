@@ -12,6 +12,8 @@ Use built-in `codemode` when a script combines retrieval, judgments, and filteri
 
 The [one-task comparison](COMPARISON.md) found identical labels and Jev token counts through both routes. It did not establish an accuracy advantage, a typical speed difference, or better agent tool selection.
 
+The [agent-level comparison](AGENT-COMPARISON.md) found a concrete benefit for short checks in fresh sessions. Both interfaces passed six tasks without errors. The dedicated tool used twelve main-model requests; built-in `codemode` used twenty-two. This supports reduced agent work, not higher reliability or better Jev judgments.
+
 ## Load
 
 ```bash

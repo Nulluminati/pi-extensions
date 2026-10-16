@@ -88,7 +88,7 @@ The dedicated route avoids a script sandbox and requires less calling code. Its 
 
 One completed pair cannot establish typical speed, accuracy, or reliability. Call order and connection reuse can affect timing. Three questions do not represent a broader workload.
 
-The experiment also does not establish which route an agent discovers or uses more reliably. That needs separate agent-level testing.
+The experiment also does not establish which route an agent discovers or uses more reliably. The separate [agent-level comparison](AGENT-COMPARISON.md) tests explicitly requested Jev checks in fresh agent sessions.
 
 ## Recommendation
 
