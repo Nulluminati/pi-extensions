@@ -4,6 +4,14 @@ The `jev` tool asks TypeSafe's Jev model for typed judgments about supplied evid
 
 Jev does not write explanations or code. It returns choices, scores, and probabilities. The main agent interprets those answers.
 
+## Built-in alternative
+
+Pi already supports Jev through `codemode` with `models.classify(...)`. This extension is optional. It adds direct access and consistent input limits and response checks, not another model capability.
+
+Use built-in `codemode` when a script combines retrieval, judgments, and filtering. Use `jev` when direct calls and its fixed checks suit the task.
+
+The [one-task comparison](COMPARISON.md) found identical labels and Jev token counts through both routes. It did not establish an accuracy advantage, a typical speed difference, or better agent tool selection.
+
 ## Load
 
 ```bash
