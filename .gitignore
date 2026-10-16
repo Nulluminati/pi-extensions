@@ -9,6 +9,7 @@ TODO.md
 
 # Pi extension runtime state (per-project, never committed)
 .pi/autoresearch/
+.pi/codemode-eval/
 .pi/messenger/
 .pi/missions/
 .pi/workers/
