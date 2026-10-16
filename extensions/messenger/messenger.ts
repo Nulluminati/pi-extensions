@@ -110,6 +110,7 @@ export default async function messengerExtension(pi: ExtensionAPI) {
 
   pi.registerTool({
     name: "messenger",
+    exposure: "model-only",
     label: "Messenger",
     description:
       "Coordinate with other Pi sessions working in this project: see who is online (list), send messages (send), read your inbox (inbox), and claim file paths so other agents cannot edit them (reserve/release). Use send to ask another agent a question or hand off work; use reserve before starting edits in a shared area.",

@@ -36,6 +36,7 @@ describe("real Pi tool contracts", () => {
     ["workers", "spawn_worker"],
     ["workers", "workers"],
     ["missions", "mission"],
+    ["messenger", "messenger"],
   ])("keeps %s/%s outside the real codemode callable-tool list", async (name, toolName) => {
     const extension = await load(name);
     const sdk = await import(import.meta.resolve("@earendil-works/pi-coding-agent"));
