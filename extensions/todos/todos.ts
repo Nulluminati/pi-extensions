@@ -82,7 +82,31 @@ export default async function todosExtension(pi: ExtensionAPI) {
       required: ["action"],
     },
 
+    outputSchema: {
+      type: "object",
+      properties: {
+        items: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "integer", minimum: 1 },
+              text: { type: "string" },
+              completed: { type: "boolean" },
+            },
+            required: ["id", "text", "completed"],
+          },
+        },
+        error: { type: "string" },
+      },
+      required: ["items"],
+    },
+
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+      const data = (error?: string) => ({
+        items: getTodoItems(pi).map((item, index) => ({ id: index + 1, ...item })),
+        ...(error ? { error } : {}),
+      });
       const action = typeof params.action === "string" ? params.action : "";
       const listText = () =>
         getTodoItems(pi)
@@ -100,12 +124,15 @@ export default async function todosExtension(pi: ExtensionAPI) {
               { type: "text", text: "No items to add: provide at least one non-empty item." },
             ],
             details: { error: "no_items" },
+            structuredContent: data("no_items"),
+            isError: true,
             terminate: true,
           };
         }
         return {
           content: [{ type: "text", text: `Added ${added} item(s):\n${listText()}` }],
           details: { items: getTodoItems(pi) },
+          structuredContent: data(),
         };
       }
 
@@ -122,6 +149,8 @@ export default async function todosExtension(pi: ExtensionAPI) {
               },
             ],
             details: { error: "no_ids" },
+            structuredContent: data("no_ids"),
+            isError: true,
             terminate: true,
           };
         }
@@ -137,6 +166,7 @@ export default async function todosExtension(pi: ExtensionAPI) {
             },
           ],
           details: { items: getTodoItems(pi) },
+          structuredContent: data(),
         };
       }
 
@@ -145,6 +175,7 @@ export default async function todosExtension(pi: ExtensionAPI) {
         return {
           content: [{ type: "text", text: "Todo list cleared." }],
           details: { items: [] },
+          structuredContent: data(),
         };
       }
 
@@ -158,6 +189,7 @@ export default async function todosExtension(pi: ExtensionAPI) {
             },
           ],
           details: { items },
+          structuredContent: data(),
         };
       }
 
@@ -169,6 +201,8 @@ export default async function todosExtension(pi: ExtensionAPI) {
           },
         ],
         details: { error: "unknown_action" },
+        structuredContent: data("unknown_action"),
+        isError: true,
         terminate: true,
       };
     },

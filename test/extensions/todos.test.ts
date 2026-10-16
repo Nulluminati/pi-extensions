@@ -1,5 +1,6 @@
 import { readdir } from "node:fs/promises";
 import { resolve } from "node:path";
+import { Check } from "typebox/value";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import todosExtension from "../../extensions/todos/todos.ts";
 import { getTodoItems } from "../../lib/todos.ts";
@@ -59,6 +60,70 @@ describe("todos-extension", () => {
       }
       throw new Error("todo tool not found");
     }
+
+    it.each([
+      [{ action: "list" }, "Todo list is empty.", undefined],
+      [{ action: "clear" }, "Todo list cleared.", undefined],
+      [
+        { action: "add", items: [] },
+        "No items to add: provide at least one non-empty item.",
+        "no_items",
+      ],
+      [
+        { action: "check" },
+        "No item numbers provided for action check. Provide ids matching the list returned by this tool.",
+        "no_ids",
+      ],
+      [
+        { action: "uncheck" },
+        "No item numbers provided for action uncheck. Provide ids matching the list returned by this tool.",
+        "no_ids",
+      ],
+      [
+        { action: "invalid" },
+        "Unknown todo action: invalid. Use add, check, uncheck, clear, or list.",
+        "unknown_action",
+      ],
+    ])("returns structured data and unchanged text for %j", async (params, text, error) => {
+      const mockPi = createMockPi();
+      await todosExtension(mockPi);
+      const tool = getTool(mockPi);
+      const result = await tool.execute(
+        "data",
+        params,
+        undefined,
+        undefined,
+        createMockCommandContext(),
+      );
+      expect(tool.outputSchema).toBeDefined();
+      expect(Check(tool.outputSchema, result.structuredContent)).toBe(true);
+      expect(result.structuredContent).toEqual({ items: [], ...(error ? { error } : {}) });
+      expect(result.content).toEqual([{ type: "text", text }]);
+      expect(result.isError).toBe(error ? true : undefined);
+      expect(result.terminate).toBe(error ? true : undefined);
+    });
+
+    it("returns numbered structured items after each mutation", async () => {
+      const mockPi = createMockPi();
+      await todosExtension(mockPi);
+      const tool = getTool(mockPi);
+      const ctx = createMockCommandContext();
+      for (const [params, completed, text] of [
+        [{ action: "add", items: ["first"] }, false, "Added 1 item(s):\n1. ☐ first"],
+        [{ action: "check", ids: [1] }, true, "Marked 1 item(s):\n1. ☑ first"],
+        [{ action: "uncheck", ids: [1] }, false, "Marked 1 item(s):\n1. ☐ first"],
+        [{ action: "check", ids: [9] }, false, "No items matched the given numbers:\n1. ☐ first"],
+        [{ action: "list" }, false, "1. ☐ first"],
+      ] as const) {
+        const result = await tool.execute("data", params, undefined, undefined, ctx);
+        expect(Check(tool.outputSchema, result.structuredContent)).toBe(true);
+        expect(result.structuredContent).toEqual({ items: [{ id: 1, text: "first", completed }] });
+        expect(result.details).toEqual({ items: [{ text: "first", completed }] });
+        expect(result.content).toEqual([{ type: "text", text }]);
+        expect(result.isError).toBeUndefined();
+        expect(result.terminate).toBeUndefined();
+      }
+    });
 
     it("add creates items, persists, and publishes", async () => {
       const mockPi = createMockPi();
