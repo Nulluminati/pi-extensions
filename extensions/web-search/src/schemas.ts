@@ -1,4 +1,4 @@
-/** Tool parameter schemas for the web-search tools. */
+/** Tool schemas for the web-search tools. */
 
 import { DEFAULT_MAX_RESULTS, MAX_MAX_RESULTS, MIN_MAX_RESULTS } from "./constants.ts";
 
@@ -15,6 +15,29 @@ export const WEB_SEARCH_PARAMS = {
     },
   },
   required: ["query"],
+};
+
+export const WEB_SEARCH_OUTPUT = {
+  type: "object",
+  properties: {
+    query: { type: "string" },
+    backend: { type: "string" },
+    resultCount: { type: "integer", minimum: 0 },
+    results: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          url: { type: "string" },
+          snippet: { type: "string" },
+        },
+        required: ["title", "url", "snippet"],
+      },
+    },
+    error: { type: "string" },
+  },
+  required: ["query", "backend", "resultCount", "results"],
 };
 
 export const WEB_FETCH_PARAMS = {

@@ -39,9 +39,9 @@ import {
   renderFetchResult,
   renderSearchResult,
 } from "./src/rendering.ts";
-import { WEB_FETCH_PARAMS, WEB_SEARCH_PARAMS } from "./src/schemas.ts";
+import { WEB_FETCH_PARAMS, WEB_SEARCH_OUTPUT, WEB_SEARCH_PARAMS } from "./src/schemas.ts";
 import { truncateWithSpill } from "./src/truncation.ts";
-import type { SearchProvider } from "./src/types.ts";
+import type { SearchProvider, SearchResult } from "./src/types.ts";
 
 // --- Extension ---
 export default async function webSearchExtension(pi: ExtensionAPI) {
@@ -136,16 +136,25 @@ export default async function webSearchExtension(pi: ExtensionAPI) {
       "Always cite sources with markdown hyperlinks when using search results in your response.",
     ],
     parameters: WEB_SEARCH_PARAMS,
+    outputSchema: WEB_SEARCH_OUTPUT,
     renderResult: renderSearchResult,
     execute: async (_toolCallId, params, signal, onUpdate, ctx) => {
       const provider = activeProvider();
       const query = String(params.query ?? "");
+      const data = (results: SearchResult[] = [], error?: string) => ({
+        query,
+        backend: provider.id,
+        resultCount: results.length,
+        results,
+        ...(error ? { error } : {}),
+      });
 
       if (!query) {
         return {
           content: [{ type: "text", text: "Error: query is required" }],
           isError: true,
           details: { query: "", backend: provider.id, resultCount: 0, isError: true },
+          structuredContent: data([], "Error: query is required"),
         };
       }
 
@@ -160,6 +169,10 @@ export default async function webSearchExtension(pi: ExtensionAPI) {
           ],
           isError: true,
           details: { query, backend: provider.id, resultCount: 0, isError: true },
+          structuredContent: data(
+            [],
+            `Error: ${provider.label} is not configured. ${provider.authHint} Switch providers with /websearch:select.`,
+          ),
         };
       }
 
@@ -194,6 +207,7 @@ export default async function webSearchExtension(pi: ExtensionAPI) {
         return {
           content: [{ type: "text", text: displayText }],
           details,
+          structuredContent: data(results),
         };
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
@@ -201,6 +215,7 @@ export default async function webSearchExtension(pi: ExtensionAPI) {
           content: [{ type: "text", text: `Error: ${message}` }],
           isError: true,
           details: { query, backend: provider.id, resultCount: 0, isError: true },
+          structuredContent: data([], `Error: ${message}`),
         };
       }
     },

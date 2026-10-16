@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { Check } from "typebox/value";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { decodeHtmlEntities } from "../../extensions/web-search/src/html.ts";
 import webSearchExtension from "../../extensions/web-search/web-search.ts";
@@ -205,6 +206,52 @@ describe("web-search-extension", () => {
       await getCommandHandler(mockPi, "websearch:select")("brave", createMockCommandContext());
       return { mockPi, tool: getRegisteredTool(mockPi, "web_search") };
     }
+
+    it.each(["success", "empty", "missing-query", "unconfigured", "network-error"])(
+      "returns schema-backed data for %s without changing text",
+      async (scenario) => {
+        if (scenario !== "unconfigured") vi.stubEnv("BRAVE_API_KEY", "test-key");
+        const results =
+          scenario === "success"
+            ? [{ title: "Title", url: "https://example.com", description: "Snippet" }]
+            : [];
+        if (scenario === "network-error") mockFetch.mockRejectedValue(new Error("offline"));
+        else mockFetch.mockResolvedValue(braveSearchResponse(results));
+        const { tool } = await setupWithBraveActive();
+        const query = scenario === "missing-query" ? "" : "test";
+        const result = await tool.execute("data", { query }, undefined, undefined, {});
+        const failed = ["missing-query", "unconfigured", "network-error"].includes(scenario);
+        expect(tool.outputSchema).toBeDefined();
+        expect(Check(tool.outputSchema, result.structuredContent)).toBe(true);
+        expect(result.structuredContent).toEqual({
+          query,
+          backend: "brave",
+          resultCount: results.length,
+          results: results.map(({ title, url, description }) => ({
+            title,
+            url,
+            snippet: description,
+          })),
+          ...(failed ? { error: result.content[0].text } : {}),
+        });
+        expect(result.isError).toBe(failed ? true : undefined);
+        expect(result.terminate).toBeUndefined();
+        if (scenario === "success") {
+          expect(result.content).toEqual([
+            { type: "text", text: "**Title**\nhttps://example.com\nSnippet" },
+          ]);
+        } else if (scenario === "empty") {
+          expect(result.content).toEqual([{ type: "text", text: "No results found for: test" }]);
+        } else if (scenario === "missing-query") {
+          expect(result.content).toEqual([{ type: "text", text: "Error: query is required" }]);
+        } else {
+          expect(result.content[0].text).toMatch(/^Error: /);
+          expect(result.content[0].text).toContain(
+            scenario === "unconfigured" ? "BRAVE_API_KEY" : "offline",
+          );
+        }
+      },
+    );
 
     it("returns error when BRAVE_API_KEY is not set", async () => {
       const { tool } = await setupWithBraveActive();
