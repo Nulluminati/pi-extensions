@@ -1,5 +1,6 @@
 import { readdir } from "node:fs/promises";
 import { resolve } from "node:path";
+import { Check } from "typebox/value";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import codeSearchExtension from "../../extensions/code-search/code-search.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
@@ -89,6 +90,32 @@ describe("code-search-extension", () => {
       expect(result.content[0].text).toContain("TypeScript");
       expect(result.details.totalResults).toBe(1);
       expect(result.details.repositoriesFound).toBe(1);
+      expect(tool.outputSchema).toBeDefined();
+      expect(Check(tool.outputSchema, result.structuredContent)).toBe(true);
+      expect(result.structuredContent).toEqual(JSON.parse(JSON.stringify(result.details)));
+      expect(result.isError).toBeUndefined();
+      expect(result.terminate).toBeUndefined();
+    });
+
+    it.each(["", "bad query(foo)"])("returns structured validation data for %j", async (query) => {
+      const mockPi = createMockPi();
+      await codeSearchExtension(mockPi);
+      const tool = getRegisteredTool(mockPi, "code_search");
+      const result = await tool.execute("data", { query }, undefined, undefined, {});
+      expect(tool.outputSchema).toBeDefined();
+      expect(Check(tool.outputSchema, result.structuredContent)).toBe(true);
+      expect(result.structuredContent).toEqual({
+        ...result.details,
+        error: result.content[0].text,
+      });
+      expect(result.structuredContent.results).toEqual([]);
+      expect(result.isError).toBe(true);
+      expect(result.terminate).toBeUndefined();
+      expect(result.content[0].text).toBe(
+        query === ""
+          ? "Error: query is required"
+          : "Error: parentheses are only reliable in a single unquoted term on this API; other shapes return false zeros. Use a single term like MarshalJSON(), or remove the parentheses.",
+      );
     });
 
     it("groups multiple results by repository", async () => {

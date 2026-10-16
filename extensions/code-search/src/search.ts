@@ -45,6 +45,79 @@ export const CODE_SEARCH_PARAMS = {
   required: ["query"],
 } as const;
 
+const FACET_OUTPUT = {
+  type: "array",
+  items: {
+    type: "object",
+    properties: { val: { type: "string" }, count: { type: "number" } },
+    required: ["val", "count"],
+  },
+};
+
+export const CODE_SEARCH_OUTPUT = {
+  type: "object",
+  properties: {
+    query: { type: "string" },
+    totalResults: { type: "number" },
+    resultsShown: { type: "number" },
+    repositoriesFound: { type: "number" },
+    topLanguages: FACET_OUTPUT,
+    topRepositories: FACET_OUTPUT,
+    results: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          repository: { type: "string" },
+          matchesCount: { type: "number" },
+          files: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                filePath: { type: "string" },
+                branch: { type: "string" },
+                totalMatches: { type: "number" },
+                lineNumbers: { type: "array", items: { type: "number" } },
+                language: { type: "string" },
+                codeSnippet: { type: "string" },
+              },
+              required: [
+                "filePath",
+                "branch",
+                "totalMatches",
+                "lineNumbers",
+                "language",
+                "codeSnippet",
+              ],
+            },
+          },
+        },
+        required: ["repository", "matchesCount", "files"],
+      },
+    },
+    filters: {
+      type: "object",
+      properties: {
+        language: { type: "string" },
+        repo: { type: "string" },
+        path: { type: "string" },
+      },
+    },
+    isError: { type: "boolean" },
+    error: { type: "string" },
+  },
+  required: [
+    "query",
+    "totalResults",
+    "resultsShown",
+    "repositoriesFound",
+    "topLanguages",
+    "topRepositories",
+    "results",
+  ],
+};
+
 // --- Result cache ---
 
 export interface CodeSearchCacheEntry {
@@ -124,20 +197,22 @@ function errorResult(
   text: string,
   filters?: CodeSearchDetails["filters"],
 ): AgentToolResult<CodeSearchDetails> {
+  const details: CodeSearchDetails = {
+    query,
+    totalResults: 0,
+    resultsShown: 0,
+    repositoriesFound: 0,
+    topLanguages: [],
+    topRepositories: [],
+    results: [],
+    ...(filters && { filters }),
+    isError: true,
+  };
   return {
     content: [{ type: "text", text }],
     isError: true,
-    details: {
-      query,
-      totalResults: 0,
-      resultsShown: 0,
-      repositoriesFound: 0,
-      topLanguages: [],
-      topRepositories: [],
-      results: [],
-      ...(filters && { filters }),
-      isError: true,
-    },
+    details,
+    structuredContent: { ...details, error: text },
   };
 }
 
@@ -193,7 +268,11 @@ export async function executeCodeSearch(
     );
   }
 
-  const filters: CodeSearchDetails["filters"] = { language, repo, path };
+  const filters: CodeSearchDetails["filters"] = {
+    ...(language ? { language } : {}),
+    ...(repo ? { repo } : {}),
+    ...(path ? { path } : {}),
+  };
   const searchParams: CodeSearchParams = {
     query,
     ...(language && { language }),
@@ -234,6 +313,7 @@ export async function executeCodeSearch(
     const result: AgentToolResult<CodeSearchDetails> = {
       content: [{ type: "text", text }],
       details: { ...details, filters },
+      structuredContent: { ...details, filters },
     };
     writeCache(cache, key, result);
     return result;

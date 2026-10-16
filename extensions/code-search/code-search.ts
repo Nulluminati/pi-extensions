@@ -7,7 +7,12 @@
 
 import type { ExtensionAPI } from "pi";
 import { renderCodeSearchResult } from "./src/renderer.ts";
-import { CODE_SEARCH_PARAMS, createCodeSearchCache, executeCodeSearch } from "./src/search.ts";
+import {
+  CODE_SEARCH_OUTPUT,
+  CODE_SEARCH_PARAMS,
+  createCodeSearchCache,
+  executeCodeSearch,
+} from "./src/search.ts";
 
 // --- Extension ---
 
@@ -28,6 +33,7 @@ export default async function codeSearchExtension(pi: ExtensionAPI) {
       "code_search covers public GitHub repositories only; private or non-GitHub code is not indexed.",
     ],
     parameters: CODE_SEARCH_PARAMS,
+    outputSchema: CODE_SEARCH_OUTPUT,
     renderResult: renderCodeSearchResult,
     execute: (toolCallId, params, signal, onUpdate, ctx) =>
       executeCodeSearch(toolCallId, params, signal, onUpdate, ctx, cache),
