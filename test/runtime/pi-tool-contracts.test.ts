@@ -31,13 +31,17 @@ describe("real Pi tool contracts", () => {
     }
   });
 
-  it("keeps ask_user outside the real codemode callable-tool list", async () => {
-    const extension = await load("ask-user");
+  it.each([
+    ["ask-user", "ask_user"],
+    ["workers", "spawn_worker"],
+    ["workers", "workers"],
+  ])("keeps %s/%s outside the real codemode callable-tool list", async (name, toolName) => {
+    const extension = await load(name);
     const sdk = await import(import.meta.resolve("@earendil-works/pi-coding-agent"));
     const { AuthStorage } = await import(
       pathToFileURL(resolve(agentDist, "core/auth-storage.js")).href
     );
-    const registered = extension.tools.get("ask_user");
+    const registered = extension.tools.get(toolName);
     expect(registered.definition.exposure).toBe("model-only");
     const cwd = mkdtempSync(join(tmpdir(), "pi-runtime-"));
     try {
@@ -70,12 +74,12 @@ describe("real Pi tool contracts", () => {
         settingsManager,
         resourceLoader,
         sessionManager: sdk.SessionManager.inMemory(cwd),
-        tools: ["ask_user"],
+        tools: [toolName],
         customTools: [registered.definition],
       });
       try {
-        expect(session.getActiveToolNames()).toContain("ask_user");
-        expect(session.getCallableToolNames()).not.toContain("ask_user");
+        expect(session.getActiveToolNames()).toContain(toolName);
+        expect(session.getCallableToolNames()).not.toContain(toolName);
         expect(session.extensionRunner.createToolContext().tools).toEqual([]);
       } finally {
         session.dispose();

@@ -347,6 +347,7 @@ export default async function workersExtension(pi: ExtensionAPI) {
 
   pi.registerTool({
     name: "spawn_worker",
+    exposure: "model-only",
     label: "Spawn Worker",
     description:
       "Spawn a cheap-model worker Pi session and hand it a bounded, self-contained task. The worker gets built-in file and shell tools routed through the OS sandbox (worker-sandbox), its own context, and its own git worktree by default. Set read_only for investigation-only workers that inspect the current workspace and produce no patch. Use for parallelizable investigation and well-specified implementation work; keep design decisions, integration, and review in this session.",
@@ -407,6 +408,7 @@ export default async function workersExtension(pi: ExtensionAPI) {
 
   pi.registerTool({
     name: "workers",
+    exposure: "model-only",
     label: "Workers",
     description:
       "Manage spawned worker sessions: list this session's workers (optionally orphans left by ended sessions), read a worker's report (status), cancel a running worker, or collect an isolated worker's patch into the working tree (collect). Lifecycle: only running workers hold a slot — workers in a terminal state consume none. cancel stops a live process; remove deletes a terminal worker's record, artifacts, and worktree; to relaunch, just spawn_worker again.",
