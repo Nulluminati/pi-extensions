@@ -1,5 +1,86 @@
 // JSON schemas exposed through the three Context7 Pi tools.
 
+const LIBRARY_RESULT = {
+  type: "object",
+  properties: {
+    id: { type: "string" },
+    title: { type: "string" },
+    description: { type: "string" },
+    totalSnippets: { type: "number" },
+    trustScore: { type: "number" },
+    benchmarkScore: { type: "number" },
+    versions: { type: "array", items: { type: "string" } },
+    source: { type: "string" },
+  },
+  required: ["id", "title", "description"],
+};
+
+const DOC_PROPERTIES = {
+  text: { type: "string" },
+  docRef: { type: "string" },
+  libraryId: { type: "string" },
+  libraryName: { type: "string" },
+  libraryVersion: { type: "string" },
+  query: { type: "string" },
+  topic: { type: "string" },
+  page: { type: "number" },
+  effectiveQuery: { type: "string" },
+  cacheStatus: { type: "string" },
+};
+
+export const RESOLVE_LIBRARY_OUTPUT = {
+  type: "object",
+  properties: {
+    text: { type: "string" },
+    source: { type: "string" },
+    recommendedLibraryId: { type: "string" },
+    ambiguous: { type: "boolean" },
+    results: { type: "array", items: LIBRARY_RESULT },
+  },
+  required: ["text", "source", "ambiguous", "results"],
+};
+
+export const GET_LIBRARY_DOCS_OUTPUT = {
+  type: "object",
+  properties: {
+    ...DOC_PROPERTIES,
+    needsResolution: { type: "boolean" },
+    candidates: { type: "array", items: LIBRARY_RESULT },
+  },
+  required: ["text"],
+  anyOf: [
+    { required: ["docRef", "libraryId", "page"] },
+    { required: ["needsResolution", "candidates"] },
+  ],
+};
+
+export const GET_CACHED_DOC_RAW_OUTPUT = {
+  type: "object",
+  properties: {
+    ...DOC_PROPERTIES,
+    ambiguous: { type: "boolean" },
+    candidates: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: DOC_PROPERTIES,
+        required: ["docRef", "libraryId", "libraryName", "query", "page"],
+      },
+    },
+    totalLines: { type: "number" },
+    totalChars: { type: "number" },
+    startLine: { type: "number" },
+    endLine: { type: "number" },
+    truncated: { type: "boolean" },
+    nextOffsetLine: { type: "number" },
+  },
+  required: ["text"],
+  anyOf: [
+    { required: ["docRef", "truncated", "totalLines", "startLine", "endLine"] },
+    { required: ["ambiguous", "candidates"] },
+  ],
+};
+
 // --- Tool parameter schemas ---
 
 export const RESOLVE_LIBRARY_PARAMS = {

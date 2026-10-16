@@ -17,8 +17,11 @@ import {
 } from "./src/renderers.ts";
 import { formatResolveResults, resolveLibraries } from "./src/resolution.ts";
 import {
+  GET_CACHED_DOC_RAW_OUTPUT,
   GET_CACHED_DOC_RAW_PARAMS,
+  GET_LIBRARY_DOCS_OUTPUT,
   GET_LIBRARY_DOCS_PARAMS,
+  RESOLVE_LIBRARY_OUTPUT,
   RESOLVE_LIBRARY_PARAMS,
 } from "./src/schemas.ts";
 import type {
@@ -28,6 +31,15 @@ import type {
 } from "./src/types.ts";
 
 export type { DocCacheIndexEntry } from "./src/types.ts";
+
+function dataResult<T extends object>(text: string, details: T, isError = false) {
+  return {
+    content: [{ type: "text" as const, text }],
+    details,
+    structuredContent: { text, ...details },
+    ...(isError ? { isError: true } : {}),
+  };
+}
 
 // --- Extension ---
 
@@ -43,21 +55,19 @@ export default async function context7Extension(pi: ExtensionAPI) {
       "context7_get_library_docs resolves library names itself. Use context7_resolve_library_id only when a name is ambiguous, a lookup returned the wrong library, or you need to pick a specific ID or version.",
     ],
     parameters: RESOLVE_LIBRARY_PARAMS,
+    outputSchema: RESOLVE_LIBRARY_OUTPUT,
     renderResult: createResolveRenderResult(),
     async execute(_toolCallId, params) {
       const resolved = await resolveLibraries(params as ResolveLibraryParams);
       const formatted = formatResolveResults(resolved.response, params.libraryName);
-      return {
-        content: [{ type: "text", text: formatted.text }],
-        details: {
-          source: resolved.source,
-          staleBecause: resolved.staleBecause,
-          configError: resolved.configError,
-          recommendedLibraryId: formatted.recommended?.id,
-          ambiguous: formatted.ambiguous,
-          results: resolved.response.results,
-        },
-      };
+      return dataResult(formatted.text, {
+        source: resolved.source,
+        staleBecause: resolved.staleBecause,
+        configError: resolved.configError,
+        recommendedLibraryId: formatted.recommended?.id,
+        ambiguous: formatted.ambiguous,
+        results: resolved.response.results,
+      });
     },
   });
 
@@ -73,14 +83,12 @@ export default async function context7Extension(pi: ExtensionAPI) {
       "If you only know the library name, pass libraryName to context7_get_library_docs and let it auto-resolve.",
     ],
     parameters: GET_LIBRARY_DOCS_PARAMS,
+    outputSchema: GET_LIBRARY_DOCS_OUTPUT,
     renderResult: createDocsRenderResult(),
     async execute(_toolCallId, params) {
       const result = await getDocsEntry(params as GetLibraryDocsParams);
       if (!result.ok) {
-        return {
-          content: [{ type: "text", text: result.text }],
-          details: result.details,
-        };
+        return dataResult(result.text, result.details, true);
       }
 
       const entry = result.entry;
@@ -91,20 +99,17 @@ export default async function context7Extension(pi: ExtensionAPI) {
       if (result.source === "network")
         notes.push("Fetched docs from Context7 and refreshed the local cache.");
 
-      return {
-        content: [{ type: "text", text: `${entry.curatedText}\n\n${notes.join(" ")}`.trim() }],
-        details: {
-          ...result.details,
-          docRef: entry.docRef,
-          libraryId: entry.libraryId,
-          libraryName: entry.libraryName,
-          libraryVersion: entry.libraryVersion,
-          page: entry.page,
-          query: entry.query,
-          topic: entry.topic,
-          effectiveQuery: entry.effectiveQuery,
-        },
-      };
+      return dataResult(`${entry.curatedText}\n\n${notes.join(" ")}`.trim(), {
+        ...result.details,
+        docRef: entry.docRef,
+        libraryId: entry.libraryId,
+        libraryName: entry.libraryName,
+        libraryVersion: entry.libraryVersion,
+        page: entry.page,
+        query: entry.query,
+        topic: entry.topic,
+        effectiveQuery: entry.effectiveQuery,
+      });
     },
   });
 
@@ -121,6 +126,7 @@ export default async function context7Extension(pi: ExtensionAPI) {
       "Documents over 2,000 lines / 40,000 chars arrive as a bounded window: keep calling with offsetLine = nextOffsetLine until truncated is false.",
     ],
     parameters: GET_CACHED_DOC_RAW_PARAMS,
+    outputSchema: GET_CACHED_DOC_RAW_OUTPUT,
     renderResult: createRawRenderResult(),
     async execute(_toolCallId, params) {
       const settings = await loadSettings();
@@ -142,25 +148,22 @@ export default async function context7Extension(pi: ExtensionAPI) {
           );
         }
         const rawWindow = sliceRawDoc(cached.entry.rawText, params.offsetLine);
-        return {
-          content: [{ type: "text", text: rawWindow.text }],
-          details: {
-            docRef: cached.entry.docRef,
-            libraryId: cached.entry.libraryId,
-            libraryName: cached.entry.libraryName,
-            libraryVersion: cached.entry.libraryVersion,
-            cacheStatus: cached.fresh ? "fresh" : "stale",
-            query: cached.entry.query,
-            topic: cached.entry.topic,
-            page: cached.entry.page,
-            totalLines: rawWindow.totalLines,
-            totalChars: rawWindow.totalChars,
-            startLine: rawWindow.startLine,
-            endLine: rawWindow.endLine,
-            truncated: rawWindow.truncated,
-            nextOffsetLine: rawWindow.nextOffsetLine,
-          },
-        };
+        return dataResult(rawWindow.text, {
+          docRef: cached.entry.docRef,
+          libraryId: cached.entry.libraryId,
+          libraryName: cached.entry.libraryName,
+          libraryVersion: cached.entry.libraryVersion,
+          cacheStatus: cached.fresh ? "fresh" : "stale",
+          query: cached.entry.query,
+          topic: cached.entry.topic,
+          page: cached.entry.page,
+          totalLines: rawWindow.totalLines,
+          totalChars: rawWindow.totalChars,
+          startLine: rawWindow.startLine,
+          endLine: rawWindow.endLine,
+          truncated: rawWindow.truncated,
+          nextOffsetLine: rawWindow.nextOffsetLine,
+        });
       }
 
       if (
@@ -182,18 +185,11 @@ export default async function context7Extension(pi: ExtensionAPI) {
       }
 
       if (candidates.length > 1) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Multiple cached Context7 documents matched that lookup. Refine the lookup or use one of these docRefs:\n\n${formatCacheCandidates(candidates)}`,
-            },
-          ],
-          details: {
-            ambiguous: true,
-            candidates,
-          },
-        };
+        return dataResult(
+          `Multiple cached Context7 documents matched that lookup. Refine the lookup or use one of these docRefs:\n\n${formatCacheCandidates(candidates)}`,
+          { ambiguous: true, candidates },
+          true,
+        );
       }
 
       const only = candidates[0];
@@ -210,25 +206,22 @@ export default async function context7Extension(pi: ExtensionAPI) {
       }
 
       const rawWindow = sliceRawDoc(entry.rawText, params.offsetLine);
-      return {
-        content: [{ type: "text", text: rawWindow.text }],
-        details: {
-          docRef: entry.docRef,
-          libraryId: entry.libraryId,
-          libraryName: entry.libraryName,
-          libraryVersion: entry.libraryVersion,
-          cacheStatus: new Date(entry.expiresAt).getTime() > Date.now() ? "fresh" : "stale",
-          query: entry.query,
-          topic: entry.topic,
-          page: entry.page,
-          totalLines: rawWindow.totalLines,
-          totalChars: rawWindow.totalChars,
-          startLine: rawWindow.startLine,
-          endLine: rawWindow.endLine,
-          truncated: rawWindow.truncated,
-          nextOffsetLine: rawWindow.nextOffsetLine,
-        },
-      };
+      return dataResult(rawWindow.text, {
+        docRef: entry.docRef,
+        libraryId: entry.libraryId,
+        libraryName: entry.libraryName,
+        libraryVersion: entry.libraryVersion,
+        cacheStatus: new Date(entry.expiresAt).getTime() > Date.now() ? "fresh" : "stale",
+        query: entry.query,
+        topic: entry.topic,
+        page: entry.page,
+        totalLines: rawWindow.totalLines,
+        totalChars: rawWindow.totalChars,
+        startLine: rawWindow.startLine,
+        endLine: rawWindow.endLine,
+        truncated: rawWindow.truncated,
+        nextOffsetLine: rawWindow.nextOffsetLine,
+      });
     },
   });
 }

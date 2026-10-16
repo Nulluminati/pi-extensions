@@ -1,3 +1,4 @@
+import { Check } from "typebox/value";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import context7Extension, { type DocCacheIndexEntry } from "../../extensions/context7/context7.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
@@ -677,6 +678,10 @@ describe("context7-extension", () => {
       expect(result.details.source).toBe("network");
       expect(result.details.recommendedLibraryId).toBe("/facebook/react");
       expect(result.details.ambiguous).toBe(false);
+      expect(tool.outputSchema).toBeDefined();
+      expect(Check(tool.outputSchema, result.structuredContent)).toBe(true);
+      expect(result.structuredContent).toEqual({ text: result.content[0].text, ...result.details });
+      expect(result.isError).toBeUndefined();
     });
 
     it("returns fresh cache hit without network call", async () => {
@@ -866,6 +871,10 @@ describe("context7-extension", () => {
       expect(result.details.libraryId).toBe("/test/lib");
       expect(result.details.cacheStatus).toBe("refreshed");
       expect(result.details.curation).toBeDefined();
+      expect(tool.outputSchema).toBeDefined();
+      expect(Check(tool.outputSchema, result.structuredContent)).toBe(true);
+      expect(result.structuredContent).toEqual({ text: result.content[0].text, ...result.details });
+      expect(result.isError).toBeUndefined();
     });
 
     it("auto-resolves libraryName before fetching docs", async () => {
@@ -903,6 +912,10 @@ describe("context7-extension", () => {
 
       expect(result.content[0].text).toContain("Unable to safely auto-resolve");
       expect(result.details.needsResolution).toBe(true);
+      expect(tool.outputSchema).toBeDefined();
+      expect(Check(tool.outputSchema, result.structuredContent)).toBe(true);
+      expect(result.structuredContent).toEqual({ text: result.content[0].text, ...result.details });
+      expect(result.isError).toBe(true);
     });
 
     it("returns fresh cache hit", async () => {
@@ -1085,6 +1098,10 @@ describe("context7-extension", () => {
       expect(result.details.docRef).toBe("ctx7:docs:ref1");
       expect(result.details.cacheStatus).toBe("fresh");
       expect(result.details.truncated).toBe(false);
+      expect(tool.outputSchema).toBeDefined();
+      expect(Check(tool.outputSchema, result.structuredContent)).toBe(true);
+      expect(result.structuredContent).toEqual({ text: result.content[0].text, ...result.details });
+      expect(result.isError).toBeUndefined();
     });
 
     it("caps documents over 2000 lines and reports the next offset", async () => {
@@ -1346,6 +1363,10 @@ describe("context7-extension", () => {
       expect(result.content[0].text).toContain("Multiple cached Context7 documents matched");
       expect(result.details.ambiguous).toBe(true);
       expect(result.details.candidates).toHaveLength(2);
+      expect(tool.outputSchema).toBeDefined();
+      expect(Check(tool.outputSchema, result.structuredContent)).toBe(true);
+      expect(result.structuredContent).toEqual({ text: result.content[0].text, ...result.details });
+      expect(result.isError).toBe(true);
     });
 
     it("throws when no semantic matches found", async () => {
