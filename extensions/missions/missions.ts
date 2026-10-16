@@ -104,6 +104,7 @@ export default async function missionsExtension(pi: ExtensionAPI) {
 
   pi.registerTool({
     name: "mission",
+    exposure: "model-only",
     label: "Mission",
     description:
       "Create and maintain a durable mission: an objective with a task graph, checkpoints, decisions, and budget, persisted across restarts. Prefer this over ad-hoc plan files when the user asks for a mission, roadmap, or multi-session effort with tracked tasks and verification.",
