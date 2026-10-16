@@ -136,20 +136,29 @@ function validateAnswers(
 async function toolResult(details: JevDetails): Promise<AgentToolResult<JevDetails>> {
   let text = JSON.stringify(details);
   if (Buffer.byteLength(text, "utf8") > MAX_TEXT_BYTES) {
-    const directory = await mkdtemp(join(tmpdir(), "pi-jev-"));
-    const fullResultPath = join(directory, "result.json");
+    let directory: string | undefined;
+    let message =
+      "Result exceeds 50 KiB. Read fullResultPath in bounded sections for the complete result. Structured output contains all answers.";
     try {
+      directory = await mkdtemp(join(tmpdir(), "pi-jev-"));
+      const fullResultPath = join(directory, "result.json");
       await writeJsonAtomic(fullResultPath, details, { mode: 0o600 });
-    } catch (error) {
-      await rm(directory, { recursive: true, force: true });
-      throw error;
+      details = { ...details, fullResultPath };
+    } catch {
+      message =
+        "Result exceeds 50 KiB. Could not save the temporary result file. The full result remains in structured output and details.";
+      if (directory) {
+        try {
+          await rm(directory, { recursive: true, force: true });
+        } catch {
+          message += " Temporary-file cleanup also failed.";
+        }
+      }
     }
-    details = { ...details, fullResultPath };
     text = JSON.stringify({
       status: details.status,
-      fullResultPath,
-      message:
-        "Result exceeds 50 KiB. Read fullResultPath in bounded sections for the complete result. Structured output contains all answers.",
+      ...(details.fullResultPath ? { fullResultPath: details.fullResultPath } : {}),
+      message,
     });
   }
   return {

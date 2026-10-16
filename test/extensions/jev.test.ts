@@ -1,10 +1,15 @@
-import { readFile, rm, stat } from "node:fs/promises";
-import { dirname } from "node:path";
+import * as fs from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import type { AgentToolResult, ClassifierAnswer, ClassifierResult } from "pi";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import jevExtension from "../../extensions/jev/jev.ts";
+import * as jsonAtomic from "../../lib/json-atomic.ts";
 import { createMockContext } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
+
+vi.mock("node:fs/promises", { spy: true });
+vi.mock("../../lib/json-atomic.ts", { spy: true });
 
 const questions = {
   supported: {
@@ -235,6 +240,22 @@ describe("jev extension", () => {
       ctx,
     );
     expectFailure(result, /failed/i);
+  });
+
+  it("reports provider cancellation without a message", async () => {
+    const { ctx, tool } = await setup();
+    ctx.modelRegistry.classify.mockResolvedValue(response({ stopReason: "aborted" }));
+    const result = await tool.execute(
+      "provider-abort",
+      { state: {}, questions },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expectFailure(result, /cancelled/i);
+    expect(result.details).not.toHaveProperty("answers");
+    expect(result.usage).toEqual(usage);
+    expect(ctx.modelRegistry.classify).toHaveBeenCalledTimes(1);
   });
 
   it("reports thrown registry failures", async () => {
@@ -536,6 +557,70 @@ describe("jev extension", () => {
     expect(rounded.details.status).toBe("ok");
   });
 
+  it.each(["directory creation", "file writing", "cleanup"])(
+    "preserves large validated answers when %s fails",
+    async (failure) => {
+      const { ctx, tool } = await setup();
+      const id = "q".repeat(55_000);
+      const directory = join(tmpdir(), "pi-jev-storage-test");
+      const createDirectory = vi.mocked(fs.mkdtemp);
+      const writeResult = vi.mocked(jsonAtomic.writeJsonAtomic);
+      const removeDirectory = vi.mocked(fs.rm);
+      if (failure === "directory creation") {
+        createDirectory.mockRejectedValueOnce(new Error("Temporary directory unavailable"));
+      } else {
+        createDirectory.mockResolvedValueOnce(directory);
+        writeResult.mockRejectedValueOnce(new Error("Temporary result write failed"));
+        if (failure === "cleanup") {
+          removeDirectory.mockRejectedValueOnce(new Error("Temporary directory cleanup failed"));
+        } else {
+          removeDirectory.mockResolvedValueOnce(undefined);
+        }
+      }
+      ctx.modelRegistry.classify.mockResolvedValue(
+        response({ answers: { [id]: answers.supported } }),
+      );
+      const result = await tool.execute(
+        "storage-failure",
+        { state: {}, questions: { [id]: questions.supported } },
+        undefined,
+        undefined,
+        ctx,
+      );
+
+      expect(result.details.status).toBe("ok");
+      expect(result.details.provider).toBe("typesafe");
+      expect(result.details.model).toBe("jev-1.13.0");
+      expect(result.details.answers[id]).toEqual(answers.supported);
+      expect(result.details.usage).toEqual(usage);
+      expect(result.details).not.toHaveProperty("error");
+      expect(result.details).not.toHaveProperty("fullResultPath");
+      expect(result.structuredContent).toEqual(result.details);
+      expect(result.usage).toEqual(usage);
+      expect(result.isError).toBeUndefined();
+      expect(result.terminate).toBeUndefined();
+      expect(Buffer.byteLength(result.content[0].text, "utf8")).toBeLessThan(51_200);
+      const notice = JSON.parse(result.content[0].text);
+      expect(notice.status).toBe("ok");
+      expect(notice.message).toMatch(/could not.*(?:save|write)/i);
+      expect(notice).not.toHaveProperty("fullResultPath");
+      expect(ctx.modelRegistry.classify).toHaveBeenCalledTimes(1);
+      expect(createDirectory).toHaveBeenCalledWith(join(tmpdir(), "pi-jev-"));
+      if (failure === "directory creation") {
+        expect(writeResult).not.toHaveBeenCalled();
+        expect(removeDirectory).not.toHaveBeenCalled();
+      } else {
+        expect(writeResult).toHaveBeenCalledWith(
+          join(directory, "result.json"),
+          expect.objectContaining({ status: "ok", usage }),
+          { mode: 0o600 },
+        );
+        expect(removeDirectory).toHaveBeenCalledWith(directory, { recursive: true, force: true });
+        if (failure === "cleanup") expect(notice.message).toMatch(/cleanup/i);
+      }
+    },
+  );
+
   it("keeps large answers out of model context and saves the complete result privately", async () => {
     const { ctx, tool } = await setup();
     const id = "q".repeat(55_000);
@@ -560,17 +645,17 @@ describe("jev extension", () => {
         status: "ok",
         fullResultPath: path,
       });
-      expect(JSON.parse(await readFile(path, "utf8"))).toMatchObject({
+      expect(JSON.parse(await fs.readFile(path, "utf8"))).toMatchObject({
         status: "ok",
         answers: { [id]: answers.supported },
         usage,
       });
-      expect((await stat(path)).mode & 0o777).toBe(0o600);
+      expect((await fs.stat(path)).mode & 0o777).toBe(0o600);
       expect(result.structuredContent).toEqual(result.details);
       expect(result.details.answers[id]).toEqual(answers.supported);
       expect(result.usage).toEqual(usage);
     } finally {
-      await rm(dirname(path), { recursive: true, force: true });
+      await fs.rm(dirname(path), { recursive: true, force: true });
     }
   });
 
