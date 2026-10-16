@@ -67,6 +67,33 @@ export const MONITOR_PARAMETERS = {
   required: ["command", "satisfy_on"],
 };
 
+export const JOBS_OUTPUT = {
+  type: "object",
+  properties: {
+    jobs: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          id: { type: "integer" },
+          kind: { type: "string", enum: ["background", "monitor"] },
+          label: { type: "string" },
+          command: { type: "string" },
+          status: { type: "string" },
+          startedAt: { type: "number" },
+          endedAt: { type: "number" },
+          exitCode: { type: ["number", "null"] },
+          spoolPath: { type: "string" },
+        },
+        required: ["id", "kind", "label", "command", "status", "startedAt"],
+      },
+    },
+    output: { type: "string" },
+    error: { type: "string" },
+  },
+  required: ["jobs"],
+};
+
 export const JOBS_PARAMETERS = {
   type: "object",
   properties: {

@@ -39,7 +39,12 @@ import {
   type JobRegistry,
 } from "./src/registry.ts";
 import { cancelJob, pruneSpoolDir, startBackgroundJob } from "./src/runner.ts";
-import { BACKGROUND_PARAMETERS, JOBS_PARAMETERS, MONITOR_PARAMETERS } from "./src/schemas.ts";
+import {
+  BACKGROUND_PARAMETERS,
+  JOBS_OUTPUT,
+  JOBS_PARAMETERS,
+  MONITOR_PARAMETERS,
+} from "./src/schemas.ts";
 import type { JobEvents } from "./src/types.ts";
 import { createJobsWidget } from "./src/widget.ts";
 
@@ -331,6 +336,7 @@ export default async function backgroundJobsExtension(pi: ExtensionAPI) {
       "Manage background jobs and monitors: list them, inspect status, tail captured output, cancel a running job. Command output is never auto-delivered on wake — read it here on demand.",
     promptSnippet: "List / inspect / cancel background jobs and monitors",
     parameters: JOBS_PARAMETERS,
+    outputSchema: JOBS_OUTPUT,
     execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
       lastUi = ctx.ui;
       return executeJobsAction({

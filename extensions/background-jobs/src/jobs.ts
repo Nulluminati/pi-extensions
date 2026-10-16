@@ -23,6 +23,25 @@ export interface JobsToolResult {
   content: Array<{ type: "text"; text: string }>;
   details?: Record<string, unknown>;
   terminate?: boolean;
+  isError?: boolean;
+  structuredContent?: {
+    jobs: Array<
+      Pick<
+        Job,
+        | "id"
+        | "kind"
+        | "label"
+        | "command"
+        | "status"
+        | "startedAt"
+        | "endedAt"
+        | "exitCode"
+        | "spoolPath"
+      >
+    >;
+    output?: string;
+    error?: string;
+  };
 }
 
 /** Slice of the TUI the panel needs: re-render on input, and terminal rows
@@ -64,13 +83,49 @@ export function openJobsPanel(ui: PanelUi, registry: JobRegistry): void {
   );
 }
 
-export async function executeJobsAction(options: {
+interface JobsActionOptions {
   registry: JobRegistry;
   action: string;
   jobId?: number | undefined;
   lines?: number | undefined;
   events: JobEvents;
-}): Promise<JobsToolResult> {
+}
+
+export async function executeJobsAction(options: JobsActionOptions): Promise<JobsToolResult> {
+  const result = await runJobsAction(options);
+  const error = typeof result.details?.error === "string" ? result.details.error : undefined;
+  const job = options.jobId === undefined ? undefined : getJob(options.registry, options.jobId);
+  const jobs = error
+    ? []
+    : options.action === "list"
+      ? listJobs(options.registry)
+      : job
+        ? [job]
+        : [];
+  return {
+    ...result,
+    ...(error ? { isError: true } : {}),
+    structuredContent: {
+      jobs: jobs.map((entry) => ({
+        id: entry.id,
+        kind: entry.kind,
+        label: entry.label,
+        command: entry.command,
+        status: entry.status,
+        startedAt: entry.startedAt,
+        ...(entry.endedAt !== undefined ? { endedAt: entry.endedAt } : {}),
+        ...(entry.exitCode !== undefined ? { exitCode: entry.exitCode } : {}),
+        ...(entry.spoolPath !== undefined ? { spoolPath: entry.spoolPath } : {}),
+      })),
+      ...(options.action === "tail" && !error
+        ? { output: job?.buffer.length ? result.content.map((block) => block.text).join("\n") : "" }
+        : {}),
+      ...(error ? { error } : {}),
+    },
+  };
+}
+
+async function runJobsAction(options: JobsActionOptions): Promise<JobsToolResult> {
   const { registry, action, events } = options;
 
   if (action === "list") {

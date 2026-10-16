@@ -3,6 +3,7 @@ import { mkdtemp, readdir, readFile, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext } from "pi";
+import { Check } from "typebox/value";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import backgroundJobsExtension from "../../extensions/background-jobs/background-jobs.ts";
 import {
@@ -512,6 +513,75 @@ describe("background-jobs-extension", () => {
   });
 
   describe("jobs tool", () => {
+    it.each(["list", "status", "tail", "cancel", "invalid"])(
+      "returns structured data for %s",
+      async (action) => {
+        const mockPi = createMockPi();
+        const ctx = createMockCommandContext();
+        await backgroundJobsExtension(mockPi);
+        const tool = getTool(mockPi, "jobs");
+        const result = await tool.execute("data", { action, jobId: 99 }, undefined, undefined, ctx);
+        expect(tool.outputSchema).toBeDefined();
+        expect(Check(tool.outputSchema, result.structuredContent)).toBe(true);
+        const error =
+          action === "list" ? undefined : action === "invalid" ? "unknown_action" : "unknown_job";
+        expect(result.structuredContent).toEqual({ jobs: [], ...(error ? { error } : {}) });
+        expect(result.isError).toBe(error ? true : undefined);
+        expect(result.terminate).toBe(error ? true : undefined);
+        expect(result.content).toEqual([
+          {
+            type: "text",
+            text:
+              action === "list"
+                ? "No background jobs or monitors registered."
+                : action === "invalid"
+                  ? 'Unknown action "invalid". Use list, status, tail, or cancel.'
+                  : "No job #99.",
+          },
+        ]);
+      },
+    );
+
+    it.each(["list", "status", "tail", "cancel"])(
+      "returns safe job metadata for %s",
+      async (action) => {
+        const mockPi = createMockPi();
+        const ctx = createMockCommandContext();
+        await backgroundJobsExtension(mockPi);
+        const { child } = await startBackgroundJob(mockPi, ctx, {
+          command: "npm test",
+          label: "tests",
+        });
+        child.stdout.emit("data", Buffer.from("line one\nline two\n"));
+        child.emit("exit", 0);
+        const tool = getTool(mockPi, "jobs");
+        const result = await tool.execute("data", { action, jobId: 1 }, undefined, undefined, ctx);
+        expect(tool.outputSchema).toBeDefined();
+        expect(Check(tool.outputSchema, result.structuredContent)).toBe(true);
+        expect(result.structuredContent).toMatchObject({
+          jobs: [
+            {
+              id: 1,
+              kind: "background",
+              label: "tests",
+              command: "npm test",
+              status: "completed",
+              exitCode: 0,
+            },
+          ],
+        });
+        const data = result.structuredContent as {
+          jobs: Array<Record<string, unknown>>;
+          output?: string;
+        };
+        expect(data.jobs[0]).not.toHaveProperty("child");
+        expect(data.jobs[0]).not.toHaveProperty("timer");
+        expect(data.output).toBe(action === "tail" ? result.content[0].text : undefined);
+        expect(result.isError).toBeUndefined();
+        expect(result.terminate).toBeUndefined();
+      },
+    );
+
     it("lists an empty registry", async () => {
       const mockPi = createMockPi();
       const mockCtx = createMockCommandContext();
