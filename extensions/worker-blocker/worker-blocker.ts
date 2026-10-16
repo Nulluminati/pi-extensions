@@ -41,6 +41,7 @@ export default async function workerBlockerExtension(pi: ExtensionAPI) {
 
   pi.registerTool({
     name: REPORT_BLOCKER_TOOL,
+    exposure: "model-only",
     label: "Report Blocker",
     description:
       "Report that you cannot proceed with your task. Sends a short, one-line reason to the parent session, which decides what to do next (adjust the task, or cancel this worker to free its slot). Use it early instead of burning the whole time budget on an impossible environment; keep working if you find a way around the blocker.",

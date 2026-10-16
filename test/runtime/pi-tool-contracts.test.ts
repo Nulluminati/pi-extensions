@@ -38,7 +38,12 @@ describe("real Pi tool contracts", () => {
     ["missions", "mission"],
     ["messenger", "messenger"],
     ["autoresearch", "autoresearch"],
+    ["worker-blocker", "report_blocker"],
   ])("keeps %s/%s outside the real codemode callable-tool list", async (name, toolName) => {
+    if (name === "worker-blocker") {
+      vi.stubEnv("PI_WORKER", "1");
+      vi.stubEnv("PI_WORKER_STREAM", join(tmpdir(), "pi-runtime-blocker.jsonl"));
+    }
     const extension = await load(name);
     const sdk = await import(import.meta.resolve("@earendil-works/pi-coding-agent"));
     const { AuthStorage } = await import(
