@@ -121,7 +121,7 @@ Or create manually:
 
 ### Prompt guidance
 
-Each extension tells Pi when to use it through its own `promptSnippet` and `promptGuidelines`. [docs/system-prompt-guidance.md](docs/system-prompt-guidance.md) explains how that guidance reaches the system prompt, what each research and workflow extension says, and how the wording was checked against real model runs.
+Each extension tells Pi when to use it through its own `promptSnippet` and `promptGuidelines`. [docs/system-prompt-guidance.md](docs/system-prompt-guidance.md) explains how that guidance reaches the system prompt, which gaps were found in the research and workflow extensions, and which fixes held up in real model runs.
 7. Commit
 
 ### Validation

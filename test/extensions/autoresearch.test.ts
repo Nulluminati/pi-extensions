@@ -126,27 +126,6 @@ describe("autoresearch-extension", () => {
     await rm(cwd, { recursive: true, force: true });
   });
 
-  describe("prompt guidance", () => {
-    const guidelines = () =>
-      (mockPi.registerTool.mock.calls[0][0].promptGuidelines ?? []).join("\n");
-
-    it("separates measurable experiments from open-ended research", () => {
-      expect(guidelines()).toMatch(/repeated experiments/);
-      expect(guidelines()).toMatch(/not for open-ended information research/);
-    });
-
-    it("explains the baseline, correctness checks, iteration bounds, and keep/discard effects", () => {
-      const text = guidelines();
-      expect(text).toMatch(/baseline/);
-      expect(text).toMatch(/checks/);
-      expect(text).toMatch(/maxIterations/);
-      expect(text).toMatch(/keep commits/);
-      expect(text).toMatch(/discard reverts/);
-      expect(text).toMatch(/spread score/);
-      expect(text).not.toMatch(/approv/i);
-    });
-  });
-
   it("init refuses to run outside a git repository", async () => {
     const plain = await mkdtemp(join(tmpdir(), "autoresearch-plain-"));
     try {

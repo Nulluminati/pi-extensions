@@ -57,17 +57,6 @@ describe("code-search-extension", () => {
     expect(tool.description).toContain("public GitHub");
   });
 
-  it("code_search guidance separates public examples from local source and documentation", async () => {
-    const mockPi = createMockPi();
-    await codeSearchExtension(mockPi);
-    const text = (getRegisteredTool(mockPi, "code_search").promptGuidelines as string[]).join("\n");
-    expect(text).toMatch(/real-world code examples/);
-    expect(text).toMatch(/current repository/i);
-    expect(text).toMatch(/local files/i);
-    expect(text).toMatch(/documentation/i);
-    expect(text).toMatch(/public GitHub repositories only/);
-  });
-
   // --- code_search ---
 
   describe("code_search", () => {

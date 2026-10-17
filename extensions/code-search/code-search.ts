@@ -26,7 +26,6 @@ export default async function codeSearchExtension(pi: ExtensionAPI) {
       "Keep queries focused. Specific patterns return more useful snippets than broad keywords.",
       "Filter by language or repo when the answer depends on a particular ecosystem or project.",
       "code_search covers public GitHub repositories only; private or non-GitHub code is not indexed.",
-      "Public examples show how others use an API, not how it is specified. Prefer official library documentation for authoritative behavior, and inspect local files for questions about the current repository.",
     ],
     parameters: CODE_SEARCH_PARAMS,
     renderResult: renderCodeSearchResult,
