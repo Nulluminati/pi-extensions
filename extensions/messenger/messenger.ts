@@ -114,7 +114,9 @@ export default async function messengerExtension(pi: ExtensionAPI) {
     description:
       "Coordinate with other Pi sessions working in this project: see who is online (list), send messages (send), read your inbox (inbox), and claim file paths so other agents cannot edit them (reserve/release). Use send to ask another agent a question or hand off work; use reserve before starting edits in a shared area.",
     promptGuidelines: [
-      "Use messenger (action=reserve) to claim paths before editing files in a project where other agents may be working, and action=send to coordinate instead of fighting over the same files.",
+      "When other sessions may be working in this project, check who is online (action=list) before overlapping work. Reserve paths (action=reserve) before editing files others may touch, and release them when you are done.",
+      "If another agent holds a path, do not edit it by other means such as bash. Message the owner (action=send) or ask the user. Reservations block edit and write only; they are a coordination signal, not filesystem isolation.",
+      "Mail is delivered into the conversation automatically when you settle, so there is no need to poll the inbox. Worker sessions cannot send mail; the parent session reads worker results and coordinates.",
     ],
     parameters: MESSENGER_PARAMETERS,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {

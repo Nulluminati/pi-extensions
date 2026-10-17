@@ -139,6 +139,28 @@ describe("messenger-extension", () => {
     expect(events).toContain("session_shutdown");
   });
 
+  describe("prompt guidance", () => {
+    const guidelines = () =>
+      (mockPi.registerTool.mock.calls[0][0].promptGuidelines ?? []).join("\n");
+
+    it("checks presence, reserves before overlapping edits, and releases when done", () => {
+      expect(guidelines()).toMatch(/action=list/);
+      expect(guidelines()).toMatch(/action=reserve/);
+      expect(guidelines()).toMatch(/release/);
+    });
+
+    it("respects conflicting claims without presenting reservations as isolation", () => {
+      expect(guidelines()).toMatch(/do not edit it by other means/i);
+      expect(guidelines()).toMatch(/bash/);
+      expect(guidelines()).toMatch(/not filesystem isolation/);
+    });
+
+    it("explains automatic mail delivery and that workers cannot send", () => {
+      expect(guidelines()).toMatch(/delivered into the conversation automatically/);
+      expect(guidelines()).toMatch(/Worker sessions cannot send mail/);
+    });
+  });
+
   it("logs inbox delivery failures while leaving settle-time delivery available", async () => {
     const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
     globalRestores.push(() => debug.mockRestore());

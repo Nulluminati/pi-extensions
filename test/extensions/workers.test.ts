@@ -379,6 +379,15 @@ describe("workers-extension", () => {
     expect(definitions.some((definition) => definition.name === "workers")).toBe(true);
   });
 
+  it("spawn_worker promptGuidelines keep investigation read-only and review in the parent", () => {
+    const spawnTool = mockPi.registerTool.mock.calls.find((c) => c[0].name === "spawn_worker")?.[0];
+    const guidelines = (spawnTool?.promptGuidelines ?? []).join("\n");
+    expect(guidelines).toMatch(/read_only workers for investigation/);
+    expect(guidelines).toMatch(/design decisions/);
+    expect(guidelines).toMatch(/verify/i);
+    expect(guidelines).not.toMatch(/approv/i);
+  });
+
   it("spawn_worker promptGuidelines state the worker slot lifecycle", () => {
     const spawnTool = mockPi.registerTool.mock.calls.find((c) => c[0].name === "spawn_worker")?.[0];
     const guidelines = (spawnTool?.promptGuidelines ?? []).join(" ");

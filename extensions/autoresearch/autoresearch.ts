@@ -86,7 +86,8 @@ export default async function autoresearchExtension(pi: ExtensionAPI) {
     description:
       "Autonomous experiment loop: init a measurable optimization (metric + measure command), then repeat — edit code, run (action=run), log keep-or-discard (action=log). Keeps are git commits, discards revert everything. Use for optimizing measurable targets: test speed, build time, bundle size, benchmark scores.",
     promptGuidelines: [
-      "Use autoresearch when the user asks to optimize a measurable metric autonomously. Init needs a deterministic measure command emitting 'METRIC name=value'. After each result, propose the next hypothesis from what was learned before editing again.",
+      "Use autoresearch when the user wants a measurable metric improved through repeated experiments; it is not for open-ended information research. Init needs a deterministic measure command emitting 'METRIC name=value' and records the baseline. After each result, propose the next hypothesis from what was learned before editing again.",
+      "Set checks to the project's tests or typecheck so a broken change cannot be kept, and set maxIterations to bound the loop. A keep commits the experiment; a discard reverts its working-tree changes.",
       "A spread score below 1x means the best-vs-baseline delta is small relative to observed run-to-run variation; re-measure before trusting a keep. The tool reports the spread score after every log.",
     ],
     parameters: AUTORESEARCH_PARAMETERS,

@@ -353,6 +353,7 @@ export default async function workersExtension(pi: ExtensionAPI) {
     promptGuidelines: [
       "Use spawn_worker when a task is separable and well-specified: scouting a subsystem, mechanical edits across files, or trying an approach in isolation. Write the task so a fresh session with no conversation history can succeed: goal, files, constraints, verification.",
       "Do not delegate vague or judgment-heavy work; workers use the globally configured worker model. Escalate to the main session when a worker fails twice or the task turns ambiguous.",
+      "Prefer read_only workers for investigation. Keep design decisions and final review in this session: read each report and verify a collected patch before relying on it.",
       "After spawning, do not block: you are woken when the worker exits. Read its report with workers (action=status). Apply an implementation worker's patch with action=collect; read_only workers produce no patch.",
       "Worker slots free themselves: only a running worker holds a slot, and a worker in a terminal state (completed, failed, timeout, cancelled) consumes none — never cancel it. cancel stops a live process; remove deletes a terminal worker's record and artifacts; to relaunch, just spawn_worker again.",
     ],

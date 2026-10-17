@@ -110,6 +110,7 @@ export default async function missionsExtension(pi: ExtensionAPI) {
     promptGuidelines: [
       "Use mission to record durable multi-session work: create the mission, break it into tasks with dependsOn ordering, attach verification commands to tasks so reconcile can catch regressions, and log checkpoints and decisions as work progresses.",
       "When a mission is active, run mission (action=status) before starting work on its tasks and after finishing each one.",
+      "Do not create a mission for a short task that one session can finish; a mission is for work that has to survive across sessions.",
     ],
     parameters: MISSION_PARAMETERS,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {

@@ -83,6 +83,15 @@ describe("missions-extension", () => {
     expect(names).toContain("mission:reconcile");
   });
 
+  it("mission guidance targets cross-session work and skips short tasks", () => {
+    const guidelines = (mockPi.registerTool.mock.calls[0][0].promptGuidelines ?? []).join("\n");
+    expect(guidelines).toMatch(/multi-session/);
+    expect(guidelines).toMatch(/short task/i);
+    expect(guidelines).toMatch(/action=status/);
+    expect(guidelines).toMatch(/verification/);
+    expect(guidelines).toMatch(/checkpoints and decisions/);
+  });
+
   it("creates a mission, persists it, and sets the active pointer", async () => {
     const result = await executeTool({
       action: "create",
