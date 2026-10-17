@@ -282,7 +282,7 @@ describe("goal-extension", () => {
         mockCtx,
       )) as { systemPrompt?: string; message?: { customType?: string; content: unknown[] } };
 
-      // The system prompt must never be touched — that would break prefix caching.
+      // The goal reminder must never replace the system prompt — that would break prefix caching.
       expect(result.systemPrompt).toBeUndefined();
       expect(result.message?.customType).toBe("goal-context");
       const text = JSON.stringify(result.message?.content);
@@ -386,6 +386,133 @@ describe("goal-extension", () => {
         messages: [{ role: "user", content: "hello" }],
       });
       expect(result).toBeUndefined();
+    });
+  });
+
+  describe("static goal discovery guideline", () => {
+    function promptOptions(promptGuidelines: string[] = ["Other extension rule"]) {
+      return {
+        selectedTools: ["read", "bash"],
+        toolSnippets: {},
+        toolGuidelines: {},
+        promptGuidelines,
+        appendSystemPrompt: "",
+        sections: {},
+        cwd: "/tmp",
+        contextFiles: [],
+        skills: [],
+      };
+    }
+
+    function userEvent(systemPromptOptions = promptOptions()) {
+      return {
+        type: "before_agent_start",
+        messageType: "user",
+        prompt: "test",
+        systemPrompt: "base prompt",
+        systemPromptOptions,
+      };
+    }
+
+    function discoveryLines(options: { promptGuidelines: string[] }) {
+      return options.promptGuidelines.filter((line) => line.includes("/goal:new"));
+    }
+
+    it("adds one /goal:new guideline while no goal exists and keeps other guidelines", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await goalExtension(mockPi);
+      const event = userEvent();
+
+      const result = await getEventHandler(mockPi, "before_agent_start")(event, mockCtx);
+
+      expect(result).toBeUndefined();
+      expect(event.systemPromptOptions.promptGuidelines[0]).toBe("Other extension rule");
+      const lines = discoveryLines(event.systemPromptOptions);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toMatch(/only the user can start/i);
+    });
+
+    it("does not duplicate the guideline when the handler runs again on the same options", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await goalExtension(mockPi);
+      const handler = getEventHandler(mockPi, "before_agent_start");
+      const options = promptOptions();
+
+      await handler(userEvent(options), mockCtx);
+      await handler(userEvent(options), mockCtx);
+
+      expect(discoveryLines(options)).toHaveLength(1);
+      expect(options.promptGuidelines).toHaveLength(2);
+    });
+
+    it("adds the same guideline in custom-message runs", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await goalExtension(mockPi);
+      const userOptions = promptOptions();
+      const customOptions = promptOptions();
+      const handler = getEventHandler(mockPi, "before_agent_start");
+
+      await handler(userEvent(userOptions), mockCtx);
+      await handler(
+        {
+          type: "before_agent_start",
+          messageType: "custom",
+          message: {
+            role: "custom",
+            customType: "other-extension",
+            content: "wake up",
+            display: false,
+            timestamp: 0,
+          },
+          systemPrompt: "base prompt",
+          systemPromptOptions: customOptions,
+        },
+        mockCtx,
+      );
+
+      expect(discoveryLines(customOptions)).toHaveLength(1);
+      expect(customOptions.promptGuidelines).toEqual(userOptions.promptGuidelines);
+    });
+
+    it("keeps the guideline identical across active, paused, and completed goals", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await goalExtension(mockPi);
+      const handler = getEventHandler(mockPi, "before_agent_start");
+      const seen: string[][] = [];
+
+      const inactive = promptOptions();
+      await handler(userEvent(inactive), mockCtx);
+      seen.push(inactive.promptGuidelines);
+
+      await getCommandHandler(mockPi, "goal:new")("implement snake game", mockCtx);
+      const active = promptOptions();
+      const activeResult = (await handler(userEvent(active), mockCtx)) as {
+        systemPrompt?: string;
+        message?: { customType?: string };
+      };
+      expect(activeResult.systemPrompt).toBeUndefined();
+      expect(activeResult.message?.customType).toBe("goal-context");
+      seen.push(active.promptGuidelines);
+
+      await getCommandHandler(mockPi, "goal:pause")("", mockCtx);
+      const paused = promptOptions();
+      expect(await handler(userEvent(paused), mockCtx)).toBeUndefined();
+      seen.push(paused.promptGuidelines);
+
+      await getCommandHandler(mockPi, "goal:resume")("", mockCtx);
+      mockVerdict("met", "done");
+      await getEventHandler(mockPi, "agent_end")({ type: "agent_end", messages: [] }, mockCtx);
+      const complete = promptOptions();
+      expect(await handler(userEvent(complete), mockCtx)).toBeUndefined();
+      seen.push(complete.promptGuidelines);
+
+      expect(discoveryLines(inactive)).toHaveLength(1);
+      for (const guidelines of seen) expect(guidelines).toEqual(seen[0]);
+      expect(seen[0].join("\n")).not.toContain("implement snake game");
     });
   });
 

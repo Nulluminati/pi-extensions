@@ -6,9 +6,11 @@
  * after every turn whether the goal is met, not yet met (its reason becomes
  * the next continuation's guidance), or impossible (the goal pauses).
  *
- * Cache safety: the system prompt is never modified. The goal reminder is
- * injected as a tail-position message each turn and stale copies are stripped
- * from history, so the request prefix stays byte-stable across turns.
+ * Cache safety: the only system prompt change is one static guideline that
+ * tells the model /goal:new exists; it is identical in every goal state. The
+ * goal reminder is injected as a tail-position message each turn and stale
+ * copies are stripped from history, so the request prefix stays byte-stable
+ * across turns.
  */
 
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "pi";
@@ -38,6 +40,13 @@ import {
 } from "./src/prompts.ts";
 import { generateGoalId, reconstructState } from "./src/state.ts";
 import type { GoalState } from "./src/types.ts";
+
+// --- Constants ---
+
+/** Static discovery hint: goal has no tool, so without this the model never
+ *  learns that bounded continuation exists. It must not vary with goal state. */
+const GOAL_DISCOVERY_GUIDELINE =
+  "For long work with a verifiable finish line, suggest that the user run /goal:new <objective>: it keeps you working turn after turn until an evaluator confirms the objective is met. Only the user can start a goal; never claim to have started one.";
 
 // --- Extension ---
 
@@ -158,10 +167,15 @@ export default async function goalExtension(pi: ExtensionAPI) {
     }
   });
 
-  // Inject the goal reminder as a per-turn tail message. Stale copies are
-  // stripped by the context handler below, so the request prefix stays stable
-  // and the reminder itself carries no per-turn-varying content.
-  pi.on("before_agent_start", async (_event, _ctx) => {
+  // Add the static discovery guideline in every state, then inject the goal
+  // reminder as a per-turn tail message. Stale copies are stripped by the
+  // context handler below, so the request prefix stays stable and the
+  // reminder itself carries no per-turn-varying content.
+  pi.on("before_agent_start", async (event, _ctx) => {
+    const guidelines = event.systemPromptOptions?.promptGuidelines;
+    if (Array.isArray(guidelines) && !guidelines.includes(GOAL_DISCOVERY_GUIDELINE)) {
+      guidelines.push(GOAL_DISCOVERY_GUIDELINE);
+    }
     if (state?.status !== "active") return undefined;
     return {
       message: {
