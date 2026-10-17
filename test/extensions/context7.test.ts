@@ -359,6 +359,32 @@ describe("context7-extension", () => {
     expect(tool.description).toContain("raw cached");
   });
 
+  describe("prompt guidance", () => {
+    async function tool(name: string) {
+      const mockPi = createMockPi();
+      await context7Extension(mockPi);
+      return getRegisteredTool(mockPi, name);
+    }
+
+    it("reserves explicit resolution for disambiguation and ID selection", async () => {
+      const resolve = await tool("context7_resolve_library_id");
+      const text = [resolve.promptSnippet, ...resolve.promptGuidelines].join("\n");
+      expect(text).not.toMatch(/before fetching docs/i);
+      expect(text).not.toMatch(/do not already know the exact/i);
+      expect(text).toMatch(/ambiguous/i);
+      expect(text).toMatch(/context7_get_library_docs resolves/i);
+    });
+
+    it("keeps name-based docs lookup and curated-first, bounded raw retrieval", async () => {
+      const docs = (await tool("context7_get_library_docs")).promptGuidelines.join("\n");
+      expect(docs).toMatch(/pass libraryName/);
+      expect(docs).toMatch(/use it first/);
+      const raw = (await tool("context7_get_cached_doc_raw")).promptGuidelines.join("\n");
+      expect(raw).toMatch(/only after context7_get_library_docs/);
+      expect(raw).toMatch(/offsetLine = nextOffsetLine/);
+    });
+  });
+
   // --- renderResult ---
 
   describe("renderResult", () => {

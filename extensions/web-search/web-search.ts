@@ -131,7 +131,7 @@ export default async function webSearchExtension(pi: ExtensionAPI) {
       "Search the web using the configured search provider (Brave, Synthetic, etc.). Returns a list of results with titles, URLs, and snippets. Use this tool when you need current information from the internet. Switch providers with the /websearch:select command.",
     promptSnippet: "Search the web for current information",
     promptGuidelines: [
-      "Use web_search when the answer likely requires up-to-date information not in your training data.",
+      "Use web_search when the answer likely requires current information not in your training data, or to discover sources when you do not know where the answer is.",
       "Formulate concise, targeted queries for best results.",
       "Always cite sources with markdown hyperlinks when using search results in your response.",
     ],
@@ -214,7 +214,7 @@ export default async function webSearchExtension(pi: ExtensionAPI) {
     promptSnippet: "Fetch a specific URL to read its content",
     promptGuidelines: [
       "Use web_fetch when you need to read the full content of a specific URL.",
-      "Prefer web_search first to find relevant URLs, then web_fetch to read them.",
+      "When the user supplies a URL or you already know the page, fetch it directly. Search first only when you still need to find the source.",
       "Set raw=true only if you specifically need the raw HTML.",
     ],
     parameters: WEB_FETCH_PARAMS,

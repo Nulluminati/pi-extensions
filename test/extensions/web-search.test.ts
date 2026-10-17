@@ -171,6 +171,29 @@ describe("web-search-extension", () => {
     expect(tool.description).toContain("/websearch:select");
   });
 
+  describe("prompt guidance", () => {
+    async function guidelines(name: string): Promise<string> {
+      const mockPi = createMockPi();
+      await webSearchExtension(mockPi);
+      return (getRegisteredTool(mockPi, name).promptGuidelines as string[]).join("\n");
+    }
+
+    it("web_search targets current external information and source discovery", async () => {
+      const text = await guidelines("web_search");
+      expect(text).toMatch(/current/i);
+      expect(text).toMatch(/discover|find sources/i);
+      expect(text).toMatch(/cite sources/i);
+    });
+
+    it("web_fetch reads supplied or known URLs directly without a prior search", async () => {
+      const text = await guidelines("web_fetch");
+      expect(text).not.toMatch(/web_search first/i);
+      expect(text).toMatch(/supplie[sd]/i);
+      expect(text).toMatch(/directly/i);
+      expect(text).toContain("raw=true");
+    });
+  });
+
   // --- web_search via brave (default provider) ---
 
   describe("web_search via brave", () => {

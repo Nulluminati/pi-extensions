@@ -38,9 +38,9 @@ export default async function context7Extension(pi: ExtensionAPI) {
     description:
       "Resolve a library or package name to a Context7 library ID. Pi-native equivalent of Context7 MCP resolve-library-id.",
     promptSnippet:
-      "Resolve a library or package name to a Context7 library ID before fetching docs when the exact ID is unknown.",
+      "List the Context7 library IDs that match a library or package name, to disambiguate or choose a specific ID.",
     promptGuidelines: [
-      "Use context7_resolve_library_id when the user asks for library documentation and you do not already know the exact Context7 library ID.",
+      "context7_get_library_docs resolves library names itself. Use context7_resolve_library_id only when a name is ambiguous, a lookup returned the wrong library, or you need to pick a specific ID or version.",
     ],
     parameters: RESOLVE_LIBRARY_PARAMS,
     renderResult: createResolveRenderResult(),
