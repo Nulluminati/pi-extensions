@@ -3,6 +3,7 @@
 ## Summary and recommendation
 
 Use **`only` for `openai-codex/gpt-6.1-sol`** on these repository tasks. Keep codemode **off for `opencode-go/glm-5.3`**.
+For `opencode-go/deepseek-v4.1-flash`, keep **`off` as the default**. `on` is a reasonable option; forcing `only` is not worthwhile.
 
 Every scored arm passed 24/24 cases. Codemode did not improve success rates in this task set.
 Compared with `off`, Codex `only` used 40% fewer median tokens, cost 15% less per median run, and took 15% less time.
@@ -29,10 +30,11 @@ pi --model opencode-go/glm-5.3 --tools -codemode
 
 ## Method
 
-The measurements used Pi 1.3.0 on 2026-10-16. The brief names 1.2.0; this evaluation used the installed version without a downgrade.
+The initial measurements used Pi 1.3.0 on 2026-10-16. The brief names 1.2.0; this evaluation used the installed version without a downgrade.
 The fixed tool baseline is commit `6ddf3dd4d84d625c606db09b383b2b652d7f91cb`.
 
-The scored comparison has eight tasks, three arms, two models, and three repetitions: 144 cases.
+The initial comparison has eight tasks, three arms, two models, and three repetitions: 144 cases.
+The DeepSeek follow-up adds 72 cases with the same tasks, modes, and repetitions.
 Codex means `openai-codex/gpt-6.1-sol`; GLM means `opencode-go/glm-5.3`.
 
 | Arm | Tool selection | Codemode mode |
@@ -90,7 +92,7 @@ The final isolated rename batch passed 18/18 cases. The scored matrix combines t
 Those retained cases made no messenger, mission, worker, or autoresearch calls.
 No individual result was selected for a favorable score. Rename measurements came from a later batch, so cache and service conditions can differ.
 
-There were 174 matrix attempts, of which 144 enter the comparison. Their estimated cost totaled $5.01622; the scored cases totaled $3.88078.
+The initial evaluation recorded 174 matrix attempts, of which 144 enter its comparison. Their estimated cost totaled $5.01622; the scored cases totaled $3.88078.
 Three smoke cases and one live tool-contract check are separate from those totals.
 The smoke checker initially omitted `web-search`; its corrected reference table scores all three answers as passes.
 Original events and scores remain unchanged beside the smoke rescore.
@@ -184,6 +186,80 @@ This expected failure confirmed the live boundary as well as the real-loader tes
 The local declarations already contained `ToolDefinition.outputSchema` and `AgentToolResult.structuredContent`.
 No declaration change was necessary. The type comparison script checks extension context interfaces, not tool definitions or results.
 The audit also includes `jev`, which already returned schema-backed results but was absent from the brief's list.
+
+## DeepSeek V4.1 Flash follow-up
+
+The follow-up used `opencode-go/deepseek-v4.1-flash` on 2026-10-17, through OpenCode Go.
+Pi remained 1.3.0. The tool baseline and user settings snapshot matched the initial evaluation.
+No harness changes were necessary. Each case used the corrected reset and checker logic.
+
+Eight tasks × three modes × three repetitions produced 72 cases, with 24 per mode.
+All 72 passed. Every rename case passed the exact-patch check and independent typecheck.
+No replacement runs were necessary, and user settings remained unchanged.
+
+The report now covers 216 valid cases from 246 matrix attempts.
+The follow-up's estimated cost totaled $0.141779. Its raw data is in `.pi/codemode-eval/2026-10-17T07-27-22-896Z/`.
+The earlier Codex and GLM numbers remain unchanged. Compare models cautiously because their measurements came from different batches.
+
+### Recommendation
+
+Keep `off` as the default for DeepSeek. Use `on` if you want scripts available, but do not force `only`.
+
+`on` lowered median estimated cost by 8%, but median time increased by 9% and median tokens increased by 6%.
+Across the whole batch, it lowered total cost by 18% and total time by 13%.
+Most of that time reduction came from the inventory task, where the `on` arm made no script calls.
+This does not show a consistent benefit from script execution in ordinary tasks.
+
+`only` reduced median tokens by 5%, but median cost rose 21% and median time rose 15%.
+Its total cost fell 22%, while total time stayed almost unchanged.
+The lower total cost does not mean each task became cheaper; expensive inventory cases strongly affect the total.
+
+With three repetitions per task, the evidence does not justify replacing direct tools by default.
+If your work resembles these inventory-heavy batches, `on` is a reasonable alternative to `off`.
+For normal sessions, this command enables `on` when no settings override selects `only`:
+
+```sh
+pi --model opencode-go/deepseek-v4.1-flash --tools +codemode
+```
+
+The earlier Codex settings example selects `only` globally. This command does not override that mode setting.
+There is no built-in per-model codemode setting in Pi 1.3.0.
+
+### Results
+
+All numeric columns after Pass are medians. Costs use six decimal places because this model's estimates are small.
+
+| Arm | Pass | Tokens | Estimated cost | Seconds | Top-level calls | Nested calls |
+| --- | --- | --- | --- | --- | --- | --- |
+| off | 24/24 | 50,530.5 | $0.000949 | 10.01 | 3 | 0 |
+| on | 24/24 | 53,622.5 | $0.000876 | 10.95 | 3 | 0 |
+| only | 24/24 | 48,173.5 | $0.001145 | 11.49 | 3 | 4.5 |
+
+Each task cell shows median seconds / estimated cost. Every task/mode group passed 3/3.
+
+| Task | off: seconds / cost | on: seconds / cost | only: seconds / cost |
+| --- | --- | --- | --- |
+| inventory | 67.48 / $0.010126 | 57.21 / $0.007108 | 56.45 / $0.006177 |
+| counts | 16.89 / $0.002005 | 13.21 / $0.000836 | 12.28 / $0.001289 |
+| imports | 9.60 / $0.000691 | 9.54 / $0.000743 | 10.88 / $0.001677 |
+| tests | 6.84 / $0.000237 | 6.11 / $0.000212 | 6.33 / $0.000217 |
+| failure | 6.18 / $0.000271 | 5.90 / $0.000284 | 7.42 / $0.000421 |
+| rename | 16.57 / $0.001638 | 17.70 / $0.001617 | 24.83 / $0.001975 |
+| facts | 6.35 / $0.000493 | 6.48 / $0.000479 | 8.24 / $0.000522 |
+| ui | 10.29 / $0.000954 | 10.84 / $0.000962 | 24.26 / $0.003180 |
+
+### Script behavior
+
+DeepSeek chose scripts in only 3/24 `on` cases, with six script calls in total. None failed.
+The `only` arm used 86 script calls across 24 cases.
+One inventory script failed with `SyntaxError: unexpected end of string`. DeepSeek recovered and passed the case.
+All nested-call records were complete. No case timed out, and captured process stderr was empty.
+
+To reproduce this follow-up without changing the original two-model default:
+
+```sh
+node --import tsx scripts/evaluate-codemode.ts --models opencode-go/deepseek-v4.1-flash
+```
 
 ## Tool audit
 
