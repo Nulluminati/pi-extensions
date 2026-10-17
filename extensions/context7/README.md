@@ -6,7 +6,7 @@ Pi-native Context7 documentation tools. Direct HTTP to the Context7 API with a p
 
 This extension registers three LLM-callable tools for accessing up-to-date library documentation from [Context7](https://context7.com/):
 
-- **`context7_resolve_library_id`** — Maps a library or package name to a Context7 library ID. Useful when you know the npm/pypi/crate name but not the exact Context7 identifier.
+- **`context7_resolve_library_id`** — Maps a library or package name to a Context7 library ID. Use it when a name is ambiguous or you need a specific ID or version; `context7_get_library_docs` resolves plain names itself.
 - **`context7_get_library_docs`** — Fetches curated documentation for a library by ID or by name (auto-resolves if needed). Returns keyword-ranked sections with a docRef for later raw retrieval.
 - **`context7_get_cached_doc_raw`** — Reads the full raw cached document from a previous `context7_get_library_docs` call. Use this when the curated summary was insufficient and you need the complete un-truncated text.
 

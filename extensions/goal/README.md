@@ -63,11 +63,15 @@ Cancels the goal entirely, clears the status line, and resets all internal state
 
 ## How It Works
 
+### Discovery
+
+Goal has no tool, so the model would otherwise never learn it exists. In every state, `before_agent_start` adds one fixed guideline to `systemPromptOptions.promptGuidelines`. It tells the model to suggest `/goal:new <objective>` for long work with a verifiable finish line, and that only the user can start a goal. The text never includes the objective or any counter, so it does not change when a goal starts, pauses, or completes, and the cached prompt prefix survives those transitions.
+
 ### Goal lifecycle
 
 1. **Start** — `/goal:new <objective>` creates a `GoalState` object and persists it via `appendEntry("goal-state", ...)`. A follow-up user message is sent with the objective and persistence rules.
 
-2. **Per-turn reminder** — On every `before_agent_start`, if a goal is active, the extension injects a tail-position message (custom type `goal-context`) carrying the objective and goal-mode rules. A `context` handler keeps the newest copy while the goal is active and strips older copies (all copies once no goal is active), so the request prefix stays byte-stable across turns — the system prompt is never modified, which keeps provider prompt caching intact.
+2. **Per-turn reminder** — On every `before_agent_start`, if a goal is active, the extension injects a tail-position message (custom type `goal-context`) carrying the objective and goal-mode rules. A `context` handler keeps the newest copy while the goal is active and strips older copies (all copies once no goal is active), so the request prefix stays byte-stable across turns and provider prompt caching stays intact.
 
 3. **Evaluation** — On `agent_end`, while the goal is active and no messages are pending, the extension sends the objective plus a bounded recent transcript to the global small model (`lib/small-model.ts`) via `completeSimple`. The verdict must be a JSON object: `{"status":"met"|"not_met"|"impossible","reason":"..."}`.
 
@@ -94,7 +98,7 @@ The extension keeps state in closure variables (`state`, `continuationQueued`, `
 
 ## Key Design Decisions
 
-- **The system prompt is never modified** — the old design appended a per-turn-varying system prompt section, which invalidated the provider prompt cache on every turn. Goal context now enters as a stripped-and-re-injected tail message, so cached prefixes survive.
+- **Goal state never enters the system prompt** — the old design appended a per-turn-varying system prompt section, which invalidated the provider prompt cache on every turn. Goal context now enters as a stripped-and-re-injected tail message, so cached prefixes survive. The only system prompt addition is the static discovery guideline.
 - **No LLM-facing completion tool** — the old `goal_complete` tool let the working model self-report completion (and its enable/disable toggling churned the tool schema). The small-model evaluator is the sole completion authority, so there is nothing to toggle.
 - **No token budget** — budget counters in prompts broke caching, and budget-as-prompt-content is an anti-pattern. Token spend is still tracked for `/goal:status` display only. Bounding is done with the iteration cap and no-progress guard.
 - **Fail-safe evaluation** — an evaluator failure never silently continues the loop; it notifies and hands control back.

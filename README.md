@@ -118,6 +118,10 @@ Or create manually:
 4. Test live: `pi -e extensions/<name>/<name>.ts`
 5. Format and lint: `npm run format`
 6. Run full check: `npm run check`
+
+### Prompt guidance
+
+Each extension tells Pi when to use it through its own `promptSnippet` and `promptGuidelines`. [docs/system-prompt-guidance.md](docs/system-prompt-guidance.md) explains how that guidance reaches the system prompt, what each research and workflow extension says, and how the wording was checked against real model runs.
 7. Commit
 
 ### Validation
