@@ -48,7 +48,11 @@ describe("codemode evaluation workspace", () => {
     await writeFile(join(root, "helper.ts"), original);
     await writeFile(
       join(root, "tsconfig.json"),
-      JSON.stringify({ compilerOptions: { target: "ES2022", types: [] }, include: ["helper.ts"] }),
+      JSON.stringify({
+        // This fixture uses no browser APIs; avoid checking the default DOM declarations.
+        compilerOptions: { target: "ES2022", lib: ["ES2022"], types: [] },
+        include: ["helper.ts"],
+      }),
     );
     await runGit(root, ["init", "--quiet"]);
     await runGit(root, ["add", "--", ".gitignore", "helper.ts", "tsconfig.json"]);
@@ -77,8 +81,15 @@ describe("codemode evaluation workspace", () => {
     expect(
       await checkRename(root, { "helper.ts": original }, join(root, "other-dependencies")),
     ).toMatchObject({ renameExact: false, typecheckPassed: true });
-    // Three TypeScript checks run here and exceed the default timeout under full-suite load.
-  }, 30_000);
+    await writeFile(
+      join(root, "helper.ts"),
+      `${original.replace("isNodeError", "hasNodeErrorCode")}const invalid: boolean = 1;\n`,
+    );
+    expect(await checkRename(root, { "helper.ts": original }, dependencies)).toMatchObject({
+      renameExact: false,
+      typecheckPassed: false,
+    });
+  });
 
   it("distinguishes a task timeout from a setup failure", async () => {
     const root = await mkdtemp(join(tmpdir(), "codemode-timeout-test-"));
