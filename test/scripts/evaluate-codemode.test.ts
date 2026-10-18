@@ -77,7 +77,8 @@ describe("codemode evaluation workspace", () => {
     expect(
       await checkRename(root, { "helper.ts": original }, join(root, "other-dependencies")),
     ).toMatchObject({ renameExact: false, typecheckPassed: true });
-  });
+    // Three TypeScript checks run here and exceed the default timeout under full-suite load.
+  }, 30_000);
 
   it("distinguishes a task timeout from a setup failure", async () => {
     const root = await mkdtemp(join(tmpdir(), "codemode-timeout-test-"));
