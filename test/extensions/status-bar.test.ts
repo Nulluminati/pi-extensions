@@ -1167,6 +1167,29 @@ describe("status-bar-extension", () => {
     expect(lines.at(-1)?.match(/╰/g)).toHaveLength(3);
   });
 
+  it("reads current terminal height and collapses footer overflow after resize", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBar(mockPi, mockCtx);
+    const tui = { requestRender: vi.fn(), terminal: { rows: 24 } };
+    const component = getFooterFactory(mockCtx)(
+      tui,
+      plainTheme(),
+      footerData({ branch: "main", statuses: new Map([["other", "x".repeat(1200)]]) }),
+    );
+    const short = component.render(40);
+    expect(short.length).toBeLessThanOrEqual(12);
+    expect(short.at(-1)).toMatch(/↓ \d+ more lines/);
+    tui.terminal.rows = 10;
+    expect(component.render(40).length).toBeLessThanOrEqual(4);
+    tui.terminal.rows = 5;
+    expect(component.render(40)).toEqual([]);
+    tui.terminal.rows = 120;
+    const tall = component.render(40);
+    expect(tall.length).toBeGreaterThan(short.length);
+    expect(tall.join("\n")).not.toContain("more lines");
+  });
+
   it("shares unused terminal width across all three panels", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
@@ -1199,7 +1222,7 @@ describe("status-bar-extension", () => {
       "workers:state",
     )({ running: 1, workerCostUsd: 0.041, workerTokens: 38100 });
     const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
+      { requestRender: vi.fn(), terminal: { rows: 120 } },
       plainTheme(),
       footerData({ branch: "main" }),
     );

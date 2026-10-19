@@ -36,6 +36,9 @@ import type { GitStatus, State, TokenUsage } from "./types.ts";
 
 // --- Utilities ---
 
+// Keep the framed editor and some conversation space outside the footer.
+const MIN_EDITOR_ROWS = 6;
+
 function formatTokenCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}m`;
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
@@ -151,8 +154,12 @@ export function buildFooterLines(
   theme: any,
   footerData: any,
   width: number,
+  terminalRows = 24,
 ): string[] {
   width = Number.isFinite(width) ? Math.max(0, Math.floor(width)) : 0;
+  const height = Number.isFinite(terminalRows) ? Math.max(0, Math.floor(terminalRows)) : 24;
+  const maxRows = Math.max(0, Math.min(Math.floor(height / 2), height - MIN_EDITOR_ROWS));
+  if (width === 0 || maxRows === 0) return [];
   // Model + thinking level live in the editor box, not the footer.
   const workspaceRows: string[] = [];
 
@@ -201,15 +208,11 @@ export function buildFooterLines(
     ...(windowStr ? [`${barStr} ${theme.fg("text", windowStr)}`] : []),
     tokenStr,
   ];
-  const lines = renderPanels(
-    [
-      { title: "Workspace", rows: workspaceRows },
-      { title: "Context", rows: contextRows },
-      { title: "Session", rows: [`${turnStr}  ${costStr}`, mailStr, workerStr].filter(Boolean) },
-    ],
-    theme,
-    width,
-  );
+  const panels: FooterPanel[] = [
+    { title: "Workspace", rows: workspaceRows },
+    { title: "Context", rows: contextRows },
+    { title: "Session", rows: [`${turnStr}  ${costStr}`, mailStr, workerStr].filter(Boolean) },
+  ];
 
   // --- Transient events (third-party extension statuses) ---
   const transientStatuses: string[] = [];
@@ -241,10 +244,30 @@ export function buildFooterLines(
     }
   }
 
-  if (width > 0) {
-    for (const text of transientStatuses) {
-      lines.push(...wrapTextWithAnsi(text, width).map((line) => truncateToWidth(line, width, "")));
-    }
+  let lines = renderPanels(panels, theme, width);
+  const panelBudget = maxRows - (transientStatuses.length > 0 ? 1 : 0);
+  if (lines.length > panelBudget) {
+    // Drop frame strokes before content. One row per value keeps long paths
+    // from consuming the space needed by Context and Session.
+    lines = panels.flatMap((panel) =>
+      panel.rows.map((row, index) =>
+        truncateToWidth(
+          (index === 0 ? theme.fg("accent", `${panel.title}: `) : "") + row,
+          width,
+          "…",
+        ),
+      ),
+    );
+  }
+  for (const text of transientStatuses) {
+    lines.push(...wrapTextWithAnsi(text, width).map((line) => truncateToWidth(line, width, "")));
+  }
+  if (lines.length > maxRows) {
+    const hidden = lines.length - maxRows + 1;
+    return [
+      ...lines.slice(0, maxRows - 1),
+      truncateToWidth(theme.fg("dim", `↓ ${hidden} more lines`), width, ""),
+    ];
   }
   return lines;
 }

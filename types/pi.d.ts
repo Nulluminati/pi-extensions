@@ -753,6 +753,7 @@ declare module "@earendil-works/pi-tui" {
     ellipsis?: string,
     pad?: boolean,
   ): string;
+  export const CURSOR_MARKER: string;
   export function visibleWidth(str: string): number;
   export function wrapTextWithAnsi(str: string, width: number): string[];
   export function fuzzyFilter<T>(items: T[], query: string, getText: (item: T) => string): T[];

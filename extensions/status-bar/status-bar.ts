@@ -245,7 +245,7 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
         dispose: unsub,
         invalidate() {},
         render(width: number): string[] {
-          return buildFooterLines(state, ctx, theme, footerData, width);
+          return buildFooterLines(state, ctx, theme, footerData, width, tui.terminal?.rows ?? 24);
         },
       };
     });
