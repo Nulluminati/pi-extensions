@@ -12,7 +12,8 @@ Replaces Pi's default footer with rounded panels, inspired by [Pi Panels](https:
 | Context | Context usage bar, tokens/context-window ratio, and token breakdown (`↑in ↓out ↗cache-read ↘cache-write`) |
 | Session | Turn count, session cost, unread mail, and delegated-worker cost and tokens |
 
-Panels size to their content and sit beside each other when space permits. Otherwise, they stack and wrap their contents.
+Panels sit beside each other when their contents fit. They share unused width evenly, so the panel row fills the terminal.
+Otherwise, they stack and wrap their contents.
 Frames use muted theme colors. Existing colors distinguish Git state, context thresholds, token types, mail, and costs.
 Third-party extension statuses from `ctx.ui.setStatus()` appear below the panels. Long statuses wrap instead of losing their final text.
 
@@ -71,7 +72,7 @@ The custom footer suppresses that indicator to avoid duplicate information. `/st
 
 ## Key Design Decisions
 
-- **Content-sized panels** — Workspace, Context, and Session separate project state from usage and activity. Equal-height frames align on wide terminals.
+- **Full-width panels** — Each panel keeps enough width for its contents. Panels share spare columns evenly and align their frames.
 - **No new state outside the session** — Footer and status state is per-instance and lives in the closure. The one deliberate exception is the editor's prompt-history store: a process-global map keyed by `Symbol.for("status-bar.prompt-history-by-session")` on `globalThis`, so submitted prompts survive editor re-creation within a session. The status bar extension is safe to load alongside others.
 - **Editor layered, not overwritten** — The polished editor is a named `installEditorFactoryLayer` layer over whatever factory is registered; `removeEditorFactoryLayer` unwraps it on shutdown without disturbing other layers. If a later-loaded extension replaces the factory after `session_start`, the 0-tick re-check re-installs the layer.
 - **Modal chrome, shared with overlays** — The input box reuses `renderModalFrame` (rounded `borderAccent` corners, title in the top border) so it reads as the same family as the voice/handoff modals, instead of a one-off grey rule. Models and thinking live in the title, so the border never needs to track the thinking level.

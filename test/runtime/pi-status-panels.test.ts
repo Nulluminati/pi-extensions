@@ -43,6 +43,9 @@ describe("status panels with real Pi text helpers", () => {
       const lines = buildFooterLines(snapshot, ctx, theme, data, width);
       for (const line of lines) {
         expect(visibleWidth(line), `width ${width}`).toBeLessThanOrEqual(width);
+        if (width >= 12 && /^[╭│╰]/u.test(stripVTControlCharacters(line))) {
+          expect(visibleWidth(line), `panel width ${width}`).toBe(width);
+        }
       }
       if (width < 24) continue;
       const text = lines.map(stripVTControlCharacters).join("\n");

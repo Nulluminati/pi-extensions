@@ -117,10 +117,16 @@ function renderPanels(panels: FooterPanel[], theme: any, width: number): string[
   const naturalWidths = panels.map((panel) =>
     Math.max(24, visibleWidth(panel.title) + 8, ...panel.rows.map((row) => visibleWidth(row) + 4)),
   );
-  const horizontal =
-    naturalWidths.reduce((sum, size) => sum + size, 0) + panels.length - 1 <= width;
+  const naturalRowWidth = naturalWidths.reduce((sum, size) => sum + size, 0) + panels.length - 1;
+  const horizontal = naturalRowWidth <= width;
+  const extraWidth = Math.max(0, width - naturalRowWidth);
+  const panelWidths = naturalWidths.map((size, index) =>
+    horizontal
+      ? size + Math.floor(extraWidth / panels.length) + (index < extraWidth % panels.length ? 1 : 0)
+      : width,
+  );
   const bodies = panels.map((panel, index) => {
-    const panelWidth = horizontal ? (naturalWidths[index] ?? width) : width;
+    const panelWidth = panelWidths[index] ?? width;
     const contentWidth = modalContentWidth(panelWidth, 1);
     return panel.rows.flatMap((row) => wrapTextWithAnsi(row, contentWidth));
   });
@@ -128,7 +134,7 @@ function renderPanels(panels: FooterPanel[], theme: any, width: number): string[
   const frames = panels.map((panel, index) => {
     const body = [...(bodies[index] ?? [])];
     if (horizontal) while (body.length < bodyHeight) body.push("");
-    return renderModalFrame(theme, horizontal ? (naturalWidths[index] ?? width) : width, body, {
+    return renderModalFrame(theme, panelWidths[index] ?? width, body, {
       title: panel.title,
       paddingX: 1,
       paddingY: 0,

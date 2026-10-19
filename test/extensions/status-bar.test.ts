@@ -1167,6 +1167,27 @@ describe("status-bar-extension", () => {
     expect(lines.at(-1)?.match(/╰/g)).toHaveLength(3);
   });
 
+  it("shares unused terminal width across all three panels", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBar(mockPi, mockCtx);
+    const component = getFooterFactory(mockCtx)(
+      { requestRender: vi.fn() },
+      plainTheme(),
+      footerData({ branch: "main" }),
+    );
+    for (const width of [160, 161, 162, 163]) {
+      const lines = component.render(width);
+      for (const line of lines) expect(visibleWidth(line)).toBe(width);
+    }
+    const panelWidths = (width: number) =>
+      (component.render(width)[0].match(/╭[^╮]*╮/gu) ?? []).map(visibleWidth);
+    const before = panelWidths(160);
+    const after = panelWidths(163);
+    expect(before).toHaveLength(3);
+    expect(after).toEqual(before.map((width: number) => width + 1));
+  });
+
   it("stacks panels on narrow terminals without shedding metrics", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
