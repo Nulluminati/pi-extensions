@@ -284,8 +284,8 @@ describe("status-bar-extension", () => {
     );
     const lines = component.render(120);
 
-    expect(lines[0]).not.toContain("anthropic/claude-sonnet-4-6");
-    expect(lines[0]).toContain("main");
+    expect(lines.join("\n")).not.toContain("anthropic/claude-sonnet-4-6");
+    expect(lines.join("\n")).toContain("main");
   });
 
   it("footer omits the provider/model label", async () => {
@@ -302,7 +302,7 @@ describe("status-bar-extension", () => {
     );
     const lines = component.render(120);
 
-    expect(lines[0]).not.toContain("openai/gpt-4o");
+    expect(lines.join("\n")).not.toContain("openai/gpt-4o");
   });
 
   it("footer omits the worker model because it lives in the editor box", async () => {
@@ -321,9 +321,9 @@ describe("status-bar-extension", () => {
     );
     const lines = component.render(120);
 
-    expect(lines[0]).not.toContain("via");
-    expect(lines[0]).not.toContain("opencode-go/deepseek-flash");
-    expect(lines[0]).toContain("main");
+    expect(lines.join("\n")).not.toContain("via");
+    expect(lines.join("\n")).not.toContain("opencode-go/deepseek-flash");
+    expect(lines.join("\n")).toContain("main");
   });
 
   it("editor box keeps the configured worker model", async () => {
@@ -340,7 +340,7 @@ describe("status-bar-extension", () => {
     expect(lines.some((line) => line.includes("opencode-go/deepseek-flash"))).toBe(true);
   });
 
-  it("footer shows working directory basename on line 1", async () => {
+  it("footer shows the working directory basename", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     mockCtx.cwd = "/home/user/projects/my-app";
@@ -353,7 +353,7 @@ describe("status-bar-extension", () => {
     );
     const lines = component.render(120);
 
-    expect(lines[0]).toContain("my-app");
+    expect(lines.join("\n")).toContain("my-app");
   });
 
   it("renders the Nerd Font folder icon before the cwd", async () => {
@@ -370,7 +370,7 @@ describe("status-bar-extension", () => {
     const lines = component.render(120);
 
     const folder = String.fromCodePoint(0xf0770);
-    expect(lines[0]).toContain(folder);
+    expect(lines.join("\n")).toContain(folder);
   });
 
   it("renders the Nerd Font git icon before the branch", async () => {
@@ -386,7 +386,7 @@ describe("status-bar-extension", () => {
     const lines = component.render(120);
 
     const git = String.fromCodePoint(0xf418);
-    expect(lines[0]).toContain(git);
+    expect(lines.join("\n")).toContain(git);
   });
 
   it("footer shows context usage bar when available", async () => {
@@ -406,7 +406,7 @@ describe("status-bar-extension", () => {
     );
     const lines = component.render(120);
 
-    expect(lines[0]).toContain("50.0k/200.0k");
+    expect(lines.join("\n")).toContain("50.0k/200.0k");
   });
 
   it("clamps usage bar when context exceeds window (e.g. continued session)", async () => {
@@ -430,9 +430,9 @@ describe("status-bar-extension", () => {
 
     // Must not throw RangeError: Invalid count value (negative repeat).
     const lines = component.render(120);
-    expect(lines[0]).toContain("262.0k/200.0k");
+    expect(lines.join("\n")).toContain("262.0k/200.0k");
     // Bar is fully filled (10 blocks) rather than crashing.
-    expect(lines[0]).toContain("[██████████]");
+    expect(lines.join("\n")).toContain("[██████████]");
   });
 
   it("does not re-query context usage on every render (cached, refreshed on events)", async () => {
@@ -460,7 +460,7 @@ describe("status-bar-extension", () => {
     expect(mockCtx.getContextUsage).not.toHaveBeenCalled();
 
     // The cached value still renders.
-    expect(component.render(120)[0]).toContain("50.0k/200.0k");
+    expect(component.render(120).join("\n")).toContain("50.0k/200.0k");
   });
 
   it("refreshes cached context usage when a message lands", async () => {
@@ -477,7 +477,7 @@ describe("status-bar-extension", () => {
       plainTheme(),
       footerData(),
     );
-    expect(component.render(120)[0]).toContain("1.0k/200.0k");
+    expect(component.render(120).join("\n")).toContain("1.0k/200.0k");
 
     // A new assistant message grows the context; the cache must refresh.
     mockCtx.getContextUsage = vi.fn(() => ({
@@ -488,7 +488,7 @@ describe("status-bar-extension", () => {
     const messageEnd = getEventHandler(mockPi, "message_end");
     await messageEnd({ type: "message_end", message: { role: "assistant" } }, mockCtx);
 
-    expect(component.render(120)[0]).toContain("80.0k/200.0k");
+    expect(component.render(120).join("\n")).toContain("80.0k/200.0k");
     mockCtx.getContextUsage.mockClear();
     component.render(120);
     expect(mockCtx.getContextUsage).not.toHaveBeenCalled();
@@ -545,10 +545,10 @@ describe("status-bar-extension", () => {
     );
     const lines = component.render(120);
 
-    expect(lines[0]).toContain("↻1");
+    expect(lines.join("\n")).toContain("↻1");
   });
 
-  it("turn count sits on the right side, after the token counters", async () => {
+  it("turn count lives in the Session panel, right of Context", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     mockCtx.getContextUsage = vi.fn(() => ({
@@ -578,17 +578,13 @@ describe("status-bar-extension", () => {
       footerData(),
     );
     const lines = component.render(160);
-    const line = lines[0];
-
-    const turnIdx = line.indexOf("↻");
-    const tokenIdx = line.indexOf("↑");
-    expect(turnIdx).toBeGreaterThan(-1);
-    expect(tokenIdx).toBeGreaterThan(-1);
-    // Turn count is to the right of the token counters.
-    expect(turnIdx).toBeGreaterThan(tokenIdx);
+    const sessionColumn = lines[0].indexOf("Session") - 3;
+    expect(sessionColumn).toBeGreaterThan(lines[0].indexOf("Context"));
+    expect(lines[1].slice(sessionColumn)).toContain("↻1");
+    expect(lines.join("\n")).toContain("↑1.0k");
   });
 
-  it("turn_end accumulates token usage on line 1", async () => {
+  it("turn_end accumulates token usage in the footer", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     mockCtx.getContextUsage = vi.fn(() => ({
@@ -623,11 +619,11 @@ describe("status-bar-extension", () => {
     );
     const lines = component.render(160);
 
-    expect(lines[0]).toContain("↑1.0k");
-    expect(lines[0]).toContain("↓500");
-    expect(lines[0]).toContain("↗200");
-    expect(lines[0]).toContain("↘100");
-    expect(lines[0]).toContain("$0.030");
+    expect(lines.join("\n")).toContain("↑1.0k");
+    expect(lines.join("\n")).toContain("↓500");
+    expect(lines.join("\n")).toContain("↗200");
+    expect(lines.join("\n")).toContain("↘100");
+    expect(lines.join("\n")).toContain("$0.030");
   });
 
   it("turn_end counts toolResult roll-ups, standalone usage, compaction, and branch summary", async () => {
@@ -683,9 +679,9 @@ describe("status-bar-extension", () => {
     const lines = component.render(160);
 
     // Every entry counted exactly once: 100+100+10+20+30 in, 50+50 out.
-    expect(lines[0]).toContain("↑260");
-    expect(lines[0]).toContain("↓100");
-    expect(lines[0]).toContain("$1.017");
+    expect(lines.join("\n")).toContain("↑260");
+    expect(lines.join("\n")).toContain("↓100");
+    expect(lines.join("\n")).toContain("$1.017");
   });
 
   it("does not recount nested codemode usage already rolled into the toolResult", async () => {
@@ -726,9 +722,9 @@ describe("status-bar-extension", () => {
     );
     const lines = component.render(160);
 
-    expect(lines[0]).toContain("↑110");
-    expect(lines[0]).toContain("↓55");
-    expect(lines[0]).toContain("$1.010");
+    expect(lines.join("\n")).toContain("↑110");
+    expect(lines.join("\n")).toContain("↓55");
+    expect(lines.join("\n")).toContain("$1.010");
   });
 
   it("token details accumulate across multiple assistant messages", async () => {
@@ -779,11 +775,11 @@ describe("status-bar-extension", () => {
     );
     const lines = component.render(160);
 
-    expect(lines[0]).toContain("↑3.0k");
-    expect(lines[0]).toContain("↓1.5k");
-    expect(lines[0]).toContain("↗500");
-    expect(lines[0]).toContain("↘100");
-    expect(lines[0]).toContain("$0.050");
+    expect(lines.join("\n")).toContain("↑3.0k");
+    expect(lines.join("\n")).toContain("↓1.5k");
+    expect(lines.join("\n")).toContain("↗500");
+    expect(lines.join("\n")).toContain("↘100");
+    expect(lines.join("\n")).toContain("$0.050");
   });
 
   it("token details always show cacheRead/cacheWrite, even at zero", async () => {
@@ -815,10 +811,10 @@ describe("status-bar-extension", () => {
     );
     const lines = component.render(120);
 
-    expect(lines[0]).toContain("↑1.0k");
-    expect(lines[0]).toContain("↓500");
-    expect(lines[0]).toContain("↗0");
-    expect(lines[0]).toContain("↘0");
+    expect(lines.join("\n")).toContain("↑1.0k");
+    expect(lines.join("\n")).toContain("↓500");
+    expect(lines.join("\n")).toContain("↗0");
+    expect(lines.join("\n")).toContain("↘0");
   });
 
   it("token indicators show 0 at the start instead of being hidden", async () => {
@@ -834,11 +830,11 @@ describe("status-bar-extension", () => {
     );
     const lines = component.render(120);
 
-    expect(lines.length).toBe(1);
-    expect(lines[0]).toContain("↑0");
-    expect(lines[0]).toContain("↓0");
-    expect(lines[0]).toContain("↗0");
-    expect(lines[0]).toContain("↘0");
+    expect(lines).toHaveLength(3);
+    expect(lines.join("\n")).toContain("↑0");
+    expect(lines.join("\n")).toContain("↓0");
+    expect(lines.join("\n")).toContain("↗0");
+    expect(lines.join("\n")).toContain("↘0");
   });
 
   it("cost shows $0.000 at the start instead of being hidden", async () => {
@@ -854,7 +850,7 @@ describe("status-bar-extension", () => {
     );
     const lines = component.render(120);
 
-    expect(lines[0]).toContain("$0.000");
+    expect(lines.join("\n")).toContain("$0.000");
   });
 
   it("cost rounds to three decimals", async () => {
@@ -878,7 +874,7 @@ describe("status-bar-extension", () => {
     );
     const lines = component.render(120);
 
-    expect(lines[0]).toContain("$0.012");
+    expect(lines.join("\n")).toContain("$0.012");
   });
 
   it("message_end accumulates token usage", async () => {
@@ -910,7 +906,7 @@ describe("status-bar-extension", () => {
     );
     const lines = component.render(120);
 
-    expect(lines[0]).toContain("↑500");
+    expect(lines.join("\n")).toContain("↑500");
   });
 
   it("editor metadata line color-codes the thinking level (low/medium/high)", async () => {
@@ -948,8 +944,8 @@ describe("status-bar-extension", () => {
     );
     const lines = component.render(120);
 
-    expect(lines[0]).toContain("main");
-    expect(lines[0]).not.toContain("[");
+    expect(lines.join("\n")).toContain("main");
+    expect(lines.join("\n")).not.toContain("[");
   });
 
   it("git status shows staged, modified, and untracked indicators", async () => {
@@ -973,10 +969,10 @@ describe("status-bar-extension", () => {
     );
     const lines = component.render(120);
 
-    expect(lines[0]).toContain("[");
-    expect(lines[0]).toContain("!");
-    expect(lines[0]).toContain("+");
-    expect(lines[0]).toContain("?");
+    expect(lines.join("\n")).toContain("[");
+    expect(lines.join("\n")).toContain("!");
+    expect(lines.join("\n")).toContain("+");
+    expect(lines.join("\n")).toContain("?");
   });
 
   it("git status indicator block uses the error color", async () => {
@@ -1015,7 +1011,7 @@ describe("status-bar-extension", () => {
     );
     const lines = component.render(120);
 
-    expect(lines[0]).toContain("↑");
+    expect(lines.join("\n")).toContain("↑");
   });
 
   it("git status shows behind indicator when behind remote", async () => {
@@ -1031,7 +1027,7 @@ describe("status-bar-extension", () => {
     );
     const lines = component.render(120);
 
-    expect(lines[0]).toContain("↓");
+    expect(lines.join("\n")).toContain("↓");
   });
 
   it("git status shows diverged indicator when ahead and behind", async () => {
@@ -1047,7 +1043,7 @@ describe("status-bar-extension", () => {
     );
     const lines = component.render(120);
 
-    expect(lines[0]).toContain("⇕");
+    expect(lines.join("\n")).toContain("⇕");
   });
 
   it("git status shows stashed indicator when a stash exists", async () => {
@@ -1065,7 +1061,7 @@ describe("status-bar-extension", () => {
     );
     const lines = component.render(120);
 
-    expect(lines[0]).toContain("$");
+    expect(lines.join("\n")).toContain("$");
   });
 
   it("git status shows conflicted indicator for unmerged files", async () => {
@@ -1083,7 +1079,7 @@ describe("status-bar-extension", () => {
     );
     const lines = component.render(120);
 
-    expect(lines[0]).toContain("=");
+    expect(lines.join("\n")).toContain("=");
   });
 
   it("git status handles non-git directory gracefully", async () => {
@@ -1105,7 +1101,7 @@ describe("status-bar-extension", () => {
     const lines = component.render(120);
 
     expect(lines.length).toBeGreaterThanOrEqual(1);
-    expect(lines[0]).not.toContain("[");
+    expect(lines.join("\n")).not.toContain("[");
   });
 
   it("git status refreshes (porcelain + stash) on turn_end", async () => {
@@ -1150,7 +1146,69 @@ describe("status-bar-extension", () => {
     });
   });
 
-  // --- Line layout ---
+  // --- Panel layout ---
+
+  it("renders framed panels beside each other when their content fits", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.getContextUsage = vi.fn(() => ({ tokens: 50000, contextWindow: 200000, percent: 25 }));
+    await enableBar(mockPi, mockCtx);
+    const component = getFooterFactory(mockCtx)(
+      { requestRender: vi.fn() },
+      plainTheme(),
+      footerData({ branch: "main" }),
+    );
+    const lines = component.render(160);
+    expect(lines[0]).toContain("Workspace");
+    expect(lines[0]).toContain("Context");
+    expect(lines[0]).toContain("Session");
+    expect(lines[0].match(/╭/g)).toHaveLength(3);
+    expect(lines.join("\n")).toContain("50.0k/200.0k");
+    expect(lines.at(-1)?.match(/╰/g)).toHaveLength(3);
+  });
+
+  it("stacks panels on narrow terminals without shedding metrics", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.getContextUsage = vi.fn(() => ({ tokens: 50000, contextWindow: 200000, percent: 25 }));
+    await enableBar(mockPi, mockCtx);
+    getEventsHandler(mockPi, "messenger:state")({ name: "scout", unread: 3 });
+    getEventsHandler(
+      mockPi,
+      "workers:state",
+    )({ running: 1, workerCostUsd: 0.041, workerTokens: 38100 });
+    const component = getFooterFactory(mockCtx)(
+      { requestRender: vi.fn() },
+      plainTheme(),
+      footerData({ branch: "main" }),
+    );
+    const lines = component.render(40);
+    const text = lines.join("\n");
+    expect(lines.filter((line: string) => line.includes("╭"))).toHaveLength(3);
+    for (const value of [
+      "Workspace",
+      "Context",
+      "Session",
+      "main",
+      "50.0k/200.0k",
+      "↑0",
+      "↓0",
+      "↗0",
+      "↘0",
+      "↻0",
+      "$0.000",
+      "✉ 3",
+      "⚙ $0.04",
+      "38.1k",
+    ]) {
+      expect(text).toContain(value);
+    }
+    for (let width = 0; width <= 160; width++) {
+      for (const line of component.render(width)) {
+        expect(visibleWidth(line), `width ${width}`).toBeLessThanOrEqual(width);
+      }
+    }
+  });
 
   it("footer render respects width limit on every line", async () => {
     const mockPi = createMockPi();
@@ -1170,7 +1228,7 @@ describe("status-bar-extension", () => {
     }
   });
 
-  it("renders a single line when there are no transient events", async () => {
+  it("renders only panels when there are no transient events", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await enableBar(mockPi, mockCtx);
@@ -1182,10 +1240,11 @@ describe("status-bar-extension", () => {
     );
     const lines = component.render(120);
 
-    expect(lines.length).toBe(1);
+    expect(lines).toHaveLength(3);
+    expect(lines.at(-1)).toContain("╰");
   });
 
-  it("renders a second line when extension statuses are present", async () => {
+  it("renders extension statuses after the panels", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await enableBar(mockPi, mockCtx);
@@ -1203,16 +1262,16 @@ describe("status-bar-extension", () => {
     );
     const lines = component.render(120);
 
-    expect(lines.length).toBe(2);
-    expect(lines[1]).toContain("🎯 active");
+    expect(lines).toHaveLength(5);
+    expect(lines[3]).toContain("🎯 active");
     // The small model lives in the editor meta line, so it is suppressed here.
-    expect(lines[1]).not.toContain("small synthetic/syn:small:text · minimal");
-    expect(lines[1]).toContain("some status");
+    expect(lines.at(-1)).not.toContain("small synthetic/syn:small:text · minimal");
+    expect(lines.at(-1)).toContain("some status");
     // Model lives in the editor box, not the footer.
-    expect(lines[0]).not.toContain("test-model");
+    expect(lines.join("\n")).not.toContain("test-model");
   });
 
-  it("does not show its own status-bar status on line 2", async () => {
+  it("does not show its own status-bar status below the panels", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await enableBar(mockPi, mockCtx);
@@ -1229,11 +1288,11 @@ describe("status-bar-extension", () => {
     );
     const lines = component.render(120);
 
-    expect(lines[1]).not.toContain(`${STATUS_ICON} statusbar`);
-    expect(lines[1]).toContain("🎯 active");
+    expect(lines.at(-1)).not.toContain(`${STATUS_ICON} statusbar`);
+    expect(lines.at(-1)).toContain("🎯 active");
   });
 
-  it("footer line 2 suppresses missions, messenger, autoresearch, workers, and background-jobs statuses (widget-first fallbacks)", async () => {
+  it("suppresses missions, messenger, autoresearch, workers, and background-jobs fallback statuses", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await enableBar(mockPi, mockCtx);
@@ -1254,17 +1313,17 @@ describe("status-bar-extension", () => {
     );
     const lines = component.render(120);
 
-    // Line 2 still renders for the foreign status, but the widget-first
+    // The foreign status still renders below the panels, but widget-first
     // extensions are suppressed (their setStatus entries are default-footer
     // fallbacks and would double-render).
-    expect(lines.length).toBe(2);
-    expect(lines[1]).toContain("foreign status");
-    expect(lines[1]).not.toContain("mission fix-bug");
-    expect(lines[1]).not.toContain("Messenger");
-    expect(lines[1]).not.toContain("✉");
-    expect(lines[1]).not.toContain("researching auth flows");
-    expect(lines[1]).not.toContain("running · $0.04");
-    expect(lines[1]).not.toContain("Jobs: 1 job");
+    expect(lines).toHaveLength(4);
+    expect(lines.at(-1)).toContain("foreign status");
+    expect(lines.at(-1)).not.toContain("mission fix-bug");
+    expect(lines.at(-1)).not.toContain("Messenger");
+    expect(lines.at(-1)).not.toContain("✉");
+    expect(lines.at(-1)).not.toContain("researching auth flows");
+    expect(lines.at(-1)).not.toContain("running · $0.04");
+    expect(lines.at(-1)).not.toContain("Jobs: 1 job");
   });
 
   it("onBranchChange triggers requestRender", async () => {
@@ -1323,8 +1382,8 @@ describe("status-bar-extension", () => {
 
     expect(lines.length).toBeGreaterThanOrEqual(1);
     // No model on the footer (it lives in the editor box); no token bar either.
-    expect(lines[0]).not.toContain("test-model");
-    expect(lines[0]).not.toContain("50.0k");
+    expect(lines.join("\n")).not.toContain("test-model");
+    expect(lines.join("\n")).not.toContain("50.0k");
   });
 
   it("footer omits the model when none is set (label lives in the editor box)", async () => {
@@ -1340,8 +1399,8 @@ describe("status-bar-extension", () => {
     );
     const lines = component.render(120);
 
-    expect(lines[0]).not.toContain("no-model");
-    expect(lines[0]).not.toContain("undefined/");
+    expect(lines.join("\n")).not.toContain("no-model");
+    expect(lines.join("\n")).not.toContain("undefined/");
   });
 
   it("session_start resets turn count and token usage", async () => {
@@ -1363,8 +1422,9 @@ describe("status-bar-extension", () => {
     );
     const lines = component.render(120);
 
-    // Only 1 line — turn count and tokens reset, line 2 collapses.
-    expect(lines.length).toBe(1);
+    expect(lines).toHaveLength(3);
+    expect(lines.join("\n")).toContain("↻0");
+    expect(lines.join("\n")).toContain("↑0 ↓0 ↗0 ↘0");
   });
 
   it("invalidate is a no-op", async () => {
@@ -1395,8 +1455,8 @@ describe("status-bar-extension", () => {
     );
     const lines = component.render(120);
 
-    expect(lines[0]).not.toContain("my-model");
-    expect(lines[0]).not.toContain("undefined/");
+    expect(lines.join("\n")).not.toContain("my-model");
+    expect(lines.join("\n")).not.toContain("undefined/");
   });
 });
 
@@ -1940,7 +2000,7 @@ describe("status-bar goal badge", () => {
     expect(getGoalHandler(mockPi)).toBeDefined();
   });
 
-  it("footer line 2 suppresses the goal status (a running goal is the badge)", async () => {
+  it("suppresses the goal fallback status (a running goal is the badge)", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await enableBar(mockPi, mockCtx);
@@ -1954,8 +2014,8 @@ describe("status-bar goal badge", () => {
     );
     const lines = component.render(120);
 
-    expect(lines.length).toBe(1);
-    expect(lines[0]).not.toContain("Goal");
+    expect(lines).toHaveLength(3);
+    expect(lines.join("\n")).not.toContain("Goal");
   });
 });
 
@@ -1964,8 +2024,8 @@ describe("status-bar mail slot", () => {
     return { fg: vi.fn((_color: string, text: string) => text) };
   }
 
-  /** Enable the bar with a context snapshot, token history, one turn, and
-   * unread mail, so every line-1 right-block segment is populated. */
+  /** Enable the bar with context, token history, one turn, and unread mail
+   * so the Context and Session panels contain all their indicators. */
   async function enableBarWithMail(
     mockPi: ReturnType<typeof createMockPi>,
     mockCtx: ReturnType<typeof createMockCommandContext>,
@@ -2005,7 +2065,7 @@ describe("status-bar mail slot", () => {
     expect(getEventsHandler(mockPi, "messenger:state")).toBeDefined();
   });
 
-  it("messenger:state with unread 2 shows ✉ 2 on line 1, right of the context bar", async () => {
+  it("messenger:state with unread 2 shows ✉ 2 in the footer", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await enableBarWithMail(mockPi, mockCtx);
@@ -2015,11 +2075,9 @@ describe("status-bar mail slot", () => {
       plainTheme(),
       footerData(),
     );
-    const line = component.render(120)[0] ?? "";
-
-    expect(line).toContain("✉ 2");
-    // Right of the context-bar cluster ([bar] 50.0k/200.0k).
-    expect(line.indexOf("✉")).toBeGreaterThan(line.indexOf("50.0k/200.0k"));
+    const lines = component.render(120);
+    const sessionColumn = lines[0].indexOf("Session") - 3;
+    expect(lines[2].slice(sessionColumn)).toContain("✉ 2");
   });
 
   it("mail segment renders in the success color", async () => {
@@ -2050,7 +2108,7 @@ describe("status-bar mail slot", () => {
       plainTheme(),
       footerData(),
     );
-    expect(component.render(120)[0]).not.toContain("✉");
+    expect(component.render(120).join("\n")).not.toContain("✉");
   });
 
   it("no mail segment and no gap artifacts at unread 0", async () => {
@@ -2063,13 +2121,12 @@ describe("status-bar mail slot", () => {
       plainTheme(),
       footerData(),
     );
-    const line = component.render(120)[0] ?? "";
+    const line = component.render(120).join("\n");
 
     expect(line).not.toContain("✉");
     expect(line).not.toContain("✉ 0");
-    // The right block is right-aligned: with no mail segment the line still
-    // ends exactly at the cost segment, with no trailing gap.
-    expect(line.endsWith("$0.000")).toBe(true);
+    expect(line).toContain("$0.000");
+    expect(component.render(120).at(-1)).toContain("╰");
   });
 
   it("messenger:state triggers a footer re-render", async () => {
@@ -2084,7 +2141,7 @@ describe("status-bar mail slot", () => {
     expect(requestRender).toHaveBeenCalled();
   });
 
-  it("mail sheds after turn count but before the token breakdown", async () => {
+  it("retains mail, cost, turns, and token counts as panels stack", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await enableBarWithMail(mockPi, mockCtx);
@@ -2095,46 +2152,11 @@ describe("status-bar mail slot", () => {
       footerData(),
     );
 
-    // Scan widths and record which segments survive at each width.
-    const rows: Array<{
-      width: number;
-      mail: boolean;
-      turn: boolean;
-      cost: boolean;
-      token: boolean;
-      bar: boolean;
-    }> = [];
     for (let width = 24; width <= 140; width++) {
-      const line = component.render(width)[0] ?? "";
-      rows.push({
-        width,
-        mail: line.includes("✉ 2"),
-        turn: line.includes("↻1"),
-        cost: line.includes("$0.030"),
-        token: line.includes("↑1.0k"),
-        bar: line.includes("█"),
-      });
-    }
-
-    const widest = rows[rows.length - 1];
-    expect(widest.mail).toBe(true);
-    expect(widest.cost).toBe(true);
-    expect(widest.turn).toBe(true);
-    expect(widest.token).toBe(true);
-    expect(widest.bar).toBe(true);
-
-    // Cost sheds first while turn and mail remain.
-    expect(rows.some((r) => r.cost === false && r.turn && r.mail)).toBe(true);
-    // Mail outlives turn count (a width exists with mail but no turn).
-    expect(rows.some((r) => r.mail && !r.turn)).toBe(true);
-    // Mail sheds before the token breakdown (a width exists with token but no mail).
-    expect(rows.some((r) => !r.mail && r.token)).toBe(true);
-
-    // Shedding priority holds at every width: cost ⊆ turn ⊆ mail ⊆ token.
-    for (const r of rows) {
-      if (r.cost) expect(r.turn, `width ${r.width}: cost without turn`).toBe(true);
-      if (r.turn) expect(r.mail, `width ${r.width}: turn without mail`).toBe(true);
-      if (r.mail) expect(r.token, `width ${r.width}: mail without token`).toBe(true);
+      const text = component.render(width).join("\n");
+      for (const value of ["✉ 2", "↻1", "$0.030", "↑1.0k", "↓500", "↗200", "↘100", "█"]) {
+        expect(text, `width ${width}`).toContain(value);
+      }
     }
   });
 });
@@ -2442,7 +2464,7 @@ describe("status-bar small model segment", () => {
     expect(segments.some((s) => /\bhigh\b/.test(s))).toBe(true);
   });
 
-  it("footer line 2 suppresses the small-model status even alongside other statuses", async () => {
+  it("suppresses the small-model fallback alongside other statuses", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await enableBar(mockPi, mockCtx);
@@ -2459,10 +2481,10 @@ describe("status-bar small model segment", () => {
     );
     const lines = component.render(120);
 
-    // Line 2 still renders for the neuralwatt status, but small-model is gone.
-    expect(lines.length).toBe(2);
-    expect(lines[1]).toContain("🎯 active");
-    expect(lines[1]).not.toContain("small synthetic/haiku");
+    // The transient row still renders, but the editor owns the small model.
+    expect(lines).toHaveLength(4);
+    expect(lines.at(-1)).toContain("🎯 active");
+    expect(lines.join("\n")).not.toContain("small synthetic/haiku");
   });
 
   it("updates the small model label immediately when the config file changes", async () => {
@@ -2595,7 +2617,7 @@ describe("status-bar worker roll-up", () => {
     expect(component.render(160).join("\n")).not.toContain("⚙");
   });
 
-  it("sheds the worker segment with the cost tier, before mail", async () => {
+  it("retains worker spend and session cost on narrow terminals", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await enableBarWithWorkers(mockPi, mockCtx, {
@@ -2604,19 +2626,16 @@ describe("status-bar worker roll-up", () => {
       workerTokens: 38100,
     });
 
-    // Width scan: at every width, worker cost never outlives the parent cost
-    // and never outlives the mail segment.
+    // Stacked panels preserve spend instead of dropping it.
     const component = getFooterFactory(mockCtx)({ requestRender: vi.fn() }, plainTheme(), {
       onBranchChange: vi.fn(),
       getGitBranch: () => null,
     });
     for (let width = 24; width <= 160; width += 4) {
       const text = component.render(width).join(" ");
-      const hasWorker = text.includes("⚙");
-      const hasCost = /\$0\.0/.test(text);
-      if (hasWorker) {
-        expect(hasCost, `width ${width}: worker without cost`).toBe(true);
-      }
+      expect(text, `width ${width}`).toContain("⚙ $0.04");
+      expect(text, `width ${width}`).toContain("$0.000");
+      expect(text, `width ${width}`).toContain("38.1k");
     }
   });
 });

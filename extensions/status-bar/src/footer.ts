@@ -1,5 +1,6 @@
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { ExtensionCommandContext } from "pi";
+import { modalContentWidth, renderModalFrame } from "../../../lib/tui-frame.ts";
 import {
   APPROVAL_STATUS_KEY,
   AUTORESEARCH_STATUS_KEY,
@@ -98,61 +99,44 @@ function buildGitStatusBlock(gs: GitStatus, theme: any): string {
   return ` ${theme.fg("error", `[${indicators.join("")}${aheadBehind}]`)}`;
 }
 
-/**
- * Right-block pieces, fullest variant first. When width is tight the right
- * block is shed in tiers — cost first, then the turn count, then mail, then
- * the token breakdown, with the decorative bar dropping early and the window
- * surviving longest — before the static left block is ever truncated, so the
- * context window stays visible as long as possible.
- */
-function rightBlockVariants(
-  bar: string,
-  windowStr: string,
-  tokenStr: string,
-  turnStr: string,
-  mailStr: string,
-  costStr: string,
-  workerStr: string,
-): string[] {
-  const join = (parts: string[]) => parts.filter(Boolean).join(" ");
-  // Shedding order: cost, worker spend, turn count, mail, token breakdown —
-  // bar and window survive longest. The worker segment rides along wherever
-  // the cost segment appears.
-  return [
-    join([bar, windowStr, tokenStr, turnStr, mailStr, costStr, workerStr]),
-    join([bar, windowStr, tokenStr, turnStr, mailStr]),
-    join([windowStr, tokenStr, turnStr, mailStr, costStr, workerStr]),
-    join([windowStr, tokenStr, turnStr, mailStr]),
-    join([tokenStr, turnStr, mailStr, costStr, workerStr]),
-    join([tokenStr, turnStr, mailStr]),
-    join([tokenStr, mailStr]),
-    join([tokenStr]),
-    join([windowStr]),
-    join([]),
-  ];
+interface FooterPanel {
+  title: string;
+  rows: string[];
 }
 
-/**
- * Compose line 1: a left block with a right block right-aligned beside it.
- * Tries each right-block variant from fullest to emptiest, keeping the first
- * that fits alongside the full left block. If none fits, the left block is
- * truncated so the result never exceeds `width`.
- */
-function composeLine1(left: string, rightVariants: string[], width: number): string {
-  const leftWidth = visibleWidth(left);
-
-  for (const right of rightVariants) {
-    const rightWidth = right ? visibleWidth(right) : 0;
-    const needed = leftWidth + (rightWidth > 0 ? 1 + rightWidth : 0);
-    if (needed <= width) {
-      if (rightWidth === 0) return truncateToWidth(left, width, "");
-      const gap = width - leftWidth - rightWidth;
-      return truncateToWidth(`${left}${" ".repeat(gap)}${right}`, width, "");
-    }
+/** Fit panels beside each other when possible; otherwise stack and wrap them. */
+function renderPanels(panels: FooterPanel[], theme: any, width: number): string[] {
+  if (width === 0) return [];
+  // At tiny widths the frame title cannot fit. Keep the content width-safe.
+  if (width < 12) {
+    return panels
+      .flatMap((panel) => panel.rows.flatMap((row) => wrapTextWithAnsi(row, width)))
+      .map((line) => truncateToWidth(line, width, ""));
   }
 
-  // Even the empty right block doesn't fit: truncate the left block.
-  return truncateToWidth(left, width, "");
+  const naturalWidths = panels.map((panel) =>
+    Math.max(24, visibleWidth(panel.title) + 8, ...panel.rows.map((row) => visibleWidth(row) + 4)),
+  );
+  const horizontal =
+    naturalWidths.reduce((sum, size) => sum + size, 0) + panels.length - 1 <= width;
+  const bodies = panels.map((panel, index) => {
+    const panelWidth = horizontal ? (naturalWidths[index] ?? width) : width;
+    const contentWidth = modalContentWidth(panelWidth, 1);
+    return panel.rows.flatMap((row) => wrapTextWithAnsi(row, contentWidth));
+  });
+  const bodyHeight = Math.max(...bodies.map((body) => body.length));
+  const frames = panels.map((panel, index) => {
+    const body = [...(bodies[index] ?? [])];
+    if (horizontal) while (body.length < bodyHeight) body.push("");
+    return renderModalFrame(theme, horizontal ? (naturalWidths[index] ?? width) : width, body, {
+      title: panel.title,
+      paddingX: 1,
+      paddingY: 0,
+      borderColor: "dim",
+    });
+  });
+  if (!horizontal) return frames.flat();
+  return (frames[0] ?? []).map((_, row) => frames.map((frame) => frame[row] ?? "").join(" "));
 }
 
 export function buildFooterLines(
@@ -162,26 +146,22 @@ export function buildFooterLines(
   footerData: any,
   width: number,
 ): string[] {
-  // --- Line 1: static session segments. Model + thinking level live in the
-  // editor box, not the footer, so line 1 opens with the working directory. ---
-  const leftSegments: string[] = [];
+  width = Number.isFinite(width) ? Math.max(0, Math.floor(width)) : 0;
+  // Model + thinking level live in the editor box, not the footer.
+  const workspaceRows: string[] = [];
 
   // Working directory (last path component) — blue, Starship-style.
-  leftSegments.push(theme.fg("mdLink", `${ICON_CWD} ${formatCwd(ctx.cwd)}`));
+  workspaceRows.push(theme.fg("mdLink", `${ICON_CWD} ${formatCwd(ctx.cwd)}`));
 
   // Git branch + status indicator block. Branch in purple (Starship's
   // signature), status indicators in red.
   const branch = state.gitBranch ?? footerData?.getGitBranch?.() ?? null;
   if (branch) {
     const block = state.gitStatus ? buildGitStatusBlock(state.gitStatus, theme) : "";
-    leftSegments.push(
-      `${theme.fg("dim", "on")} ${theme.fg("thinkingHigh", `${ICON_GIT} ${branch}`)}${block}`,
-    );
+    workspaceRows.push(`${theme.fg("thinkingHigh", `${ICON_GIT} ${branch}`)}${block}`);
   }
 
-  // Right block: context usage bar + window, token breakdown, cost. Shed in
-  // tiers when narrow (see rightBlockVariants) so the static left block wins.
-  // Reads the cached snapshot (refreshed on message boundaries) so a render —
+  // Context usage reads the cached snapshot (refreshed on message boundaries) so a render —
   // which fires on every keystroke — never recomputes O(conversation) usage.
   let barStr = "";
   let windowStr = "";
@@ -196,16 +176,13 @@ export function buildFooterLines(
   // Token breakdown: always shown (0 when empty), each indicator colored.
   const tu = state.tokenUsage;
   const tokenStr = formatTokenBreakdown(tu, theme);
-  // Turn count sits right of the token counters, leading the trailing trio
-  // with mail and cost. Cost always shown — $0.000 at session start, 3
-  // decimals. Mail appears only while mail is unread, and sheds after the
-  // turn count but before the token breakdown (see rightBlockVariants).
+  // Session activity stays separate from context usage. Cost always shows
+  // three decimals; mail appears only while unread.
   const turnStr = theme.fg("text", `${ICON_TURN}${state.turnCount}`);
   const mailStr =
     state.unreadMail > 0 ? theme.fg(MAIL_COLOR, `${ICON_MAIL} ${state.unreadMail}`) : "";
   const costStr = theme.fg("mdHeading", `$${tu.cost.toFixed(3)}`);
-  // Delegated-worker spend roll-up (published on workers:state). Sheds with
-  // the cost segment — ambient totals, not actionable mid-turn.
+  // Delegated-worker spend roll-up (published on workers:state).
   const workerStr =
     state.workerCostUsd > 0
       ? theme.fg(
@@ -214,22 +191,22 @@ export function buildFooterLines(
         )
       : "";
 
-  const line1 = composeLine1(
-    leftSegments.join(" "),
-    rightBlockVariants(
-      barStr,
-      windowStr ? theme.fg("text", windowStr) : "",
-      tokenStr,
-      turnStr,
-      mailStr,
-      costStr,
-      workerStr,
-    ),
+  const contextRows = [
+    ...(windowStr ? [`${barStr} ${theme.fg("text", windowStr)}`] : []),
+    tokenStr,
+  ];
+  const lines = renderPanels(
+    [
+      { title: "Workspace", rows: workspaceRows },
+      { title: "Context", rows: contextRows },
+      { title: "Session", rows: [`${turnStr}  ${costStr}`, mailStr, workerStr].filter(Boolean) },
+    ],
+    theme,
     width,
   );
 
-  // --- Line 2: transient events (third-party extension statuses) ---
-  const line2Segments: string[] = [];
+  // --- Transient events (third-party extension statuses) ---
+  const transientStatuses: string[] = [];
 
   const extStatuses = footerData?.getExtensionStatuses?.();
   if (extStatuses) {
@@ -240,7 +217,7 @@ export function buildFooterLines(
       // messenger, autoresearch, workers and background-jobs as well: their
       // setStatus entries are fallback text for the default footer. Approval
       // Mode shows its off state in the editor instead. Messenger's unread
-      // count reaches line 1 via messenger:state.
+      // count reaches the Session panel via messenger:state.
       if (
         key !== STATUS_KEY &&
         key !== SMALL_MODEL_STATUS_KEY &&
@@ -253,14 +230,15 @@ export function buildFooterLines(
         key !== APPROVAL_STATUS_KEY &&
         text
       ) {
-        line2Segments.push(text);
+        transientStatuses.push(text);
       }
     }
   }
 
-  const lines = [line1];
-  if (line2Segments.length > 0) {
-    lines.push(truncateToWidth(line2Segments.join("  "), width, ""));
+  if (width > 0) {
+    for (const text of transientStatuses) {
+      lines.push(...wrapTextWithAnsi(text, width).map((line) => truncateToWidth(line, width, "")));
+    }
   }
   return lines;
 }

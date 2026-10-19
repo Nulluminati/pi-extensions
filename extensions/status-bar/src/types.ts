@@ -64,7 +64,7 @@ export interface State {
   approvalModeOff: boolean;
   // Unread messenger mail count, published by the messenger extension on the
   // pi.events bus (see messenger:state). Shown as an "✉ N" segment in the
-  // line-1 right block while N > 0. Like goalRunning, it is not cleared on
+  // Session panel while N > 0. Like goalRunning, it is not cleared on
   // session boundaries: the messenger re-announces its state during its own
   // session_start, and a reset here could clobber an announcement that has
   // already fired.

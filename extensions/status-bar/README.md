@@ -1,22 +1,24 @@
 # Status Bar Extension
 
-A Starship-inspired two-line footer plus an input editor wrapped in the same rounded accent modal frame the voice/handoff overlays use, with the model and thinking level shown in the title (top border).
+A responsive panel footer plus a rounded input editor. The editor title shows the model and thinking level.
 
 ## What It Does
 
-Replaces Pi's default footer with a denser, more information-rich two-line status bar, and replaces the default input editor with one that draws a rounded accent modal frame around the prompt (the same `renderModalFrame` chrome as the voice/handoff overlays) and prints the current model and thinking level in the title (top border).
+Replaces Pi's default footer with rounded panels, inspired by [Pi Panels](https://github.com/alasano/house-of-pi/tree/master/packages/pi-panels).
 
-**Footer line 1** (static session info):
-- Working directory (last path component)
-- Git branch and a compact status block (`! ? + ✘ » = $ ↑ ↓ ⇕`) for ahead, behind, conflicted, stashed, deleted, renamed, modified, typechanged, staged, and untracked
-- Right-aligned context usage bar with a token breakdown (`↑in ↓out ↗cache-read ↘cache-write`) and the turn count and cost
+| Panel | Information |
+|-------|-------------|
+| Workspace | Working directory basename, Git branch, and compact Git status indicators (`! ? + ✘ » = $ ↑ ↓ ⇕`) |
+| Context | Context usage bar, tokens/context-window ratio, and token breakdown (`↑in ↓out ↗cache-read ↘cache-write`) |
+| Session | Turn count, session cost, unread mail, and delegated-worker cost and tokens |
 
-**Footer line 2** (transient events):
-- Third-party extension statuses published via `ctx.ui.setStatus()`
+Panels size to their content and sit beside each other when space permits. Otherwise, they stack and wrap their contents.
+Frames use muted theme colors. Existing colors distinguish Git state, context thresholds, token types, mail, and costs.
+Third-party extension statuses from `ctx.ui.setStatus()` appear below the panels. Long statuses wrap instead of losing their final text.
 
 Small- and worker-model labels live in the editor title and are omitted from the footer, so they are not shown twice. A running goal is the **Goal** badge in the editor frame; their `setStatus` entries remain as fallbacks for Pi's default footer.
 
-The whole second line is omitted when there's nothing transient to show.
+The footer omits transient rows when no third-party status exists.
 
 **Editor**:
 - The input box is wrapped in the same rounded accent modal frame the voice/handoff overlays use (`renderModalFrame`), with side borders and padding
@@ -50,7 +52,9 @@ On every `message_end` and `turn_end` the extension walks the current branch and
 
 ### Context usage bar
 
-The right block has a usage bar, a `tokens/contextWindow` ratio, the token breakdown, the turn count, and cost. When the terminal is narrow, the right block is shed in tiers (cost first, then the bar, then the window) so the static left block wins and the token counts stay visible as long as possible.
+The Context panel shows the usage bar, `tokens/contextWindow` ratio, and token breakdown. The Session panel shows turns and costs separately.
+Narrow terminals stack the panels and wrap rows. The footer does not drop metrics to make room for the directory or branch.
+Below 12 columns, the footer omits frames and wraps raw contents.
 
 ### Editor
 
@@ -62,16 +66,17 @@ The install also re-checks on the next tick after `session_start` in case a late
 
 ### Footer and status indicator
 
-The footer is registered through `ctx.ui.setFooter()`. While the extension is enabled, a Nerd Font dock-bottom icon with a muted `statusbar` label sits in the footer line 2 area, matching the cross-extension convention. `/statusbar:toggle` flips both at once.
+The extension registers the footer through `ctx.ui.setFooter()` and publishes its fallback `statusbar` indicator through `ctx.ui.setStatus()`.
+The custom footer suppresses that indicator to avoid duplicate information. `/statusbar:toggle` controls the footer and editor together.
 
 ## Key Design Decisions
 
-- **Two lines, not one** — Static session info and transient events fight for the same real estate on a single line. Splitting them lets the right block (tokens, cost, bar) breathe on line 1 while third-party statuses live on line 2, omitted when empty.
+- **Content-sized panels** — Workspace, Context, and Session separate project state from usage and activity. Equal-height frames align on wide terminals.
 - **No new state outside the session** — Footer and status state is per-instance and lives in the closure. The one deliberate exception is the editor's prompt-history store: a process-global map keyed by `Symbol.for("status-bar.prompt-history-by-session")` on `globalThis`, so submitted prompts survive editor re-creation within a session. The status bar extension is safe to load alongside others.
 - **Editor layered, not overwritten** — The polished editor is a named `installEditorFactoryLayer` layer over whatever factory is registered; `removeEditorFactoryLayer` unwraps it on shutdown without disturbing other layers. If a later-loaded extension replaces the factory after `session_start`, the 0-tick re-check re-installs the layer.
 - **Modal chrome, shared with overlays** — The input box reuses `renderModalFrame` (rounded `borderAccent` corners, title in the top border) so it reads as the same family as the voice/handoff modals, instead of a one-off grey rule. Models and thinking live in the title, so the border never needs to track the thinking level.
-- **Token breakdown always visible** — Hiding the breakdown when a bucket is empty makes the layout shift between turns. Showing zeros keeps the right block steady.
-- **Tiered shedding on narrow terminals** — The right block is built in variants from fullest to emptiest. As the terminal narrows, cost and the bar are dropped before the static left block is ever truncated.
+- **Token breakdown always visible** — Empty buckets show zero, so the same indicators remain available throughout the session.
+- **Stack instead of hide** — Narrow layouts use more rows rather than drop metrics. The renderer uses Pi's width-aware text helpers.
 - **Editor re-checked after a tick** — A later-loaded extension can replace the editor factory during `session_start`. A short re-check after the synchronous install catches that race.
 
 ## Pi APIs Used

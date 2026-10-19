@@ -1,20 +1,19 @@
 /**
  * Status Bar Extension
  *
- * A Starship-inspired two-line footer that replaces the default Pi footer,
- * plus an input editor wrapped in the same rounded accent modal frame the
- * voice/handoff overlays use, with the model + thinking level shown in the
- * title (top border).
+ * Responsive framed panels replace the default Pi footer. The input editor
+ * uses the rounded accent modal frame shared with voice/handoff overlays.
+ * The model + thinking level live in the editor title (top border).
  *
- *  Footer line 1 (static session info):
- *    working directory (last path component + icon), git branch + status
- *    indicator block (!?+$»=✘$↑↓⇕), and a right-aligned context usage bar
- *    with the token breakdown (↑↓↗↘), turn count, and cost. The model and
- *    thinking level are NOT here: they live in the editor title.
+ *  Footer panels:
+ *    Workspace: working directory, Git branch and status (!?+$»=✘$↑↓⇕).
+ *    Context: usage bar, context window and token breakdown (↑↓↗↘).
+ *    Session: turn count, cost, unread mail and delegated-worker spend.
+ *    Panels sit side by side when space permits, otherwise stack and wrap.
  *
- *  Footer line 2 (transient events):
- *    third-party extension statuses published via ctx.ui.setStatus(). Omitted
- *    entirely when empty.
+ *  Transient events:
+ *    Third-party statuses published via ctx.ui.setStatus() follow the panels.
+ *    The footer omits these rows when empty.
  *
  *  Editor:
  *    The default Pi editor is wrapped in a rounded accent modal frame
@@ -522,7 +521,7 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
   // --- Command ---
 
   pi.registerCommand("statusbar:toggle", {
-    description: "Toggle the Starship-inspired status bar footer",
+    description: "Toggle the responsive status panels and framed editor",
     handler: async (_args: string, ctx: ExtensionCommandContext) => {
       state.enabled = !state.enabled;
 
