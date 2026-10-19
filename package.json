@@ -38,7 +38,7 @@
     "*.{ts,js,mjs,json,jsonc}": "biome check --write --no-errors-on-unmatched"
   },
   "dependencies": {
-    "@anthropic-ai/sandbox-runtime": "^0.0.77",
+    "@anthropic-ai/sandbox-runtime": "^0.0.79",
     "onnxruntime-node": "^1.30.0",
     "sherpa-onnx-node": "^1.13.8"
   },

@@ -76,6 +76,35 @@ describe("worker sandbox policy", () => {
     expect(policy.filesystem.denyWrite).toContain(root);
   });
 
+  it("keeps literal path entries marked and resolves them against the worker directory", () => {
+    const root = project();
+    savePolicy(root, {
+      network: { allowedDomains: [], deniedDomains: [] },
+      filesystem: {
+        denyRead: [],
+        allowRead: [{ path: ".", literal: true }],
+        allowWrite: [{ path: "br[1]", literal: true }],
+        denyWrite: [],
+      },
+    });
+    const policy = loadWorkerSandboxPolicy(root);
+    expect(policy.filesystem.allowRead).toEqual([{ path: root, literal: true }]);
+    expect(policy.filesystem.allowWrite).toEqual([{ path: join(root, "br[1]"), literal: true }]);
+  });
+
+  it("refuses a literal write rule that escapes the worktree", () => {
+    const root = project();
+    savePolicy(root, {
+      network: { allowedDomains: [], deniedDomains: [] },
+      filesystem: {
+        denyRead: [],
+        allowWrite: [{ path: "../parent", literal: true }],
+        denyWrite: [],
+      },
+    });
+    expect(() => loadWorkerSandboxPolicy(root)).toThrow(/outside the worktree/);
+  });
+
   it("refuses relative write rules that escape the worktree", () => {
     const root = project();
     savePolicy(root, {

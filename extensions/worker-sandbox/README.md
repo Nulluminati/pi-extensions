@@ -8,7 +8,7 @@ Loaded only in worker sessions (`PI_WORKER=1`). On `session_start` the extension
 
 ## Policy
 
-Rules come from the project's `.pi/sandbox.json` (srt schema: filesystem read/write rules plus `network.allowedDomains`). The extension refuses to start when:
+Rules come from the project's `.pi/sandbox.json` (srt schema: filesystem read/write rules plus `network.allowedDomains`). A read or write rule is a path, or `{ "path": "...", "literal": true }` when the name holds glob characters such as `[`, `]`, `*`, or `?`. Relative rules resolve against the worktree. The extension refuses to start when:
 
 - The policy file is missing or malformed.
 - The policy weakens isolation: unix sockets, local binding, disabled filesystem rules, or weakening flags (`allowAllUnixSockets`, `allowLocalBinding`, and friends) are refused at load and force-cleared again inside the broker as defense in depth.

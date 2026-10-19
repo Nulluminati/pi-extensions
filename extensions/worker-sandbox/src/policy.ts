@@ -1,6 +1,7 @@
 import { readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
+  type FilesystemPathEntry,
   type SandboxRuntimeConfig,
   SandboxRuntimeConfigSchema,
 } from "@anthropic-ai/sandbox-runtime";
@@ -9,16 +10,28 @@ import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 export type WorkerSandboxPolicy = SandboxRuntimeConfig & {
   network: SandboxRuntimeConfig["network"] & { allowedDomains: string[] };
   filesystem: SandboxRuntimeConfig["filesystem"] & {
-    denyRead: string[];
-    allowRead: string[];
-    allowWrite: string[];
-    denyWrite: string[];
+    denyRead: FilesystemPathEntry[];
+    allowRead: FilesystemPathEntry[];
+    allowWrite: FilesystemPathEntry[];
+    denyWrite: FilesystemPathEntry[];
   };
 };
 
 function workspacePath(cwd: string, value: string): string {
   if (value === "~" || value.startsWith("~/") || isAbsolute(value)) return value;
   return resolve(cwd, value);
+}
+
+/** The path a policy entry names, whether it is spelled or marked literal. */
+function entryPath(entry: FilesystemPathEntry): string {
+  return typeof entry === "string" ? entry : entry.path;
+}
+
+/** Resolve a policy entry against the worker directory, keeping its literal mark. */
+function workspaceEntry(cwd: string, entry: FilesystemPathEntry): FilesystemPathEntry {
+  return typeof entry === "string"
+    ? workspacePath(cwd, entry)
+    : { path: workspacePath(cwd, entry.path), literal: true };
 }
 
 function isInside(root: string, path: string): boolean {
@@ -89,12 +102,13 @@ export function loadWorkerSandboxPolicy(cwd: string, readOnly = false): WorkerSa
   }
   const worktree = resolve(cwd);
   for (const entry of parsed.filesystem.allowWrite ?? []) {
-    if (!withinWorkspace(worktree, entry)) {
-      throw new Error(`Worker sandbox write rule ${entry} is outside the worktree`);
+    const rule = entryPath(entry);
+    if (!withinWorkspace(worktree, rule)) {
+      throw new Error(`Worker sandbox write rule ${rule} is outside the worktree`);
     }
   }
-  const mapPaths = (paths: string[] | undefined) =>
-    (paths ?? []).map((entry) => workspacePath(worktree, entry));
+  const mapPaths = (paths: FilesystemPathEntry[] | undefined): FilesystemPathEntry[] =>
+    (paths ?? []).map((entry) => workspaceEntry(worktree, entry));
   return {
     ...parsed,
     network: { ...parsed.network, allowedDomains: parsed.network.allowedDomains ?? [] },
