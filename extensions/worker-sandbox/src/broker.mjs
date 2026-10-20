@@ -5,6 +5,7 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { SandboxManager } from "@anthropic-ai/sandbox-runtime";
 import { worktreeGitCommonDir } from "./git-metadata.mjs";
+import { runtimePackageReadPaths } from "./runtime-paths.mjs";
 
 const helper = fileURLToPath(new URL("./tool-child.mjs", import.meta.url));
 const running = new Map();
@@ -33,11 +34,6 @@ function stop(child) {
 
 function shellQuote(value) {
   return `'${value.replaceAll("'", `'\\''`)}'`;
-}
-
-function readGrantForPackage(name) {
-  const entrypoint = fileURLToPath(import.meta.resolve(name));
-  return dirname(dirname(entrypoint));
 }
 
 function safeEnvironment() {
@@ -76,8 +72,8 @@ async function initialize(request) {
         ...request.policy.filesystem.allowRead,
         scratch,
         dirname(helper),
-        readGrantForPackage("@anthropic-ai/sandbox-runtime"),
-        readGrantForPackage("@earendil-works/pi-coding-agent"),
+        ...runtimePackageReadPaths(["@anthropic-ai/sandbox-runtime", "@earendil-works/pi-coding-agent"])
+          .map((path) => ({ path, literal: true })),
         toolchain,
         ...(gitMetadata ? [gitMetadata] : []),
       ],

@@ -14,6 +14,12 @@ Rules come from the project's `.pi/sandbox.json` (srt schema: filesystem read/wr
 - The policy weakens isolation: unix sockets, local binding, disabled filesystem rules, or weakening flags (`allowAllUnixSockets`, `allowLocalBinding`, and friends) are refused at load and force-cleared again inside the broker as defense in depth.
 - A declared write path resolves outside the worktree.
 
+The broker grants read-only access to exact installed runtime package directories and their dependency directories.
+It resolves nested versions and package links as Node does. It does not grant the enclosing `node_modules` directory.
+These grants let the sandbox load Pi's tools without exposing unrelated project or credential files.
+They do not add write access or weaken socket, network, or approval restrictions.
+A missing required runtime package prevents sandbox startup.
+
 ## Fail-Closed Behavior
 
 | Condition | Result |
@@ -31,6 +37,7 @@ Rules come from the project's `.pi/sandbox.json` (srt schema: filesystem read/wr
 - `src/broker.mjs` — the broker process: spawns sandboxed children, tracks running calls, honors cancellation.
 - `src/tool-child.mjs` — the sandboxed child: executes one tool or shell request and reports the result.
 - `src/git-metadata.mjs` — read-only git metadata helpers for the sandboxed environment.
+- `src/runtime-paths.mjs` — exact installed runtime package directories, including transitive dependencies.
 
 ## Cross-Extension Use
 

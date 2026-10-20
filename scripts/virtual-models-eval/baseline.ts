@@ -5,7 +5,7 @@ import { mkdir, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { getAgentDir, ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { excludeFromGit, runGit } from "../../lib/git.ts";
 import { writeJsonAtomic } from "../../lib/json-atomic.ts";
 import { projectStateDir, projectStateRelative } from "../../lib/paths.ts";
@@ -186,10 +186,10 @@ async function main() {
     agentDir: getAgentDir(),
     env: process.env,
     async getAvailable() {
-      const registry = new ModelRegistry(await ModelRuntime.create());
+      const runtime = await ModelRuntime.create();
       return [
-        ...(await registry.getAvailableOfType("chat")),
-        ...(await registry.getAvailableOfType("classifier")),
+        ...(await runtime.getAvailableOfType("chat")),
+        ...(await runtime.getAvailableOfType("classifier")),
       ];
     },
   });

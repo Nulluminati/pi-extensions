@@ -81,11 +81,20 @@ It loads worker-sandbox last. It rejects workers, missions, autoresearch, and go
 Do not change the saved allowlist or weaken these boundaries for the pilot.
 
 An initial read-only audit worker could not read repository files.
-Its installed extension checkout lacked `cross-spawn`, which the sandbox's process helper requires.
-That checkout is outside the assigned worktree and remains unchanged.
-The assigned worktree's locked dependency installation contains `cross-spawn`.
-The pilot must test worker loading from an isolated agent configuration that points at this worktree.
+It reported a missing `cross-spawn` package. That diagnosis was wrong: both checkouts contain the package.
+Real sandbox-tool tests showed that the broker permits the Pi package but hides its separately installed dependencies.
+The same error occurs in the assigned worktree despite a complete locked installation.
+
+Zero Cool authorized a narrow prerequisite fix to the agreed plan.
+The broker now resolves installed runtime package dependencies and grants their exact directories read-only access.
+It does not grant the enclosing `node_modules` directory. Project restrictions, credential restrictions, approvals, and nested-delegation restrictions remain in force.
+Tests require a permitted workspace read to succeed and a private file outside the workspace to remain blocked.
+The other checkout and saved settings remain unchanged.
+
 The audit attempt is investigation overhead, not a scored pilot case.
+One early offline integration test inherited TypeSafe credentials and made an unintended, unscored classifier request.
+Test cleanup removed its usage trace. Its consumed tokens are unknown, not zero, and cannot enter completed-case comparisons.
+The offline tests now clear that credential variable explicitly.
 
 ## Reproduce the baseline
 
@@ -111,6 +120,77 @@ The repository check passed before implementation: 2,105 unit tests and 48 runti
 
 Source references are the installed Pi `docs/virtual-models.md`, `docs/extensions.md`, and `examples/extensions/jev-router.ts`.
 The worker-loading findings come from this repository's `lib/worker-model.ts` and `extensions/workers/src/worker-extensions.ts`.
+
+## Frozen pilot design
+
+Fixture version is `teop-fixtures-v1`. Policy version is `teop-policy-v1`.
+Disposable task worktrees use commit `cc936d4`, before controller checking rules entered the repository.
+The router receives request text and role, not fixture IDs, difficulty labels, or expected answers.
+
+| Task | Main-session work | Bounded worker work | Independent check |
+| --- | --- | --- | --- |
+| `boundaries` | Delegate once to fixed GLM, then verify repository resolution and launch facts | Inspect model and extension resolution through launch | Exact mandatory names, forbidden names, precedence, and sandbox order |
+| `diagnosis` | Execute and diagnose an injected test failure | Same bounded diagnosis | Exact test name and string mismatch, plus execution evidence |
+| `fix` | Repair an injected arrow-matcher bug and add a regression test | Same tested fix in an isolated worker worktree | Golden implementation, permitted changes, and independently executed focused tests |
+| `rename` | Rename one identifier across tracked TypeScript files | Same rename in an isolated worker worktree | Exact byte-preserving replacement and independent typecheck |
+| `review` | Review a proposed worker-safety patch without edits | Same bounded review | Exact safety-violation set and unchanged tracked sources |
+| `schedule` | Find an optimal dependency and memory-constrained schedule | Same bounded scheduling problem | Feasibility checks and an independent exhaustive optimum solver |
+
+The scored plan has 30 main cases and 18 worker cases, with one repetition.
+Main arms are fixed Sol, fixed DeepSeek, fixed GLM, rules, and Jev. Delegated workers stay fixed at GLM.
+Worker arms are fixed GLM, rules, and Jev. Their parent stays fixed at Sol and receives the same assignment text.
+Worker scores use the worker's own answer, not a parent repair. Parent task-tool use invalidates that worker comparison.
+The runner preserves worker isolation for edits and collects their patches through the normal worker tools.
+
+All arms use direct tools with codemode inactive. This holds one configuration constant; it does not apply the earlier codemode recommendations.
+The temporary worker list retains normal provider and research extensions plus mandatory safety extensions.
+The runner records actual tool names and exposure, selected identities, and physical dispatches.
+
+## Accounting and resume design
+
+The runner writes a manifest before inference. Every attempt receives a separate checkpoint before process launch.
+It retains raw main events, worker events, routing decisions, checking evidence, process identity, and configuration hashes.
+Completed cases do not run again, including completed task failures.
+Quota exhaustion or interruption preserves the attempt. Resume creates a separate attempt with explicit provenance.
+The runner refuses changed experiment code or original configuration.
+
+Token aggregate means `input + output + cacheRead + cacheWrite`.
+Totals supplied by Pi remain separate. Literal provider usage fields, including `total_tokens` when available, remain in `provider_usage` trace records.
+Pi can calculate its normalized total when a provider omits one. Missing literal provider totals remain unknown.
+Missing usage stays unknown and makes the affected aggregate unknown.
+Input already excludes cache reads in Pi's normalized usage. Raw OpenAI prompt totals require cache-read subtraction; raw Anthropic fields do not.
+The ledger counts finalized messages, not partial streams or end-of-run copies.
+It excludes parent worker rollups because it reads each worker's own events.
+
+With experiment tracing enabled, the extension observes registry classifier calls, including approval checks outside the router.
+The ledger counts those call records once instead of adding duplicate router usage or the Jev tool's usage again.
+Router-only classifier usage remains available as a separate overhead measure.
+The installed runtime's `classify()` returns usage but does not automatically append it to session totals.
+Codemode stays inactive, so its separate nested-call accounting does not overlap this instrument.
+
+Main and worker chat usage and classifier usage remain separate. The report must show their categories beside aggregate tokens.
+Tokens from different models do not imply equal money or subscription consumption.
+
+Run unscored smoke checks with:
+
+```sh
+node --import tsx scripts/evaluate-virtual-models.ts --phase smoke
+```
+
+Run the one-repetition scored plan only after smoke checks pass:
+
+```sh
+node --import tsx scripts/evaluate-virtual-models.ts --phase scored --repetitions 1
+```
+
+Resume an existing manifest with:
+
+```sh
+node --import tsx scripts/evaluate-virtual-models.ts --resume .pi/virtual-models-eval/<run-directory>
+```
+
+Use `--tasks`, `--arms`, `--roles`, and `--repetitions` to select pending cases.
+The default command runs four unscored smoke cases, not the scored matrix.
 
 ## Evidence still required
 
