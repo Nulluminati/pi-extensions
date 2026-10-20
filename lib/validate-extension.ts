@@ -119,7 +119,6 @@ export function validateFile(filePath: string): { passed: boolean; messages: str
 
     // Allowed Pi runtime modules (bundled with the Pi agent, not external npm deps)
     const ALLOWED_RUNTIME_MODULES = [
-      "pi",
       "typebox",
       "@earendil-works/pi-ai",
       "@earendil-works/pi-ai/compat",

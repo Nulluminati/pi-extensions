@@ -134,16 +134,29 @@ export default async function (pi: any) {
     );
   });
 
-  it("allows relative imports and pi imports", () => {
+  it("allows relative imports", () => {
     const file = withTempFile(`
 import { helper } from "./helper";
-import { api } from "pi";
 export default async function (pi: any) {
   pi.registerCommand("hello", { description: "Hi", handler: async () => {} });
 }
 `);
     const result = validateFile(file);
     expect(result.passed).toBe(true);
+  });
+
+  it("rejects the retired pi type module", () => {
+    const file = withTempFile(`
+import type { ExtensionAPI } from "pi";
+export default async function (pi: ExtensionAPI) {
+  pi.registerCommand("hello", { description: "Hi", handler: async () => {} });
+}
+`);
+    const result = validateFile(file);
+    expect(result.passed).toBe(false);
+    expect(result.messages).toEqual(
+      expect.arrayContaining([expect.stringContaining("Undeclared imports detected: pi.")]),
+    );
   });
 
   it("fails when no pi API is used", () => {
