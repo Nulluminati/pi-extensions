@@ -1,3 +1,4 @@
+import type { EditorComponent } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
 import {
   type EditorFactory,
@@ -13,19 +14,29 @@ interface LayeredEditor {
   layers: string[];
 }
 
+// Composition never reads the factory arguments or calls editor methods, so
+// plain objects stand in for the TUI, theme, keybindings and editors.
+const FACTORY_ARGS = [{}, {}, {}] as unknown as Parameters<EditorFactory>;
+
+function asEditor(editor: LayeredEditor): EditorComponent {
+  return editor as unknown as EditorComponent;
+}
+
 function renderLayers(factory: EditorFactory): string[] {
-  return (factory({}, {}, {}) as LayeredEditor).layers;
+  return (factory(...FACTORY_ARGS) as unknown as LayeredEditor).layers;
 }
 
 function baseFactory(label: string): EditorFactory {
-  return () => ({ layers: [label] });
+  return () => asEditor({ layers: [label] });
 }
 
 function layer(current: EditorFactory | undefined, id: string, priority: number): EditorFactory {
   return installEditorFactoryLayer(current, id, priority, (parent, tui, theme, keybindings) => {
-    const editor = (parent?.(tui, theme, keybindings) ?? { layers: [] }) as LayeredEditor;
+    const editor = (parent?.(tui, theme, keybindings) ?? {
+      layers: [],
+    }) as unknown as LayeredEditor;
     editor.layers.push(id);
-    return editor;
+    return asEditor(editor);
   });
 }
 
@@ -64,10 +75,10 @@ describe("editor factory composition", () => {
   });
 
   it("supports an absent base factory", () => {
-    const instantiate = vi.fn(() => ({ layers: [BASE_LAYER] }));
+    const instantiate = vi.fn(() => asEditor({ layers: [BASE_LAYER] }));
     const composed = installEditorFactoryLayer(undefined, BASE_LAYER, 0, instantiate);
 
-    expect(composed({}, {}, {})).toEqual({ layers: [BASE_LAYER] });
+    expect(composed(...FACTORY_ARGS)).toEqual({ layers: [BASE_LAYER] });
     expect(instantiate).toHaveBeenCalledWith(undefined, {}, {}, {});
     expect(removeEditorFactoryLayer(composed, BASE_LAYER)).toBeUndefined();
   });

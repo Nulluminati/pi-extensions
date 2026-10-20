@@ -13,7 +13,7 @@
  * in the right order.
  */
 
-import type { ExtensionAPI, ExtensionCommandContext } from "pi";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { confirmModal } from "../../lib/input-modal.ts";
 import { requestSideTurn } from "./src/agent.ts";
 import {
@@ -90,8 +90,8 @@ export default async function btwExtension(pi: ExtensionAPI) {
   });
 
   pi.on("context", async (event, _ctx) => {
-    const filtered = (event.messages as Array<{ customType?: string }>).filter(
-      (m) => m.customType !== THREAD_CUSTOM_TYPE,
+    const filtered = event.messages.filter(
+      (m) => (m as { customType?: string }).customType !== THREAD_CUSTOM_TYPE,
     );
     if (filtered.length === event.messages.length) return undefined;
     return { messages: filtered };

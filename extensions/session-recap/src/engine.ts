@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "pi";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_FOCUS_MIN_SECONDS, DEFAULT_IDLE_SECONDS } from "./constants.ts";
 import { generateRecap } from "./generate.ts";
 import { getState } from "./state.ts";

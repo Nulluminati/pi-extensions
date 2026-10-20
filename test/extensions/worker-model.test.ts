@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import workerModelExtension from "../../extensions/worker-model/worker-model.ts";
-import { createMockCommandContext } from "../mocks/context-mocks.ts";
+import { createMockCommandContext, createMockModel } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
 import { getCommandHandler } from "../mocks/test-helpers.ts";
 
@@ -40,15 +40,13 @@ describe("worker-model-extension", () => {
     writeFileSync(path, JSON.stringify({ provider: "opencode-go", model: "glm-5.3-flash" }));
     const pi = createMockPi();
     const ctx = createMockCommandContext();
-    const flashModel = {
-      ...ctx.model,
+    const flashModel = createMockModel({
       id: "glm-5.3-flash",
       name: "GLM 5.3 Flash",
       provider: "opencode-go",
       reasoning: true,
-    };
-    const haikuModel = {
-      ...ctx.model,
+    });
+    const haikuModel = createMockModel({
       id: "claude-haiku-4-5",
       name: "Claude Haiku 4.5",
       provider: "anthropic",
@@ -56,7 +54,7 @@ describe("worker-model-extension", () => {
       input: ["text", "image"] as ("text" | "image")[],
       contextWindow: 200_000,
       maxTokens: 64_000,
-    };
+    });
     ctx.modelRegistry.getAvailable = vi.fn(() => [flashModel, haikuModel]);
 
     let initialRender = "";
@@ -94,7 +92,7 @@ describe("worker-model-extension", () => {
     vi.stubEnv("PI_WORKER_MODEL", "");
     const pi = createMockPi();
     const ctx = createMockCommandContext();
-    ctx.modelRegistry.getAvailable = vi.fn(() => [ctx.model]);
+    ctx.modelRegistry.getAvailable = vi.fn(() => (ctx.model ? [ctx.model] : []));
     await workerModelExtension(pi);
 
     await getCommandHandler(pi, "worker-model")("synthetic/hf:zai-org/GLM-5.3-Flash xhigh", ctx);
@@ -117,7 +115,7 @@ describe("worker-model-extension", () => {
     const pi = createMockPi();
     const ctx = createMockCommandContext();
     ctx.mode = "rpc";
-    ctx.modelRegistry.getAvailable = vi.fn(() => [ctx.model]);
+    ctx.modelRegistry.getAvailable = vi.fn(() => (ctx.model ? [ctx.model] : []));
     ctx.ui.select = vi.fn(async (_title, options) => options[0]);
     await workerModelExtension(pi);
 

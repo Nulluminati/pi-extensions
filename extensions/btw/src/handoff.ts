@@ -1,5 +1,6 @@
-import { completeSimple, type TextContent } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionContext } from "pi";
+import type { TextContent } from "@earendil-works/pi-ai";
+import { completeSimple } from "@earendil-works/pi-ai/compat";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { resolveSmallModel } from "../../../lib/small-model.ts";
 import { SUMMARIZE_GUIDANCE } from "./constants.ts";
 import type { BtwLiveState, BtwThreadState } from "./types.ts";

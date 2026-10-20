@@ -2,7 +2,7 @@ import { type FSWatcher, watch } from "node:fs";
 import { mkdtemp, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { visibleWidth } from "@earendil-works/pi-tui";
+import { type EditorComponent, visibleWidth } from "@earendil-works/pi-tui";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import statusBarExtension, {
   buildEditorMetaSegments,
@@ -18,7 +18,7 @@ import {
 } from "../../lib/editor-factory.ts";
 import { loadSmallModelConfig, resolveSmallModelConfigPath } from "../../lib/small-model.ts";
 import { loadWorkerModelConfig } from "../../lib/worker-model.ts";
-import { createMockCommandContext } from "../mocks/context-mocks.ts";
+import { createMockCommandContext, createMockModel } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
 import { getEventHandler } from "../mocks/test-helpers.ts";
 
@@ -121,6 +121,9 @@ function mockGitExec(porcelainStdout: string, opts: { stash?: string; code?: num
     return Promise.resolve({ stdout: porcelainStdout, stderr: "", code, killed: false });
   });
 }
+
+// The editor layers under test never read these arguments.
+const EDITOR_FACTORY_ARGS = [{}, {}, {}] as unknown as Parameters<EditorFactory>;
 
 describe("status-bar-extension", () => {
   describe("file structure", () => {
@@ -269,12 +272,11 @@ describe("status-bar-extension", () => {
   it("footer does not show the model label (it lives in the editor box)", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
-    mockCtx.model = {
-      ...mockCtx.model,
+    mockCtx.model = createMockModel({
       id: "claude-sonnet-4-6",
       provider: "anthropic",
       // biome-ignore lint/suspicious/noExplicitAny: test mock
-    } as any;
+    }) as any;
     await enableBar(mockPi, mockCtx);
 
     const component = getFooterFactory(mockCtx)(
@@ -1674,11 +1676,10 @@ describe("status-bar editor install", () => {
   it("session reload replaces the editor layer with a factory bound to the new extension instance", async () => {
     const firstPi = createMockPi();
     const mockCtx = createMockCommandContext();
-    mockCtx.model = {
-      ...mockCtx.model,
+    mockCtx.model = createMockModel({
       id: "old-model",
       // biome-ignore lint/suspicious/noExplicitAny: test mock
-    } as any;
+    }) as any;
     await enableBar(firstPi, mockCtx);
 
     const shutdownHandler = getEventHandler(firstPi, "session_shutdown");
@@ -1686,11 +1687,10 @@ describe("status-bar editor install", () => {
     expect(hasEditorFactoryLayer(mockCtx.ui.getEditorComponent(), "status-bar")).toBe(false);
 
     const reboundPi = createMockPi();
-    mockCtx.model = {
-      ...mockCtx.model,
+    mockCtx.model = createMockModel({
       id: "rebound-model",
       // biome-ignore lint/suspicious/noExplicitAny: test mock
-    } as any;
+    }) as any;
     await statusBarExtension(reboundPi);
     await getEventHandler(reboundPi, "session_start")(
       { type: "session_start", reason: "reload" },
@@ -1723,7 +1723,9 @@ describe("status-bar editor install", () => {
       "test-outer-behavior",
       100,
       (parent, tui, theme, keybindings) => {
-        const editor = (parent?.(tui, theme, keybindings) ?? {}) as { outer?: boolean };
+        const editor = (parent?.(tui, theme, keybindings) ?? {}) as EditorComponent & {
+          outer?: boolean;
+        };
         editor.outer = true;
         return editor;
       },
@@ -1736,7 +1738,7 @@ describe("status-bar editor install", () => {
     const installed = mockCtx.ui.getEditorComponent() as EditorFactory;
     expect(hasEditorFactoryLayer(installed, "status-bar")).toBe(true);
     expect(hasEditorFactoryLayer(installed, "test-outer-behavior")).toBe(true);
-    expect((installed({}, {}, {}) as { outer?: boolean }).outer).toBe(true);
+    expect((installed(...EDITOR_FACTORY_ARGS) as { outer?: boolean }).outer).toBe(true);
 
     const handler = mockPi.registerCommand.mock.calls[0][1].handler;
     await handler("", mockCtx);
@@ -1744,7 +1746,7 @@ describe("status-bar editor install", () => {
     const restored = mockCtx.ui.getEditorComponent() as EditorFactory;
     expect(hasEditorFactoryLayer(restored, "status-bar")).toBe(false);
     expect(hasEditorFactoryLayer(restored, "test-outer-behavior")).toBe(true);
-    expect((restored({}, {}, {}) as { outer?: boolean }).outer).toBe(true);
+    expect((restored(...EDITOR_FACTORY_ARGS) as { outer?: boolean }).outer).toBe(true);
   });
 
   it("installs a factory marked as the status-bar editor (idempotent)", async () => {

@@ -1,4 +1,4 @@
-import type { ThinkingLevel } from "pi";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { createModelConfigFlow } from "../../../lib/model-picker.ts";
 import {
   loadSmallModelConfig,

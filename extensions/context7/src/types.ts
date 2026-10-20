@@ -48,12 +48,12 @@ export interface DocCacheIndexEntry {
 }
 
 export interface CacheSearchSelector {
-  docRef?: string;
-  libraryId?: string;
-  libraryName?: string;
-  libraryVersion?: string;
-  query?: string;
-  topic?: string;
+  docRef?: string | undefined;
+  libraryId?: string | undefined;
+  libraryName?: string | undefined;
+  libraryVersion?: string | undefined;
+  query?: string | undefined;
+  topic?: string | undefined;
   page?: number | undefined;
 }
 

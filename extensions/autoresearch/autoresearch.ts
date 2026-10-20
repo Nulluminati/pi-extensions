@@ -15,7 +15,7 @@
  * is told to re-measure when the delta is small relative to that spread.
  */
 
-import type { ExtensionAPI, ExtensionContext } from "pi";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { setStripWidget, WIDGET_PRIORITY_AUTORESEARCH } from "../../lib/widget-strip.ts";
 import { statusAction, stopAction } from "./src/control.ts";
 import { logAction, runAction } from "./src/experiments.ts";

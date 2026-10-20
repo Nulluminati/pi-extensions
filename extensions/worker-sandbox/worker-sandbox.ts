@@ -3,6 +3,12 @@
  * A missing policy or failed broker never falls back to host execution.
  */
 
+import type {
+  AgentToolUpdateCallback,
+  ExtensionAPI,
+  ExtensionContext,
+  ToolDefinition,
+} from "@earendil-works/pi-coding-agent";
 import {
   createBashToolDefinition,
   createEditToolDefinition,
@@ -12,7 +18,6 @@ import {
   createReadToolDefinition,
   createWriteToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import type { AgentToolUpdateCallback, ExtensionAPI, ExtensionContext } from "pi";
 import { startWorkerSandbox, type WorkerSandboxClient } from "./src/client.ts";
 
 // --- Extension ---
@@ -55,7 +60,7 @@ export default async function workerSandboxExtension(pi: ExtensionAPI) {
   // Register the full built-in tool definitions so metadata (promptSnippet,
   // promptGuidelines) and renderers survive; only execute is replaced to
   // route every call into the sandbox.
-  const tools = [
+  const tools: ToolDefinition<any, any, any>[] = [
     createReadToolDefinition(localCwd),
     createWriteToolDefinition(localCwd),
     createEditToolDefinition(localCwd),
@@ -71,7 +76,7 @@ export default async function workerSandboxExtension(pi: ExtensionAPI) {
         _id: string,
         params: unknown,
         signal: AbortSignal | undefined,
-        onUpdate: AgentToolUpdateCallback | undefined,
+        onUpdate: AgentToolUpdateCallback<any> | undefined,
         ctx: ExtensionContext,
       ) {
         return (await activeClient()).runTool(tool.name, params, {

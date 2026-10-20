@@ -1,5 +1,5 @@
+import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import type { ExtensionCommandContext } from "pi";
 import { modalContentWidth, renderModalFrame } from "../../../lib/tui-frame.ts";
 import {
   APPROVAL_STATUS_KEY,

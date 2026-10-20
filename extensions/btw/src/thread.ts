@@ -1,4 +1,8 @@
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "pi";
+import type {
+  ExtensionAPI,
+  ExtensionCommandContext,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import { extractText } from "../../../lib/session-utils.ts";
 import {
   SIDE_GUIDANCE,

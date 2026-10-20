@@ -19,7 +19,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { appendFile, mkdir, open } from "node:fs/promises";
 import { join } from "node:path";
 import { Duplex } from "node:stream";
-import type { ThinkingLevel } from "pi";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { cleanGitEnv } from "../../../lib/git.ts";
 import { projectStateRelative } from "../../../lib/paths.ts";
 import { isProcessAlive } from "../../../lib/presence-shards.ts";

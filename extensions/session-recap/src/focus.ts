@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "pi";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { FOCUS_DISABLE, FOCUS_ENABLE, FOCUS_IN_SEQ, FOCUS_OUT_SEQ } from "./constants.ts";
 import { handleFocusIn, handleFocusOut } from "./engine.ts";
 import { getState } from "./state.ts";

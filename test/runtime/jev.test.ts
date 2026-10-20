@@ -1,7 +1,7 @@
 import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import type { ClassifierContext } from "pi";
+import type { ClassifierContext } from "@earendil-works/pi-ai";
 import { Check } from "typebox/value";
 import { describe, expect, it, vi } from "vitest";
 

@@ -16,7 +16,7 @@
  *   3. CLI flag: pi --model synthetic/hf:zai-org/GLM-5.2 --api-key syn_...
  */
 
-import type { ExtensionAPI } from "pi";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { authPath } from "../../lib/paths.ts";
 import { formatProviderModelList } from "../../lib/provider-models.ts";
 import { getResolvedApiKey } from "./src/auth.ts";

@@ -1,4 +1,4 @@
-import type { ExtensionContext } from "pi";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createTimeoutController } from "../../../lib/fetch-timeout.ts";
 import { authPath } from "../../../lib/paths.ts";
 import {
@@ -288,7 +288,7 @@ export function reconstructProviderId(ctx: ExtensionContext): string | undefined
   const branch = ctx.sessionManager.getBranch();
   for (let i = branch.length - 1; i >= 0; i--) {
     const entry = branch[i];
-    if (entry.type === "custom" && entry.customType === PROVIDER_STATE_TYPE) {
+    if (entry?.type === "custom" && entry.customType === PROVIDER_STATE_TYPE) {
       const data = entry.data as { provider?: string } | null;
       const id = data?.provider;
       if (id && getProvider(id)) return id;

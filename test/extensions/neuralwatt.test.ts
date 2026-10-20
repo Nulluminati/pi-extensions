@@ -14,7 +14,7 @@ import type {
   NeuralwattModelsResponse,
   NeuralwattQuotaResponse,
 } from "../../extensions/neuralwatt/src/types.ts";
-import { createMockCommandContext } from "../mocks/context-mocks.ts";
+import { createMockCommandContext, createMockModel } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
 import { getCommandHandler, getEventHandler } from "../mocks/test-helpers.ts";
 
@@ -24,16 +24,7 @@ function mockModelsResponse(models: unknown[]): Response {
 
 /** Minimal Model shape for overriding mockCtx.model with a specific id/provider. */
 function makeModel(id: string, provider = "neuralwatt") {
-  return {
-    id,
-    name: id,
-    provider,
-    api: {},
-    reasoning: false,
-    input: ["text"] as ("text" | "image")[],
-    contextWindow: 128_000,
-    maxTokens: 4096,
-  };
+  return createMockModel({ id, name: id, provider });
 }
 
 // Ids present in the static catalog. Startup check tests use these.
@@ -531,9 +522,15 @@ describe("neuralwatt-extension", () => {
   it("sets compat.supportsReasoningEffort true on reasoning models only", () => {
     for (const m of STATIC_MODELS) {
       if (m.reasoning) {
-        expect(m.compat?.supportsReasoningEffort, `${m.id}`).toBe(true);
+        expect(
+          (m.compat as Record<string, unknown> | undefined)?.supportsReasoningEffort,
+          `${m.id}`,
+        ).toBe(true);
       } else {
-        expect(m.compat?.supportsReasoningEffort, `${m.id}`).toBeUndefined();
+        expect(
+          (m.compat as Record<string, unknown> | undefined)?.supportsReasoningEffort,
+          `${m.id}`,
+        ).toBeUndefined();
       }
     }
   });
@@ -545,7 +542,8 @@ describe("neuralwatt-extension", () => {
     // reasoning_content on replay that the API does not need.
     for (const m of STATIC_MODELS) {
       expect(
-        m.compat?.requiresReasoningContentOnAssistantMessages,
+        (m.compat as Record<string, unknown> | undefined)
+          ?.requiresReasoningContentOnAssistantMessages,
         `${m.id} should not set requiresReasoningContentOnAssistantMessages`,
       ).toBeUndefined();
     }

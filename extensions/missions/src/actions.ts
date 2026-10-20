@@ -9,7 +9,7 @@
  */
 
 // --- Imports ---
-import type { AgentToolResult, ExtensionContext } from "pi";
+import type { AgentToolResult, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { execPlatformHint, runExec } from "../../../lib/exec.ts";
 import { findNewestCustomEntry } from "../../../lib/session-utils.ts";
 import {
@@ -206,7 +206,7 @@ export async function executeMissionAction(
   deps: MissionActionDeps,
   params: MissionToolParams,
   ctx: ExtensionContext,
-): Promise<AgentToolResult> {
+): Promise<AgentToolResult<unknown>> {
   const action = params.action;
 
   if (action === "create") {

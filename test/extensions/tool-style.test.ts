@@ -32,18 +32,28 @@ const ORIGINAL_RENDERERS = {
 type MockRenderedComponent = {
   lines: string[];
   renderedWidth: number;
+  toolName?: string;
+  render(width: number): string[];
 };
 
-type MockToolExecutionComponent = ToolExecutionComponent &
-  MockRenderedComponent & {
-    isPartial: boolean;
-    result?: { isError?: boolean };
-  };
+type MockToolExecutionComponent = MockRenderedComponent & {
+  isPartial: boolean;
+  result?: { isError?: boolean };
+};
 
-type MockBashExecutionComponent = BashExecutionComponent &
-  MockRenderedComponent & {
-    status: "running" | "complete" | "error" | "cancelled";
-  };
+type MockBashExecutionComponent = MockRenderedComponent & {
+  status: "running" | "complete" | "error" | "cancelled";
+};
+
+// test/setup/pi-coding-agent.ts replaces these classes with stubs whose
+// constructors take no arguments and whose render output is plain lines.
+const StubToolExecutionComponent =
+  ToolExecutionComponent as unknown as new () => MockToolExecutionComponent;
+const StubBashExecutionComponent =
+  BashExecutionComponent as unknown as new () => MockBashExecutionComponent;
+const StubCustomMessageComponent =
+  CustomMessageComponent as unknown as new () => MockRenderedComponent;
+const StubTheme = Theme as unknown as new () => Theme;
 
 describe("tool-style-extension", () => {
   beforeEach(() => {
@@ -128,7 +138,7 @@ describe("tool-style-extension", () => {
 
   it("overrides tool backgrounds with the computed pywal surface", async () => {
     await startExtension();
-    const theme = new Theme();
+    const theme = new StubTheme();
 
     expect(theme.bg("toolPendingBg", "content")).toBe("\u001b[48;2;24;27;36mcontent\u001b[49m");
     expect(theme.bg("customMessageBg", "message")).toBe("\u001b[48;2;24;27;36mmessage\u001b[49m");
@@ -139,7 +149,7 @@ describe("tool-style-extension", () => {
 
   it("uses the custom message label color for extension messages", async () => {
     await startExtension();
-    const component = new CustomMessageComponent();
+    const component = new StubCustomMessageComponent();
 
     expect(component.render(20)[1]).toBe("<customMessageLabel>▏</customMessageLabel>content");
   });
@@ -183,7 +193,7 @@ describe("tool-style-extension", () => {
     const start = getEventHandler(pi, "session_start");
     await start({ type: "session_start", reason: "startup" }, ctx);
 
-    const component = new ToolExecutionComponent();
+    const component = new StubToolExecutionComponent();
 
     expect(component.render(20)).toEqual([]);
     expect(ctx.ui.notify).toHaveBeenCalledWith(
@@ -202,7 +212,7 @@ describe("tool-style-extension", () => {
     const start = getEventHandler(pi, "session_start");
     await start({ type: "session_start", reason: "startup" }, ctx);
 
-    const component = new ToolExecutionComponent();
+    const component = new StubToolExecutionComponent();
     component.toolName = "web_search";
     component.render(20);
 
@@ -222,7 +232,7 @@ describe("tool-style-extension", () => {
     const start = getEventHandler(pi, "session_start");
     await start({ type: "session_start", reason: "startup" }, ctx);
 
-    const component = new ToolExecutionComponent();
+    const component = new StubToolExecutionComponent();
     component.render(20);
     component.render(20);
 
@@ -254,7 +264,7 @@ describe("tool-style-extension", () => {
       return surfaceMocks.stop;
     });
     await startExtension();
-    const theme = new Theme();
+    const theme = new StubTheme();
     const originalRenderer = ToolExecutionComponent.prototype.render;
 
     expect(theme.getBgAnsi("toolPendingBg")).toBe("\u001b[48;2;16;24;32m");
@@ -336,11 +346,11 @@ async function startExtension() {
 }
 
 function createToolComponent(): MockToolExecutionComponent {
-  return new ToolExecutionComponent() as MockToolExecutionComponent;
+  return new StubToolExecutionComponent();
 }
 
 function createBashComponent(): MockBashExecutionComponent {
-  return new BashExecutionComponent() as MockBashExecutionComponent;
+  return new StubBashExecutionComponent();
 }
 
 function createStyledContext() {

@@ -34,7 +34,7 @@ export const BACKGROUND_PARAMETERS = {
     },
   },
   required: ["command"],
-};
+} as const;
 
 export const MONITOR_PARAMETERS = {
   type: "object",
@@ -65,7 +65,7 @@ export const MONITOR_PARAMETERS = {
     },
   },
   required: ["command", "satisfy_on"],
-};
+} as const;
 
 export const JOBS_OUTPUT = {
   type: "object",
@@ -111,4 +111,4 @@ export const JOBS_PARAMETERS = {
     },
   },
   required: ["action"],
-};
+} as const;

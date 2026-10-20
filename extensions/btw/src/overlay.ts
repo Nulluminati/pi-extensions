@@ -1,16 +1,15 @@
+import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import {
   Container,
   type Focusable,
   Input,
-  type Theme,
   type TUI,
   type TuiMouseEvent,
-  type TuiMouseEventResult,
   truncateToWidth,
   visibleWidth,
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import type { ExtensionContext } from "pi";
+import type { TuiMouseDispatchResult } from "../../../lib/pi-types.ts";
 import { modalContentWidth, renderModalFrame } from "../../../lib/tui-frame.ts";
 import { formatStyledKeyHints } from "../../../lib/ui-format.ts";
 import { isFocusShortcut, MAX_QUESTION_LENGTH } from "./constants.ts";
@@ -112,10 +111,13 @@ class BtwOverlayComponent extends Container implements Focusable {
     this.refresh();
   }
 
-  handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+  handleMouse(event: TuiMouseEvent): TuiMouseDispatchResult | undefined {
     if (event.type !== "wheel") return undefined;
     this.scrollTranscript(event.wheelDelta ?? 0);
-    return { handled: true };
+    // Container declares a dispatch result, but pi-tui's dispatchMouseEvent
+    // accepts a plain TuiMouseEventResult from any component and adds the
+    // dispatch target itself.
+    return { handled: true } as TuiMouseDispatchResult;
   }
 
   setDraft(value: string): void {

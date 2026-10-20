@@ -2,7 +2,7 @@
  *  the pending hand-off between the two, and keep (git commit) or discard
  *  (git revert) of the current experiment. */
 
-import type { AgentToolResult, ExtensionContext } from "pi";
+import type { AgentToolResult, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { buildSummary, formatSummary } from "./format.ts";
 import {
   CHECKS_TIMEOUT_MS,
@@ -38,7 +38,7 @@ export async function runAction(
   params: AutoresearchParams,
   ctx: ExtensionContext,
   publish: PublishFn,
-): Promise<AgentToolResult> {
+): Promise<AgentToolResult<unknown>> {
   const cwd = ctx.cwd;
   const description = typeof params.description === "string" ? params.description.trim() : "";
   if (!description) throw new Error("run requires description (what this experiment changes).");
@@ -118,7 +118,7 @@ export async function logAction(
   params: AutoresearchParams,
   ctx: ExtensionContext,
   publish: PublishFn,
-): Promise<AgentToolResult> {
+): Promise<AgentToolResult<unknown>> {
   const cwd = ctx.cwd;
   await loadPending(state, cwd);
   if (!state.pending) throw new Error("Nothing to log. Run an experiment first (action=run).");

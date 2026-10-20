@@ -2,7 +2,7 @@
  * Everything lives under `<cwd>/.pi/autoresearch/` so a fresh session can
  * resume from files alone. */
 
-import type { ExtensionContext } from "pi";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 // --- Types ---
 

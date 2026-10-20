@@ -1,4 +1,9 @@
-import type { AgentToolResult, Theme, ToolRenderContext, ToolRenderResultOptions } from "pi";
+import type {
+  AgentToolResult,
+  Theme,
+  ToolRenderResultOptions,
+} from "@earendil-works/pi-coding-agent";
+import type { ToolRenderContext } from "../../../lib/pi-types.ts";
 import { createToolStatus, wrapToolText as wrapMultilineText } from "../../../lib/tool-renderer.ts";
 import type {
   CacheSearchSelector,
@@ -9,7 +14,7 @@ import type {
 
 export function createResolveRenderResult() {
   return (
-    result: AgentToolResult,
+    result: AgentToolResult<unknown>,
     options: ToolRenderResultOptions,
     theme: Theme,
     context: ToolRenderContext<unknown, ResolveLibraryParams>,
@@ -85,7 +90,7 @@ export function createResolveRenderResult() {
 
 export function createDocsRenderResult() {
   return (
-    result: AgentToolResult,
+    result: AgentToolResult<unknown>,
     options: ToolRenderResultOptions,
     theme: Theme,
     context: ToolRenderContext<unknown, GetLibraryDocsParams>,
@@ -149,7 +154,7 @@ export function createDocsRenderResult() {
 
 export function createRawRenderResult() {
   return (
-    result: AgentToolResult,
+    result: AgentToolResult<unknown>,
     options: ToolRenderResultOptions,
     theme: Theme,
     context: ToolRenderContext<unknown, CacheSearchSelector>,

@@ -1,6 +1,6 @@
 import { readdir } from "node:fs/promises";
 import { resolve } from "node:path";
-import { completeSimple, stream } from "@earendil-works/pi-ai";
+import { completeSimple, stream } from "@earendil-works/pi-ai/compat";
 import {
   createBashTool,
   createEditTool,
@@ -9,11 +9,11 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import btwExtension from "../../extensions/btw/btw.ts";
-import { createMockCommandContext } from "../mocks/context-mocks.ts";
+import { createMockCommandContext, createMockModel } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
-import { getCommandHandler, getEventHandler } from "../mocks/test-helpers.ts";
+import { firstContentText, getCommandHandler, getEventHandler } from "../mocks/test-helpers.ts";
 
-vi.mock("@earendil-works/pi-ai", () => ({
+vi.mock("@earendil-works/pi-ai/compat", () => ({
   stream: vi.fn(),
   completeSimple: vi.fn(),
 }));
@@ -793,12 +793,11 @@ describe("btw-extension", () => {
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       const mockPi = createMockPi() as any;
       const { mockCtx } = setupContext();
-      const smallModel = {
-        ...mockCtx.model,
+      const smallModel = createMockModel({
         id: "small-model",
         provider: "small-provider",
         reasoning: true,
-      };
+      });
       vi.stubEnv("PI_SMALL_MODEL", "small-provider/small-model");
       mockCtx.modelRegistry.find = vi.fn(() => smallModel);
       const signal = new AbortController().signal;
@@ -816,7 +815,7 @@ describe("btw-extension", () => {
       // Summarization always runs with thinking off (minimal).
       expect(options).toMatchObject({ reasoning: "minimal" });
       // The summarize call is cancellable via the extension context's signal.
-      expect(options.signal).toBe(signal);
+      expect(options?.signal).toBe(signal);
       const [content] =
         mockPi.sendUserMessage.mock.calls[mockPi.sendUserMessage.mock.calls.length - 1];
       expect(content).toContain("Decision: use option A");
@@ -839,7 +838,7 @@ describe("btw-extension", () => {
 
       expect(completeSimple).toHaveBeenCalledTimes(1);
       const [, params] = vi.mocked(completeSimple).mock.calls[0];
-      const prompt = params.messages[0].content[0].text;
+      const prompt = firstContentText(params.messages[0]);
       expect(prompt).toContain("focus on the database decision");
     });
 
@@ -859,7 +858,7 @@ describe("btw-extension", () => {
       await flush();
 
       const [, params] = vi.mocked(completeSimple).mock.calls[0];
-      const prompt = params.messages[0].content[0].text;
+      const prompt = firstContentText(params.messages[0]);
       expect(prompt).not.toContain("steer the summary");
     });
 
@@ -897,12 +896,11 @@ describe("btw-extension", () => {
       const mockPi = createMockPi() as any;
       const { mockCtx } = setupContext();
       const activeModel = mockCtx.model;
-      const smallModel = {
-        ...activeModel,
+      const smallModel = createMockModel({
         id: "small-model",
         provider: "small-provider",
         reasoning: true,
-      };
+      });
       vi.stubEnv("PI_SMALL_MODEL", "small-provider/small-model");
       mockCtx.modelRegistry.find = vi.fn(() => smallModel);
       await registerAll(mockPi);
@@ -1366,12 +1364,11 @@ describe("btw-extension", () => {
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       const mockPi = createMockPi() as any;
       const { mockCtx, overlays } = setupContext();
-      const smallModel = {
-        ...mockCtx.model,
+      const smallModel = createMockModel({
         id: "small-model",
         provider: "small-provider",
         reasoning: true,
-      };
+      });
       vi.stubEnv("PI_SMALL_MODEL", "small-provider/small-model");
       mockCtx.modelRegistry.find = vi.fn(() => smallModel);
       await registerAll(mockPi);
@@ -1425,7 +1422,7 @@ describe("btw-extension", () => {
       const roles = secondMessages.map((m: any) => m.role);
       // History from the first exchange precedes the new question.
       expect(roles).toEqual(["user", "assistant", "user"]);
-      expect(secondMessages[0].content[0].text).toBe("first question");
+      expect(firstContentText(secondMessages[0])).toBe("first question");
     });
 
     it("includes the assistant tool-call message before its tool results in multi-step turns", async () => {

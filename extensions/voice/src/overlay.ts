@@ -1,5 +1,5 @@
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { matchesKey, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import type { ExtensionContext } from "pi";
 import { modalContentWidth, renderModalFrame } from "../../../lib/tui-frame.ts";
 import { formatStyledKeyHints } from "../../../lib/ui-format.ts";
 import { concatFloat32, detectRecorders, startStreamingRecorder } from "./audio.ts";

@@ -18,9 +18,10 @@
  *                as the synthetic model provider extension).
  */
 
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { SelectItem } from "@earendil-works/pi-tui";
-import type { ExtensionAPI, ExtensionCommandContext } from "pi";
 import { createSearchableSelectModal } from "../../lib/searchable-select.ts";
+import { asStructuredContent } from "../../lib/structured-content.ts";
 import {
   DEFAULT_MAX_RESULTS,
   DEFAULT_PROVIDER_ID,
@@ -141,13 +142,14 @@ export default async function webSearchExtension(pi: ExtensionAPI) {
     execute: async (_toolCallId, params, signal, onUpdate, ctx) => {
       const provider = activeProvider();
       const query = String(params.query ?? "");
-      const data = (results: SearchResult[] = [], error?: string) => ({
-        query,
-        backend: provider.id,
-        resultCount: results.length,
-        results,
-        ...(error ? { error } : {}),
-      });
+      const data = (results: SearchResult[] = [], error?: string) =>
+        asStructuredContent({
+          query,
+          backend: provider.id,
+          resultCount: results.length,
+          results,
+          ...(error ? { error } : {}),
+        });
 
       if (!query) {
         return {

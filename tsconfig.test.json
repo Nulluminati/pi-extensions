@@ -3,12 +3,6 @@
   "compilerOptions": {
     "noUncheckedIndexedAccess": false
   },
-  "include": [
-    "extensions/**/*.ts",
-    "lib/**/*.ts",
-    "scripts/**/*.ts",
-    "types/**/*.ts",
-    "test/**/*.ts"
-  ],
+  "include": ["extensions/**/*.ts", "lib/**/*.ts", "scripts/**/*.ts", "test/**/*.ts"],
   "exclude": ["node_modules"]
 }

@@ -1,5 +1,5 @@
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import type { ExtensionAPI, ExtensionContext } from "pi";
 import { setStripWidget, WIDGET_PRIORITY_RECAP } from "../../../lib/widget-strip.ts";
 import { AUTO_DISMISS_MS, RECAP_CHANGED_EVENT, WIDGET_KEY } from "./constants.ts";
 import { getState } from "./state.ts";

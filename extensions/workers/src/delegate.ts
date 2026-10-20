@@ -7,7 +7,8 @@
  */
 
 import { readFile, stat } from "node:fs/promises";
-import type { AgentToolResult, ExtensionContext, ThinkingLevel } from "pi";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { AgentToolResult, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { withFileLock } from "../../../lib/file-lock.ts";
 import { isCaseInsensitiveVolume } from "../../../lib/fs-case.ts";
 import { runGit } from "../../../lib/git.ts";
@@ -637,7 +638,7 @@ export function buildDelegateStartedResponse(
   worktree: { path: string; branch: string } | undefined,
   wait: boolean | undefined,
   provision: ProvisionStatus | undefined,
-): AgentToolResult {
+): AgentToolResult<unknown> {
   const isolateNote = plan.readOnly
     ? "Read-only investigation worker: workspace writes are blocked by the sandbox; no patch is produced."
     : worktree
@@ -667,7 +668,7 @@ export function buildDelegateStartedResponse(
 }
 
 /** Blocking path: the worker finished and its report is returned inline. */
-export function buildDelegateWaitedResponse(record: WorkerRecord): AgentToolResult {
+export function buildDelegateWaitedResponse(record: WorkerRecord): AgentToolResult<unknown> {
   return {
     content: [{ type: "text", text: formatWorkerStatus(record) }],
     details: { worker: record },

@@ -96,7 +96,7 @@ export const RESOLVE_LIBRARY_PARAMS = {
     },
   },
   required: ["libraryName"],
-};
+} as const;
 
 export const GET_LIBRARY_DOCS_PARAMS = {
   type: "object",
@@ -123,7 +123,7 @@ export const GET_LIBRARY_DOCS_PARAMS = {
     },
   },
   required: [],
-};
+} as const;
 
 export const GET_CACHED_DOC_RAW_PARAMS = {
   type: "object",
@@ -163,4 +163,4 @@ export const GET_CACHED_DOC_RAW_PARAMS = {
     },
   },
   required: [],
-};
+} as const;

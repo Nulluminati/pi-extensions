@@ -1,6 +1,7 @@
 /** Human-readable rendering of mission state for tool results, commands,
  * the footer status line, and the editor widget. */
 
+import type { Theme } from "@earendil-works/pi-coding-agent";
 import { createFramedWidget, type FramedWidgetFactory } from "../../../lib/framed-widget.ts";
 import { formatStatusLine } from "../../../lib/ui-format.ts";
 import type { Mission, MissionSummary, ReconcileReport } from "./types.ts";
@@ -62,7 +63,7 @@ export function createMissionWidget(getMission: () => Mission | undefined): Fram
 
 /** Theme-formatted footer status entry. */
 export function formatStatus(
-  theme: { fg: (color: string, text: string) => string },
+  theme: Pick<Theme, "fg">,
   mission: Mission | undefined,
 ): string | undefined {
   const text = statusText(mission);

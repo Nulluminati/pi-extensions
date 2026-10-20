@@ -1,6 +1,6 @@
 /** Publish extension display values without taking over Herdr's agent state. */
 
-import type { ExtensionAPI, ExtensionContext } from "pi";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { sumSessionUsage } from "../../lib/session-usage.ts";
 import { reportMetadata } from "./src/client.ts";
 import {

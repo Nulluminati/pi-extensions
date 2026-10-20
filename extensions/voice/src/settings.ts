@@ -1,6 +1,6 @@
+import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
 import { type SettingItem, SettingsList, visibleWidth } from "@earendil-works/pi-tui";
-import type { ExtensionCommandContext } from "pi";
 import { modalContentWidth, renderModalFrame } from "../../../lib/tui-frame.ts";
 import { formatStyledKeyHints } from "../../../lib/ui-format.ts";
 import { detectRecorders, hasTool } from "./audio.ts";

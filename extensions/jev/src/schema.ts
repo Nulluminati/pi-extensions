@@ -1,4 +1,4 @@
-import type { ClassifierContext } from "pi";
+import type { ClassifierContext } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 
 // --- Constants ---

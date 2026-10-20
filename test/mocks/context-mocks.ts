@@ -1,6 +1,13 @@
-import type { ExtensionCommandContext, ExtensionContext, ExtensionUIContext } from "pi";
+import type { Api, Model } from "@earendil-works/pi-ai";
+import type {
+  ExtensionCommandContext,
+  ExtensionContext,
+  ExtensionUIContext,
+  ModelRegistry,
+  Theme,
+} from "@earendil-works/pi-coding-agent";
 import { vi } from "vitest";
-import type { DeepMocked } from "./mock-types.ts";
+import { asSdkMock, type DeepMocked } from "./mock-types.ts";
 
 export function createMockUI(): DeepMocked<ExtensionUIContext> {
   // Track the editor component so getEditorComponent mirrors real Pi (returns
@@ -31,7 +38,10 @@ export function createMockUI(): DeepMocked<ExtensionUIContext> {
       editorComponent = factory;
     }),
     getEditorComponent: vi.fn(() => editorComponent),
-    theme: {
+    theme: asSdkMock<Theme>({
+      appearance: "dark" as const,
+      colors: {} as Theme["colors"],
+      style: vi.fn((text: string) => text),
       fg: vi.fn((_color: string, text: string) => text),
       bg: vi.fn((_color: string, text: string) => text),
       bold: vi.fn((text: string) => text),
@@ -44,7 +54,7 @@ export function createMockUI(): DeepMocked<ExtensionUIContext> {
       getColorMode: vi.fn(() => "truecolor" as const),
       getThinkingBorderColor: vi.fn(() => (str: string) => str),
       getBashModeBorderColor: vi.fn(() => (str: string) => str),
-    },
+    }),
     getAllThemes: vi.fn(() => []),
     getTheme: vi.fn(),
     setTheme: vi.fn(),
@@ -53,30 +63,66 @@ export function createMockUI(): DeepMocked<ExtensionUIContext> {
   };
 }
 
-export function createMockContext(): DeepMocked<ExtensionContext> {
-  const model = {
+/** A complete chat model. Pass overrides for the fields a test cares about. */
+export function createMockModel(overrides: Partial<Model<Api>> = {}): Model<Api> {
+  return {
     id: "test-model",
     name: "Test Model",
     provider: "test-provider",
-    api: {},
+    api: "openai-completions",
+    baseUrl: "https://test.invalid",
     reasoning: false,
-    input: ["text"] as ("text" | "image")[],
+    input: ["text"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 128_000,
     maxTokens: 4096,
+    ...overrides,
   };
+}
+
+export function createMockContext(): DeepMocked<ExtensionContext> {
+  const model = createMockModel();
   return {
     ui: createMockUI(),
     hasUI: true,
     mode: "tui" as const,
     cwd: "/home/test",
     sessionManager: {
-      getBranch: vi.fn(() => []),
-      getEntries: vi.fn(() => []),
-      getLeafId: vi.fn(() => undefined),
+      getCwd: vi.fn(() => "/home/test"),
+      getSessionDir: vi.fn(() => "/home/test/.pi/sessions"),
       getSessionId: vi.fn(() => "test-session"),
       getSessionFile: vi.fn(() => undefined),
+      getSessionName: vi.fn(() => undefined),
+      getLeafId: vi.fn(() => undefined),
+      getLeafEntry: vi.fn(() => undefined),
+      getEntry: vi.fn(() => undefined),
+      getLabel: vi.fn(() => undefined),
+      getBranch: vi.fn(() => []),
+      buildContextEntries: vi.fn(() => []),
+      buildSessionProjection: vi.fn(),
+      getHeader: vi.fn(() => null),
+      getEntries: vi.fn(() => []),
+      getTree: vi.fn(() => []),
     },
-    modelRegistry: {
+    modelRegistry: asSdkMock<ModelRegistry>({
+      refresh: vi.fn(),
+      getError: vi.fn(() => undefined),
+      hasConfiguredAuth: vi.fn(() => true),
+      getProviderAuthStatus: vi.fn(),
+      getProvider: vi.fn(() => undefined),
+      stream: vi.fn(),
+      complete: vi.fn(),
+      generateImages: vi.fn(),
+      getProviderDisplayName: vi.fn((provider: string) => provider),
+      getProviderAuth: vi.fn(),
+      isUsingOAuth: vi.fn(() => false),
+      registerProvider: vi.fn(),
+      unregisterProvider: vi.fn(),
+      registerVirtualModel: vi.fn(),
+      unregisterVirtualModel: vi.fn(),
+      getRegisteredProviderConfig: vi.fn(() => undefined),
+      getRegisteredNativeProvider: vi.fn(() => undefined),
+      getRegisteredProviderIds: vi.fn(() => []),
       streamSimple: vi.fn(),
       getAll: vi.fn(() => []),
       getAvailable: vi.fn(() => []),
@@ -94,9 +140,11 @@ export function createMockContext(): DeepMocked<ExtensionContext> {
       find: vi.fn((providerName: string, modelId: string) =>
         providerName === model.provider && modelId === model.id ? model : undefined,
       ),
-    },
+    }),
     model,
+    scopedModels: [],
     isIdle: vi.fn(() => true),
+    isProjectTrusted: vi.fn(() => false),
     signal: undefined,
     abort: vi.fn(),
     hasPendingMessages: vi.fn(() => false),

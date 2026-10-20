@@ -8,7 +8,7 @@
  * workers set it so children get stable, predictable mailbox addresses.
  */
 
-import type { ExtensionAPI, ExtensionContext } from "pi";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { findNewestCustomEntry } from "../../../lib/session-utils.ts";
 
 // --- Types ---

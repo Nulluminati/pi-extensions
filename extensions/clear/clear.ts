@@ -17,7 +17,7 @@
 
 // --- Imports ---
 
-import type { ExtensionAPI, ExtensionCommandContext } from "pi";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { confirmModal } from "../../lib/input-modal.ts";
 
 // --- Extension ---

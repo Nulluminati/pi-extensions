@@ -1,5 +1,6 @@
-import { completeSimple } from "@earendil-works/pi-ai";
-import type { ExtensionContext } from "pi";
+import type { SimpleStreamOptions } from "@earendil-works/pi-ai";
+import { completeSimple } from "@earendil-works/pi-ai/compat";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { resolveSmallModel } from "../../../lib/small-model.ts";
 
 const SUMMARY_MAX_TOKENS = 2048;
@@ -57,14 +58,7 @@ export async function generateSummary(
 ): Promise<SummaryResult> {
   try {
     const resolved = await resolveSmallModel(ctx);
-    const options: {
-      apiKey: string;
-      headers?: Record<string, string>;
-      env?: Record<string, string>;
-      signal?: AbortSignal;
-      maxTokens: number;
-      reasoning?: string;
-    } = {
+    const options: SimpleStreamOptions = {
       apiKey: resolved.auth.apiKey,
       maxTokens: SUMMARY_MAX_TOKENS,
     };

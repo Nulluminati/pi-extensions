@@ -2,7 +2,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync }
 import { readdir } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { completeSimple } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage } from "@earendil-works/pi-ai";
+import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { isKittyProtocolActive } from "@earendil-works/pi-tui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { encodePcm16Wave } from "../../extensions/voice/src/audio.ts";
@@ -54,11 +55,11 @@ import {
   hasEditorFactoryLayer,
   installEditorFactoryLayer,
 } from "../../lib/editor-factory.ts";
-import { createMockCommandContext } from "../mocks/context-mocks.ts";
+import { createMockCommandContext, createMockModel } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
 import { getCommandHandler, getEventHandler } from "../mocks/test-helpers.ts";
 
-vi.mock("@earendil-works/pi-ai", () => ({
+vi.mock("@earendil-works/pi-ai/compat", () => ({
   completeSimple: vi.fn(),
 }));
 
@@ -628,7 +629,10 @@ describe("voice-extension", () => {
         voiceFactory,
         "test-visual-layer",
         0,
-        (parent, tui, theme, keybindings) => parent?.(tui, theme, keybindings),
+        (parent, tui, theme, keybindings) => {
+          if (!parent) throw new Error("test-visual-layer needs a parent editor");
+          return parent(tui, theme, keybindings);
+        },
       );
       ctx.ui.setEditorComponent(withVisualLayer);
 
@@ -933,17 +937,16 @@ describe("voice-extension", () => {
     it("uses the global small model instead of the active model for a spoken summary", async () => {
       const ctx = createMockCommandContext();
       const activeModel = ctx.model;
-      const smallModel = {
-        ...activeModel,
+      const smallModel = createMockModel({
         id: "small-model",
         provider: "small-provider",
         reasoning: true,
-      };
+      });
       vi.stubEnv("PI_SMALL_MODEL", "small-provider/small-model");
       ctx.modelRegistry.find = vi.fn(() => smallModel);
-      vi.mocked(completeSimple).mockResolvedValue({
-        content: [{ type: "text", text: "**Short result.** Next, test playback." }],
-      });
+      vi.mocked(completeSimple).mockResolvedValue(
+        fauxAssistantMessage([{ type: "text", text: "**Short result.** Next, test playback." }]),
+      );
 
       const result = await summarizeForSpeech("A long assistant response.", ctx);
 

@@ -21,7 +21,7 @@
  *   /recap                        Force-generate a recap now
  */
 
-import type { ExtensionAPI } from "pi";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   DEFAULT_FOCUS_MIN_SECONDS,
   DEFAULT_IDLE_SECONDS,

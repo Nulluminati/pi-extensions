@@ -10,7 +10,7 @@
  *   /handoff                        (drafts a general summary)
  */
 
-import type { ExtensionAPI } from "pi";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { renderModalFrame } from "../../lib/tui-frame.ts";
 import { formatGoalForSessionName, resolveGoal } from "./src/goal.ts";
 import { generateSummary, type SummaryResult } from "./src/summary.ts";

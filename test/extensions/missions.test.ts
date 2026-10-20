@@ -1,8 +1,8 @@
 import { mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
-import type { ExtensionAPI, ExtensionCommandContext } from "pi";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import missionsExtension from "../../extensions/missions/missions.ts";
 import { createExecVerificationRunner } from "../../extensions/missions/src/actions.ts";

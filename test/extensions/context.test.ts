@@ -1,9 +1,5 @@
-import {
-  // @ts-expect-error unresolved re-export in pi-coding-agent's declarations
-  // (TypeScript 7.0.2 preview); the vitest package mock supplies the function.
-  formatSkillsForPrompt,
-} from "@earendil-works/pi-coding-agent";
-import type { ExtensionCommandContext } from "pi";
+import type { ExtensionCommandContext, Skill } from "@earendil-works/pi-coding-agent";
+import { formatSkillsForPrompt } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import contextExtension from "../../extensions/context/context.ts";
 import { measureContext, sumSessionUsage } from "../../extensions/context/src/measure.ts";
@@ -200,7 +196,7 @@ describe("context-extension", () => {
 
       const breakdown = measureContext(pi, ctx);
 
-      const section = formatSkillsForPrompt(skills, "read").trim();
+      const section = formatSkillsForPrompt(skills as Skill[], "read").trim();
       expect(breakdown.skillsTokens).toBe(est(section));
       expect(breakdown.skillCount).toBe(2);
       const readBlob = `read\nRead file contents\n${JSON.stringify(readParams)}`;
@@ -231,7 +227,7 @@ describe("context-extension", () => {
       const skills = [
         { name: "write-tests", description: "d".repeat(100), filePath: "/s/SKILL.md" },
       ];
-      const section = formatSkillsForPrompt(skills, "read").trim();
+      const section = formatSkillsForPrompt(skills as Skill[], "read").trim();
       ctx.getSystemPromptOptions = vi.fn(() => ({
         cwd: "/home/test",
         selectedTools: ["read"],
@@ -522,7 +518,7 @@ describe("context-extension", () => {
           filePath: "/home/test/.pi/skills/write-tests/SKILL.md",
         },
       ];
-      const section = formatSkillsForPrompt(skills, "read").trim();
+      const section = formatSkillsForPrompt(skills as Skill[], "read").trim();
       ctx.getSystemPrompt = vi.fn(
         () => `Base instructions.\n\n${fileContent}\n\n${section}\n\n/home/test`,
       );

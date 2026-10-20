@@ -3,15 +3,11 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type {
-  AgentToolResult,
-  ClassifierAnswer,
-  ClassifierContext,
-  ClassifierResult,
-  ExtensionContext,
-} from "pi";
+import type { ClassifierAnswer, ClassifierContext, ClassifierResult } from "@earendil-works/pi-ai";
+import type { AgentToolResult, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Check } from "typebox/value";
 import { writeJsonAtomic } from "../../../lib/json-atomic.ts";
+import { asStructuredContent } from "../../../lib/structured-content.ts";
 import type { JevParameters } from "./schema.ts";
 import { JEV_PARAMETERS, MAX_REQUEST_BYTES } from "./schema.ts";
 
@@ -164,7 +160,7 @@ async function toolResult(details: JevDetails): Promise<AgentToolResult<JevDetai
   return {
     content: [{ type: "text", text }],
     details,
-    structuredContent: details,
+    structuredContent: asStructuredContent(details),
     ...(details.usage ? { usage: details.usage } : {}),
     ...(details.status === "error" ? { isError: true } : {}),
   };

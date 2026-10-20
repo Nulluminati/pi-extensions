@@ -10,7 +10,11 @@
 
 // --- Imports ---
 
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "pi";
+import type {
+  ExtensionAPI,
+  ExtensionCommandContext,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import {
   addTodoItems,
   clearTodoItems,
@@ -80,7 +84,7 @@ export default async function todosExtension(pi: ExtensionAPI) {
         },
       },
       required: ["action"],
-    },
+    } as const,
 
     outputSchema: {
       type: "object",

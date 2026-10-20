@@ -1,4 +1,4 @@
-import type { ExtensionCommandContext } from "pi";
+import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
 const GOAL_MAX_LENGTH = 4000;
 

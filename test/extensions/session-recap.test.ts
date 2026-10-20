@@ -1,13 +1,14 @@
 import { readdir } from "node:fs/promises";
 import { resolve } from "node:path";
+import { type AssistantMessage, fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import sessionRecapExtension from "../../extensions/session-recap/session-recap.ts";
 import { __resetWidgetStrip, STRIP_KEY_ABOVE } from "../../lib/widget-strip.ts";
-import { createMockCommandContext } from "../mocks/context-mocks.ts";
+import { createMockCommandContext, createMockModel } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
 import { getCommandHandler, getEventHandler } from "../mocks/test-helpers.ts";
 
-vi.mock("@earendil-works/pi-ai", () => ({
+vi.mock("@earendil-works/pi-ai/compat", () => ({
   completeSimple: vi.fn(),
 }));
 
@@ -209,10 +210,10 @@ describe("session-recap-extension", () => {
   });
 
   it("session_start with resume triggers recap after delay", async () => {
-    const { completeSimple } = await import("@earendil-works/pi-ai");
-    vi.mocked(completeSimple).mockResolvedValueOnce({
-      content: [{ type: "text", text: "recap: fixed the auth bug" }],
-    });
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+    vi.mocked(completeSimple).mockResolvedValueOnce(
+      fauxAssistantMessage([{ type: "text", text: "recap: fixed the auth bug" }]),
+    );
 
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
@@ -244,10 +245,10 @@ describe("session-recap-extension", () => {
   });
 
   it("session_shutdown before the resume delay cancels the pending recap", async () => {
-    const { completeSimple } = await import("@earendil-works/pi-ai");
-    vi.mocked(completeSimple).mockResolvedValueOnce({
-      content: [{ type: "text", text: "recap: fixed the auth bug" }],
-    });
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+    vi.mocked(completeSimple).mockResolvedValueOnce(
+      fauxAssistantMessage([{ type: "text", text: "recap: fixed the auth bug" }]),
+    );
 
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
@@ -273,10 +274,10 @@ describe("session-recap-extension", () => {
   });
 
   it("turn_end schedules idle recap", async () => {
-    const { completeSimple } = await import("@earendil-works/pi-ai");
-    vi.mocked(completeSimple).mockResolvedValueOnce({
-      content: [{ type: "text", text: "recap: updated the middleware" }],
-    });
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+    vi.mocked(completeSimple).mockResolvedValueOnce(
+      fauxAssistantMessage([{ type: "text", text: "recap: updated the middleware" }]),
+    );
 
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
@@ -303,10 +304,10 @@ describe("session-recap-extension", () => {
   });
 
   it("input clears recap and cancels idle timer", async () => {
-    const { completeSimple } = await import("@earendil-works/pi-ai");
-    vi.mocked(completeSimple).mockResolvedValueOnce({
-      content: [{ type: "text", text: "recap: did some work" }],
-    });
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+    vi.mocked(completeSimple).mockResolvedValueOnce(
+      fauxAssistantMessage([{ type: "text", text: "recap: did some work" }]),
+    );
 
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
@@ -337,10 +338,10 @@ describe("session-recap-extension", () => {
   });
 
   it("publishes recap:changed on the event bus when the widget shows and clears", async () => {
-    const { completeSimple } = await import("@earendil-works/pi-ai");
-    vi.mocked(completeSimple).mockResolvedValueOnce({
-      content: [{ type: "text", text: "recap: did some work" }],
-    });
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+    vi.mocked(completeSimple).mockResolvedValueOnce(
+      fauxAssistantMessage([{ type: "text", text: "recap: did some work" }]),
+    );
 
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
@@ -382,10 +383,10 @@ describe("session-recap-extension", () => {
 
   it("agent_end triggers deferred focus recap", async () => {
     const tty = mockTTY();
-    const { completeSimple } = await import("@earendil-works/pi-ai");
-    vi.mocked(completeSimple).mockResolvedValueOnce({
-      content: [{ type: "text", text: "recap: completed the task" }],
-    });
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+    vi.mocked(completeSimple).mockResolvedValueOnce(
+      fauxAssistantMessage([{ type: "text", text: "recap: completed the task" }]),
+    );
 
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
@@ -414,10 +415,10 @@ describe("session-recap-extension", () => {
   });
 
   it("turn_start cancels pending idle recap", async () => {
-    const { completeSimple } = await import("@earendil-works/pi-ai");
-    vi.mocked(completeSimple).mockResolvedValueOnce({
-      content: [{ type: "text", text: "recap: some work" }],
-    });
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+    vi.mocked(completeSimple).mockResolvedValueOnce(
+      fauxAssistantMessage([{ type: "text", text: "recap: some work" }]),
+    );
 
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
@@ -441,10 +442,10 @@ describe("session-recap-extension", () => {
   });
 
   it("/recap command generates manual recap", async () => {
-    const { completeSimple } = await import("@earendil-works/pi-ai");
-    vi.mocked(completeSimple).mockResolvedValueOnce({
-      content: [{ type: "text", text: "recap: manual recap here" }],
-    });
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+    vi.mocked(completeSimple).mockResolvedValueOnce(
+      fauxAssistantMessage([{ type: "text", text: "recap: manual recap here" }]),
+    );
 
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
@@ -470,7 +471,7 @@ describe("session-recap-extension", () => {
   });
 
   it("idle recap firing mid-generation does not abort an in-flight /recap", async () => {
-    const { completeSimple } = await import("@earendil-works/pi-ai");
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
     const { gated, release: releaseGeneration } = gateGeneration();
     vi.mocked(completeSimple).mockImplementationOnce(() => gated);
 
@@ -492,14 +493,14 @@ describe("session-recap-extension", () => {
     // The idle trigger must yield to the manual recap, not abort it
     expect(completeSimple).toHaveBeenCalledTimes(1);
 
-    releaseGeneration({ content: [{ type: "text", text: "recap: manual wins" }] });
+    releaseGeneration(fauxAssistantMessage([{ type: "text", text: "recap: manual wins" }]));
     await recapDone;
 
     expect(mockCtx.ui.setWidget).toHaveBeenCalledWith(STRIP_KEY_ABOVE, expect.any(Function));
   });
 
   it("/recap with an empty transcript notifies instead of silently doing nothing", async () => {
-    const { completeSimple } = await import("@earendil-works/pi-ai");
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
 
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
@@ -513,8 +514,8 @@ describe("session-recap-extension", () => {
   });
 
   it("/recap reports when generation returns no output", async () => {
-    const { completeSimple } = await import("@earendil-works/pi-ai");
-    vi.mocked(completeSimple).mockResolvedValueOnce({ content: [] });
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+    vi.mocked(completeSimple).mockResolvedValueOnce(fauxAssistantMessage([]));
 
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
@@ -537,7 +538,7 @@ describe("session-recap-extension", () => {
   });
 
   it("/recap still shows when only a custom entry (e.g. todos-state) is appended during generation", async () => {
-    const { completeSimple } = await import("@earendil-works/pi-ai");
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
     const { gated, release: releaseGeneration } = gateGeneration();
     vi.mocked(completeSimple).mockImplementationOnce(() => gated);
 
@@ -558,14 +559,14 @@ describe("session-recap-extension", () => {
       { type: "custom", customType: "todos-state", data: { items: [] } },
     ]);
 
-    releaseGeneration({ content: [{ type: "text", text: "recap: not stale" }] });
+    releaseGeneration(fauxAssistantMessage([{ type: "text", text: "recap: not stale" }]));
     await recapDone;
 
     expect(mockCtx.ui.setWidget).toHaveBeenCalledWith(STRIP_KEY_ABOVE, expect.any(Function));
   });
 
   it("/recap drops the recap when a new message lands during generation", async () => {
-    const { completeSimple } = await import("@earendil-works/pi-ai");
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
     const { gated, release: releaseGeneration } = gateGeneration();
     vi.mocked(completeSimple).mockImplementationOnce(() => gated);
 
@@ -589,7 +590,7 @@ describe("session-recap-extension", () => {
       },
     ]);
 
-    releaseGeneration({ content: [{ type: "text", text: "recap: stale" }] });
+    releaseGeneration(fauxAssistantMessage([{ type: "text", text: "recap: stale" }]));
     await recapDone;
 
     expect(mockCtx.ui.setWidget).not.toHaveBeenCalledWith(
@@ -600,19 +601,18 @@ describe("session-recap-extension", () => {
   });
 
   it("uses the global small model instead of the active model", async () => {
-    const { completeSimple } = await import("@earendil-works/pi-ai");
-    vi.mocked(completeSimple).mockResolvedValueOnce({
-      content: [{ type: "text", text: "recap: used the small model" }],
-    });
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+    vi.mocked(completeSimple).mockResolvedValueOnce(
+      fauxAssistantMessage([{ type: "text", text: "recap: used the small model" }]),
+    );
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     const activeModel = mockCtx.model;
-    const smallModel = {
-      ...activeModel,
+    const smallModel = createMockModel({
       id: "small-model",
       provider: "small-provider",
       reasoning: true,
-    };
+    });
     vi.stubEnv("PI_SMALL_MODEL", "small-provider/small-model");
     mockCtx.modelRegistry.find = vi.fn(() => smallModel);
     mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
@@ -635,7 +635,7 @@ describe("session-recap-extension", () => {
   });
 
   it("manual recap reports an unavailable global small model without falling back", async () => {
-    const { completeSimple } = await import("@earendil-works/pi-ai");
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     mockCtx.modelRegistry.find = vi.fn(() => undefined);
@@ -687,18 +687,17 @@ describe("session-recap-extension", () => {
   });
 
   it("a successful recap re-arms the background failure notification", async () => {
-    const { completeSimple } = await import("@earendil-works/pi-ai");
-    vi.mocked(completeSimple).mockResolvedValue({
-      content: [{ type: "text", text: "recap: did some work" }],
-    });
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+    vi.mocked(completeSimple).mockResolvedValue(
+      fauxAssistantMessage([{ type: "text", text: "recap: did some work" }]),
+    );
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
-    const smallModel = {
-      ...mockCtx.model,
+    const smallModel = createMockModel({
       id: "small-model",
       provider: "small-provider",
       reasoning: true,
-    };
+    });
     let modelAvailable = false;
     mockCtx.modelRegistry.find = vi.fn(() => (modelAvailable ? smallModel : undefined));
     mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
@@ -729,10 +728,10 @@ describe("session-recap-extension", () => {
   });
 
   it("does not generate recap when there is no meaningful activity", async () => {
-    const { completeSimple } = await import("@earendil-works/pi-ai");
-    vi.mocked(completeSimple).mockResolvedValueOnce({
-      content: [{ type: "text", text: "recap: no activity" }],
-    });
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+    vi.mocked(completeSimple).mockResolvedValueOnce(
+      fauxAssistantMessage([{ type: "text", text: "recap: no activity" }]),
+    );
 
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
@@ -786,10 +785,10 @@ describe("session-recap-extension", () => {
 
   it("focus out during active agent defers recap", async () => {
     const tty = mockTTY();
-    const { completeSimple } = await import("@earendil-works/pi-ai");
-    vi.mocked(completeSimple).mockResolvedValueOnce({
-      content: [{ type: "text", text: "recap: completed the task" }],
-    });
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+    vi.mocked(completeSimple).mockResolvedValueOnce(
+      fauxAssistantMessage([{ type: "text", text: "recap: completed the task" }]),
+    );
 
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
@@ -823,10 +822,10 @@ describe("session-recap-extension", () => {
 
   it("quick focus glance does not show recap", async () => {
     const tty = mockTTY();
-    const { completeSimple } = await import("@earendil-works/pi-ai");
-    vi.mocked(completeSimple).mockResolvedValueOnce({
-      content: [{ type: "text", text: "recap: some work done" }],
-    });
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+    vi.mocked(completeSimple).mockResolvedValueOnce(
+      fauxAssistantMessage([{ type: "text", text: "recap: some work done" }]),
+    );
 
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
@@ -859,11 +858,11 @@ describe("session-recap-extension", () => {
   // --- Wrapping tests ---
 
   it("wraps long recap text via render width", async () => {
-    const { completeSimple } = await import("@earendil-works/pi-ai");
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
     const longRecap = `recap: ${"x".repeat(300)}. Next: do something.`;
-    vi.mocked(completeSimple).mockResolvedValueOnce({
-      content: [{ type: "text", text: longRecap }],
-    });
+    vi.mocked(completeSimple).mockResolvedValueOnce(
+      fauxAssistantMessage([{ type: "text", text: longRecap }]),
+    );
 
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
@@ -894,11 +893,11 @@ describe("session-recap-extension", () => {
 });
 
 function gateGeneration(): {
-  gated: Promise<{ content: Array<{ type: string; text: string }> }>;
-  release: (value: { content: Array<{ type: string; text: string }> }) => void;
+  gated: Promise<AssistantMessage>;
+  release: (value: AssistantMessage) => void;
 } {
-  let release!: (value: { content: Array<{ type: string; text: string }> }) => void;
-  const gated = new Promise<{ content: Array<{ type: string; text: string }> }>((resolve) => {
+  let release!: (value: AssistantMessage) => void;
+  const gated = new Promise<AssistantMessage>((resolve) => {
     release = resolve;
   });
   return { gated, release };

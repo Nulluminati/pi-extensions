@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "pi";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveSessionIdentity } from "../../extensions/messenger/src/session-identity.ts";
 import { createMockContext } from "../mocks/context-mocks.ts";

@@ -1,5 +1,6 @@
 /** Rendering for worker lists, status output, and the editor widget. */
 
+import type { Theme } from "@earendil-works/pi-coding-agent";
 import { createFramedWidget, type FramedWidgetFactory } from "../../../lib/framed-widget.ts";
 import { formatStatusLine } from "../../../lib/ui-format.ts";
 import { BLOCKER_MARKER_TYPE } from "../../../lib/worker-blocker.ts";
@@ -90,7 +91,7 @@ export function workersStatusText(running: number, costUsd: number): string | un
 
 /** Themed status-line fallback (default footer) for the widget state. */
 export function formatWorkersStatus(
-  theme: { fg: (color: string, text: string) => string },
+  theme: Pick<Theme, "fg">,
   running: number,
   costUsd: number,
 ): string | undefined {

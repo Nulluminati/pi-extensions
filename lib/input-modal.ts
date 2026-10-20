@@ -1,7 +1,7 @@
 /** Single-line text prompt and yes/no confirmation rendered inside the shared modal frame. */
 
+import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { Input } from "@earendil-works/pi-tui";
-import type { ExtensionCommandContext } from "pi";
 import { wrapToolText } from "./tool-renderer.ts";
 import { modalContentWidth, renderModalFrame } from "./tui-frame.ts";
 import { formatStyledKeyHints } from "./ui-format.ts";

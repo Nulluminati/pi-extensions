@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import smallModelExtension, { STATUS_ICON } from "../../extensions/small-model/small-model.ts";
-import { createMockCommandContext } from "../mocks/context-mocks.ts";
+import { createMockCommandContext, createMockModel } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
 import { getCommandHandler, getEventHandler } from "../mocks/test-helpers.ts";
 
@@ -59,15 +59,13 @@ describe("small-model-extension", () => {
     );
     const pi = createMockPi();
     const ctx = createMockCommandContext();
-    const syntheticModel = {
-      ...ctx.model,
+    const syntheticModel = createMockModel({
       id: "syn:small:text",
       name: "Synthetic Small",
       provider: "synthetic",
       reasoning: true,
-    };
-    const haikuModel = {
-      ...ctx.model,
+    });
+    const haikuModel = createMockModel({
       id: "claude-haiku-4-5",
       name: "Claude Haiku 4.5",
       provider: "anthropic",
@@ -75,7 +73,7 @@ describe("small-model-extension", () => {
       input: ["text", "image"] as ("text" | "image")[],
       contextWindow: 200_000,
       maxTokens: 64_000,
-    };
+    });
     ctx.modelRegistry.getAvailable = vi.fn(() => [syntheticModel, haikuModel]);
     ctx.modelRegistry.find = vi.fn((provider: string, model: string) =>
       provider === "anthropic" && model === "claude-haiku-4-5" ? haikuModel : undefined,
@@ -135,12 +133,11 @@ describe("small-model-extension", () => {
     const pi = createMockPi();
     const ctx = createMockCommandContext();
     ctx.mode = "rpc";
-    const smallModel = {
-      ...ctx.model,
+    const smallModel = createMockModel({
       id: "syn:small:text",
       provider: "synthetic",
       reasoning: true,
-    };
+    });
     ctx.modelRegistry.getAvailable = vi.fn(() => [smallModel]);
     ctx.modelRegistry.find = vi.fn(() => smallModel);
     ctx.ui.select = vi.fn(async (_title, options) => options[0]);
@@ -165,12 +162,11 @@ describe("small-model-extension", () => {
     vi.stubEnv("PI_SMALL_MODEL", "");
     const pi = createMockPi();
     const ctx = createMockCommandContext();
-    const smallModel = {
-      ...ctx.model,
+    const smallModel = createMockModel({
       id: "google/gemini-flash",
       provider: "openrouter",
       reasoning: true,
-    };
+    });
     ctx.modelRegistry.find = vi.fn(() => smallModel);
     await smallModelExtension(pi);
 
@@ -201,12 +197,13 @@ describe("small-model-extension", () => {
     );
     const pi = createMockPi();
     const ctx = createMockCommandContext();
-    ctx.modelRegistry.find = vi.fn(() => ({
-      ...ctx.model,
-      provider: "opencode-go",
-      id: "deepseek-flash",
-      reasoning: true,
-    }));
+    ctx.modelRegistry.find = vi.fn(() =>
+      createMockModel({
+        provider: "opencode-go",
+        id: "deepseek-flash",
+        reasoning: true,
+      }),
+    );
     await smallModelExtension(pi);
 
     await getCommandHandler(pi, "smallmodel")("thinking high", ctx);
@@ -260,12 +257,13 @@ describe("small-model-extension", () => {
     vi.stubEnv("PI_SMALL_MODEL_THINKING", "minimal");
     const pi = createMockPi();
     const ctx = createMockCommandContext();
-    ctx.modelRegistry.find = vi.fn(() => ({
-      ...ctx.model,
-      id: "syn:small:text",
-      provider: "synthetic",
-      reasoning: true,
-    }));
+    ctx.modelRegistry.find = vi.fn(() =>
+      createMockModel({
+        id: "syn:small:text",
+        provider: "synthetic",
+        reasoning: true,
+      }),
+    );
     await smallModelExtension(pi);
 
     await getCommandHandler(pi, "smallmodel")("openrouter/google/gemini-flash", ctx);
@@ -305,12 +303,13 @@ describe("small-model-extension", () => {
     vi.stubEnv("PI_SMALL_MODEL", "");
     const pi = createMockPi();
     const ctx = createMockCommandContext();
-    ctx.modelRegistry.find = vi.fn((provider: string, model: string) => ({
-      ...ctx.model,
-      provider,
-      id: model,
-      reasoning: true,
-    }));
+    ctx.modelRegistry.find = vi.fn((provider: string, model: string) =>
+      createMockModel({
+        provider,
+        id: model,
+        reasoning: true,
+      }),
+    );
     await smallModelExtension(pi);
     const sessionStart = getEventHandler(pi, "session_start");
     const sessionShutdown = getEventHandler(pi, "session_shutdown");

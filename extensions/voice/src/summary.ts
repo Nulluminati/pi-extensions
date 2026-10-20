@@ -1,6 +1,8 @@
-import { completeSimple } from "@earendil-works/pi-ai";
+import type { SimpleStreamOptions } from "@earendil-works/pi-ai";
+import { completeSimple } from "@earendil-works/pi-ai/compat";
+import type { ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
+import type { Component } from "@earendil-works/pi-tui";
 import { Loader, type TUI } from "@earendil-works/pi-tui";
-import type { Component, ExtensionCommandContext, Theme } from "pi";
 import { extractText } from "../../../lib/session-utils.ts";
 import { resolveSmallModel } from "../../../lib/small-model.ts";
 import { resolveModelsDir } from "./config.ts";
@@ -52,13 +54,7 @@ export async function summarizeForSpeech(
   ctx: ExtensionCommandContext,
 ): Promise<string> {
   const resolved = await resolveSmallModel(ctx);
-  const completionOptions: {
-    apiKey: string;
-    headers?: Record<string, string>;
-    env?: Record<string, string>;
-    maxTokens: number;
-    reasoning?: string;
-  } = {
+  const completionOptions: SimpleStreamOptions = {
     apiKey: resolved.auth.apiKey,
     maxTokens: 160,
   };
@@ -150,7 +146,7 @@ export function setTtsIndicator(ctx: ExtensionCommandContext, text: string | und
     ctx.ui.setWidget(TTS_WIDGET_KEY, undefined);
     return;
   }
-  ctx.ui.setWidget(TTS_WIDGET_KEY, (tui: TUI, theme: Theme): Component => {
+  ctx.ui.setWidget(TTS_WIDGET_KEY, (tui: TUI, theme: Theme): Component & { dispose(): void } => {
     const loader = new Loader(
       tui,
       (spinner: string) => theme.fg("accent", spinner),

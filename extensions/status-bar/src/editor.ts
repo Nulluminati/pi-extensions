@@ -1,10 +1,10 @@
+import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { CustomEditor } from "@earendil-works/pi-coding-agent";
 import {
   type TuiMouseEvent,
   type TuiMouseEventResult,
   truncateToWidth,
 } from "@earendil-works/pi-tui";
-import type { ExtensionCommandContext } from "pi";
 import { modalContentWidth, renderModalFrame } from "../../../lib/tui-frame.ts";
 import {
   EDITOR_META_SEPARATOR,

@@ -4,7 +4,7 @@
  * Keys: esc/enter/q close, c clears completed items.
  */
 
-import type { ExtensionAPI, ExtensionCommandContext } from "pi";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { PANEL_OVERLAY_OPTIONS } from "../../../lib/overlay-options.ts";
 import { getTodoItems, removeCompletedTodoItems, type TodoItem } from "../../../lib/todos.ts";
 import { type ModalFrameOptions, renderModalFrame } from "../../../lib/tui-frame.ts";

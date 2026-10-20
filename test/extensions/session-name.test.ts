@@ -2,7 +2,7 @@ import { readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import sessionNameExtension from "../../extensions/session-name/session-name.ts";
-import { createMockContext } from "../mocks/context-mocks.ts";
+import { createMockContext, createMockModel } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
 
 const TEMP = "Pi · project · 12345678";
@@ -50,7 +50,7 @@ async function setup(options: { name?: string; branch?: unknown[] } = {}) {
     branch.push({ type: "custom", customType, data }),
   );
   ctx.sessionManager.getBranch.mockImplementation(() => branch);
-  const small = { ...ctx.model, id: "title-model", provider: "title-provider", reasoning: true };
+  const small = createMockModel({ id: "title-model", provider: "title-provider", reasoning: true });
   ctx.modelRegistry.find.mockImplementation((provider, id) =>
     provider === small.provider && id === small.id ? small : undefined,
   );
@@ -215,8 +215,9 @@ describe("automatic Pi session names", () => {
     expect(complete).toHaveBeenCalledWith(
       fixture.small,
       expect.anything(),
-      expect.objectContaining({ reasoning: undefined, maxTokens: 256 }),
+      expect.objectContaining({ maxTokens: 256 }),
     );
+    expect(complete.mock.calls[0]?.[2]).not.toHaveProperty("reasoning");
   });
 
   it("retains the smaller output limit for models without reasoning support", async () => {
@@ -228,8 +229,9 @@ describe("automatic Pi session names", () => {
     expect(complete).toHaveBeenCalledWith(
       fixture.small,
       expect.anything(),
-      expect.objectContaining({ reasoning: undefined, maxTokens: 256 }),
+      expect.objectContaining({ maxTokens: 256 }),
     );
+    expect(complete.mock.calls[0]?.[2]).not.toHaveProperty("reasoning");
   });
 
   it("does not wait for generation or start duplicate calls during a main turn", async () => {

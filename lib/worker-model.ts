@@ -9,8 +9,8 @@
  */
 
 import { readFileSync } from "node:fs";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import type { ThinkingLevel } from "pi";
 import { isNodeError } from "./errors.ts";
 import { writeJsonAtomic } from "./json-atomic.ts";
 import { agentConfigPath } from "./paths.ts";

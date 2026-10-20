@@ -1,4 +1,4 @@
-import type { ExtensionContext } from "pi";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createProviderAuthHeaders, resolveProviderApiKey } from "../../../lib/provider-auth.ts";
 
 // --- Utilities ---

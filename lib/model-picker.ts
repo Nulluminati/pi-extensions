@@ -6,8 +6,9 @@
  * lives in lib/small-model.ts and lib/worker-model.ts.
  */
 
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { SelectItem } from "@earendil-works/pi-tui";
-import type { ExtensionCommandContext, ThinkingLevel } from "pi";
 import { createSearchableSelectModal } from "./searchable-select.ts";
 import { parseSmallModelSpec } from "./small-model.ts";
 import { formatTokenCount } from "./token-count.ts";

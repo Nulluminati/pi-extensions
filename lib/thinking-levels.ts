@@ -6,7 +6,7 @@
  * accepted by all of them.
  */
 
-import type { ThinkingLevel } from "pi";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 
 /** The thinking levels Pi accepts, in ascending order of depth. */
 export const THINKING_LEVELS = new Set<ThinkingLevel>([

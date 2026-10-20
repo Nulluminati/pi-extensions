@@ -1,7 +1,7 @@
 /** Widget rendering for the todo list: pure line building plus the framed
  * editor-widget factory. Tested directly and through the extension. */
 
-import type { ExtensionAPI } from "pi";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createFramedWidget, type FramedWidgetComponent } from "../../../lib/framed-widget.ts";
 import { getTodoItems, type TodoItem } from "../../../lib/todos.ts";
 

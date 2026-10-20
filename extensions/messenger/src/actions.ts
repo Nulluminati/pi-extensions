@@ -3,7 +3,7 @@
  *  throw so the tool layer surfaces the message to the model. Per-instance
  *  state (agent name, status refresh) is passed in by the composition root. */
 
-import type { AgentToolResult, ExtensionContext } from "pi";
+import type { AgentToolResult, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { formatMessages, formatPresence } from "./format.ts";
 import { WORKER_STATUS_VALUES } from "./schemas.ts";
 import {
@@ -44,7 +44,7 @@ export async function runMessengerAction(
   params: MessengerActionParams,
   ctx: ExtensionContext,
   deps: MessengerActionDeps,
-): Promise<AgentToolResult> {
+): Promise<AgentToolResult<unknown>> {
   const { agentName, refreshStatus } = deps;
 
   if (action === "whoami") {

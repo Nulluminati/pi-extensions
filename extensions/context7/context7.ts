@@ -5,7 +5,8 @@
  * Context7 API with persistent searchable cache.
  */
 
-import type { ExtensionAPI } from "pi";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { asStructuredContent } from "../../lib/structured-content.ts";
 import { findDocCacheCandidates, getDocCacheByRef, loadDocCacheObject } from "./src/cache.ts";
 import { loadSettings } from "./src/config.ts";
 import { formatCacheCandidates, getDocsEntry } from "./src/docs.ts";
@@ -36,7 +37,7 @@ function dataResult<T extends object>(text: string, details: T, isError = false)
   return {
     content: [{ type: "text" as const, text }],
     details,
-    structuredContent: { text, ...details },
+    structuredContent: asStructuredContent({ text, ...details }),
     ...(isError ? { isError: true } : {}),
   };
 }

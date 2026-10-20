@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { mkdtemp, readdir, readFile, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import type { ExtensionAPI, ExtensionCommandContext } from "pi";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { Check } from "typebox/value";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import backgroundJobsExtension from "../../extensions/background-jobs/background-jobs.ts";

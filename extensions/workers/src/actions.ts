@@ -7,7 +7,7 @@
 
 import { existsSync } from "node:fs";
 import { access, readFile } from "node:fs/promises";
-import type { AgentToolResult } from "pi";
+import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
 import { isNodeError } from "../../../lib/errors.ts";
 import {
   formatRawStreamEntries,
@@ -33,7 +33,7 @@ export function listWorkers(options: {
   orphans: WorkerRecord[];
   foreignLive: WorkerRecord[];
   scope: WorkerListScope;
-}): AgentToolResult {
+}): AgentToolResult<unknown> {
   const { mine, orphans, foreignLive, scope } = options;
   const byStart = (a: WorkerRecord, b: WorkerRecord) => a.startedAt - b.startedAt;
   const sections: string[] = [];
@@ -100,7 +100,7 @@ export async function tailWorkerStream(
   id: string,
   requestedLines: number | undefined,
   record: WorkerRecord,
-): Promise<AgentToolResult> {
+): Promise<AgentToolResult<unknown>> {
   const lines =
     typeof requestedLines === "number" && requestedLines > 0 ? Math.floor(requestedLines) : 40;
   const all =
@@ -138,7 +138,7 @@ export async function tailWorkerStream(
 }
 
 /** Full status/report read for one worker. */
-export function workerStatusResponse(record: WorkerRecord): AgentToolResult {
+export function workerStatusResponse(record: WorkerRecord): AgentToolResult<unknown> {
   return {
     content: [{ type: "text", text: formatWorkerStatus(record) }],
     details: { worker: record },
@@ -154,7 +154,7 @@ export async function cancelWorker(options: {
   publish: () => Promise<void>;
   id: string;
   record: WorkerRecord;
-}): Promise<AgentToolResult> {
+}): Promise<AgentToolResult<unknown>> {
   const { running, publish, id, record } = options;
   const runningWorker = running.get(id);
   if (!runningWorker) {
@@ -199,9 +199,9 @@ export async function collectWorkerPatch(
   cwd: string,
   id: string,
   record: WorkerRecord,
-  params: { apply?: boolean; cleanup?: boolean },
+  params: { apply?: boolean | undefined; cleanup?: boolean | undefined },
   persistCollected: (record: WorkerRecord) => Promise<void>,
-): Promise<AgentToolResult> {
+): Promise<AgentToolResult<unknown>> {
   if (!record.patchPath) {
     throw new Error(
       `Worker ${id} has no patch (only isolated workers produce patches, after finishing).`,

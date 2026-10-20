@@ -25,7 +25,7 @@
  * itself is in-memory and session-scoped.
  */
 
-import type { ExtensionAPI, ExtensionUIContext } from "pi";
+import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { agentStateDir } from "../../lib/paths.ts";
 import { formatStatusLine } from "../../lib/ui-format.ts";
 import { setStripWidget, WIDGET_PRIORITY_JOBS } from "../../lib/widget-strip.ts";

@@ -3,7 +3,7 @@
  *  delivery and the idle inbox watcher; concurrency is gated by the caller
  *  (the composition root's single-flight flag). */
 
-import type { ExtensionAPI, ExtensionContext } from "pi";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { markRead, readInbox } from "./store.ts";
 import type { Message } from "./types.ts";
 

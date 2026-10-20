@@ -15,7 +15,7 @@ export const WEB_SEARCH_PARAMS = {
     },
   },
   required: ["query"],
-};
+} as const;
 
 export const WEB_SEARCH_OUTPUT = {
   type: "object",
@@ -53,4 +53,4 @@ export const WEB_FETCH_PARAMS = {
     },
   },
   required: ["url"],
-};
+} as const;

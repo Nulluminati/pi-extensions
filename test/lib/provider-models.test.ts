@@ -1,8 +1,8 @@
-import type { ProviderModelConfig } from "pi";
 import { describe, expect, it } from "vitest";
+import type { ProviderChatModelConfig } from "../../lib/pi-types.ts";
 import { formatProviderModelList } from "../../lib/provider-models.ts";
 
-function makeModel(overrides: Partial<ProviderModelConfig> = {}): ProviderModelConfig {
+function makeModel(overrides: Partial<ProviderChatModelConfig> = {}): ProviderChatModelConfig {
   return {
     id: "test-model",
     name: "Test Model",

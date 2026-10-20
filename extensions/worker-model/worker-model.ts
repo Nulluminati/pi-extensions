@@ -9,7 +9,8 @@
  * the editor meta line.
  */
 
-import type { ExtensionAPI, ThinkingLevel } from "pi";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   isWorkerThinkingLevel,
   loadWorkerModelConfig,

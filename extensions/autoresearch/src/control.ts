@@ -2,7 +2,7 @@
  *  without an active campaign; stop reverts a pending experiment and marks
  *  the config stopped, keeping config and log for the record. */
 
-import type { AgentToolResult, ExtensionContext } from "pi";
+import type { AgentToolResult, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { projectStateRelative } from "../../../lib/paths.ts";
 import { buildSummary, formatSummary } from "./format.ts";
 import { discardExperiment } from "./measure.ts";
@@ -16,7 +16,7 @@ export async function statusAction(
   state: InstanceState,
   ctx: ExtensionContext,
   publish: PublishFn,
-): Promise<AgentToolResult> {
+): Promise<AgentToolResult<unknown>> {
   const cwd = ctx.cwd;
   const config = await loadConfig(cwd);
   if (!config) {
@@ -40,7 +40,7 @@ export async function stopAction(
   config: AutoConfig,
   ctx: ExtensionContext,
   publish: PublishFn,
-): Promise<AgentToolResult> {
+): Promise<AgentToolResult<unknown>> {
   const cwd = ctx.cwd;
   await loadPending(state, cwd);
   const entries = await readLog(cwd);

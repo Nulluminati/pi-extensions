@@ -1,5 +1,5 @@
 import type { TextContent, ToolCall } from "@earendil-works/pi-ai";
-import type { ExtensionCommandContext } from "pi";
+import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
 // --- Types ---
 

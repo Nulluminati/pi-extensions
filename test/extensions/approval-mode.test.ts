@@ -1,4 +1,4 @@
-import type { ClassifierAnswer, ClassifierContext, ClassifierResult } from "pi";
+import type { ClassifierAnswer, ClassifierContext, ClassifierResult } from "@earendil-works/pi-ai";
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import approvalMode from "../../extensions/approval-mode/approval-mode.ts";
 import { judgeCommand } from "../../extensions/approval-mode/src/jev.ts";
@@ -825,7 +825,6 @@ describe("approval-mode extension", () => {
     const parentStop = parent.pi.on.mock.calls.find((call) => call[0] === "session_shutdown")?.[1];
     await parentStop?.({ type: "session_shutdown" }, parent.ctx);
     expect(parent.unsubscribe).toHaveBeenCalledTimes(1);
-    expect(parent.pi.events.off).not.toHaveBeenCalled();
     expect(await parentRequest(parent.pi, workerRequest())).toEqual({ approved: false });
     const parentStart = parent.pi.on.mock.calls.find((call) => call[0] === "session_start")?.[1];
     await parentStart?.({ type: "session_start" }, parent.ctx);

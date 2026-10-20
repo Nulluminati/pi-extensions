@@ -3,14 +3,14 @@
  * Higher-priority behavior layers wrap lower-priority visual layers.
  */
 
-export type EditorFactory = (tui: unknown, theme: unknown, keybindings: unknown) => unknown;
+import type { EditorFactory } from "./pi-types.ts";
+
+export type { EditorFactory };
 
 export type EditorLayerInstantiate = (
   parent: EditorFactory | undefined,
-  tui: unknown,
-  theme: unknown,
-  keybindings: unknown,
-) => unknown;
+  ...args: Parameters<EditorFactory>
+) => ReturnType<EditorFactory>;
 
 interface EditorFactoryLayer {
   id: string;

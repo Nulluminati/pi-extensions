@@ -19,7 +19,7 @@
 // --- Imports ---
 import { appendFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { ExtensionAPI } from "pi";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { isNodeError } from "../../lib/errors.ts";
 import {
   BLOCKER_MARKER_TYPE,

@@ -1,5 +1,6 @@
+import type { AgentToolResult, Theme } from "@earendil-works/pi-coding-agent";
+import type { Component } from "@earendil-works/pi-tui";
 import { truncateToWidth } from "@earendil-works/pi-tui";
-import type { AgentToolResult, Component, Theme } from "pi";
 import { wrapToolText } from "../../../lib/tool-renderer.ts";
 import type { AskUserAnswer, AskUserDetails, AskUserQuestion, AskUserStatus } from "./schema.ts";
 

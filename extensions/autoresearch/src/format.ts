@@ -1,5 +1,6 @@
 /** Rendering for autoresearch status, results, and the footer line. */
 
+import type { Theme } from "@earendil-works/pi-coding-agent";
 import { createFramedWidget, type FramedWidgetFactory } from "../../../lib/framed-widget.ts";
 import { formatStatusLine } from "../../../lib/ui-format.ts";
 import { bestEntry, spreadScore } from "./stats.ts";
@@ -89,7 +90,7 @@ function statusText(summary: AutoSummary): string | undefined {
 
 /** Theme-formatted footer status entry, or undefined when not running. */
 export function formatFooter(
-  theme: { fg: (color: string, text: string) => string },
+  theme: Pick<Theme, "fg">,
   summary: AutoSummary | undefined,
 ): string | undefined {
   const text = summary ? statusText(summary) : undefined;

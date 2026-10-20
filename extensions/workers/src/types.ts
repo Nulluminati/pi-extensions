@@ -1,6 +1,6 @@
 /** Worker session types for the workers extension. */
 
-import type { ThinkingLevel } from "pi";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type {
   WorkerApprovalReply,
   WorkerApprovalRequest,

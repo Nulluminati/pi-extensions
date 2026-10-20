@@ -9,7 +9,7 @@ import {
   resolveSmallModelConfigPath,
   saveSmallModelConfig,
 } from "../../lib/small-model.ts";
-import { createMockCommandContext } from "../mocks/context-mocks.ts";
+import { createMockCommandContext, createMockModel } from "../mocks/context-mocks.ts";
 
 const temporaryDirectories: string[] = [];
 
@@ -124,15 +124,14 @@ describe("resolveSmallModel", () => {
   it("resolves the configured text model and credentials", async () => {
     const path = configuredPath();
     const ctx = createMockCommandContext();
-    const smallModel = {
-      ...ctx.model,
+    const smallModel = createMockModel({
       id: "syn:small:text",
       provider: "synthetic",
       reasoning: true,
-    };
+    });
     ctx.modelRegistry.find = vi.fn(() => smallModel);
     ctx.modelRegistry.getApiKeyAndHeaders = vi.fn(async () => ({
-      ok: true,
+      ok: true as const,
       apiKey: "small-key",
       headers: { "x-test": "yes" },
       env: { SYNTHETIC_API_KEY: "small-key" },
@@ -162,15 +161,14 @@ describe("resolveSmallModel", () => {
   it("adds per-session routing headers for an OpenCode small model", async () => {
     const path = modelConfigPath("opencode-go", "glm-5.3-flash");
     const ctx = createMockCommandContext();
-    const smallModel = {
-      ...ctx.model,
+    const smallModel = createMockModel({
       id: "glm-5.3-flash",
       provider: "opencode-go",
       baseUrl: "https://opencode.ai/zen/go/v1",
-    };
+    });
     ctx.modelRegistry.find = vi.fn(() => smallModel);
     ctx.modelRegistry.getApiKeyAndHeaders = vi.fn(async () => ({
-      ok: true,
+      ok: true as const,
       apiKey: "opencode-key",
       headers: { "x-auth-source": "oauth" },
     }));
@@ -188,12 +186,13 @@ describe("resolveSmallModel", () => {
   it("adds OpenCode headers for a custom provider using the OpenCode host", async () => {
     const path = modelConfigPath("custom", "flash");
     const ctx = createMockCommandContext();
-    ctx.modelRegistry.find = vi.fn(() => ({
-      ...ctx.model,
-      id: "flash",
-      provider: "custom",
-      baseUrl: "https://opencode.ai/custom/v1",
-    }));
+    ctx.modelRegistry.find = vi.fn(() =>
+      createMockModel({
+        id: "flash",
+        provider: "custom",
+        baseUrl: "https://opencode.ai/custom/v1",
+      }),
+    );
     ctx.sessionManager.getSessionId = vi.fn(() => "session-custom");
 
     const resolved = await resolveSmallModel(ctx, { configPath: path, env: {} });
@@ -207,14 +206,15 @@ describe("resolveSmallModel", () => {
   it("preserves explicitly configured OpenCode header overrides", async () => {
     const path = modelConfigPath("opencode", "free-model");
     const ctx = createMockCommandContext();
-    ctx.modelRegistry.find = vi.fn(() => ({
-      ...ctx.model,
-      id: "free-model",
-      provider: "opencode",
-      baseUrl: "https://opencode.ai/zen/v1",
-    }));
+    ctx.modelRegistry.find = vi.fn(() =>
+      createMockModel({
+        id: "free-model",
+        provider: "opencode",
+        baseUrl: "https://opencode.ai/zen/v1",
+      }),
+    );
     ctx.modelRegistry.getApiKeyAndHeaders = vi.fn(async () => ({
-      ok: true,
+      ok: true as const,
       apiKey: "opencode-key",
       headers: {
         "x-opencode-session": "configured-session",
@@ -242,7 +242,7 @@ describe("resolveSmallModel", () => {
 
   it("rejects a configured model that cannot accept text", async () => {
     const ctx = createMockCommandContext();
-    ctx.modelRegistry.find = vi.fn(() => ({ ...ctx.model, input: ["image"] }));
+    ctx.modelRegistry.find = vi.fn(() => createMockModel({ input: ["image"] }));
 
     await expect(resolveSmallModel(ctx, { configPath: configuredPath(), env: {} })).rejects.toThrow(
       "does not accept text",
@@ -251,11 +251,12 @@ describe("resolveSmallModel", () => {
 
   it("does not fall back when the configured model has no credentials", async () => {
     const ctx = createMockCommandContext();
-    ctx.modelRegistry.find = vi.fn(() => ({
-      ...ctx.model,
-      id: "syn:small:text",
-      provider: "synthetic",
-    }));
+    ctx.modelRegistry.find = vi.fn(() =>
+      createMockModel({
+        id: "syn:small:text",
+        provider: "synthetic",
+      }),
+    );
     ctx.modelRegistry.getApiKeyAndHeaders = vi.fn(async () => ({
       ok: false,
       error: "no key",
@@ -268,15 +269,37 @@ describe("resolveSmallModel", () => {
 
   it("omits reasoning for a non-reasoning model", async () => {
     const ctx = createMockCommandContext();
-    ctx.modelRegistry.find = vi.fn(() => ({
-      ...ctx.model,
-      id: "syn:small:text",
-      provider: "synthetic",
-      reasoning: false,
-    }));
+    ctx.modelRegistry.find = vi.fn(() =>
+      createMockModel({
+        id: "syn:small:text",
+        provider: "synthetic",
+        reasoning: false,
+      }),
+    );
 
     const resolved = await resolveSmallModel(ctx, { configPath: configuredPath(), env: {} });
 
+    expect(resolved.reasoning).toBeUndefined();
+  });
+
+  it("omits reasoning when the thinking level is off", async () => {
+    const path = temporaryConfigPath();
+    writeFileSync(
+      path,
+      JSON.stringify({ provider: "synthetic", model: "syn:small:text", thinkingLevel: "off" }),
+    );
+    const ctx = createMockCommandContext();
+    ctx.modelRegistry.find = vi.fn(() =>
+      createMockModel({
+        id: "syn:small:text",
+        provider: "synthetic",
+        reasoning: true,
+      }),
+    );
+
+    const resolved = await resolveSmallModel(ctx, { configPath: path, env: {} });
+
+    expect(resolved.config.thinkingLevel).toBe("off");
     expect(resolved.reasoning).toBeUndefined();
   });
 });

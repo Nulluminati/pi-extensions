@@ -7,7 +7,7 @@
  */
 
 import { resolve } from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "pi";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   connectWorkerApprovalChannel,
   WORKER_APPROVAL_EVENT,
@@ -189,11 +189,12 @@ export default async function approvalMode(pi: ExtensionAPI) {
     if (readOnly && event.toolName !== "bash") {
       return { block: true, reason: "Read-only workers cannot start detached commands." };
     }
-    const command = typeof event.input?.command === "string" ? event.input.command : "";
+    const input: Record<string, unknown> | undefined = event.input;
+    const command = typeof input?.command === "string" ? input.command : "";
     if (!command.trim()) return { block: true, reason: "Command is empty." };
     const cwd =
-      event.toolName === "background" && typeof event.input?.cwd === "string"
-        ? resolve(ctx.cwd, event.input.cwd)
+      event.toolName === "background" && typeof input?.cwd === "string"
+        ? resolve(ctx.cwd, input.cwd)
         : ctx.cwd;
     const classification = classifyCommand(command, cwd);
     if (classification === "hard-deny") {

@@ -26,7 +26,7 @@
 
 import { type FSWatcher, watch } from "node:fs";
 import { basename, dirname } from "node:path";
-import type { ExtensionAPI, ExtensionCommandContext } from "pi";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import {
   type EditorFactory,
   hasEditorFactoryLayer,
@@ -160,16 +160,14 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
   // session_start-scoped listener, and the state would be missed on first
   // load. Load-time subscriptions are registered before any session events
   // dispatch.
-  pi.events.on(
-    GOAL_STATE_EVENT,
-    (payload: { status: string | null; iteration?: number; maxIterations?: number }) => {
-      state.goalRunning = payload.status === "active";
-      state.goalIteration = payload.status === "active" ? (payload.iteration ?? 0) : 0;
-      state.goalCap = payload.status === "active" ? (payload.maxIterations ?? null) : null;
-      state.lastHandle?.requestRender();
-      editorRequestRender?.();
-    },
-  );
+  pi.events.on(GOAL_STATE_EVENT, (data) => {
+    const payload = data as { status: string | null; iteration?: number; maxIterations?: number };
+    state.goalRunning = payload.status === "active";
+    state.goalIteration = payload.status === "active" ? (payload.iteration ?? 0) : 0;
+    state.goalCap = payload.status === "active" ? (payload.maxIterations ?? null) : null;
+    state.lastHandle?.requestRender();
+    editorRequestRender?.();
+  });
 
   // Track unread messenger mail so line 1 can show an "✉ N" segment in its
   // right block. Subscribed at load time rather than in session_start, for
@@ -179,7 +177,8 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
   // announcement would be missed on first load. Like goalRunning, unreadMail
   // is not reset on session boundaries — the messenger re-announces on every
   // session_start, and resetting here could clobber that announcement.
-  pi.events.on(MESSENGER_STATE_EVENT, (payload: { name: string | null; unread: number }) => {
+  pi.events.on(MESSENGER_STATE_EVENT, (data) => {
+    const payload = data as { name: string | null; unread: number };
     state.unreadMail = payload.unread;
     state.lastHandle?.requestRender();
   });
@@ -187,18 +186,17 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
   // Worker spend roll-up from the workers extension. Like unreadMail, this is
   // event-owned state: the workers extension re-announces on its lifecycle
   // events, so no session-boundary reset.
-  pi.events.on(
-    WORKERS_STATE_EVENT,
-    (payload: { running: number; workerCostUsd?: number; workerTokens?: number }) => {
-      state.workerCostUsd = payload.workerCostUsd ?? 0;
-      state.workerTokens = payload.workerTokens ?? 0;
-      state.lastHandle?.requestRender();
-    },
-  );
+  pi.events.on(WORKERS_STATE_EVENT, (data) => {
+    const payload = data as { running: number; workerCostUsd?: number; workerTokens?: number };
+    state.workerCostUsd = payload.workerCostUsd ?? 0;
+    state.workerTokens = payload.workerTokens ?? 0;
+    state.lastHandle?.requestRender();
+  });
 
   // The approval gate announces its state on session_start. Subscribe before
   // that event so the editor never misses the initial enabled state.
-  pi.events.on(APPROVAL_MODE_EVENT, (payload: { enabled: boolean }) => {
+  pi.events.on(APPROVAL_MODE_EVENT, (data) => {
+    const payload = data as { enabled: boolean };
     state.approvalModeOff = !payload.enabled;
     state.lastHandle?.requestRender();
     editorRequestRender?.();
@@ -210,7 +208,8 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
   // session_start handler, which may run before this extension's
   // session_start-scoped listeners exist, and re-subscribing per session would
   // stack a duplicate listener on every session start.
-  pi.events.on(FLEX_EVENT, (flex: { flexOn: boolean; flexCapable: boolean }) => {
+  pi.events.on(FLEX_EVENT, (data) => {
+    const flex = data as { flexOn: boolean; flexCapable: boolean };
     state.flexOn = flex.flexOn;
     state.flexCapable = flex.flexCapable;
     state.lastHandle?.requestRender();

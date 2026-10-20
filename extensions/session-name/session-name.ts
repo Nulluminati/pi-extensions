@@ -1,7 +1,7 @@
 /** Name interactive Pi sessions from their first user message. */
 
 import { basename } from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "pi";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { extractText, findNewestCustomEntry } from "../../lib/session-utils.ts";
 import { cleanName, generateTitle } from "./src/title.ts";
 

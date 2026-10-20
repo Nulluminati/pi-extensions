@@ -5,7 +5,7 @@
  * public search API. Bypasses MCP entirely — direct HTTP with no API key required.
  */
 
-import type { ExtensionAPI } from "pi";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { renderCodeSearchResult } from "./src/renderer.ts";
 import {
   CODE_SEARCH_OUTPUT,

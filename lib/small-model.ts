@@ -1,7 +1,14 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type {
+  Model,
+  ProviderEnv,
+  ProviderHeaders,
+  SimpleStreamOptions,
+} from "@earendil-works/pi-ai";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import type { ExtensionContext, Model, ThinkingLevel } from "pi";
 import { isNodeError } from "./errors.ts";
 import { agentConfigPath } from "./paths.ts";
 import { THINKING_LEVELS } from "./thinking-levels.ts";
@@ -21,8 +28,8 @@ export interface SmallModelConfig {
 
 export interface SmallModelAuth {
   apiKey: string;
-  headers?: Record<string, string>;
-  env?: Record<string, string>;
+  headers?: ProviderHeaders;
+  env?: ProviderEnv;
 }
 
 export interface ResolvedSmallModel {
@@ -30,8 +37,11 @@ export interface ResolvedSmallModel {
   auth: SmallModelAuth;
   config: SmallModelConfig;
   source: "config" | "environment";
-  reasoning: string | undefined;
+  reasoning: SmallModelReasoning;
 }
+
+/** Provider-neutral reasoning option; undefined turns thinking off. */
+type SmallModelReasoning = SimpleStreamOptions["reasoning"];
 
 interface ConfigOptions {
   configPath?: string;
@@ -183,7 +193,7 @@ export async function resolveSmallModelFromConfig(
 function getOpenCodeSessionHeaders(
   model: Model<any>,
   ctx: ExtensionContext,
-): Record<string, string> | undefined {
+): ProviderHeaders | undefined {
   if (!isOpenCodeModel(model)) return undefined;
   const sessionId = ctx.sessionManager.getSessionId();
   if (!sessionId) return undefined;
@@ -210,6 +220,6 @@ function parseThinkingLevel(value: unknown, source: string): ThinkingLevel {
   );
 }
 
-function thinkingLevelToReasoning(level: ThinkingLevel): string | undefined {
-  return level === "off" ? "none" : level;
+function thinkingLevelToReasoning(level: ThinkingLevel): SmallModelReasoning {
+  return level === "off" ? undefined : level;
 }

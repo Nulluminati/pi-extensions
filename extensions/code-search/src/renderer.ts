@@ -1,4 +1,9 @@
-import type { AgentToolResult, Theme, ToolRenderContext, ToolRenderResultOptions } from "pi";
+import type {
+  AgentToolResult,
+  Theme,
+  ToolRenderResultOptions,
+} from "@earendil-works/pi-coding-agent";
+import type { ToolRenderContext } from "../../../lib/pi-types.ts";
 import { createToolStatus, wrapToolText } from "../../../lib/tool-renderer.ts";
 import type { CodeSearchDetails, CodeSearchParams } from "./types.ts";
 

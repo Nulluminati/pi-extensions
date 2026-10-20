@@ -1,7 +1,7 @@
 /** Framed, single-call approval with a reviewable command and a safe default. */
 
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { SelectList, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import type { ExtensionContext } from "pi";
 import { PANEL_OVERLAY_OPTIONS } from "../../../lib/overlay-options.ts";
 import { createSettleOnce } from "../../../lib/settle-once.ts";
 import { modalContentWidth, renderModalFrame } from "../../../lib/tui-frame.ts";

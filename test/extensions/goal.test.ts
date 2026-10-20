@@ -1,13 +1,14 @@
 import { readdir } from "node:fs/promises";
 import { resolve } from "node:path";
-import { completeSimple } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage } from "@earendil-works/pi-ai";
+import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import goalExtension from "../../extensions/goal/goal.ts";
 import { createMockCommandContext } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
 import { getCommandHandler, getEventHandler, makeConfirmCustom } from "../mocks/test-helpers.ts";
 
-vi.mock("@earendil-works/pi-ai", () => ({
+vi.mock("@earendil-works/pi-ai/compat", () => ({
   completeSimple: vi.fn(),
 }));
 
@@ -624,9 +625,9 @@ describe("goal-extension", () => {
       await goalExtension(mockPi);
       await getCommandHandler(mockPi, "goal:new")("implement snake game", mockCtx);
       mockPi.sendUserMessage.mockClear();
-      vi.mocked(completeSimple).mockResolvedValueOnce({
-        content: [{ type: "text", text: "The goal looks mostly done to me." }],
-      });
+      vi.mocked(completeSimple).mockResolvedValueOnce(
+        fauxAssistantMessage([{ type: "text", text: "The goal looks mostly done to me." }]),
+      );
 
       const agentEndHandler = getEventHandler(mockPi, "agent_end");
       await agentEndHandler({ type: "agent_end", messages: [] }, mockCtx);
@@ -1370,9 +1371,9 @@ describe("goal-extension", () => {
 
 // Queue an evaluator verdict for the next completeSimple call.
 function mockVerdict(status: "met" | "not_met" | "impossible", reason: string) {
-  vi.mocked(completeSimple).mockResolvedValueOnce({
-    content: [{ type: "text", text: JSON.stringify({ status, reason }) }],
-  });
+  vi.mocked(completeSimple).mockResolvedValueOnce(
+    fauxAssistantMessage([{ type: "text", text: JSON.stringify({ status, reason }) }]),
+  );
 }
 
 // A valid active goal as persisted in goal-state entries.

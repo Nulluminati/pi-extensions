@@ -1,11 +1,12 @@
 import * as fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import type { AgentToolResult, ClassifierAnswer, ClassifierResult } from "pi";
+import type { ClassifierAnswer, ClassifierResult } from "@earendil-works/pi-ai";
+import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import jevExtension from "../../extensions/jev/jev.ts";
 import * as jsonAtomic from "../../lib/json-atomic.ts";
-import { createMockContext } from "../mocks/context-mocks.ts";
+import { createMockContext, createMockModel } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
 
 vi.mock("node:fs/promises", { spy: true });
@@ -65,7 +66,7 @@ function response(overrides: Partial<ClassifierResult> = {}): ClassifierResult {
 async function setup() {
   const pi = createMockPi();
   const ctx = createMockContext();
-  const model = { ...ctx.model, provider: "typesafe", id: "jev-latest" };
+  const model = createMockModel({ provider: "typesafe", id: "jev-latest" });
   ctx.modelRegistry.findOfType.mockReturnValue(model);
   ctx.modelRegistry.classify.mockResolvedValue(response());
   await jevExtension(pi);

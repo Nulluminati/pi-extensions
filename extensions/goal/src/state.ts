@@ -1,4 +1,4 @@
-import type { ExtensionContext } from "pi";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { GoalState } from "./types.ts";
 
 // --- Utilities ---
@@ -38,7 +38,7 @@ export function reconstructState(ctx: ExtensionContext): GoalState | null {
   const branch = ctx.sessionManager.getBranch();
   for (let i = branch.length - 1; i >= 0; i--) {
     const entry = branch[i];
-    if (entry.type === "custom" && entry.customType === "goal-state") {
+    if (entry?.type === "custom" && entry.customType === "goal-state") {
       const data = entry.data as { goal?: PersistedGoalState | null } | null;
       if (!isGoal(data?.goal) || data.goal.status === "complete") return null;
       const { status, ...rest } = data.goal;

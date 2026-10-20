@@ -14,16 +14,13 @@
  * read them as relative sizes, not exact counts.
  */
 
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { ExtensionAPI, ExtensionCommandContext, Skill } from "@earendil-works/pi-coding-agent";
 import {
   DEFAULT_COMPACTION_SETTINGS,
   estimateTokens,
-  // TypeScript 7.0.2 (native preview) fails to resolve the skills re-export
-  // line in the shipped index.d.ts and drops every name from it; the runtime
-  // export exists, so the suppression stays until the compiler resolves it.
-  // @ts-expect-error unresolved re-export in pi-coding-agent's declarations
   formatSkillsForPrompt,
 } from "@earendil-works/pi-coding-agent";
-import type { ExtensionAPI, ExtensionCommandContext } from "pi";
 import { sumSessionUsage } from "../../../lib/session-usage.ts";
 import { extractText } from "../../../lib/session-utils.ts";
 import type { ContextFileInfo, MessageSizeInfo, SessionTotals } from "./types.ts";
@@ -63,7 +60,7 @@ const PREVIEW_LENGTH = 48;
 
 function estimateTextTokens(text: string): number {
   if (!text) return 0;
-  return estimateTokens({ role: "user", content: [{ type: "text", text }] });
+  return estimateTokens({ role: "user", content: [{ type: "text", text }], timestamp: 0 });
 }
 
 /** Shorten a context file path for display: cwd-relative, then ~-relative. */
@@ -132,10 +129,15 @@ export function measureContext(pi: ExtensionAPI, ctx: ExtensionCommandContext): 
     ];
   });
   const selectedTools = options.selectedTools ?? ["read", "bash", "edit", "write"];
-  const skillFileReadTool = ["read", "bash"].find((tool) => selectedTools.includes(tool));
+  const skillFileReadTool = (["read", "bash"] as const).find((tool) =>
+    selectedTools.includes(tool),
+  );
   let skillsTokens = 0;
   if (skillFileReadTool && skills.length > 0) {
-    skillsTokens = estimateTextTokens(formatSkillsForPrompt(skills, skillFileReadTool).trim());
+    // formatSkillsForPrompt reads only the fields normalized above.
+    skillsTokens = estimateTextTokens(
+      formatSkillsForPrompt(skills as Skill[], skillFileReadTool).trim(),
+    );
   }
 
   // Tools: active tool definitions (name, description, parameter schema) are
@@ -163,7 +165,7 @@ export function measureContext(pi: ExtensionAPI, ctx: ExtensionCommandContext): 
     const message = e.message as { role?: unknown; content?: unknown };
     if (typeof message.role !== "string") continue;
     messageCount += 1;
-    const tokens = estimateTokens(message);
+    const tokens = estimateTokens(message as AgentMessage);
     messageTokens += tokens;
     const preview = extractText(message.content)
       .replace(/\s+/g, " ")

@@ -4,7 +4,7 @@
 
 import { type FSWatcher, mkdirSync, watch } from "node:fs";
 import { join } from "node:path";
-import type { ExtensionContext } from "pi";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { inboxFileName, messengerDir } from "./store.ts";
 
 // --- Types ---

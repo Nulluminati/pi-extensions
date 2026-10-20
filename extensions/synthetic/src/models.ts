@@ -1,4 +1,5 @@
-import type { ProviderModelConfig, ThinkingLevelMap } from "pi";
+import type { ThinkingLevelMap } from "@earendil-works/pi-ai";
+import type { ProviderChatModelConfig } from "../../../lib/pi-types.ts";
 
 /**
  * Compat flags applied to every Synthetic model.
@@ -15,7 +16,7 @@ const SYNTHETIC_COMPAT = {
   supportsStore: false,
   maxTokensField: "max_tokens",
   requiresToolResultName: true,
-} as const satisfies ProviderModelConfig["compat"];
+} as const satisfies ProviderChatModelConfig["compat"];
 
 /**
  * Thinking map for reasoning models whose thinking can be disabled. The
@@ -70,7 +71,7 @@ const ALWAYS_ON_THINKING_MAP: ThinkingLevelMap = {
  * The syn:* ids are first-class selectable models in the Synthetic API (each
  * points at a concrete model behind the scenes) and are registered standalone.
  */
-export const STATIC_MODELS: ProviderModelConfig[] = [
+export const STATIC_MODELS: ProviderChatModelConfig[] = [
   // --- syn: aliases (first-class selectable ids) ---
   // syn:large:* currently alias GLM-5.2 and Kimi-K3 respectively; pricing
   // from the live catalog (2026-08).

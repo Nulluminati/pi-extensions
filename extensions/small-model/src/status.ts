@@ -1,4 +1,5 @@
-import type { ExtensionContext, ThinkingLevel } from "pi";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { resolveSmallModel } from "../../../lib/small-model.ts";
 import { formatStatusLine } from "../../../lib/ui-format.ts";
 import { STATUS_ICON, STATUS_KEY } from "./constants.ts";

@@ -2,7 +2,7 @@
  *  creation, baseline measurement, and the untracked snapshot that scopes
  *  later keeps and discards. */
 
-import type { AgentToolResult, ExtensionContext } from "pi";
+import type { AgentToolResult, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { isProjectStatePath } from "../../../lib/paths.ts";
 import { buildSummary, formatSummary } from "./format.ts";
 import {
@@ -42,7 +42,7 @@ export async function initAction(
   params: AutoresearchParams,
   ctx: ExtensionContext,
   publish: PublishFn,
-): Promise<AgentToolResult> {
+): Promise<AgentToolResult<unknown>> {
   const cwd = ctx.cwd;
   const objective = typeof params.objective === "string" ? params.objective.trim() : "";
   const metric = typeof params.metric === "string" ? params.metric.trim() : "";

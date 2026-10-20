@@ -1,13 +1,19 @@
 import { readdir } from "node:fs/promises";
 import { resolve } from "node:path";
-import type { ExtensionCommandContext } from "pi";
+import { fauxAssistantMessage } from "@earendil-works/pi-ai";
+import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import handoffExtension from "../../extensions/handoff/handoff.ts";
-import { createMockCommandContext } from "../mocks/context-mocks.ts";
+import { createMockCommandContext, createMockModel } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
-import { getCommandHandler } from "../mocks/test-helpers.ts";
+import { firstContentText, getCommandHandler } from "../mocks/test-helpers.ts";
 
-vi.mock("@earendil-works/pi-ai", () => ({
+// test/setup/pi-coding-agent.ts stubs the package; the session manager is real.
+const { SessionManager } = await vi.importActual<typeof import("@earendil-works/pi-coding-agent")>(
+  "@earendil-works/pi-coding-agent",
+);
+
+vi.mock("@earendil-works/pi-ai/compat", () => ({
   completeSimple: vi.fn(),
 }));
 
@@ -95,7 +101,8 @@ describe("handoff-extension", () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     mockCustomResolvesOnDone(mockCtx);
-    const setupSessionManager = { appendSessionInfo: vi.fn() };
+    const setupSessionManager = SessionManager.inMemory();
+    vi.spyOn(setupSessionManager, "appendSessionInfo");
     mockCtx.sessionManager.getBranch = vi.fn(buildBranch);
     mockCtx.sessionManager.getSessionFile = vi.fn(() => "/sessions/old.json");
     mockCtx.ui.editor = vi.fn(() => Promise.resolve("edited summary"));
@@ -106,10 +113,10 @@ describe("handoff-extension", () => {
       },
     );
 
-    const { completeSimple } = await import("@earendil-works/pi-ai");
-    vi.mocked(completeSimple).mockResolvedValue({
-      content: [{ type: "text", text: "summary text" }],
-    });
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+    vi.mocked(completeSimple).mockResolvedValue(
+      fauxAssistantMessage([{ type: "text", text: "summary text" }]),
+    );
 
     await runHandoff(mockPi, mockCtx, "");
 
@@ -117,7 +124,7 @@ describe("handoff-extension", () => {
     expect(mockCtx.ui.custom).toHaveBeenCalledTimes(1);
     expect(mockCtx.ui.editor).toHaveBeenCalledWith("Review handoff prompt", "summary text");
     // The summary prompt omits the goal line and steers from the transcript.
-    const request = vi.mocked(completeSimple).mock.calls[0][1].messages[0].content[0].text;
+    const request = firstContentText(vi.mocked(completeSimple).mock.calls[0][1].messages[0]) ?? "";
     expect(request).not.toContain("Goal for the new session");
     // The session falls back to the generic name.
     expect(setupSessionManager.appendSessionInfo).toHaveBeenCalledWith("Handoff session");
@@ -131,10 +138,10 @@ describe("handoff-extension", () => {
 
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
-    const { completeSimple } = await import("@earendil-works/pi-ai");
-    vi.mocked(completeSimple).mockResolvedValue({
-      content: [{ type: "text", text: "print mode summary" }],
-    });
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+    vi.mocked(completeSimple).mockResolvedValue(
+      fauxAssistantMessage([{ type: "text", text: "print mode summary" }]),
+    );
 
     await runHandoff(mockPi, mockCtx, "");
 
@@ -167,7 +174,7 @@ describe("handoff-extension", () => {
       expect.stringContaining("Global small model not found"),
       "error",
     );
-    const { completeSimple } = await import("@earendil-works/pi-ai");
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
     expect(completeSimple).not.toHaveBeenCalled();
   });
 
@@ -196,10 +203,10 @@ describe("handoff-extension", () => {
       });
     });
 
-    const { completeSimple } = await import("@earendil-works/pi-ai");
-    vi.mocked(completeSimple).mockResolvedValue({
-      content: [{ type: "text", text: "summary text" }],
-    });
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+    vi.mocked(completeSimple).mockResolvedValue(
+      fauxAssistantMessage([{ type: "text", text: "summary text" }]),
+    );
 
     await runHandoff(mockPi, mockCtx, "finish the refactor");
 
@@ -245,14 +252,14 @@ describe("handoff-extension", () => {
     ]);
     mockCtx.ui.editor = vi.fn(() => Promise.resolve(undefined));
 
-    const { completeSimple } = await import("@earendil-works/pi-ai");
-    vi.mocked(completeSimple).mockResolvedValue({
-      content: [{ type: "text", text: "summary text" }],
-    });
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+    vi.mocked(completeSimple).mockResolvedValue(
+      fauxAssistantMessage([{ type: "text", text: "summary text" }]),
+    );
 
     await runHandoff(mockPi, mockCtx, "finish the refactor");
 
-    const request = vi.mocked(completeSimple).mock.calls[0][1].messages[0].content[0].text;
+    const request = firstContentText(vi.mocked(completeSimple).mock.calls[0][1].messages[0]) ?? "";
     const transcript = request.match(
       /<conversation_transcript>\n([\s\S]*)\n<\/conversation_transcript>/,
     )?.[1];
@@ -288,14 +295,14 @@ describe("handoff-extension", () => {
     ]);
     mockCtx.ui.editor = vi.fn(() => Promise.resolve(undefined));
 
-    const { completeSimple } = await import("@earendil-works/pi-ai");
-    vi.mocked(completeSimple).mockResolvedValue({
-      content: [{ type: "text", text: "summary text" }],
-    });
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+    vi.mocked(completeSimple).mockResolvedValue(
+      fauxAssistantMessage([{ type: "text", text: "summary text" }]),
+    );
 
     await runHandoff(mockPi, mockCtx, "finish the refactor");
 
-    const request = vi.mocked(completeSimple).mock.calls[0][1].messages[0].content[0].text;
+    const request = firstContentText(vi.mocked(completeSimple).mock.calls[0][1].messages[0]) ?? "";
     const transcript = request.match(
       /<conversation_transcript>\n([\s\S]*)\n<\/conversation_transcript>/,
     )?.[1];
@@ -307,23 +314,22 @@ describe("handoff-extension", () => {
     const mockCtx = createMockCommandContext();
     mockCustomResolvesOnDone(mockCtx);
     const activeModel = mockCtx.model;
-    const smallModel = {
-      ...activeModel,
+    const smallModel = createMockModel({
       id: "small-model",
       name: "Small Model",
       provider: "small-provider",
       reasoning: true,
-    };
+    });
     vi.stubEnv("PI_SMALL_MODEL", "small-provider/small-model");
     mockCtx.modelRegistry.find = vi.fn(() => smallModel);
     mockCtx.sessionManager.getBranch = vi.fn(buildBranch);
     mockCtx.sessionManager.getSessionFile = vi.fn(() => "/sessions/old.json");
     mockCtx.ui.editor = vi.fn(() => Promise.resolve("edited summary"));
 
-    const { completeSimple } = await import("@earendil-works/pi-ai");
-    vi.mocked(completeSimple).mockResolvedValue({
-      content: [{ type: "text", text: "summary text" }],
-    });
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+    vi.mocked(completeSimple).mockResolvedValue(
+      fauxAssistantMessage([{ type: "text", text: "summary text" }]),
+    );
 
     await runHandoff(mockPi, mockCtx, "finish the refactor");
 
@@ -361,8 +367,13 @@ describe("handoff-extension", () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     mockCustomResolvesOnDone(mockCtx);
-    const replacementCtx = createMockCommandContext();
-    const setupSessionManager = { appendSessionInfo: vi.fn() };
+    const replacementCtx = {
+      ...createMockCommandContext(),
+      sendMessage: vi.fn(),
+      sendUserMessage: vi.fn(),
+    };
+    const setupSessionManager = SessionManager.inMemory();
+    vi.spyOn(setupSessionManager, "appendSessionInfo");
     mockCtx.sessionManager.getBranch = vi.fn(buildBranch);
     mockCtx.sessionManager.getSessionFile = vi.fn(() => "/sessions/old.json");
     mockCtx.ui.editor = vi.fn(() => Promise.resolve("edited summary"));
@@ -380,10 +391,10 @@ describe("handoff-extension", () => {
       },
     );
 
-    const { completeSimple } = await import("@earendil-works/pi-ai");
-    vi.mocked(completeSimple).mockResolvedValue({
-      content: [{ type: "text", text: "summary text" }],
-    });
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+    vi.mocked(completeSimple).mockResolvedValue(
+      fauxAssistantMessage([{ type: "text", text: "summary text" }]),
+    );
 
     await expect(runHandoff(mockPi, mockCtx, "finish the refactor")).resolves.toBeUndefined();
 
@@ -405,10 +416,10 @@ describe("handoff-extension", () => {
 
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
-    const { completeSimple } = await import("@earendil-works/pi-ai");
-    vi.mocked(completeSimple).mockResolvedValue({
-      content: [{ type: "text", text: "print mode summary" }],
-    });
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+    vi.mocked(completeSimple).mockResolvedValue(
+      fauxAssistantMessage([{ type: "text", text: "print mode summary" }]),
+    );
 
     await runHandoff(mockPi, mockCtx, "finish the refactor");
 
@@ -426,10 +437,10 @@ describe("handoff-extension", () => {
     mockCtx.sessionManager.getBranch = vi.fn(buildBranch);
     mockCtx.ui.editor = vi.fn(() => Promise.resolve(undefined));
 
-    const { completeSimple } = await import("@earendil-works/pi-ai");
-    vi.mocked(completeSimple).mockResolvedValue({
-      content: [{ type: "text", text: "summary text" }],
-    });
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+    vi.mocked(completeSimple).mockResolvedValue(
+      fauxAssistantMessage([{ type: "text", text: "summary text" }]),
+    );
 
     await runHandoff(mockPi, mockCtx, "finish the refactor");
 
@@ -443,7 +454,7 @@ describe("handoff-extension", () => {
     mockCustomResolvesOnDone(mockCtx);
     mockCtx.sessionManager.getBranch = vi.fn(buildBranch);
 
-    const { completeSimple } = await import("@earendil-works/pi-ai");
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
     vi.mocked(completeSimple).mockRejectedValue(new Error("rate limited"));
 
     await runHandoff(mockPi, mockCtx, "finish the refactor");
@@ -461,8 +472,8 @@ describe("handoff-extension", () => {
     mockCustomResolvesOnDone(mockCtx);
     mockCtx.sessionManager.getBranch = vi.fn(buildBranch);
 
-    const { completeSimple } = await import("@earendil-works/pi-ai");
-    vi.mocked(completeSimple).mockResolvedValue({ content: [] });
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+    vi.mocked(completeSimple).mockResolvedValue(fauxAssistantMessage([]));
 
     await runHandoff(mockPi, mockCtx, "finish the refactor");
 
@@ -481,10 +492,10 @@ describe("handoff-extension", () => {
     mockCtx.ui.editor = vi.fn(() => Promise.resolve("edited summary"));
     mockCtx.newSession = vi.fn(() => Promise.resolve({ cancelled: true }));
 
-    const { completeSimple } = await import("@earendil-works/pi-ai");
-    vi.mocked(completeSimple).mockResolvedValue({
-      content: [{ type: "text", text: "summary text" }],
-    });
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+    vi.mocked(completeSimple).mockResolvedValue(
+      fauxAssistantMessage([{ type: "text", text: "summary text" }]),
+    );
 
     await runHandoff(mockPi, mockCtx, "finish the refactor");
 

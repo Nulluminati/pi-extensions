@@ -4,8 +4,8 @@ import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
-import type { ExtensionAPI, ExtensionContext } from "pi";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import autoresearchExtension from "../../extensions/autoresearch/autoresearch.ts";
 import {

@@ -13,7 +13,11 @@
  * across turns.
  */
 
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "pi";
+import type {
+  ExtensionAPI,
+  ExtensionCommandContext,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import { confirmModal, promptText } from "../../lib/input-modal.ts";
 import { extractToolCallBlocks } from "../../lib/session-utils.ts";
 import { formatStatusLine } from "../../lib/ui-format.ts";
@@ -191,15 +195,17 @@ export default async function goalExtension(pi: ExtensionAPI) {
   // copy is the current run's reminder and stays; otherwise every copy is
   // stale. Nothing to strip when no copy exists, so skip the allocation.
   pi.on("context", async (event) => {
-    const messages = event.messages as Array<{ customType?: string }>;
+    const messages = event.messages;
+    const customType = (message: unknown) =>
+      (message as { customType?: string } | undefined)?.customType;
     let newest = -1;
     for (let index = messages.length - 1; index >= 0 && newest === -1; index--) {
-      if (messages[index]?.customType === GOAL_CONTEXT_TYPE) newest = index;
+      if (customType(messages[index]) === GOAL_CONTEXT_TYPE) newest = index;
     }
     if (newest === -1) return undefined;
     const keep = state?.status === "active" ? newest : -1;
     const filtered = messages.filter(
-      (message, index) => message.customType !== GOAL_CONTEXT_TYPE || index === keep,
+      (message, index) => customType(message) !== GOAL_CONTEXT_TYPE || index === keep,
     );
     if (filtered.length === messages.length) return undefined;
     return { messages: filtered };

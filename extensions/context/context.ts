@@ -16,7 +16,7 @@
  */
 
 // --- Imports ---
-import type { ExtensionAPI, ExtensionCommandContext } from "pi";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { measureContext } from "./src/measure.ts";
 import { buildPlainText, showContextModal } from "./src/view.ts";
 

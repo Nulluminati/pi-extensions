@@ -4,16 +4,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
-import type { AgentToolResult, AgentToolUpdateCallback } from "pi";
+import type { AgentToolResult, AgentToolUpdateCallback } from "@earendil-works/pi-coding-agent";
 import { loadWorkerSandboxPolicy } from "./policy.ts";
 
 const START_TIMEOUT_MS = 30_000;
 const CLOSE_TIMEOUT_MS = 2_000;
 
+// Results come from whichever built-in tool ran in the sandbox, so their
+// details type varies by tool.
+type SandboxToolResult = AgentToolResult<any>;
+type SandboxToolUpdateCallback = AgentToolUpdateCallback<any>;
+
 type Reply =
   | { type: "ready" }
   | { type: "fatal"; error: string }
-  | { type: "update"; id: number; value: Partial<AgentToolResult> }
+  | { type: "update"; id: number; value: SandboxToolResult }
   | { type: "data"; id: number; base64: string }
   | { type: "result"; id: number; value: unknown }
   | { type: "error"; id: number; error: string };
@@ -21,7 +26,7 @@ type Reply =
 interface PendingRequest {
   resolve(value: unknown): void;
   reject(error: Error): void;
-  onUpdate?: AgentToolUpdateCallback;
+  onUpdate?: SandboxToolUpdateCallback;
   onData?: (chunk: Buffer) => void;
   signal?: AbortSignal;
   abort?: () => void;
@@ -31,8 +36,8 @@ export interface WorkerSandboxClient {
   runTool(
     name: string,
     params: unknown,
-    options: { cwd: string; signal?: AbortSignal; onUpdate?: AgentToolUpdateCallback },
-  ): Promise<AgentToolResult>;
+    options: { cwd: string; signal?: AbortSignal; onUpdate?: SandboxToolUpdateCallback },
+  ): Promise<SandboxToolResult>;
   runShell(
     command: string,
     options: {
@@ -90,7 +95,7 @@ class BrokerClient implements WorkerSandboxClient {
     options: {
       cwd: string;
       signal?: AbortSignal;
-      onUpdate?: AgentToolUpdateCallback;
+      onUpdate?: SandboxToolUpdateCallback;
       onData?: (chunk: Buffer) => void;
     },
   ): Promise<unknown> {
@@ -141,9 +146,9 @@ class BrokerClient implements WorkerSandboxClient {
   async runTool(
     name: string,
     params: unknown,
-    options: { cwd: string; signal?: AbortSignal; onUpdate?: AgentToolUpdateCallback },
-  ): Promise<AgentToolResult> {
-    return (await this.request({ type: "tool", name, params }, options)) as AgentToolResult;
+    options: { cwd: string; signal?: AbortSignal; onUpdate?: SandboxToolUpdateCallback },
+  ): Promise<SandboxToolResult> {
+    return (await this.request({ type: "tool", name, params }, options)) as SandboxToolResult;
   }
 
   async runShell(

@@ -22,7 +22,11 @@
 // --- Imports ---
 
 import { existsSync } from "node:fs";
-import type { ExtensionAPI, ExtensionContext, ExtensionUIContext } from "pi";
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+  ExtensionUIContext,
+} from "@earendil-works/pi-coding-agent";
 import { excludeFromGit } from "../../lib/git.ts";
 import { projectStateRelative } from "../../lib/paths.ts";
 import { isProcessAlive } from "../../lib/presence-shards.ts";

@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "pi";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { RecapState } from "./types.ts";
 
 // --- State management (WeakMap for per-instance) ---

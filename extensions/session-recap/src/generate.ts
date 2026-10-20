@@ -1,5 +1,6 @@
-import { completeSimple } from "@earendil-works/pi-ai";
-import type { ExtensionContext } from "pi";
+import type { SimpleStreamOptions } from "@earendil-works/pi-ai";
+import { completeSimple } from "@earendil-works/pi-ai/compat";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { resolveSmallModel } from "../../../lib/small-model.ts";
 
 export async function generateRecap(
@@ -23,15 +24,7 @@ Rules:
 ${transcript.slice(0, 12000)}
 </transcript>`;
 
-  const options: {
-    apiKey: string;
-    headers?: Record<string, string>;
-    env?: Record<string, string>;
-    signal?: AbortSignal;
-    cacheRetention: string;
-    maxTokens: number;
-    reasoning?: string;
-  } = {
+  const options: SimpleStreamOptions = {
     apiKey: resolved.auth.apiKey,
     cacheRetention: "none",
     maxTokens: 256,

@@ -9,7 +9,7 @@
  * extension, so plan keeps working when todos is not loaded.
  */
 
-import type { ExtensionAPI } from "pi";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export const TODOS_ENTRY_TYPE = "todos-state";
 export const TODOS_CHANGED_EVENT = "todos:changed";

@@ -1,7 +1,7 @@
 // Non-TUI question flow: asks each question through plain ctx.ui
 // input/select/confirm dialogs and reviews the answers before submitting.
 
-import type { ExtensionContext } from "pi";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { QuestionnaireOutcome } from "./dialog.ts";
 import { formatAnswerSummary } from "./result.ts";
 import { type AskUserAnswer, type AskUserQuestion, normalizeCustomText } from "./schema.ts";

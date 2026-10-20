@@ -3,9 +3,9 @@
  * `/provider:models` commands.
  */
 
-import type { ProviderModelConfig } from "pi";
+import type { ProviderChatModelConfig } from "./pi-types.ts";
 
-export function formatProviderModelList(models: ProviderModelConfig[]): string {
+export function formatProviderModelList(models: ProviderChatModelConfig[]): string {
   if (models.length === 0) return "No models available.";
   return models
     .map((m) => {

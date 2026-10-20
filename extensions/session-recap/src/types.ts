@@ -22,7 +22,7 @@ export type RecapState = {
   focusEnabled: boolean;
   focusedOutAt: number | undefined;
   pendingRecap: string | undefined;
-  lastDraftedLeafId: string | undefined;
+  lastDraftedLeafId: string | null | undefined;
   autoDismissTimer: NodeJS.Timeout | undefined;
   resumeTimer: NodeJS.Timeout | undefined;
   backgroundFailureNotified: boolean;

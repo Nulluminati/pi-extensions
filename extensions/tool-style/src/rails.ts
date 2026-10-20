@@ -4,6 +4,7 @@ import type {
   BashExecutionComponent,
   CustomMessageComponent,
   Theme,
+  ThemeBg,
   ToolExecutionComponent,
 } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
@@ -47,8 +48,8 @@ interface ComponentClass {
 }
 
 interface ThemePrototype {
-  bg: (this: Theme, color: string, text: string) => string;
-  getBgAnsi: (this: Theme, color: string) => string;
+  bg: (this: Theme, color: ThemeBg, text: string) => string;
+  getBgAnsi: (this: Theme, color: ThemeBg) => string;
   [THEME_PATCH_PROPERTY]?: ThemePatchRecord;
 }
 

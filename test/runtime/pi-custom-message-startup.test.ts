@@ -2,7 +2,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import type { ExtensionAPI, ExtensionContext, ExtensionEventMap } from "pi";
+import type {
+  BeforeAgentStartEvent,
+  ExtensionAPI,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -10,7 +14,7 @@ const agentDist = dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-
 const GOAL_OBJECTIVE = "ship the snake game";
 
 type StartupHandler = (
-  event: ExtensionEventMap["before_agent_start"],
+  event: BeforeAgentStartEvent,
   ctx: ExtensionContext,
   pi: ExtensionAPI,
 ) => Promise<void> | void;

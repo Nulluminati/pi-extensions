@@ -39,7 +39,7 @@ const extTemplate = `/**
  * Short description of what this extension does.
  */
 
-import type { ExtensionAPI, ExtensionCommandContext } from "pi";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
 // --- Constants ---
 

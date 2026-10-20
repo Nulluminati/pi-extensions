@@ -1,4 +1,8 @@
-import type { AgentToolResult, Theme, ToolRenderResultOptions } from "pi";
+import type {
+  AgentToolResult,
+  Theme,
+  ToolRenderResultOptions,
+} from "@earendil-works/pi-coding-agent";
 import { createToolStatus, wrapToolText } from "../../../lib/tool-renderer.ts";
 import { FETCH_PREVIEW_LINE_LIMIT, SEARCH_PREVIEW_RESULT_LIMIT } from "./constants.ts";
 import type { SearchResult } from "./types.ts";
@@ -17,7 +21,7 @@ export function formatBytes(bytes: number): string {
 }
 
 export function renderSearchResult(
-  result: AgentToolResult,
+  result: AgentToolResult<unknown>,
   options: ToolRenderResultOptions,
   theme: Theme,
 ) {
@@ -64,7 +68,7 @@ export function renderSearchResult(
 }
 
 export function renderFetchResult(
-  result: AgentToolResult,
+  result: AgentToolResult<unknown>,
   options: ToolRenderResultOptions,
   theme: Theme,
 ) {

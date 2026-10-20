@@ -38,7 +38,7 @@ export const DELEGATE_PARAMETERS = {
     },
   },
   required: ["task"],
-};
+} as const;
 
 export const WORKERS_PARAMETERS = {
   type: "object",
@@ -71,4 +71,4 @@ export const WORKERS_PARAMETERS = {
     },
   },
   required: ["action"],
-};
+} as const;

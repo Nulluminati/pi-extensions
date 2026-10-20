@@ -7,13 +7,13 @@
 
 // --- Imports ---
 
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   BashExecutionComponent,
   CustomMessageComponent,
   Theme,
   ToolExecutionComponent,
 } from "@earendil-works/pi-coding-agent";
-import type { ExtensionAPI, ExtensionContext } from "pi";
 import { installRailStyles, type RailController } from "./src/rails.ts";
 import { startWalSurfaceMonitor } from "./src/surface.ts";
 

@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "pi";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { executeJev } from "./src/judge.ts";
 import { JEV_OUTPUT, JEV_PARAMETERS } from "./src/schema.ts";
 

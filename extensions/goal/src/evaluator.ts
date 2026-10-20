@@ -10,8 +10,9 @@
  * and returning control to the user.
  */
 
-import { completeSimple } from "@earendil-works/pi-ai";
-import type { ExtensionContext } from "pi";
+import type { SimpleStreamOptions } from "@earendil-works/pi-ai";
+import { completeSimple } from "@earendil-works/pi-ai/compat";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { extractText, extractToolCallBlocks } from "../../../lib/session-utils.ts";
 import { resolveSmallModel } from "../../../lib/small-model.ts";
 import { buildEvaluatorPrompt, EVALUATOR_SYSTEM_PROMPT } from "./prompts.ts";
@@ -119,15 +120,7 @@ export async function evaluateGoal(
 ): Promise<EvaluatorVerdict> {
   const resolved = await resolveSmallModel(ctx);
 
-  const options: {
-    apiKey: string;
-    headers?: Record<string, string>;
-    env?: Record<string, string>;
-    signal?: AbortSignal;
-    cacheRetention: string;
-    maxTokens: number;
-    reasoning?: string;
-  } = {
+  const options: SimpleStreamOptions = {
     apiKey: resolved.auth.apiKey,
     cacheRetention: "none",
     maxTokens: MAX_TOKENS,

@@ -2,7 +2,7 @@
  *  after each turn so the experiment cycle keeps going, with runaway guards
  *  (iteration cap, stall detection). */
 
-import type { ExtensionAPI, ExtensionContext } from "pi";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { projectStateRelative } from "../../../lib/paths.ts";
 import { loadConfig, readLog, stopConfig } from "./store.ts";
 import type { InstanceState, PublishFn } from "./types.ts";

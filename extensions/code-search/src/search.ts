@@ -1,4 +1,9 @@
-import type { AgentToolResult, AgentToolUpdateCallback, ExtensionContext } from "pi";
+import type {
+  AgentToolResult,
+  AgentToolUpdateCallback,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
+import { asStructuredContent } from "../../../lib/structured-content.ts";
 import { buildSearchUrl, fetchSourcegraphSearch } from "./client.ts";
 import {
   CACHE_MAX_ENTRIES,
@@ -212,7 +217,7 @@ function errorResult(
     content: [{ type: "text", text }],
     isError: true,
     details,
-    structuredContent: { ...details, error: text },
+    structuredContent: asStructuredContent({ ...details, error: text }),
   };
 }
 
@@ -313,7 +318,7 @@ export async function executeCodeSearch(
     const result: AgentToolResult<CodeSearchDetails> = {
       content: [{ type: "text", text }],
       details: { ...details, filters },
-      structuredContent: { ...details, filters },
+      structuredContent: asStructuredContent({ ...details, filters }),
     };
     writeCache(cache, key, result);
     return result;

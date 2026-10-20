@@ -1,3 +1,4 @@
+import type { Message } from "@earendil-works/pi-ai";
 import { vi } from "vitest";
 
 /**
@@ -68,4 +69,12 @@ export function makeConfirmCustom(mockCtx: { ui: { theme: unknown } }, confirmed
       component.handleInput(confirmed ? "\r" : "\u001b");
     });
   });
+}
+
+/** Text of a message's first content block, for asserting on prompts sent to a model. */
+export function firstContentText(message: Message | undefined): string | undefined {
+  const content = message?.content;
+  if (typeof content === "string") return content;
+  const block = content?.[0];
+  return block && "text" in block ? block.text : undefined;
 }

@@ -18,7 +18,7 @@
 
 // --- Imports ---
 
-import type { ExtensionAPI, ExtensionContext } from "pi";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { excludeFromGit } from "../../lib/git.ts";
 import { projectStateRelative } from "../../lib/paths.ts";
 import { formatStatusLine } from "../../lib/ui-format.ts";

@@ -7,7 +7,8 @@
 
 import { type FSWatcher, mkdirSync, watch } from "node:fs";
 import { basename, dirname } from "node:path";
-import type { ExtensionAPI, ExtensionContext, ThinkingLevel } from "pi";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   loadSmallModelConfig,
   resolveSmallModelConfigPath,

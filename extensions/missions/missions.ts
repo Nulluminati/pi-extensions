@@ -13,7 +13,11 @@
  */
 
 // --- Imports ---
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "pi";
+import type {
+  ExtensionAPI,
+  ExtensionCommandContext,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import { excludeFromGit } from "../../lib/git.ts";
 import { projectStateRelative } from "../../lib/paths.ts";
 import { setStripWidget, WIDGET_PRIORITY_MISSIONS } from "../../lib/widget-strip.ts";

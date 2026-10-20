@@ -4,7 +4,7 @@
  * wins; the provider's environment variable is the fallback.
  */
 
-import type { ExtensionContext } from "pi";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 export interface ProviderKeyOptions {
   /** Provider id as registered in Pi's model registry. */

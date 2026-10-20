@@ -1,16 +1,18 @@
-import {
-  type AssistantMessage,
-  stream,
-  type TextContent,
-  type ToolCall,
+import type {
+  AssistantMessage,
+  Message,
+  ProviderStreamOptions,
+  TextContent,
+  ToolCall,
 } from "@earendil-works/pi-ai";
+import { stream } from "@earendil-works/pi-ai/compat";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import {
   createBashTool,
   createEditTool,
   createReadTool,
   createWriteTool,
 } from "@earendil-works/pi-coding-agent";
-import type { ExtensionAPI, ExtensionCommandContext } from "pi";
 import { resolveSmallModel } from "../../../lib/small-model.ts";
 import { modelLabel, thinkingLevelToReasoning } from "./model.ts";
 import {
@@ -125,13 +127,7 @@ async function runSideTurn(
   for (let turn = 0; turn < maxTurns; turn++) {
     const abort = new AbortController();
     state.abortController = abort;
-    const streamOptions: {
-      apiKey: string;
-      headers?: Record<string, string>;
-      env?: Record<string, string>;
-      signal?: AbortSignal;
-      reasoning?: string;
-    } = { apiKey: auth.apiKey };
+    const streamOptions: ProviderStreamOptions = { apiKey: auth.apiKey };
     if (auth.headers) streamOptions.headers = auth.headers;
     if (auth.env) streamOptions.env = auth.env;
     streamOptions.signal = abort.signal;
@@ -139,7 +135,9 @@ async function runSideTurn(
 
     const eventStream = stream(
       model as unknown as Parameters<typeof stream>[0],
-      { systemPrompt, tools, messages: workingMessages },
+      // Side-thread assistant turns keep only role, content and timestamp, not
+      // the provider metadata a full AssistantMessage carries.
+      { systemPrompt, tools, messages: workingMessages as Message[] },
       streamOptions,
     );
 

@@ -3,8 +3,10 @@
  * focusable overlay panel opened by the user-facing /jobs command.
  */
 
+import type { JsonValue } from "@earendil-works/pi-ai";
 import { isArrowDown, isArrowUp } from "../../../lib/arrow-keys.ts";
 import { PANEL_OVERLAY_OPTIONS } from "../../../lib/overlay-options.ts";
+import { asStructuredContent } from "../../../lib/structured-content.ts";
 import { renderModalFrame } from "../../../lib/tui-frame.ts";
 import { formatStyledKeyHints } from "../../../lib/ui-format.ts";
 import {
@@ -19,29 +21,35 @@ import { getJob, type JobRegistry, listJobs } from "./registry.ts";
 import { cancelJob, KILL_GRACE_MS } from "./runner.ts";
 import type { Job, JobEvents } from "./types.ts";
 
-export interface JobsToolResult {
+interface JobsActionResult {
   content: Array<{ type: "text"; text: string }>;
   details?: Record<string, unknown>;
   terminate?: boolean;
   isError?: boolean;
-  structuredContent?: {
-    jobs: Array<
-      Pick<
-        Job,
-        | "id"
-        | "kind"
-        | "label"
-        | "command"
-        | "status"
-        | "startedAt"
-        | "endedAt"
-        | "exitCode"
-        | "spoolPath"
-      >
-    >;
-    output?: string;
-    error?: string;
-  };
+}
+
+export interface JobsToolResult extends Omit<JobsActionResult, "details"> {
+  details: Record<string, unknown> | undefined;
+  structuredContent: JsonValue;
+}
+
+interface JobsStructuredContent {
+  jobs: Array<
+    Pick<
+      Job,
+      | "id"
+      | "kind"
+      | "label"
+      | "command"
+      | "status"
+      | "startedAt"
+      | "endedAt"
+      | "exitCode"
+      | "spoolPath"
+    >
+  >;
+  output?: string;
+  error?: string;
 }
 
 /** Slice of the TUI the panel needs: re-render on input, and terminal rows
@@ -102,30 +110,32 @@ export async function executeJobsAction(options: JobsActionOptions): Promise<Job
       : job
         ? [job]
         : [];
+  const structuredContent: JobsStructuredContent = {
+    jobs: jobs.map((entry) => ({
+      id: entry.id,
+      kind: entry.kind,
+      label: entry.label,
+      command: entry.command,
+      status: entry.status,
+      startedAt: entry.startedAt,
+      ...(entry.endedAt !== undefined ? { endedAt: entry.endedAt } : {}),
+      ...(entry.exitCode !== undefined ? { exitCode: entry.exitCode } : {}),
+      ...(entry.spoolPath !== undefined ? { spoolPath: entry.spoolPath } : {}),
+    })),
+    ...(options.action === "tail" && !error
+      ? { output: job?.buffer.length ? result.content.map((block) => block.text).join("\n") : "" }
+      : {}),
+    ...(error ? { error } : {}),
+  };
   return {
     ...result,
+    details: result.details,
     ...(error ? { isError: true } : {}),
-    structuredContent: {
-      jobs: jobs.map((entry) => ({
-        id: entry.id,
-        kind: entry.kind,
-        label: entry.label,
-        command: entry.command,
-        status: entry.status,
-        startedAt: entry.startedAt,
-        ...(entry.endedAt !== undefined ? { endedAt: entry.endedAt } : {}),
-        ...(entry.exitCode !== undefined ? { exitCode: entry.exitCode } : {}),
-        ...(entry.spoolPath !== undefined ? { spoolPath: entry.spoolPath } : {}),
-      })),
-      ...(options.action === "tail" && !error
-        ? { output: job?.buffer.length ? result.content.map((block) => block.text).join("\n") : "" }
-        : {}),
-      ...(error ? { error } : {}),
-    },
+    structuredContent: asStructuredContent(structuredContent),
   };
 }
 
-async function runJobsAction(options: JobsActionOptions): Promise<JobsToolResult> {
+async function runJobsAction(options: JobsActionOptions): Promise<JobsActionResult> {
   const { registry, action, events } = options;
 
   if (action === "list") {
@@ -205,7 +215,7 @@ async function runJobsAction(options: JobsActionOptions): Promise<JobsToolResult
   );
 }
 
-function errorResult(code: string, text: string): JobsToolResult {
+function errorResult(code: string, text: string): JobsActionResult {
   return { content: [{ type: "text", text }], details: { error: code }, terminate: true };
 }
 

@@ -20,9 +20,13 @@
  * validator-safe way to load it.
  */
 
+import type {
+  ExtensionAPI,
+  ExtensionCommandContext,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import { CustomEditor } from "@earendil-works/pi-coding-agent";
 import { isKeyRelease, isKeyRepeat, Key, matchesKey } from "@earendil-works/pi-tui";
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "pi";
 import {
   type EditorFactory,
   hasEditorFactoryLayer,

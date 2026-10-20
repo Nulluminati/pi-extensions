@@ -1,14 +1,13 @@
 import { readdir } from "node:fs/promises";
 import { resolve } from "node:path";
-import { visibleWidth } from "@earendil-works/pi-tui";
 import type {
   AgentToolResult,
-  Component,
   ExtensionContext,
   Theme,
-  ToolRenderContext,
   ToolRenderResultOptions,
-} from "pi";
+} from "@earendil-works/pi-coding-agent";
+import type { Component } from "@earendil-works/pi-tui";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import askUserExtension from "../../extensions/ask-user/ask-user.ts";
 import {
@@ -21,6 +20,7 @@ import {
   type AskUserQuestion,
   validateQuestions,
 } from "../../extensions/ask-user/src/schema.ts";
+import type { ToolRenderContext } from "../../lib/pi-types.ts";
 import { createMockContext } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
 

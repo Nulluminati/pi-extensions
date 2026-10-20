@@ -6,7 +6,11 @@
 
 // --- Imports ---
 
-import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "pi";
+import type {
+  AgentToolResult,
+  ExtensionAPI,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import { createSettleOnce } from "../../lib/settle-once.ts";
 import { QuestionnaireComponent, type QuestionnaireOutcome } from "./src/dialog.ts";
 import { askWithDialogs } from "./src/dialog-flow.ts";

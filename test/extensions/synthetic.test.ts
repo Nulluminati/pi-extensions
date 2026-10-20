@@ -223,7 +223,10 @@ describe("synthetic-extension", () => {
     // Provider-wide flag; the actual bug we are fixing had it false, so even the
     // levels pi exposed were no-ops on the wire.
     for (const m of STATIC_MODELS) {
-      expect(m.compat?.supportsReasoningEffort, `${m.id}`).toBe(true);
+      expect(
+        (m.compat as Record<string, unknown> | undefined)?.supportsReasoningEffort,
+        `${m.id}`,
+      ).toBe(true);
     }
   });
 

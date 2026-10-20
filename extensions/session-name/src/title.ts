@@ -1,6 +1,6 @@
 /** Provider-neutral, bounded topic-name generation using the global small model. */
 
-import type { ExtensionContext } from "pi";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createTimeoutController } from "../../../lib/fetch-timeout.ts";
 import { extractText } from "../../../lib/session-utils.ts";
 import { resolveSmallModel } from "../../../lib/small-model.ts";
@@ -44,7 +44,7 @@ export async function generateTitle(
         },
         {
           ...resolved.auth,
-          reasoning,
+          ...(reasoning ? { reasoning } : {}),
           // Reasoning tokens share the provider's output limit with the title text.
           maxTokens: reasoning ? 1024 : 256,
           cacheRetention: "none",

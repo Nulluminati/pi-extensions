@@ -1,6 +1,6 @@
 // biome-ignore assist/source/organizeImports: Runtime imports precede Pi types in extension entrypoints.
 import { Type } from "typebox";
-import type { ExtensionAPI } from "pi";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getCodexCredentials } from "./src/auth.ts";
 import { getCodexResponseModel } from "./src/config.ts";
 import { generateHostedImage } from "./src/hosted.ts";
@@ -61,7 +61,10 @@ export default async function codexImageExtension(pi: ExtensionAPI) {
         ...(params.quality ? { quality: params.quality } : {}),
       };
       const onPartial = (partial: string) => {
-        onUpdate?.({ content: [{ type: "image", data: partial, mimeType: "image/png" }] });
+        onUpdate?.({
+          content: [{ type: "image", data: partial, mimeType: "image/png" }],
+          details: undefined,
+        });
       };
       let image: string;
       try {

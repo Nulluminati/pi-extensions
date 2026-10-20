@@ -1,4 +1,5 @@
-import type { ProviderModelConfig, ThinkingLevelMap } from "pi";
+import type { ThinkingLevelMap } from "@earendil-works/pi-ai";
+import type { ProviderChatModelConfig } from "../../../lib/pi-types.ts";
 
 /**
  * Compat flags applied to non-reasoning Neuralwatt models. The gateway accepts
@@ -7,7 +8,7 @@ import type { ProviderModelConfig, ThinkingLevelMap } from "pi";
 const NEURALWATT_COMPAT = {
   supportsDeveloperRole: false,
   maxTokensField: "max_tokens",
-} as const satisfies ProviderModelConfig["compat"];
+} as const satisfies ProviderChatModelConfig["compat"];
 
 /**
  * Compat flags for reasoning models. supportsReasoningEffort is required for pi
@@ -27,7 +28,7 @@ const NEURALWATT_REASONING_COMPAT = {
   supportsDeveloperRole: false,
   supportsReasoningEffort: true,
   maxTokensField: "max_tokens",
-} as const satisfies ProviderModelConfig["compat"];
+} as const satisfies ProviderChatModelConfig["compat"];
 
 /**
  * Thinking maps for reasoning models.
@@ -133,7 +134,7 @@ const DISABLEABLE_BINARY_MAP: ThinkingLevelMap = {
  * (qwen3.6-35b's previous restriction was lifted in 2026-08, and qwen-3.8-27b
  * shipped disableable in 2026-09).
  */
-export const STATIC_MODELS: ProviderModelConfig[] = [
+export const STATIC_MODELS: ProviderChatModelConfig[] = [
   // --- Neuralwatt tracking aliases (nw-*) ---
   // nw-large — large tier (catalog: currently Kimi K3; same pricing and
   // limits as the kimi-k3 entry). Probed 2026-10: every effort returns HTTP
