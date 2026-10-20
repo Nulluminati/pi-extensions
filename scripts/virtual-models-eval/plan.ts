@@ -125,7 +125,13 @@ export function planCases(options: Options): Case[] {
   if (!result.length) throw new Error("No compatible cases selected");
   return result;
 }
+export const RUNNER_VERSION = "teop-runner-v2";
+
+export function requiresWorkerIsolation(task: TaskId): boolean {
+  return task === "fix" || task === "rename" || task === "diagnosis";
+}
+
 export function workerParentPrompt(item: Case): string {
-  const writable = item.task === "fix" || item.task === "rename";
+  const writable = requiresWorkerIsolation(item.task);
   return `Use spawn_worker exactly once with wait:true, isolate:${writable}, read_only:${!writable}, timeout_seconds:${Math.floor((item.timeoutMs - 180000) / 1000)}. Keep the configured worker model and extension list. Pass this exact task string, without extra instructions: ${JSON.stringify(item.assignment)}. Use only spawn_worker and workers. Do not use other tools or perform the assignment yourself. If the worker has a patch, use workers action:collect to apply it before your final answer. Do not remove the worker or its artifacts. Do not commit or install packages. Echo the worker's final VIRTUAL_RESULT line exactly once. If the worker fails, report its failure instead of solving the task yourself.`;
 }

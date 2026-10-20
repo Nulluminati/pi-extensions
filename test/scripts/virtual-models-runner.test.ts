@@ -72,6 +72,25 @@ describe("virtual-model runner plan and checkpoints", () => {
     expect(prompt).toContain("collect");
     expect(prompt).toContain(JSON.stringify(item.assignment));
   });
+  it("uses an isolated writable worker for diagnostic test caches without permitting source edits", () => {
+    const item = planCases(
+      parseOptions([
+        "--phase",
+        "scored",
+        "--roles",
+        "worker",
+        "--tasks",
+        "diagnosis",
+        "--arms",
+        "glm",
+      ]),
+    )[0];
+    if (!item) throw new Error("Missing diagnostic case");
+    expect(workerParentPrompt(item)).toContain("isolate:true");
+    expect(workerParentPrompt(item)).toContain("read_only:false");
+    expect(item.assignment).toContain("Do not fix or edit anything");
+  });
+
   it("saves the manifest before attempts and never reruns completed failed or passed cases", async () => {
     const path = await directory();
     const cases = planCases(parseOptions([]));

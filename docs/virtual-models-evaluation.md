@@ -2,8 +2,8 @@
 
 ## Status
 
-The pilot has not started. No scored model calls or routing comparisons exist yet.
-Keep fixed models and saved defaults until the pilot provides evidence.
+The pilot is in progress. DeepSeek service failures and a runner repair pause affected comparisons.
+Keep fixed models and saved defaults. The incomplete comparison does not support global adoption.
 
 This report follows herdboard card `teop` and its agreed eight-step plan.
 The initial repository commit is `9d014872a60068c50cb2e39c8d761561ac3af1f4`.
@@ -124,7 +124,8 @@ The worker-loading findings come from this repository's `lib/worker-model.ts` an
 ## Frozen pilot design
 
 Fixture version is `teop-fixtures-v1`. Policy version is `teop-policy-v1`.
-Disposable task worktrees use commit `cc936d4`, before controller checking rules entered the repository.
+Disposable task worktrees start from commit `cc936d4`, before controller checking rules entered the repository.
+Runner v2 commits setup data only in disposable worker trees when isolation requires a clean source snapshot.
 The router receives request text and role, not fixture IDs, difficulty labels, or expected answers.
 
 | Task | Main-session work | Bounded worker work | Independent check |
@@ -191,6 +192,41 @@ node --import tsx scripts/evaluate-virtual-models.ts --resume .pi/virtual-models
 
 Use `--tasks`, `--arms`, `--roles`, and `--repetitions` to select pending cases.
 The default command runs four unscored smoke cases, not the scored matrix.
+
+## Runner repair and retained evidence
+
+Zero Cool approved runner `teop-runner-v2` after two worker setup errors became visible.
+The isolated-worker guard correctly rejected an injected, uncommitted bug and an untracked dependency link.
+Runner v2 commits the fixture and a local dependency-ignore rule before delegation. It does not change the worker safety guard.
+
+Diagnostic workers need writable, isolated worktrees for test dependencies and cache files.
+The assignment still forbids source edits. The independent check still requires unchanged tracked sources.
+Runner v2 also requires the expected assertion failure, not just a command containing the test path.
+
+The first GLM worker diagnosis result is invalid infrastructure evidence: Vitest never loaded the test.
+The old checker accepted its correct answer despite that startup failure.
+Its original result and 166,314 reported tokens remain in the raw data.
+The explicit invalidation is `.pi/virtual-models-eval/pilot-e348087/invalidations.json`.
+
+Offline replay verified actual test failures in all three completed main diagnosis cases.
+Their original scores remain unchanged, including GLM's missing-result-line failure.
+Routing policy, model pool, assignment text, and expected answers remain unchanged.
+The repair records links between run versions. It does not bypass the original resume fingerprint checks.
+
+The Software Development Kit (SDK) can fill failed responses with zero-token placeholders.
+These fields do not prove provider usage. Runner v2 marks them unknown and retains the original events.
+The offline report keeps known token lower bounds separate from unknown totals.
+
+Rebuild the available results without model requests:
+
+```sh
+node --import tsx scripts/report-virtual-models.mjs \
+  .pi/virtual-models-eval/pilot-e348087 \
+  --output-dir .pi/virtual-models-eval/combined-v2
+```
+
+When a report includes both runner versions, supply `--compatibility PATH`.
+The record must list the approved fingerprints. The report rejects unapproved invalidations and duplicate completed scores.
 
 ## Evidence still required
 

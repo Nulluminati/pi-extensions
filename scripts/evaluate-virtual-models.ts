@@ -16,11 +16,13 @@ import { writeJsonAtomic } from "../lib/json-atomic.ts";
 import { projectStateDir, projectStateRelative } from "../lib/paths.ts";
 import { trackedSources } from "./codemode-evaluation/runtime.ts";
 import { collectBaseline } from "./virtual-models-eval/baseline.ts";
+import { hasExpectedDiagnosisFailure } from "./virtual-models-eval/checks.ts";
 import { object, sumUsage } from "./virtual-models-eval/ledger.ts";
 import {
   type Case,
   parseOptions,
   planCases,
+  RUNNER_VERSION,
   workerParentPrompt,
 } from "./virtual-models-eval/plan.ts";
 import {
@@ -28,18 +30,13 @@ import {
   checkTaskWorkspace,
   createEvaluationWorkspace,
   harvest,
+  prepareTaskWorkspace,
   recoverCase,
   recoverWorkspace,
   resetState,
-  setupFiles,
 } from "./virtual-models-eval/runtime.ts";
 import { ExperimentStore } from "./virtual-models-eval/store.ts";
-import {
-  checkAnswer,
-  DIAGNOSIS_PATH,
-  FIXTURE_VERSION,
-  taskSetup,
-} from "./virtual-models-eval/tasks.ts";
+import { checkAnswer, FIXTURE_VERSION } from "./virtual-models-eval/tasks.ts";
 
 const TASK_COMMIT = "cc936d4";
 const execute = promisify(execFile);
@@ -154,6 +151,7 @@ async function main() {
         nodeVersion: process.version,
         toolCommit,
         taskCommit,
+        runnerVersion: RUNNER_VERSION,
         policyVersion: POLICY_VERSION,
         fixtureVersion: FIXTURE_VERSION,
         baseline,
@@ -191,7 +189,7 @@ async function main() {
         throw new Error("Original configuration changed before a case; experiment paused");
       await resetState(workspace.cwd);
       await workspace.reset("on", "inventory");
-      await setupFiles(workspace.cwd, taskSetup(item.task, sources));
+      const setup = await prepareTaskWorkspace(workspace.cwd, item, sources);
       const attempt = await store.start(item);
       const prefix = join(outputDirectory, attempt.id);
       await writeJsonAtomic(
@@ -200,6 +198,8 @@ async function main() {
           case: item,
           toolCommit,
           taskCommit,
+          runnerVersion: RUNNER_VERSION,
+          setup,
           fingerprint: currentFingerprint,
           cwd: workspace.cwd,
           agentDir: workspace.agentDir,
@@ -299,9 +299,10 @@ async function main() {
           item.role === "worker" ? (children.workers[0]?.finalText ?? "") : run.main.finalText;
         const checked = checkAnswer(item.task, answerText, {
           patchPassed: patch.passed,
-          diagnosisExecuted: commands.some(
-            (command) => command.includes("vitest") && command.includes(DIAGNOSIS_PATH),
-          ),
+          diagnosisExecuted: hasExpectedDiagnosisFailure(commands, [
+            ...run.main.assertionFailures,
+            ...children.workers.flatMap((worker) => worker.assertionFailures),
+          ]),
         });
         const workerCompleted =
           item.role !== "worker" ||

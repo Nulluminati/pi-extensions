@@ -25,7 +25,8 @@ import { isProcessAlive } from "../../lib/presence-shards.ts";
 import { processStartTime } from "../../lib/process-identity.ts";
 import { checkRename, createWorkspace } from "../codemode-evaluation/runtime.ts";
 import { classifierUsage, EventLedger, object, routeUsage, sumUsage } from "./ledger.ts";
-import { DIAGNOSIS_PATH, type TaskId } from "./tasks.ts";
+import { type Case, requiresWorkerIsolation } from "./plan.ts";
+import { DIAGNOSIS_PATH, type TaskId, taskSetup } from "./tasks.ts";
 
 const execute = promisify(execFile);
 async function names(path: string): Promise<string[]> {
@@ -365,6 +366,47 @@ export async function recoverWorkspace(prefix: string, repository: string): Prom
   await runGit(repository, ["worktree", "remove", "--force", cwd]);
   await rm(root, { recursive: true, force: true });
   return true;
+}
+
+export async function prepareTaskWorkspace(
+  cwd: string,
+  item: Pick<Case, "role" | "task">,
+  sources: Record<string, string>,
+) {
+  const files = taskSetup(item.task, sources);
+  await setupFiles(cwd, files);
+  const seeded = item.role === "worker" && requiresWorkerIsolation(item.task);
+  if (seeded) {
+    const path = join(cwd, ".gitignore");
+    let ignore = "";
+    try {
+      ignore = await readFile(path, "utf8");
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+    }
+    if (!ignore.split(/\r?\n/).includes("/node_modules"))
+      await writeFile(
+        path,
+        `${ignore}${ignore.endsWith("\n") || !ignore ? "" : "\n"}/node_modules\n`,
+      );
+    const paths = [...Object.keys(files), ".gitignore"];
+    await runGit(cwd, ["add", "--", ...paths]);
+    // Fixture commits stay on the disposable detached task tree; model-made changes remain separate.
+    await runGit(cwd, [
+      "-c",
+      "user.name=Virtual model pilot",
+      "-c",
+      "user.email=virtual-models@example.invalid",
+      "commit",
+      "--quiet",
+      "--only",
+      "-m",
+      "test: prepare isolated task fixture",
+      "--",
+      ...paths,
+    ]);
+  }
+  return { seeded, setupCommit: (await runGit(cwd, ["rev-parse", "HEAD"])).trim() };
 }
 
 export async function setupFiles(cwd: string, files: Record<string, string>) {

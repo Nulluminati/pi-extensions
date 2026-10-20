@@ -185,6 +185,68 @@ describe("pilot token accounting", () => {
     ).toBeNull();
   });
 
+  it.each(["error", "aborted"])(
+    "does not treat SDK %s placeholders as reported zero-token usage",
+    (stopReason) => {
+      const ledger = new EventLedger();
+      ledger.push(
+        line({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            provider: "p",
+            model: "m",
+            stopReason,
+            errorMessage: "Endpoint unavailable",
+            usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
+            content: [],
+          },
+        }),
+      );
+      expect(ledger.finish().usage.aggregate).toBeNull();
+      expect(ledger.finish().unknownCalls).toBe(1);
+      const partial = new EventLedger();
+      partial.push(
+        line({
+          type: "message_end",
+          message: { role: "assistant", provider: "p", model: "m", stopReason, usage, content: [] },
+        }),
+      );
+      expect(partial.finish().usage.aggregate).toBe(19);
+    },
+  );
+
+  it("captures actual assertion failures but does not accept a test-runner startup error as a test failure", () => {
+    const ledger = new EventLedger();
+    ledger.push(
+      line({
+        type: "message_end",
+        message: {
+          role: "toolResult",
+          toolName: "bash",
+          toolCallId: "bad",
+          isError: true,
+          content: [{ type: "text", text: "failed to load config: Cannot find package vitest" }],
+        },
+      }),
+    );
+    expect(ledger.finish().assertionFailures).toEqual([]);
+    const text = "FAIL pilot fixed precision\nAssertionError: expected '1.0k' to be '1k'";
+    ledger.push(
+      line({
+        type: "message_end",
+        message: {
+          role: "toolResult",
+          toolName: "bash",
+          toolCallId: "expected",
+          isError: true,
+          content: [{ type: "text", text }],
+        },
+      }),
+    );
+    expect(ledger.finish().assertionFailures).toEqual([text]);
+  });
+
   it("handles split JSON lines without parsing carriage returns as record separators", () => {
     const ledger = new EventLedger();
     const event = line({ type: "message_end", message: message() });

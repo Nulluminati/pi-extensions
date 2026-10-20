@@ -1,13 +1,15 @@
 import { spawn } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createWorktree, removeWorktree } from "../../extensions/workers/src/worktree.ts";
 import { runGit } from "../../lib/git.ts";
 import { processStartTime } from "../../lib/process-identity.ts";
 import {
   capture,
   createEvaluationWorkspace,
+  prepareTaskWorkspace,
   recoverCase,
   recoverWorkspace,
 } from "../../scripts/virtual-models-eval/runtime.ts";
@@ -83,6 +85,48 @@ describe("isolated virtual-model evaluation runtime", () => {
       false,
     );
   });
+  it("commits only disposable isolated-worker setup so the real clean-tree guard accepts the injected bug", async () => {
+    const root = await directory();
+    const cwd = join(root, "repo");
+    const dependencies = join(root, "dependencies");
+    await mkdir(join(cwd, "lib"), { recursive: true });
+    await mkdir(dependencies);
+    const source =
+      'export function isArrowLeft(data: string) { return data === "\\u001b[D" || data === "\\u001bOD"; }\n';
+    await writeFile(join(cwd, "lib/arrow-keys.ts"), source);
+    await writeFile(join(cwd, ".gitignore"), "node_modules/\n");
+    await runGit(cwd, ["init", "--quiet"]);
+    await runGit(cwd, ["add", "."]);
+    await runGit(cwd, [
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.invalid",
+      "commit",
+      "--quiet",
+      "-m",
+      "test: seed source",
+    ]);
+    await symlink(dependencies, join(cwd, "node_modules"));
+    const prepared = await prepareTaskWorkspace(
+      cwd,
+      { role: "worker", task: "fix" },
+      { "lib/arrow-keys.ts": source },
+    );
+    expect(prepared.seeded).toBe(true);
+    expect((await runGit(cwd, ["status", "--porcelain"])).trim()).toBe("");
+    expect(await readFile(join(cwd, ".gitignore"), "utf8")).toContain("/node_modules");
+    const child = await createWorktree(cwd, "w-fixture-clean");
+    try {
+      expect(await readFile(join(child.path, "lib/arrow-keys.ts"), "utf8")).toContain(
+        '"\\u001bOC"',
+      );
+      expect((await runGit(child.path, ["rev-parse", "HEAD"])).trim()).toBe(prepared.setupCommit);
+    } finally {
+      await removeWorktree(cwd, "w-fixture-clean");
+    }
+  });
+
   it("stops only the recorded process identity before an interrupted case resumes", async () => {
     const cwd = await directory();
     const child = spawn(process.execPath, ["-e", "setInterval(()=>{},30000)"], {

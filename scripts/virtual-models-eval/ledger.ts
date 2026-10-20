@@ -1,5 +1,6 @@
 /** Authoritative completed-event accounting. Never walk nested usage or streaming partials. */
 import { createHash } from "node:crypto";
+import { stripVTControlCharacters } from "node:util";
 
 export interface Usage {
   input: number | null;
@@ -133,6 +134,7 @@ export class EventLedger {
   }> = [];
   private commands: string[] = [];
   private tools: string[] = [];
+  private assertionFailures: string[] = [];
   private finalText = "";
   private settled = false;
   private aborted = false;
@@ -172,10 +174,29 @@ export class EventLedger {
     const key = `${message.role === "assistant" ? this.generation : "tool"}/${createHash("sha256").update(JSON.stringify(message)).digest("hex")}`;
     if (this.seen.has(key)) return;
     this.seen.add(key);
+    if (
+      message.role === "toolResult" &&
+      (message.toolName === "bash" || message.toolName === "jobs")
+    ) {
+      const blocks = Array.isArray(message.content) ? message.content.map(object) : [];
+      const text = stripVTControlCharacters(
+        blocks
+          .filter((block) => block.type === "text")
+          .map((block) => block.text)
+          .join("\n"),
+      );
+      if (text.includes("AssertionError")) this.assertionFailures.push(text.slice(0, 32000));
+    }
     if (message.role === "assistant") {
       this.pending = Math.max(0, this.pending - 1);
       this.calls++;
-      const usage = normalizeUsage(message.usage);
+      const reported = normalizeUsage(message.usage);
+      // SDK failures can contain zero-filled placeholders without any provider usage report.
+      const usage =
+        (message.stopReason === "error" || message.stopReason === "aborted") &&
+        reported.aggregate === 0
+          ? unknownUsage()
+          : reported;
       this.usages.push(usage);
       this.dispatches.push({
         provider: message.provider,
@@ -222,6 +243,7 @@ export class EventLedger {
       dispatches: [...this.dispatches],
       commands: [...this.commands],
       tools: [...this.tools],
+      assertionFailures: [...this.assertionFailures],
       finalText: this.finalText,
       settled: this.settled,
       aborted: this.aborted,
