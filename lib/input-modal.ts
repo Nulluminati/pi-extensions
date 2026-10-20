@@ -2,6 +2,7 @@
 
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { Input } from "@earendil-works/pi-tui";
+import { setInputValue } from "./input-value.ts";
 import { wrapToolText } from "./tool-renderer.ts";
 import { modalContentWidth, renderModalFrame } from "./tui-frame.ts";
 import { formatStyledKeyHints } from "./ui-format.ts";
@@ -39,7 +40,7 @@ export interface InputModal {
 
 export function createInputModal(options: InputModalOptions): InputModal {
   const input = new Input();
-  if (options.initialValue !== undefined) input.setValue(options.initialValue);
+  if (options.initialValue !== undefined) setInputValue(input, options.initialValue);
   input.focused = true;
 
   return {

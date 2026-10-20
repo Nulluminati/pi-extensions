@@ -8,6 +8,7 @@ import {
   truncateToWidth,
   visibleWidth,
 } from "@earendil-works/pi-tui";
+import { setInputValue } from "./input-value.ts";
 import { modalContentWidth, renderModalFrame } from "./tui-frame.ts";
 import { formatStyledKeyHints } from "./ui-format.ts";
 
@@ -90,7 +91,7 @@ export class SearchableSelect {
     this.options = options;
     this.showTitle = showTitle;
     this.filteredItems = options.items;
-    this.input.setValue(options.initialQuery ?? "");
+    setInputValue(this.input, options.initialQuery ?? "");
     this.selectList = this.createSelectList();
     this.applyFilter();
   }

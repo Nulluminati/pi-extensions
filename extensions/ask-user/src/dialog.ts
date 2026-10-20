@@ -1,5 +1,6 @@
 import { Input, Key, matchesKey, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { isArrowLeft, isArrowRight } from "../../../lib/arrow-keys.ts";
+import { setInputValue } from "../../../lib/input-value.ts";
 import { modalContentWidth, renderModalFrame } from "../../../lib/tui-frame.ts";
 import { formatStyledKeyHints } from "../../../lib/ui-format.ts";
 import { type AskUserAnswer, type AskUserQuestion, normalizeCustomText } from "./schema.ts";
@@ -348,7 +349,8 @@ export class QuestionnaireComponent {
       this.questions,
     );
     const editingIndex = this.state.editingQuestionIndex;
-    this.input.setValue(
+    setInputValue(
+      this.input,
       editingIndex === undefined ? "" : (this.state.answers[editingIndex]?.customText ?? ""),
     );
   }
@@ -359,7 +361,7 @@ export class QuestionnaireComponent {
     if (!question || !answer) return;
     const customRow = question.options?.length ?? 0;
     if (answer.cursorIndex === customRow) {
-      this.input.setValue(answer.customText ?? "");
+      setInputValue(this.input, answer.customText ?? "");
       this.state = reduceQuestionnaire(this.state, { type: "startCustom" }, this.questions);
       return;
     }
