@@ -4,7 +4,7 @@ import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
-import { isKittyProtocolActive } from "@earendil-works/pi-tui";
+import { isKittyProtocolActive, visibleWidth } from "@earendil-works/pi-tui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { encodePcm16Wave } from "../../extensions/voice/src/audio.ts";
 import {
@@ -1746,7 +1746,7 @@ describe("voice-extension", () => {
       const rendered = renderedLines.join("\n");
       expect(renderedLines[0]).toContain("╭── Voice ");
       expect(renderedLines.at(-1)).toBe(`╰${"─".repeat(70)}╯`);
-      expect(renderedLines.every((line) => line.length === 72)).toBe(true);
+      expect(renderedLines.every((line) => visibleWidth(line) === 72)).toBe(true);
       expect(rendered).not.toContain("FOCUSED");
       expect(rendered).toContain("Voice");
       expect(rendered).toContain("local audio · MIC → TEXT → SPEECH");
@@ -1892,8 +1892,8 @@ describe("voice-extension", () => {
       });
       const component = getComponent();
       const rendered = component.render(72).join("\n");
-      expect(rendered).toContain("Speech model  Supertonic 3 · Ready");
-      expect(rendered).toContain("Local voice  Voice 1");
+      expect(rendered).toMatch(/Speech model +Supertonic 3 · Ready/);
+      expect(rendered).toMatch(/Local voice +Voice 1/);
 
       // Move down to the voice row and cycle to the second speaker.
       component.handleInput?.("\x1b[B");

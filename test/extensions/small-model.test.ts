@@ -90,7 +90,9 @@ describe("small-model-extension", () => {
             resolve,
           );
           initialRender = component.render(100).join("\n");
-          for (const character of "haiku") component.handleInput(character);
+          // pi-tui fuzzy-matches characters in order, so the query must not be a
+          // subsequence of the other entry ("haiku" is).
+          for (const character of "claude") component.handleInput(character);
           filteredRender = component.render(100).join("\n");
           component.handleInput("\r");
         }),

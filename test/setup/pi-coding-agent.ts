@@ -1,10 +1,20 @@
 import { vi } from "vitest";
 
 /**
- * Unit tests stub the SDK component surface used by extensions. The runtime
- * suite loads the installed Pi packages without these mocks.
+ * Unit tests use the real `@earendil-works/pi-coding-agent` exports except
+ * the stubs below. Each stub stays because the real export cannot run in a
+ * unit test:
+ *
+ * - The interactive components (`CustomEditor`, `ToolExecutionComponent`,
+ *   `BashExecutionComponent`, `CustomMessageComponent`) and `Theme` need a
+ *   live TUI and the global theme from `initTheme()`. The runtime suite
+ *   covers the real classes (test/runtime/pi-tool-style.test.ts).
+ * - `getSettingsListTheme` reads the global theme from `initTheme()`.
+ * - `getAgentDir` points at a fixed fake directory so no unit test reads or
+ *   writes the real `~/.pi`; tests redirect it with `vi.mocked(getAgentDir)`.
  */
-vi.mock("@earendil-works/pi-coding-agent", () => {
+vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@earendil-works/pi-coding-agent")>();
   class CustomEditor {
     borderColor?: ((str: string) => string) | undefined;
     focused = false;
@@ -33,20 +43,6 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
     }
     setText(_text: string): void {}
   }
-  class DynamicBorder {
-    invalidated = false;
-    private color?: ((str: string) => string) | undefined;
-    constructor(color?: ((str: string) => string) | undefined) {
-      this.color = color;
-    }
-    invalidate(): void {
-      this.invalidated = true;
-    }
-    render(width: number): string[] {
-      const bar = "─".repeat(Math.max(0, width));
-      return [this.color ? this.color(bar) : bar];
-    }
-  }
   class RenderedComponent {
     lines = ["", "content"];
     renderedWidth = 0;
@@ -71,102 +67,14 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
     status: "running" | "complete" | "error" | "cancelled" = "running";
   }
   class CustomMessageComponent extends RenderedComponent {}
-  // Mirrors pi's chars/4 heuristic (see estimateTokens in the real package):
-  // text blocks count chars/4, images count as 4800 chars each.
-  const estimateTokens = vi.fn((message: { content?: unknown }) => {
-    let chars = 0;
-    const content = message?.content;
-    if (typeof content === "string") {
-      chars = content.length;
-    } else if (Array.isArray(content)) {
-      for (const block of content) {
-        if (block?.type === "text" && typeof block.text === "string") {
-          chars += block.text.length;
-        } else if (block?.type === "image") {
-          chars += 4800;
-        }
-      }
-    }
-    return Math.max(0, Math.ceil(chars / 4));
-  });
-  // Mirrors pi's skills section rendering (see formatSkillsForPrompt in the
-  // real package): usage instructions plus one XML-escaped <skill> block per
-  // visible skill inside <available_skills>.
-  const escapeXml = (str: string): string =>
-    str
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&apos;");
-  const formatSkillsForPrompt = vi.fn(
-    (
-      skills: Array<{
-        name: string;
-        description: string;
-        filePath: string;
-        disableModelInvocation?: boolean;
-      }>,
-      fileReadTool: "read" | "bash" = "read",
-    ): string => {
-      const visibleSkills = skills.filter((s) => !s.disableModelInvocation);
-      if (visibleSkills.length === 0) return "";
-      const lines = [
-        "\n\nThe following skills provide specialized instructions for specific tasks.",
-        fileReadTool === "read"
-          ? "Use the read tool to load a skill's file when the task matches its description."
-          : "Use bash to load a skill's file when the task matches its description.",
-        "When a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.",
-        "",
-        "<available_skills>",
-      ];
-      for (const skill of visibleSkills) {
-        lines.push("  <skill>");
-        lines.push(`    <name>${escapeXml(skill.name)}</name>`);
-        lines.push(`    <description>${escapeXml(skill.description)}</description>`);
-        lines.push(`    <location>${escapeXml(skill.filePath)}</location>`);
-        lines.push("  </skill>");
-      }
-      lines.push("</available_skills>");
-      return lines.join("\n");
-    },
-  );
   return {
+    ...actual,
     BashExecutionComponent,
     CustomEditor,
     CustomMessageComponent,
-    DynamicBorder,
     Theme,
     ToolExecutionComponent,
-    CONFIG_DIR_NAME: ".pi",
-    DEFAULT_COMPACTION_SETTINGS: {
-      enabled: true,
-      reserveTokens: 16384,
-      keepRecentTokens: 20000,
-    },
-    estimateTokens,
-    formatSkillsForPrompt,
     getAgentDir: vi.fn(() => "/home/test/.pi/agent"),
-    getMarkdownTheme: vi.fn(() =>
-      Object.fromEntries(
-        [
-          "heading",
-          "link",
-          "linkUrl",
-          "code",
-          "codeBlock",
-          "codeBlockBorder",
-          "quote",
-          "quoteBorder",
-          "hr",
-          "listBullet",
-          "bold",
-          "italic",
-          "strikethrough",
-          "underline",
-        ].map((name) => [name, (text: string) => text]),
-      ),
-    ),
     getSettingsListTheme: vi.fn(() => ({
       label: (text: string) => text,
       value: (text: string) => text,

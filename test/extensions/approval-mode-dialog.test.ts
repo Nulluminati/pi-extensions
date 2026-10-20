@@ -1,3 +1,4 @@
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
 import { createApprovalDialog, promptApproval } from "../../extensions/approval-mode/src/dialog.ts";
 import { PANEL_OVERLAY_OPTIONS } from "../../lib/overlay-options.ts";
@@ -55,9 +56,10 @@ describe("Approval Mode confirmation dialog", () => {
   it("makes terminal control characters visible and fits narrow widths", () => {
     const { component } = setup("printf '\u001b[31m'\nnext");
     const lines = component.render(28);
-    expect(lines.join("\n")).not.toContain("\u001b");
+    // The command's escape sequence is shown as text; only frame styling emits SGR codes.
+    expect(lines.join("\n")).not.toContain("\u001b[31m");
     expect(lines.join("\n")).toContain("\\x1b");
-    expect(lines.every((line) => line.length <= 28)).toBe(true);
+    expect(lines.every((line) => visibleWidth(line) <= 28)).toBe(true);
   });
 
   it("blocks on escape without requiring command review", () => {
