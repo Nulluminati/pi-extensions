@@ -6,7 +6,7 @@ This repository publishes standalone TypeScript extensions for Pi. It is not a P
 
 - Do not add external npm dependencies without asking first. Pi loads extensions without a build step.
 - Keep one async default-exported entrypoint at `extensions/<name>/<name>.ts`. Put supporting TypeScript files under `src/`.
-- Do not use non-null assertions. Update `types/pi.d.ts` when an extension needs an API absent from the local declarations.
+- Do not use non-null assertions. Import Pi types from the SDK packages (`@earendil-works/pi-coding-agent`, `@earendil-works/pi-ai`, `@earendil-works/pi-agent-core`, `@earendil-works/pi-tui`). Put derived types that no public entry exports in `lib/pi-types.ts`.
 - Add or update tests in `test/extensions/<name>.test.ts` when extension behavior changes.
 - Run `npm run format` before committing. Run `npm run check` for format, lint, typecheck, validation, and tests.
 

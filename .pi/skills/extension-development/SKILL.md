@@ -48,9 +48,13 @@ Choose the shortest-lived state that satisfies the behavior:
 - Use `pi.appendEntry` when state belongs to the session transcript. Restore it from `ctx.sessionManager.getBranch()` on `session_start`; consider branch switches and reloads.
 - Use a disk file when state must outlive a session but does not belong in the transcript. Read the [shared-helpers skill](../shared-helpers/SKILL.md) for `lib/paths.ts`, atomic writes, locks, and git excludes. Never hardcode the agent directory or write data inside its `extensions/` discovery directory.
 
-## Local type declarations
+## Pi types
 
-`types/pi.d.ts` supplies this repository's ambient Pi API declarations. Update the relevant module block when runtime APIs or imported runtime modules are missing from the stubs. Keep complex nested shapes loose unless their exact shape matters. Run TypeScript checks after the edit; a passing cast that hides a missing API is not a substitute for a declaration.
+Import Pi types from the package that exports them: extension API types from `@earendil-works/pi-coding-agent`, model and message types from `@earendil-works/pi-ai`, `ThinkingLevel` from `@earendil-works/pi-agent-core`, and TUI types from `@earendil-works/pi-tui`. Import `completeSimple` and `stream` from `@earendil-works/pi-ai/compat`; the root `pi-ai` entry does not export them outside Pi.
+
+When a type exists only inside a package (no public entry exports it), derive it from public types in `lib/pi-types.ts`. Do not import from deep `dist/` paths and do not copy SDK declarations.
+
+Fix extension code to match the SDK types. Use a cast only where the SDK type is wrong for the runtime, and add a comment that says why. For tool `structuredContent`, pass plain data through `asStructuredContent` from `lib/structured-content.ts`.
 
 ## Validation
 

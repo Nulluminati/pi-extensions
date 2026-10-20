@@ -82,10 +82,10 @@ Per-extension configuration (flags, env vars, config files) lives in each extens
 
 ### Type declarations
 
-Extensions can import types from the `"pi"` module for IDE autocomplete and compile-time safety:
+Extensions import types from the Pi SDK packages, which are dev dependencies of this repository:
 
 ```typescript
-import type { ExtensionAPI, ExtensionContext } from "pi";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
 export default async function (pi: ExtensionAPI) {
   pi.registerCommand("hello", {
@@ -97,7 +97,7 @@ export default async function (pi: ExtensionAPI) {
 }
 ```
 
-Type stubs live in `types/pi.d.ts` and cover `ExtensionAPI`, `ExtensionContext`, `ExtensionCommandContext`, `ToolDefinition`, event types, and common TUI helpers.
+Pi loads these packages for extensions at runtime, so the imports need no build step. Types that no public package entry exports are derived in `lib/pi-types.ts`.
 
 ### Creating a new extension
 
@@ -112,7 +112,7 @@ This creates `extensions/my-feature/my-feature.ts` and `test/extensions/my-featu
 Or create manually:
 
 1. Create `extensions/<descriptive-name>/` and add `<descriptive-name>.ts`
-2. Implement your extension using `import type { ... } from "pi"`
+2. Implement your extension using `import type { ... } from "@earendil-works/pi-coding-agent"`
 3. Validate: `npm run validate:one extensions/<name>/<name>.ts`
 4. Test live: `pi -e extensions/<name>/<name>.ts`
 5. Format and lint: `npm run format`
@@ -177,10 +177,11 @@ pi-extensions/
 ├── scripts/            # CLI entry points
 ├── test/
 │   ├── extensions/     # Per-extension tests
+│   ├── harness/        # In-memory Pi session for runtime tests
 │   ├── lib/            # Shared helper tests
 │   ├── mocks/          # Shared test mock factories
+│   ├── runtime/        # Tests against the installed Pi packages
 │   └── validator.test.ts
-├── types/              # Ambient type declarations for "pi"
 ```
 
 ### Project scripts

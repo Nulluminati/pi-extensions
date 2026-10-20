@@ -11,6 +11,11 @@ This skill provides concrete rules for writing tests that catch real bugs in Pi 
 
 Tests live in `test/extensions/<name>.test.ts` and import the extension via relative path. The repo uses Vitest with `createMockPi()` and `createMockCommandContext()` from `test/mocks/`.
 
+Choose the test style by what the behavior depends on:
+
+- **Mock tests** (`test/extensions/`, default suite): call handlers, tools and commands directly with typed mocks. Use them for branches, error paths, UI calls and anything that needs fake timers.
+- **Session tests** (`test/runtime/`, runtime suite): run the extension in a real Pi session with `createPiSession` from `test/harness/pi-session.ts`. Use them for lifecycle behavior that depends on how Pi wires events, tools and session entries together. Assert on session messages and entries, not on mock calls.
+
 ## MUST
 
 1. **Test the full tool result shape.** Every field the Pi runtime inspects must be asserted:
@@ -157,14 +162,25 @@ Tests live in `test/extensions/<name>.test.ts` and import the extension via rela
     ```typescript
     // test/setup/pi-tui.ts
     import { vi } from "vitest";
-    vi.mock("@earendil-works/pi-tui", () => ({ ... }));
+    vi.mock("@earendil-works/pi-tui", async (importOriginal) => ({
+      ...(await importOriginal<typeof import("@earendil-works/pi-tui")>()),
+      isKittyProtocolActive: vi.fn(() => false),
+    }));
     ```
+
+12. **Do NOT stub a Pi export that runs in a unit test.** The setup files spread the real module and stub only exports that need a live TUI, the global theme, process-wide terminal state, or the real `~/.pi`. Write the reason next to each stub. A stub that renders or behaves differently from Pi hides bugs: the old `Input` stub hid a cursor bug in prefilled fields. Test the real components in `test/runtime/` when a unit test cannot run them.
 
 ## Best Practices
 
 ### Mock Factory Pattern
 
-Use the repo's `createMockPi()` and `createMockCommandContext()` factories. They provide typed Vitest mocks for all Pi APIs via the `DeepMocked<T>` helper. If you need to override a mock mid-test, use `vi.fn()` so the assignment stays type-compatible:
+Use the repo's `createMockPi()` and `createMockCommandContext()` factories. They are typed as `DeepMocked<T>` of the real SDK types (`ExtensionAPI`, `ExtensionContext`, `ExtensionCommandContext`), so a member that Pi adds, renames or removes fails `tsc -p tsconfig.test.json` until the mock is updated. Keep the mocks complete; do not cast a mock to silence a missing member.
+
+`Theme` and `ModelRegistry` are classes with private fields. Their mocks go through `asSdkMock` in `test/mocks/mock-types.ts`, which checks the public members and then asserts the class type, so a mock context still passes where the SDK context type is expected.
+
+Use `createMockModel(overrides)` from `test/mocks/context-mocks.ts` for a complete `Model`, and `fauxAssistantMessage(...)` from `@earendil-works/pi-ai` for a complete model reply. Use `firstContentText(message)` from `test/mocks/test-helpers.ts` to read prompt text from a recorded model call.
+
+If you need to override a mock mid-test, use `vi.fn()` so the assignment stays type-compatible:
 
 ```typescript
 // With typed mocks, plain functions do not satisfy Mock-typed properties
@@ -183,6 +199,25 @@ mockCtx.sessionManager.getBranch = vi.fn(() => [
 ### Typed Mocks and `noUncheckedIndexedAccess`
 
 The repo's `tsconfig.json` enables `noUncheckedIndexedAccess: true`, which flags `mock.calls[0]` as possibly `undefined`. Test files use `tsconfig.test.json` which relaxes this flag because mock call arrays always contain data when tests access them. If you see `TS2532: Object is possibly 'undefined'` errors in test files, the test config is handling it automatically.
+
+### Session Harness
+
+`createPiSession` builds a real `AgentSession` with an in-memory session manager and settings, the given extension factories, and the pi-ai faux provider as the model. Script the model with `responses`; each request's context is recorded in `requests`. All Pi state lives in a temporary directory, so the harness never touches `~/.pi`.
+
+```typescript
+const harness = await createPiSession({
+  extensions: [todosExtension],
+  responses: [
+    fauxAssistantMessage(fauxToolCall("todo", { action: "list" }), { stopReason: "toolUse" }),
+    fauxAssistantMessage("done"),
+  ],
+});
+await harness.session.prompt("what is left?");
+expect(harness.session.messages.filter((m) => m.role === "toolResult")).toMatchObject([...]);
+await harness.dispose(); // emits session_shutdown, then removes the temporary directory
+```
+
+Use `setup` to append persisted entries before `session_start`, and `shutdown()` to assert on cleanup before `dispose()`. The harness only works in the runtime suite: the default suite stubs `@earendil-works/pi-coding-agent`.
 
 ### Extracting Handlers
 
