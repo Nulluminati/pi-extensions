@@ -523,8 +523,8 @@ describe("background-jobs-extension", () => {
         await backgroundJobsExtension(mockPi);
         const tool = getTool(mockPi, "jobs");
         const result = await tool.execute("data", { action, jobId: 99 }, undefined, undefined, ctx);
-        expect(tool.outputSchema).toBeDefined();
-        expect(Check(tool.outputSchema!, result.structuredContent)).toBe(true);
+        if (!tool.outputSchema) throw new Error("jobs tool has no outputSchema");
+        expect(Check(tool.outputSchema, result.structuredContent)).toBe(true);
         const error =
           action === "list" ? undefined : action === "invalid" ? "unknown_action" : "unknown_job";
         expect(result.structuredContent).toEqual({ jobs: [], ...(error ? { error } : {}) });
@@ -558,8 +558,8 @@ describe("background-jobs-extension", () => {
         child.emit("exit", 0);
         const tool = getTool(mockPi, "jobs");
         const result = await tool.execute("data", { action, jobId: 1 }, undefined, undefined, ctx);
-        expect(tool.outputSchema).toBeDefined();
-        expect(Check(tool.outputSchema!, result.structuredContent)).toBe(true);
+        if (!tool.outputSchema) throw new Error("jobs tool has no outputSchema");
+        expect(Check(tool.outputSchema, result.structuredContent)).toBe(true);
         expect(result.structuredContent).toMatchObject({
           jobs: [
             {
