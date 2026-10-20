@@ -8,7 +8,8 @@
  *
  * All Pi state lives in a temporary directory that is also the session cwd
  * and `PI_CODING_AGENT_DIR`; `dispose` removes it. Nothing reads or writes
- * `~/.pi` or the repository's `.pi` config.
+ * `~/.pi` or the repository's `.pi` config. Always `await dispose()`: it emits
+ * session_shutdown first, so extensions stop their timers, watchers and jobs.
  *
  * Use it from the runtime suite (`test/runtime/`). The default suite stubs
  * `@earendil-works/pi-coding-agent` in `test/setup/`, so a real session cannot
@@ -57,7 +58,10 @@ export interface PiSession {
   requests: TranscriptContext[];
   /** Temporary directory that holds all Pi state for this session. */
   cwd: string;
-  dispose(): void;
+  /** Emit session_shutdown to the extensions, as Pi does when it quits. Runs once. */
+  shutdown(): Promise<void>;
+  /** Shut down if needed, dispose the session and remove the temporary directory. */
+  dispose(): Promise<void>;
 }
 
 export async function createPiSession(options: PiSessionOptions = {}): Promise<PiSession> {
@@ -122,15 +126,28 @@ export async function createPiSession(options: PiSessionOptions = {}): Promise<P
     });
     await session.bindExtensions({});
 
+    let shutdown: Promise<void> | undefined;
+    const emitShutdown = () => {
+      shutdown ??= session.extensionRunner
+        .emit({ type: "session_shutdown", reason: "quit" })
+        .then(() => undefined);
+      return shutdown;
+    };
+
     return {
       session,
       sessionManager,
       faux,
       requests,
       cwd,
-      dispose: () => {
-        session.dispose();
-        restore();
+      shutdown: emitShutdown,
+      dispose: async () => {
+        try {
+          await emitShutdown();
+          session.dispose();
+        } finally {
+          restore();
+        }
       },
     };
   } catch (error) {

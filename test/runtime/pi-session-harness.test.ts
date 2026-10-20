@@ -9,8 +9,8 @@ import { createPiSession, type PiSession } from "../harness/pi-session.ts";
 
 let harness: PiSession | undefined;
 
-afterEach(() => {
-  harness?.dispose();
+afterEach(async () => {
+  await harness?.dispose();
   harness = undefined;
 });
 
@@ -54,7 +54,7 @@ describe("in-memory Pi session harness", () => {
     expect(cwd.startsWith(homedir())).toBe(false);
     expect(process.env.PI_CODING_AGENT_DIR).toBe(cwd);
 
-    harness.dispose();
+    await harness.dispose();
     harness = undefined;
 
     expect(existsSync(cwd)).toBe(false);
