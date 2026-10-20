@@ -20,7 +20,7 @@ import { loadSmallModelConfig, resolveSmallModelConfigPath } from "../../lib/sma
 import { loadWorkerModelConfig } from "../../lib/worker-model.ts";
 import { createMockCommandContext, createMockModel } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
-import { getEventHandler } from "../mocks/test-helpers.ts";
+import { fakeTheme, fakeTui, getEventHandler, sessionEntries } from "../mocks/test-helpers.ts";
 
 // watch is wrapped (not replaced) so tests can grab the live FSWatcher
 // handle while every other test keeps real watch behavior.
@@ -76,14 +76,15 @@ function getFooterFactory(mockCtx: ReturnType<typeof createMockCommandContext>) 
   const calls = mockCtx.ui.setFooter.mock.calls;
   // Find the last call that was passed a function (not undefined)
   for (let i = calls.length - 1; i >= 0; i--) {
-    if (typeof calls[i][0] === "function") return calls[i][0];
+    const factory = calls[i]?.[0];
+    if (typeof factory === "function") return factory;
   }
   throw new Error("No setFooter(factory) call found");
 }
 
 /** Minimal theme that returns text unchanged for assertions. */
 function plainTheme() {
-  return { fg: vi.fn((_color: string, text: string) => text) };
+  return fakeTheme({ fg: vi.fn((_color: string, text: string) => text) });
 }
 
 /** Mock footer data with overridable git branch / extension statuses. */
@@ -92,6 +93,7 @@ function footerData(opts: { branch?: string | null; statuses?: Map<string, strin
     onBranchChange: vi.fn(() => vi.fn()),
     getGitBranch: vi.fn(() => opts.branch ?? null),
     getExtensionStatuses: vi.fn(() => opts.statuses ?? new Map()),
+    getAvailableProviderCount: vi.fn(() => 1),
   };
 }
 
@@ -280,7 +282,7 @@ describe("status-bar-extension", () => {
     await enableBar(mockPi, mockCtx);
 
     const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
+      fakeTui(),
       plainTheme(),
       footerData({ branch: "main" }),
     );
@@ -297,11 +299,7 @@ describe("status-bar-extension", () => {
     mockCtx.model = { id: "gpt-4o", provider: "openai" } as any;
     await enableBar(mockPi, mockCtx);
 
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      plainTheme(),
-      footerData(),
-    );
+    const component = getFooterFactory(mockCtx)(fakeTui(), plainTheme(), footerData());
     const lines = component.render(120);
 
     expect(lines.join("\n")).not.toContain("openai/gpt-4o");
@@ -317,7 +315,7 @@ describe("status-bar-extension", () => {
     await enableBar(mockPi, mockCtx);
 
     const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
+      fakeTui(),
       plainTheme(),
       footerData({ branch: "main" }),
     );
@@ -348,11 +346,7 @@ describe("status-bar-extension", () => {
     mockCtx.cwd = "/home/user/projects/my-app";
     await enableBar(mockPi, mockCtx);
 
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      plainTheme(),
-      footerData(),
-    );
+    const component = getFooterFactory(mockCtx)(fakeTui(), plainTheme(), footerData());
     const lines = component.render(120);
 
     expect(lines.join("\n")).toContain("my-app");
@@ -364,11 +358,7 @@ describe("status-bar-extension", () => {
     mockCtx.cwd = "/home/user/projects/my-app";
     await enableBar(mockPi, mockCtx);
 
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      plainTheme(),
-      footerData(),
-    );
+    const component = getFooterFactory(mockCtx)(fakeTui(), plainTheme(), footerData());
     const lines = component.render(120);
 
     const folder = String.fromCodePoint(0xf0770);
@@ -381,7 +371,7 @@ describe("status-bar-extension", () => {
     await enableBar(mockPi, mockCtx);
 
     const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
+      fakeTui(),
       plainTheme(),
       footerData({ branch: "main" }),
     );
@@ -401,11 +391,7 @@ describe("status-bar-extension", () => {
     }));
     await enableBar(mockPi, mockCtx);
 
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      plainTheme(),
-      footerData(),
-    );
+    const component = getFooterFactory(mockCtx)(fakeTui(), plainTheme(), footerData());
     const lines = component.render(120);
 
     expect(lines.join("\n")).toContain("50.0k/200.0k");
@@ -424,11 +410,7 @@ describe("status-bar-extension", () => {
     }));
     await enableBar(mockPi, mockCtx);
 
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      plainTheme(),
-      footerData(),
-    );
+    const component = getFooterFactory(mockCtx)(fakeTui(), plainTheme(), footerData());
 
     // Must not throw RangeError: Invalid count value (negative repeat).
     const lines = component.render(120);
@@ -448,11 +430,7 @@ describe("status-bar-extension", () => {
       percent: 25,
     }));
     await enableBar(mockPi, mockCtx);
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      plainTheme(),
-      footerData(),
-    );
+    const component = getFooterFactory(mockCtx)(fakeTui(), plainTheme(), footerData());
 
     // session_start refreshed the cache once; renders must not re-query.
     mockCtx.getContextUsage.mockClear();
@@ -474,11 +452,7 @@ describe("status-bar-extension", () => {
       percent: 1,
     }));
     await enableBar(mockPi, mockCtx);
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      plainTheme(),
-      footerData(),
-    );
+    const component = getFooterFactory(mockCtx)(fakeTui(), plainTheme(), footerData());
     expect(component.render(120).join("\n")).toContain("1.0k/200.0k");
 
     // A new assistant message grows the context; the cache must refresh.
@@ -504,26 +478,24 @@ describe("status-bar-extension", () => {
       contextWindow: 200000,
       percent: 0.5,
     }));
-    mockCtx.sessionManager.getBranch = vi.fn(() => [
-      {
-        type: "message",
-        message: {
-          role: "assistant",
-          usage: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4, cost: { total: 0.001 } },
+    mockCtx.sessionManager.getBranch = vi.fn(() =>
+      sessionEntries([
+        {
+          type: "message",
+          message: {
+            role: "assistant",
+            usage: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4, cost: { total: 0.001 } },
+          },
         },
-      },
-    ]);
+      ]),
+    );
     await enableBar(mockPi, mockCtx);
 
     const turnEndHandler = getEventHandler(mockPi, "turn_end");
     await turnEndHandler({ type: "turn_end", turnIndex: 0, message: {}, toolResults: [] }, mockCtx);
 
     const fgMock = vi.fn((_color: string, text: string) => text);
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      { fg: fgMock },
-      footerData(),
-    );
+    const component = getFooterFactory(mockCtx)(fakeTui(), fakeTheme({ fg: fgMock }), footerData());
     component.render(120);
 
     expect(fgMock).toHaveBeenCalledWith("accent", "↑1");
@@ -540,11 +512,7 @@ describe("status-bar-extension", () => {
     const turnStartHandler = getEventHandler(mockPi, "turn_start");
     await turnStartHandler({ type: "turn_start", turnIndex: 0, timestamp: Date.now() }, mockCtx);
 
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      plainTheme(),
-      footerData(),
-    );
+    const component = getFooterFactory(mockCtx)(fakeTui(), plainTheme(), footerData());
     const lines = component.render(120);
 
     expect(lines.join("\n")).toContain("↻1");
@@ -558,15 +526,17 @@ describe("status-bar-extension", () => {
       contextWindow: 200000,
       percent: 2.5,
     }));
-    mockCtx.sessionManager.getBranch = vi.fn(() => [
-      {
-        type: "message",
-        message: {
-          role: "assistant",
-          usage: { input: 1000, output: 500, cacheRead: 0, cacheWrite: 0, cost: { total: 0.01 } },
+    mockCtx.sessionManager.getBranch = vi.fn(() =>
+      sessionEntries([
+        {
+          type: "message",
+          message: {
+            role: "assistant",
+            usage: { input: 1000, output: 500, cacheRead: 0, cacheWrite: 0, cost: { total: 0.01 } },
+          },
         },
-      },
-    ]);
+      ]),
+    );
     await enableBar(mockPi, mockCtx);
 
     const turnEndHandler = getEventHandler(mockPi, "turn_end");
@@ -574,11 +544,7 @@ describe("status-bar-extension", () => {
     const turnStartHandler = getEventHandler(mockPi, "turn_start");
     await turnStartHandler({ type: "turn_start", turnIndex: 0, timestamp: Date.now() }, mockCtx);
 
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      plainTheme(),
-      footerData(),
-    );
+    const component = getFooterFactory(mockCtx)(fakeTui(), plainTheme(), footerData());
     const lines = component.render(160);
     const sessionColumn = lines[0].indexOf("Session") - 3;
     expect(sessionColumn).toBeGreaterThan(lines[0].indexOf("Context"));
@@ -594,31 +560,29 @@ describe("status-bar-extension", () => {
       contextWindow: 200000,
       percent: 2.5,
     }));
-    mockCtx.sessionManager.getBranch = vi.fn(() => [
-      {
-        type: "message",
-        message: {
-          role: "assistant",
-          usage: {
-            input: 1000,
-            output: 500,
-            cacheRead: 200,
-            cacheWrite: 100,
-            cost: { total: 0.03 },
+    mockCtx.sessionManager.getBranch = vi.fn(() =>
+      sessionEntries([
+        {
+          type: "message",
+          message: {
+            role: "assistant",
+            usage: {
+              input: 1000,
+              output: 500,
+              cacheRead: 200,
+              cacheWrite: 100,
+              cost: { total: 0.03 },
+            },
           },
         },
-      },
-    ]);
+      ]),
+    );
     await enableBar(mockPi, mockCtx);
 
     const turnEndHandler = getEventHandler(mockPi, "turn_end");
     await turnEndHandler({ type: "turn_end", turnIndex: 0, message: {}, toolResults: [] }, mockCtx);
 
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      plainTheme(),
-      footerData(),
-    );
+    const component = getFooterFactory(mockCtx)(fakeTui(), plainTheme(), footerData());
     const lines = component.render(160);
 
     expect(lines.join("\n")).toContain("↑1.0k");
@@ -636,48 +600,46 @@ describe("status-bar-extension", () => {
       contextWindow: 200000,
       percent: 2.5,
     }));
-    mockCtx.sessionManager.getBranch = vi.fn(() => [
-      {
-        type: "message",
-        message: {
-          role: "assistant",
-          usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, cost: { total: 0.01 } },
+    mockCtx.sessionManager.getBranch = vi.fn(() =>
+      sessionEntries([
+        {
+          type: "message",
+          message: {
+            role: "assistant",
+            usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, cost: { total: 0.01 } },
+          },
         },
-      },
-      {
-        // Codemode nested LLM calls (image, classifier, nested tools) roll
-        // their usage into the top-level toolResult.
-        type: "message",
-        message: {
-          role: "toolResult",
-          content: [{ type: "text", text: "ok" }],
-          toolName: "bash",
-          usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, cost: { total: 1 } },
+        {
+          // Codemode nested LLM calls (image, classifier, nested tools) roll
+          // their usage into the top-level toolResult.
+          type: "message",
+          message: {
+            role: "toolResult",
+            content: [{ type: "text", text: "ok" }],
+            toolName: "bash",
+            usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, cost: { total: 1 } },
+          },
         },
-      },
-      {
-        type: "usage",
-        usage: { input: 10, output: 0, cacheRead: 0, cacheWrite: 0, cost: { total: 0.001 } },
-      },
-      {
-        type: "compaction",
-        usage: { input: 20, output: 0, cacheRead: 0, cacheWrite: 0, cost: { total: 0.002 } },
-      },
-      {
-        type: "branch_summary",
-        usage: { input: 30, output: 0, cacheRead: 0, cacheWrite: 0, cost: { total: 0.004 } },
-      },
-    ]);
+        {
+          type: "usage",
+          usage: { input: 10, output: 0, cacheRead: 0, cacheWrite: 0, cost: { total: 0.001 } },
+        },
+        {
+          type: "compaction",
+          usage: { input: 20, output: 0, cacheRead: 0, cacheWrite: 0, cost: { total: 0.002 } },
+        },
+        {
+          type: "branch_summary",
+          usage: { input: 30, output: 0, cacheRead: 0, cacheWrite: 0, cost: { total: 0.004 } },
+        },
+      ]),
+    );
     await enableBar(mockPi, mockCtx);
 
     const turnEndHandler = getEventHandler(mockPi, "turn_end");
     await turnEndHandler({ type: "turn_end", turnIndex: 0, message: {}, toolResults: [] }, mockCtx);
 
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      plainTheme(),
-      footerData(),
-    );
+    const component = getFooterFactory(mockCtx)(fakeTui(), plainTheme(), footerData());
     const lines = component.render(160);
 
     // Every entry counted exactly once: 100+100+10+20+30 in, 50+50 out.
@@ -694,34 +656,32 @@ describe("status-bar-extension", () => {
       contextWindow: 200000,
       percent: 2.5,
     }));
-    mockCtx.sessionManager.getBranch = vi.fn(() => [
-      {
-        type: "message",
-        message: {
-          role: "assistant",
-          usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, cost: { total: 0.01 } },
+    mockCtx.sessionManager.getBranch = vi.fn(() =>
+      sessionEntries([
+        {
+          type: "message",
+          message: {
+            role: "assistant",
+            usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, cost: { total: 0.01 } },
+          },
         },
-      },
-      {
-        type: "message",
-        message: {
-          role: "toolResult",
-          content: [{ type: "text", text: "ok" }],
-          toolName: "bash",
-          usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, cost: { total: 1 } },
+        {
+          type: "message",
+          message: {
+            role: "toolResult",
+            content: [{ type: "text", text: "ok" }],
+            toolName: "bash",
+            usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, cost: { total: 1 } },
+          },
         },
-      },
-    ]);
+      ]),
+    );
     await enableBar(mockPi, mockCtx);
 
     const turnEndHandler = getEventHandler(mockPi, "turn_end");
     await turnEndHandler({ type: "turn_end", turnIndex: 0, message: {}, toolResults: [] }, mockCtx);
 
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      plainTheme(),
-      footerData(),
-    );
+    const component = getFooterFactory(mockCtx)(fakeTui(), plainTheme(), footerData());
     const lines = component.render(160);
 
     expect(lines.join("\n")).toContain("↑110");
@@ -737,44 +697,42 @@ describe("status-bar-extension", () => {
       contextWindow: 200000,
       percent: 2.5,
     }));
-    mockCtx.sessionManager.getBranch = vi.fn(() => [
-      {
-        type: "message",
-        message: {
-          role: "assistant",
-          usage: {
-            input: 1000,
-            output: 500,
-            cacheRead: 200,
-            cacheWrite: 100,
-            cost: { total: 0.02 },
+    mockCtx.sessionManager.getBranch = vi.fn(() =>
+      sessionEntries([
+        {
+          type: "message",
+          message: {
+            role: "assistant",
+            usage: {
+              input: 1000,
+              output: 500,
+              cacheRead: 200,
+              cacheWrite: 100,
+              cost: { total: 0.02 },
+            },
           },
         },
-      },
-      {
-        type: "message",
-        message: {
-          role: "assistant",
-          usage: {
-            input: 2000,
-            output: 1000,
-            cacheRead: 300,
-            cacheWrite: 0,
-            cost: { total: 0.03 },
+        {
+          type: "message",
+          message: {
+            role: "assistant",
+            usage: {
+              input: 2000,
+              output: 1000,
+              cacheRead: 300,
+              cacheWrite: 0,
+              cost: { total: 0.03 },
+            },
           },
         },
-      },
-    ]);
+      ]),
+    );
     await enableBar(mockPi, mockCtx);
 
     const turnEndHandler = getEventHandler(mockPi, "turn_end");
     await turnEndHandler({ type: "turn_end", turnIndex: 0, message: {}, toolResults: [] }, mockCtx);
 
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      plainTheme(),
-      footerData(),
-    );
+    const component = getFooterFactory(mockCtx)(fakeTui(), plainTheme(), footerData());
     const lines = component.render(160);
 
     expect(lines.join("\n")).toContain("↑3.0k");
@@ -792,25 +750,23 @@ describe("status-bar-extension", () => {
       contextWindow: 200000,
       percent: 0.5,
     }));
-    mockCtx.sessionManager.getBranch = vi.fn(() => [
-      {
-        type: "message",
-        message: {
-          role: "assistant",
-          usage: { input: 1000, output: 500, cacheRead: 0, cacheWrite: 0, cost: { total: 0.01 } },
+    mockCtx.sessionManager.getBranch = vi.fn(() =>
+      sessionEntries([
+        {
+          type: "message",
+          message: {
+            role: "assistant",
+            usage: { input: 1000, output: 500, cacheRead: 0, cacheWrite: 0, cost: { total: 0.01 } },
+          },
         },
-      },
-    ]);
+      ]),
+    );
     await enableBar(mockPi, mockCtx);
 
     const turnEndHandler = getEventHandler(mockPi, "turn_end");
     await turnEndHandler({ type: "turn_end", turnIndex: 0, message: {}, toolResults: [] }, mockCtx);
 
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      plainTheme(),
-      footerData(),
-    );
+    const component = getFooterFactory(mockCtx)(fakeTui(), plainTheme(), footerData());
     const lines = component.render(120);
 
     expect(lines.join("\n")).toContain("↑1.0k");
@@ -822,14 +778,10 @@ describe("status-bar-extension", () => {
   it("token indicators show 0 at the start instead of being hidden", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
-    mockCtx.sessionManager.getBranch = vi.fn(() => []);
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries([]));
     await enableBar(mockPi, mockCtx);
 
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      plainTheme(),
-      footerData(),
-    );
+    const component = getFooterFactory(mockCtx)(fakeTui(), plainTheme(), footerData());
     const lines = component.render(120);
 
     expect(lines).toHaveLength(3);
@@ -842,14 +794,10 @@ describe("status-bar-extension", () => {
   it("cost shows $0.000 at the start instead of being hidden", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
-    mockCtx.sessionManager.getBranch = vi.fn(() => []);
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries([]));
     await enableBar(mockPi, mockCtx);
 
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      plainTheme(),
-      footerData(),
-    );
+    const component = getFooterFactory(mockCtx)(fakeTui(), plainTheme(), footerData());
     const lines = component.render(120);
 
     expect(lines.join("\n")).toContain("$0.000");
@@ -858,22 +806,20 @@ describe("status-bar-extension", () => {
   it("cost rounds to three decimals", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
-    mockCtx.sessionManager.getBranch = vi.fn(() => [
-      {
-        type: "message",
-        message: {
-          role: "assistant",
-          usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: { total: 0.01234 } },
+    mockCtx.sessionManager.getBranch = vi.fn(() =>
+      sessionEntries([
+        {
+          type: "message",
+          message: {
+            role: "assistant",
+            usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: { total: 0.01234 } },
+          },
         },
-      },
-    ]);
+      ]),
+    );
     await enableBar(mockPi, mockCtx);
 
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      plainTheme(),
-      footerData(),
-    );
+    const component = getFooterFactory(mockCtx)(fakeTui(), plainTheme(), footerData());
     const lines = component.render(120);
 
     expect(lines.join("\n")).toContain("$0.012");
@@ -887,25 +833,23 @@ describe("status-bar-extension", () => {
       contextWindow: 200000,
       percent: 0.25,
     }));
-    mockCtx.sessionManager.getBranch = vi.fn(() => [
-      {
-        type: "message",
-        message: {
-          role: "assistant",
-          usage: { input: 500, output: 200, cacheRead: 0, cacheWrite: 0, cost: { total: 0.01 } },
+    mockCtx.sessionManager.getBranch = vi.fn(() =>
+      sessionEntries([
+        {
+          type: "message",
+          message: {
+            role: "assistant",
+            usage: { input: 500, output: 200, cacheRead: 0, cacheWrite: 0, cost: { total: 0.01 } },
+          },
         },
-      },
-    ]);
+      ]),
+    );
     await enableBar(mockPi, mockCtx);
 
     const messageEndHandler = getEventHandler(mockPi, "message_end");
     await messageEndHandler({ type: "message_end", message: { role: "assistant" } }, mockCtx);
 
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      plainTheme(),
-      footerData(),
-    );
+    const component = getFooterFactory(mockCtx)(fakeTui(), plainTheme(), footerData());
     const lines = component.render(120);
 
     expect(lines.join("\n")).toContain("↑500");
@@ -940,7 +884,7 @@ describe("status-bar-extension", () => {
     await enableBar(mockPi, mockCtx);
 
     const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
+      fakeTui(),
       plainTheme(),
       footerData({ branch: "main" }),
     );
@@ -965,7 +909,7 @@ describe("status-bar-extension", () => {
     await enableBar(mockPi, mockCtx);
 
     const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
+      fakeTui(),
       plainTheme(),
       footerData({ branch: "develop" }),
     );
@@ -991,8 +935,8 @@ describe("status-bar-extension", () => {
 
     const fgMock = vi.fn((_color: string, text: string) => text);
     const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      { fg: fgMock },
+      fakeTui(),
+      fakeTheme({ fg: fgMock }),
       footerData({ branch: "main" }),
     );
     component.render(120);
@@ -1007,7 +951,7 @@ describe("status-bar-extension", () => {
     await enableBar(mockPi, mockCtx);
 
     const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
+      fakeTui(),
       plainTheme(),
       footerData({ branch: "main" }),
     );
@@ -1023,7 +967,7 @@ describe("status-bar-extension", () => {
     await enableBar(mockPi, mockCtx);
 
     const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
+      fakeTui(),
       plainTheme(),
       footerData({ branch: "main" }),
     );
@@ -1039,7 +983,7 @@ describe("status-bar-extension", () => {
     await enableBar(mockPi, mockCtx);
 
     const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
+      fakeTui(),
       plainTheme(),
       footerData({ branch: "main" }),
     );
@@ -1057,7 +1001,7 @@ describe("status-bar-extension", () => {
     await enableBar(mockPi, mockCtx);
 
     const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
+      fakeTui(),
       plainTheme(),
       footerData({ branch: "main" }),
     );
@@ -1075,7 +1019,7 @@ describe("status-bar-extension", () => {
     await enableBar(mockPi, mockCtx);
 
     const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
+      fakeTui(),
       plainTheme(),
       footerData({ branch: "main" }),
     );
@@ -1096,7 +1040,7 @@ describe("status-bar-extension", () => {
     await enableBar(mockPi, mockCtx);
 
     const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
+      fakeTui(),
       plainTheme(),
       footerData({ branch: null }),
     );
@@ -1137,9 +1081,10 @@ describe("status-bar-extension", () => {
       }),
       getGitBranch: vi.fn(() => "develop"),
       getExtensionStatuses: vi.fn(() => new Map()),
+      getAvailableProviderCount: vi.fn(() => 1),
     };
 
-    footerFactory({ requestRender: vi.fn() }, plainTheme(), mockFooterData);
+    footerFactory(fakeTui(), plainTheme(), mockFooterData);
 
     mockPi.exec.mockClear();
     branchChangeCallback?.();
@@ -1156,7 +1101,7 @@ describe("status-bar-extension", () => {
     mockCtx.getContextUsage = vi.fn(() => ({ tokens: 50000, contextWindow: 200000, percent: 25 }));
     await enableBar(mockPi, mockCtx);
     const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
+      fakeTui(),
       plainTheme(),
       footerData({ branch: "main" }),
     );
@@ -1173,7 +1118,7 @@ describe("status-bar-extension", () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await enableBar(mockPi, mockCtx);
-    const tui = { requestRender: vi.fn(), terminal: { rows: 24 } };
+    const tui = fakeTui({ terminal: { rows: 24 } });
     const component = getFooterFactory(mockCtx)(
       tui,
       plainTheme(),
@@ -1197,7 +1142,7 @@ describe("status-bar-extension", () => {
     const mockCtx = createMockCommandContext();
     await enableBar(mockPi, mockCtx);
     const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
+      fakeTui(),
       plainTheme(),
       footerData({ branch: "main" }),
     );
@@ -1224,7 +1169,7 @@ describe("status-bar-extension", () => {
       "workers:state",
     )({ running: 1, workerCostUsd: 0.041, workerTokens: 38100 });
     const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn(), terminal: { rows: 120 } },
+      fakeTui({ terminal: { rows: 120 } }),
       plainTheme(),
       footerData({ branch: "main" }),
     );
@@ -1262,7 +1207,7 @@ describe("status-bar-extension", () => {
     await enableBar(mockPi, mockCtx);
 
     const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
+      fakeTui(),
       plainTheme(),
       footerData({ branch: "feature/some-long-branch-name" }),
     );
@@ -1280,7 +1225,7 @@ describe("status-bar-extension", () => {
     await enableBar(mockPi, mockCtx);
 
     const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
+      fakeTui(),
       plainTheme(),
       footerData({ statuses: new Map() }),
     );
@@ -1296,7 +1241,7 @@ describe("status-bar-extension", () => {
     await enableBar(mockPi, mockCtx);
 
     const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
+      fakeTui(),
       plainTheme(),
       footerData({
         statuses: new Map([
@@ -1323,7 +1268,7 @@ describe("status-bar-extension", () => {
     await enableBar(mockPi, mockCtx);
 
     const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
+      fakeTui(),
       plainTheme(),
       footerData({
         statuses: new Map([
@@ -1344,7 +1289,7 @@ describe("status-bar-extension", () => {
     await enableBar(mockPi, mockCtx);
 
     const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
+      fakeTui(),
       plainTheme(),
       footerData({
         statuses: new Map([
@@ -1387,9 +1332,10 @@ describe("status-bar-extension", () => {
       }),
       getGitBranch: vi.fn(() => "develop"),
       getExtensionStatuses: vi.fn(() => new Map()),
+      getAvailableProviderCount: vi.fn(() => 1),
     };
 
-    footerFactory({ requestRender: mockRequestRender }, plainTheme(), mockFooterData);
+    footerFactory(fakeTui({ requestRender: mockRequestRender }), plainTheme(), mockFooterData);
 
     await branchChangeCallback?.();
     expect(mockRequestRender).toHaveBeenCalled();
@@ -1406,9 +1352,10 @@ describe("status-bar-extension", () => {
       onBranchChange: vi.fn(() => mockDispose),
       getGitBranch: vi.fn(() => null),
       getExtensionStatuses: vi.fn(() => new Map()),
+      getAvailableProviderCount: vi.fn(() => 1),
     };
 
-    const component = footerFactory({ requestRender: vi.fn() }, plainTheme(), mockFooterData);
+    const component = footerFactory(fakeTui(), plainTheme(), mockFooterData);
 
     expect(component.dispose).toBe(mockDispose);
   });
@@ -1419,11 +1366,7 @@ describe("status-bar-extension", () => {
     mockCtx.getContextUsage = vi.fn(() => undefined);
     await enableBar(mockPi, mockCtx);
 
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      plainTheme(),
-      footerData(),
-    );
+    const component = getFooterFactory(mockCtx)(fakeTui(), plainTheme(), footerData());
     const lines = component.render(120);
 
     expect(lines.length).toBeGreaterThanOrEqual(1);
@@ -1438,11 +1381,7 @@ describe("status-bar-extension", () => {
     mockCtx.model = undefined;
     await enableBar(mockPi, mockCtx);
 
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      plainTheme(),
-      footerData(),
-    );
+    const component = getFooterFactory(mockCtx)(fakeTui(), plainTheme(), footerData());
     const lines = component.render(120);
 
     expect(lines.join("\n")).not.toContain("no-model");
@@ -1461,11 +1400,7 @@ describe("status-bar-extension", () => {
     const sessionStartHandler = getEventHandler(mockPi, "session_start");
     await sessionStartHandler({ type: "session_start", reason: "new" }, mockCtx);
 
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      plainTheme(),
-      footerData(),
-    );
+    const component = getFooterFactory(mockCtx)(fakeTui(), plainTheme(), footerData());
     const lines = component.render(120);
 
     expect(lines).toHaveLength(3);
@@ -1478,11 +1413,7 @@ describe("status-bar-extension", () => {
     const mockCtx = createMockCommandContext();
     await enableBar(mockPi, mockCtx);
 
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      plainTheme(),
-      footerData(),
-    );
+    const component = getFooterFactory(mockCtx)(fakeTui(), plainTheme(), footerData());
 
     expect(() => component.invalidate()).not.toThrow();
   });
@@ -1494,11 +1425,7 @@ describe("status-bar-extension", () => {
     mockCtx.model = { id: "my-model", provider: undefined } as any;
     await enableBar(mockPi, mockCtx);
 
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      plainTheme(),
-      footerData(),
-    );
+    const component = getFooterFactory(mockCtx)(fakeTui(), plainTheme(), footerData());
     const lines = component.render(120);
 
     expect(lines.join("\n")).not.toContain("my-model");
@@ -1510,7 +1437,7 @@ describe("status-bar-extension", () => {
 
 describe("status-bar editor frame", () => {
   function plainTheme() {
-    return { fg: vi.fn((_c: string, t: string) => t) };
+    return fakeTheme({ fg: vi.fn((_c: string, t: string) => t) });
   }
 
   /** Simulate the base editor's render output at the modal content width: top
@@ -1912,7 +1839,8 @@ describe("status-bar editor install", () => {
 function renderInstalledEditor(mockCtx: ReturnType<typeof createMockCommandContext>) {
   const factory = mockCtx.ui.getEditorComponent();
   if (typeof factory !== "function") throw new Error("No editor factory installed");
-  const editor = factory({ requestRender() {} }, {}, {});
+  const [, theme, keybindings] = EDITOR_FACTORY_ARGS;
+  const editor = factory(fakeTui(), theme, keybindings);
   return editor as { render(width: number): string[] };
 }
 
@@ -2052,7 +1980,7 @@ describe("status-bar goal badge", () => {
     await enableBar(mockPi, mockCtx);
 
     const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
+      fakeTui(),
       plainTheme(),
       footerData({
         statuses: new Map([["goal", "🎯 Goal: active 2m 30s"]]),
@@ -2067,7 +1995,7 @@ describe("status-bar goal badge", () => {
 
 describe("status-bar mail slot", () => {
   function plainTheme() {
-    return { fg: vi.fn((_color: string, text: string) => text) };
+    return fakeTheme({ fg: vi.fn((_color: string, text: string) => text) });
   }
 
   /** Enable the bar with context, token history, one turn, and unread mail
@@ -2081,21 +2009,23 @@ describe("status-bar mail slot", () => {
       contextWindow: 200000,
       percent: 25,
     }));
-    mockCtx.sessionManager.getBranch = vi.fn(() => [
-      {
-        type: "message",
-        message: {
-          role: "assistant",
-          usage: {
-            input: 1000,
-            output: 500,
-            cacheRead: 200,
-            cacheWrite: 100,
-            cost: { total: 0.03 },
+    mockCtx.sessionManager.getBranch = vi.fn(() =>
+      sessionEntries([
+        {
+          type: "message",
+          message: {
+            role: "assistant",
+            usage: {
+              input: 1000,
+              output: 500,
+              cacheRead: 200,
+              cacheWrite: 100,
+              cost: { total: 0.03 },
+            },
           },
         },
-      },
-    ]);
+      ]),
+    );
     await enableBar(mockPi, mockCtx);
     const turnStartHandler = getEventHandler(mockPi, "turn_start");
     await turnStartHandler({ type: "turn_start", turnIndex: 0, timestamp: Date.now() }, mockCtx);
@@ -2116,11 +2046,7 @@ describe("status-bar mail slot", () => {
     const mockCtx = createMockCommandContext();
     await enableBarWithMail(mockPi, mockCtx);
 
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      plainTheme(),
-      footerData(),
-    );
+    const component = getFooterFactory(mockCtx)(fakeTui(), plainTheme(), footerData());
     const lines = component.render(120);
     const sessionColumn = lines[0].indexOf("Session") - 3;
     expect(lines[2].slice(sessionColumn)).toContain("✉ 2");
@@ -2132,11 +2058,7 @@ describe("status-bar mail slot", () => {
     await enableBarWithMail(mockPi, mockCtx);
 
     const fgMock = vi.fn((_color: string, text: string) => text);
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      { fg: fgMock },
-      footerData(),
-    );
+    const component = getFooterFactory(mockCtx)(fakeTui(), fakeTheme({ fg: fgMock }), footerData());
     component.render(120);
 
     expect(fgMock).toHaveBeenCalledWith("success", "✉ 2");
@@ -2149,11 +2071,7 @@ describe("status-bar mail slot", () => {
 
     getEventsHandler(mockPi, "messenger:state")({ name: "scout", unread: 0 });
 
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      plainTheme(),
-      footerData(),
-    );
+    const component = getFooterFactory(mockCtx)(fakeTui(), plainTheme(), footerData());
     expect(component.render(120).join("\n")).not.toContain("✉");
   });
 
@@ -2162,11 +2080,7 @@ describe("status-bar mail slot", () => {
     const mockCtx = createMockCommandContext();
     await enableBar(mockPi, mockCtx);
 
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      plainTheme(),
-      footerData(),
-    );
+    const component = getFooterFactory(mockCtx)(fakeTui(), plainTheme(), footerData());
     const line = component.render(120).join("\n");
 
     expect(line).not.toContain("✉");
@@ -2181,7 +2095,7 @@ describe("status-bar mail slot", () => {
     await enableBar(mockPi, mockCtx);
 
     const requestRender = vi.fn();
-    getFooterFactory(mockCtx)({ requestRender }, plainTheme(), footerData());
+    getFooterFactory(mockCtx)(fakeTui({ requestRender }), plainTheme(), footerData());
 
     getEventsHandler(mockPi, "messenger:state")({ name: "scout", unread: 1 });
     expect(requestRender).toHaveBeenCalled();
@@ -2192,11 +2106,7 @@ describe("status-bar mail slot", () => {
     const mockCtx = createMockCommandContext();
     await enableBarWithMail(mockPi, mockCtx);
 
-    const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
-      plainTheme(),
-      footerData(),
-    );
+    const component = getFooterFactory(mockCtx)(fakeTui(), plainTheme(), footerData());
 
     for (let width = 24; width <= 140; width++) {
       const text = component.render(width).join("\n");
@@ -2209,7 +2119,7 @@ describe("status-bar mail slot", () => {
 
 describe("status-bar flex badge", () => {
   function plainTheme() {
-    return { fg: vi.fn((_color: string, text: string) => text) };
+    return fakeTheme({ fg: vi.fn((_color: string, text: string) => text) });
   }
 
   it("buildEditorMetaSegments appends a flex-on badge when capable and on", () => {
@@ -2293,7 +2203,7 @@ describe("status-bar flex badge", () => {
   it("prompt history survives editor recreation only within the same session", async () => {
     const { PolishedEditor } = await import("../../extensions/status-bar/src/editor.ts");
     const theme = { fg: vi.fn((_c: string, t: string) => t) };
-    const tui = { requestRender: vi.fn() };
+    const tui = fakeTui();
     const makeEditor = (sessionId: string) =>
       new PolishedEditor(
         tui,
@@ -2327,7 +2237,7 @@ describe("status-bar flex badge", () => {
     const theme = { fg: vi.fn((_c: string, text: string) => text) };
     const makeEditor = (sessionId: string) =>
       new PolishedEditor(
-        { requestRender: vi.fn() },
+        fakeTui(),
         theme,
         {},
         theme,
@@ -2437,7 +2347,7 @@ describe("status-bar small model segment", () => {
   });
 
   function plainTheme() {
-    return { fg: vi.fn((_color: string, text: string) => text) };
+    return fakeTheme({ fg: vi.fn((_color: string, text: string) => text) });
   }
 
   it("buildEditorMetaSegments lays out main group, slash, then small label", () => {
@@ -2516,7 +2426,7 @@ describe("status-bar small model segment", () => {
     await enableBar(mockPi, mockCtx);
 
     const component = getFooterFactory(mockCtx)(
-      { requestRender: vi.fn() },
+      fakeTui(),
       plainTheme(),
       footerData({
         statuses: new Map([
@@ -2606,7 +2516,7 @@ describe("status-bar small model segment", () => {
 
 describe("status-bar worker roll-up", () => {
   function plainTheme() {
-    return { fg: vi.fn((_color: string, text: string) => text) };
+    return fakeTheme({ fg: vi.fn((_color: string, text: string) => text) });
   }
 
   async function enableBarWithWorkers(
@@ -2638,10 +2548,7 @@ describe("status-bar worker roll-up", () => {
       workerTokens: 38100,
     });
 
-    const component = getFooterFactory(mockCtx)({ requestRender: vi.fn() }, plainTheme(), {
-      onBranchChange: vi.fn(),
-      getGitBranch: () => null,
-    });
+    const component = getFooterFactory(mockCtx)(fakeTui(), plainTheme(), footerData());
     const text = component.render(160).join("\n");
     expect(text).toContain("⚙ $0.04");
     expect(text).toContain("38.1k");
@@ -2656,10 +2563,7 @@ describe("status-bar worker roll-up", () => {
       workerTokens: 0,
     });
 
-    const component = getFooterFactory(mockCtx)({ requestRender: vi.fn() }, plainTheme(), {
-      onBranchChange: vi.fn(),
-      getGitBranch: () => null,
-    });
+    const component = getFooterFactory(mockCtx)(fakeTui(), plainTheme(), footerData());
     expect(component.render(160).join("\n")).not.toContain("⚙");
   });
 
@@ -2673,10 +2577,7 @@ describe("status-bar worker roll-up", () => {
     });
 
     // Stacked panels preserve spend instead of dropping it.
-    const component = getFooterFactory(mockCtx)({ requestRender: vi.fn() }, plainTheme(), {
-      onBranchChange: vi.fn(),
-      getGitBranch: () => null,
-    });
+    const component = getFooterFactory(mockCtx)(fakeTui(), plainTheme(), footerData());
     for (let width = 24; width <= 160; width += 4) {
       const text = component.render(width).join(" ");
       expect(text, `width ${width}`).toContain("⚙ $0.04");

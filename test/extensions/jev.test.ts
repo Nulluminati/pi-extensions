@@ -8,6 +8,7 @@ import jevExtension from "../../extensions/jev/jev.ts";
 import * as jsonAtomic from "../../lib/json-atomic.ts";
 import { createMockContext, createMockModel } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
+import { contentText } from "../mocks/test-helpers.ts";
 
 vi.mock("node:fs/promises", { spy: true });
 vi.mock("../../lib/json-atomic.ts", { spy: true });
@@ -94,7 +95,7 @@ describe("jev extension", () => {
       destructiveHint: false,
       openWorldHint: true,
     });
-    expect(tool.promptGuidelines.join(" ")).toMatch(/supplied|evidence/i);
+    expect((tool.promptGuidelines ?? []).join(" ")).toMatch(/supplied|evidence/i);
     expect(pi.registerCommand).not.toHaveBeenCalled();
     expect(pi.on).not.toHaveBeenCalled();
     expect(pi.appendEntry).not.toHaveBeenCalled();
@@ -128,7 +129,7 @@ describe("jev extension", () => {
       usage,
     });
     expect(result.structuredContent).toEqual(result.details);
-    expect(JSON.parse(result.content[0].text)).toEqual(result.details);
+    expect(JSON.parse(contentText(result))).toEqual(result.details);
     expect(result.usage).toEqual(usage);
     expect(result.isError).toBeUndefined();
     expect(result.terminate).toBeUndefined();
@@ -600,8 +601,8 @@ describe("jev extension", () => {
       expect(result.usage).toEqual(usage);
       expect(result.isError).toBeUndefined();
       expect(result.terminate).toBeUndefined();
-      expect(Buffer.byteLength(result.content[0].text, "utf8")).toBeLessThan(51_200);
-      const notice = JSON.parse(result.content[0].text);
+      expect(Buffer.byteLength(contentText(result), "utf8")).toBeLessThan(51_200);
+      const notice = JSON.parse(contentText(result));
       expect(notice.status).toBe("ok");
       expect(notice.message).toMatch(/could not.*(?:save|write)/i);
       expect(notice).not.toHaveProperty("fullResultPath");
@@ -641,8 +642,8 @@ describe("jev extension", () => {
     const path = result.details.fullResultPath;
     expect(path).toBeTypeOf("string");
     try {
-      expect(Buffer.byteLength(result.content[0].text, "utf8")).toBeLessThan(51_200);
-      expect(JSON.parse(result.content[0].text)).toMatchObject({
+      expect(Buffer.byteLength(contentText(result), "utf8")).toBeLessThan(51_200);
+      expect(JSON.parse(contentText(result))).toMatchObject({
         status: "ok",
         fullResultPath: path,
       });

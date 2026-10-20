@@ -2,11 +2,19 @@ import { readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
+import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import goalExtension from "../../extensions/goal/goal.ts";
 import { createMockCommandContext } from "../mocks/context-mocks.ts";
+import { mockFn } from "../mocks/mock-types.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
-import { getCommandHandler, getEventHandler, makeConfirmCustom } from "../mocks/test-helpers.ts";
+import {
+  fakeTui,
+  getCommandHandler,
+  getEventHandler,
+  makeConfirmCustom,
+  sessionEntries,
+} from "../mocks/test-helpers.ts";
 
 vi.mock("@earendil-works/pi-ai/compat", () => ({
   completeSimple: vi.fn(),
@@ -670,19 +678,21 @@ describe("goal-extension", () => {
     it("the evaluator prompt contains the objective and transcript evidence", async () => {
       const mockPi = createMockPi();
       const mockCtx = createMockCommandContext();
-      mockCtx.sessionManager.getBranch = vi.fn(() => [
-        {
-          type: "message",
-          message: { role: "user", content: [{ type: "text", text: "implement snake game" }] },
-        },
-        {
-          type: "message",
-          message: {
-            role: "assistant",
-            content: [{ type: "text", text: "Done. All tests pass." }],
+      mockCtx.sessionManager.getBranch = vi.fn(() =>
+        sessionEntries([
+          {
+            type: "message",
+            message: { role: "user", content: [{ type: "text", text: "implement snake game" }] },
           },
-        },
-      ]);
+          {
+            type: "message",
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: "Done. All tests pass." }],
+            },
+          },
+        ]),
+      );
       await goalExtension(mockPi);
       await getCommandHandler(mockPi, "goal:new")("implement snake game", mockCtx);
       mockVerdict("met", "evidence cited");
@@ -1107,9 +1117,11 @@ describe("goal-extension", () => {
     it("reconstructs state from session on session_start", async () => {
       const mockPi = createMockPi();
       const mockCtx = createMockCommandContext();
-      mockCtx.sessionManager.getBranch = vi.fn(() => [
-        { type: "custom", customType: "goal-state", data: { goal: makeGoalState() } },
-      ]);
+      mockCtx.sessionManager.getBranch = vi.fn(() =>
+        sessionEntries([
+          { type: "custom", customType: "goal-state", data: { goal: makeGoalState() } },
+        ]),
+      );
 
       await goalExtension(mockPi);
       await getEventHandler(mockPi, "session_start")(
@@ -1142,13 +1154,15 @@ describe("goal-extension", () => {
     it("reconstructs legacy budget-status goals as paused", async () => {
       const mockPi = createMockPi();
       const mockCtx = createMockCommandContext();
-      mockCtx.sessionManager.getBranch = vi.fn(() => [
-        {
-          type: "custom",
-          customType: "goal-state",
-          data: { goal: makeGoalState({ status: "budget" as "paused", tokenBudget: 10_000 }) },
-        },
-      ]);
+      mockCtx.sessionManager.getBranch = vi.fn(() =>
+        sessionEntries([
+          {
+            type: "custom",
+            customType: "goal-state",
+            data: { goal: makeGoalState({ status: "budget" as "paused", tokenBudget: 10_000 }) },
+          },
+        ]),
+      );
 
       await goalExtension(mockPi);
       await getEventHandler(mockPi, "session_start")(
@@ -1166,13 +1180,15 @@ describe("goal-extension", () => {
     it("reconstructState skips completed goals", async () => {
       const mockPi = createMockPi();
       const mockCtx = createMockCommandContext();
-      mockCtx.sessionManager.getBranch = vi.fn(() => [
-        {
-          type: "custom",
-          customType: "goal-state",
-          data: { goal: makeGoalState({ status: "complete" }) },
-        },
-      ]);
+      mockCtx.sessionManager.getBranch = vi.fn(() =>
+        sessionEntries([
+          {
+            type: "custom",
+            customType: "goal-state",
+            data: { goal: makeGoalState({ status: "complete" }) },
+          },
+        ]),
+      );
 
       await goalExtension(mockPi);
       await getEventHandler(mockPi, "session_start")(
@@ -1186,9 +1202,11 @@ describe("goal-extension", () => {
     it("session_tree reconstructs state like session_start", async () => {
       const mockPi = createMockPi();
       const mockCtx = createMockCommandContext();
-      mockCtx.sessionManager.getBranch = vi.fn(() => [
-        { type: "custom", customType: "goal-state", data: { goal: makeGoalState() } },
-      ]);
+      mockCtx.sessionManager.getBranch = vi.fn(() =>
+        sessionEntries([
+          { type: "custom", customType: "goal-state", data: { goal: makeGoalState() } },
+        ]),
+      );
 
       await goalExtension(mockPi);
       await getEventHandler(mockPi, "session_tree")(
@@ -1398,10 +1416,10 @@ function makePromptCustom(
   typed: string | null,
 ) {
   // biome-ignore lint/suspicious/noExplicitAny: test mock
-  return vi.fn((factory: any) => {
+  return mockFn<ExtensionUIContext["custom"]>((factory: any) => {
     return new Promise((resolve) => {
       const component = factory(
-        { requestRender: vi.fn() },
+        fakeTui(),
         mockCtx.ui.theme,
         {
           matches: (data: string, keybinding: string) =>

@@ -5,7 +5,9 @@ import contextExtension from "../../extensions/context/context.ts";
 import { measureContext, sumSessionUsage } from "../../extensions/context/src/measure.ts";
 import { buildPlainText } from "../../extensions/context/src/view.ts";
 import { createMockCommandContext } from "../mocks/context-mocks.ts";
+import { mockFn } from "../mocks/mock-types.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
+import { contentText, fakeTui, fixtureAs, sessionEntries } from "../mocks/test-helpers.ts";
 
 // --- Test helpers (bottom of file keeps the describe block readable) ---
 
@@ -145,13 +147,15 @@ describe("context-extension", () => {
       vi.stubEnv("HOME", "/home/natekift");
       const pi = createMockPi();
       const ctx = createMockCommandContext();
-      ctx.getSystemPromptOptions = vi.fn(() => ({
-        cwd: "/home/test",
-        contextFiles: [
-          { path: "/home/test/AGENTS.md", content: "x".repeat(400) },
-          { path: "/home/natekift/.pi/agent/AGENTS.md", content: "y".repeat(200) },
-        ],
-      }));
+      ctx.getSystemPromptOptions.mockImplementation(() =>
+        fixtureAs({
+          cwd: "/home/test",
+          contextFiles: [
+            { path: "/home/test/AGENTS.md", content: "x".repeat(400) },
+            { path: "/home/natekift/.pi/agent/AGENTS.md", content: "y".repeat(200) },
+          ],
+        }),
+      );
 
       const breakdown = measureContext(pi, ctx);
 
@@ -176,23 +180,32 @@ describe("context-extension", () => {
           filePath: "/home/test/.agents/skills/humanizer/SKILL.md",
         },
       ];
-      ctx.getSystemPromptOptions = vi.fn(() => ({
-        cwd: "/home/test",
-        selectedTools: ["read", "bash", "edit", "write"],
-        skills,
-      }));
+      ctx.getSystemPromptOptions.mockImplementation(() =>
+        fixtureAs({
+          cwd: "/home/test",
+          selectedTools: ["read", "bash", "edit", "write"],
+          skills,
+        }),
+      );
       const readParams = { type: "object", properties: {} };
       const bashParams = { type: "object", properties: {} };
       pi.getActiveTools = vi.fn(() => ["read", "bash"]);
-      pi.getAllTools = vi.fn(() => [
-        { name: "read", description: "Read file contents", parameters: readParams, sourceInfo: {} },
-        {
-          name: "bash",
-          description: "Execute shell commands",
-          parameters: bashParams,
-          sourceInfo: {},
-        },
-      ]);
+      pi.getAllTools.mockImplementation(() =>
+        fixtureAs([
+          {
+            name: "read",
+            description: "Read file contents",
+            parameters: readParams,
+            sourceInfo: {},
+          },
+          {
+            name: "bash",
+            description: "Execute shell commands",
+            parameters: bashParams,
+            sourceInfo: {},
+          },
+        ]),
+      );
 
       const breakdown = measureContext(pi, ctx);
 
@@ -208,11 +221,13 @@ describe("context-extension", () => {
     it("excludes the skills section when no read or bash tool is selected", async () => {
       const pi = createMockPi();
       const ctx = createMockCommandContext();
-      ctx.getSystemPromptOptions = vi.fn(() => ({
-        cwd: "/home/test",
-        selectedTools: ["edit", "write"],
-        skills: [{ name: "write-tests", description: "d".repeat(100), filePath: "/s/SKILL.md" }],
-      }));
+      ctx.getSystemPromptOptions.mockImplementation(() =>
+        fixtureAs({
+          cwd: "/home/test",
+          selectedTools: ["edit", "write"],
+          skills: [{ name: "write-tests", description: "d".repeat(100), filePath: "/s/SKILL.md" }],
+        }),
+      );
 
       const breakdown = measureContext(pi, ctx);
 
@@ -228,12 +243,14 @@ describe("context-extension", () => {
         { name: "write-tests", description: "d".repeat(100), filePath: "/s/SKILL.md" },
       ];
       const section = formatSkillsForPrompt(skills as Skill[], "read").trim();
-      ctx.getSystemPromptOptions = vi.fn(() => ({
-        cwd: "/home/test",
-        selectedTools: ["read"],
-        contextFiles: [{ path: "/home/test/AGENTS.md", content: fileContent }],
-        skills,
-      }));
+      ctx.getSystemPromptOptions.mockImplementation(() =>
+        fixtureAs({
+          cwd: "/home/test",
+          selectedTools: ["read"],
+          contextFiles: [{ path: "/home/test/AGENTS.md", content: fileContent }],
+          skills,
+        }),
+      );
       const prompt = `Preamble\n\n${fileContent}\n\n${section}\n\n/home/test`;
       ctx.getSystemPrompt = vi.fn(() => prompt);
 
@@ -250,12 +267,14 @@ describe("context-extension", () => {
       const pi = createMockPi();
       const ctx = createMockCommandContext();
       ctx.getSystemPrompt = vi.fn(() => "tiny");
-      ctx.getSystemPromptOptions = vi.fn(() => ({
-        cwd: "/home/test",
-        selectedTools: ["read"],
-        contextFiles: [{ path: "/home/test/AGENTS.md", content: "x".repeat(400) }],
-        skills: [{ name: "write-tests", description: "d".repeat(100), filePath: "/s/SKILL.md" }],
-      }));
+      ctx.getSystemPromptOptions.mockImplementation(() =>
+        fixtureAs({
+          cwd: "/home/test",
+          selectedTools: ["read"],
+          contextFiles: [{ path: "/home/test/AGENTS.md", content: "x".repeat(400) }],
+          skills: [{ name: "write-tests", description: "d".repeat(100), filePath: "/s/SKILL.md" }],
+        }),
+      );
 
       const breakdown = measureContext(pi, ctx);
 
@@ -265,7 +284,7 @@ describe("context-extension", () => {
     it("counts messages, estimates their tokens, and ranks the largest", async () => {
       const pi = createMockPi();
       const ctx = createMockCommandContext();
-      ctx.sessionManager.getBranch = vi.fn(() => SESSION_ENTRIES);
+      ctx.sessionManager.getBranch = vi.fn(() => sessionEntries(SESSION_ENTRIES));
 
       const breakdown = measureContext(pi, ctx);
 
@@ -349,15 +368,15 @@ describe("context-extension", () => {
         percent: 19.5,
       }));
       ctx.getSystemPrompt = vi.fn(() => "You are Pi.\n".repeat(40));
-      ctx.sessionManager.getBranch = vi.fn(() => SESSION_ENTRIES);
+      ctx.sessionManager.getBranch = vi.fn(() => sessionEntries(SESSION_ENTRIES));
 
       let component!: { render(width: number): string[]; handleInput(data: string): void };
-      ctx.ui.custom = vi.fn(
+      ctx.ui.custom = mockFn(
         // biome-ignore lint/suspicious/noExplicitAny: test mock
         (factory: any) =>
           new Promise((resolve) => {
             component = factory(
-              { requestRender: vi.fn(), terminal: { rows: 40 } },
+              fakeTui({ terminal: { rows: 40 } }),
               ctx.ui.theme,
               NULL_KEYBINDINGS,
               resolve,
@@ -391,15 +410,15 @@ describe("context-extension", () => {
       const pi = createMockPi();
       const ctx = createMockCommandContext();
       ctx.getContextUsage = vi.fn(() => undefined);
-      ctx.sessionManager.getBranch = vi.fn(() => []);
+      ctx.sessionManager.getBranch = vi.fn(() => sessionEntries([]));
 
       let component!: { render(width: number): string[]; handleInput(data: string): void };
-      ctx.ui.custom = vi.fn(
+      ctx.ui.custom = mockFn(
         // biome-ignore lint/suspicious/noExplicitAny: test mock
         (factory: any) =>
           new Promise((resolve) => {
             component = factory(
-              { requestRender: vi.fn(), terminal: { rows: 40 } },
+              fakeTui({ terminal: { rows: 40 } }),
               ctx.ui.theme,
               NULL_KEYBINDINGS,
               resolve,
@@ -431,7 +450,7 @@ describe("context-extension", () => {
       let component!: { render(width: number): string[]; handleInput(data: string): void };
       const done = vi.fn();
       let resolveModal!: () => void;
-      ctx.ui.custom = vi.fn(
+      ctx.ui.custom = mockFn(
         // biome-ignore lint/suspicious/noExplicitAny: test mock
         (factory: any) =>
           new Promise<void>((resolve) => {
@@ -450,7 +469,7 @@ describe("context-extension", () => {
               },
             };
             component = factory(
-              { requestRender: vi.fn(), terminal: { rows: 40 } },
+              fakeTui({ terminal: { rows: 40 } }),
               ctx.ui.theme,
               keybindings,
               () => {
@@ -482,7 +501,7 @@ describe("context-extension", () => {
         percent: 19.5,
       }));
       ctx.getSystemPrompt = vi.fn(() => "You are Pi.\n".repeat(40));
-      ctx.sessionManager.getBranch = vi.fn(() => SESSION_ENTRIES);
+      ctx.sessionManager.getBranch = vi.fn(() => sessionEntries(SESSION_ENTRIES));
 
       await contextExtension(pi);
       const handler = getCommandHandler(pi);
@@ -493,7 +512,7 @@ describe("context-extension", () => {
       const [message] = pi.sendMessage.mock.calls[0];
       expect(message.customType).toBe("context");
       expect(message.display).toBe(true);
-      const text = message.content[0].text;
+      const text = contentText(message);
       expect(text).toContain("Used: 25.0k / 128.0k (19.5%");
       expect(text).toContain("System prompt:");
       expect(text).toContain("Messages:");
@@ -522,13 +541,15 @@ describe("context-extension", () => {
       ctx.getSystemPrompt = vi.fn(
         () => `Base instructions.\n\n${fileContent}\n\n${section}\n\n/home/test`,
       );
-      ctx.getSystemPromptOptions = vi.fn(() => ({
-        cwd: "/home/test",
-        selectedTools: ["read", "bash", "edit", "write"],
-        contextFiles: [{ path: "/home/test/AGENTS.md", content: fileContent }],
-        skills,
-      }));
-      ctx.sessionManager.getBranch = vi.fn(() => SESSION_ENTRIES);
+      ctx.getSystemPromptOptions.mockImplementation(() =>
+        fixtureAs({
+          cwd: "/home/test",
+          selectedTools: ["read", "bash", "edit", "write"],
+          contextFiles: [{ path: "/home/test/AGENTS.md", content: fileContent }],
+          skills,
+        }),
+      );
+      ctx.sessionManager.getBranch = vi.fn(() => sessionEntries(SESSION_ENTRIES));
 
       const text = buildPlainText(measureContext(pi, ctx));
 

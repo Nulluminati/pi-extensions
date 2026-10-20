@@ -2,7 +2,6 @@ import { EventEmitter } from "node:events";
 import { mkdtemp, readdir, readFile, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { Check } from "typebox/value";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import backgroundJobsExtension from "../../extensions/background-jobs/background-jobs.ts";
@@ -12,9 +11,9 @@ import {
   SPOOL_MAX_FILES,
 } from "../../extensions/background-jobs/src/runner.ts";
 import { __resetWidgetStrip, STRIP_KEY_ABOVE } from "../../lib/widget-strip.ts";
-import { createMockCommandContext } from "../mocks/context-mocks.ts";
-import type { DeepMocked } from "../mocks/mock-types.ts";
-import { createMockPi } from "../mocks/pi-mocks.ts";
+import { createMockCommandContext, type MockCommandContext } from "../mocks/context-mocks.ts";
+import { createMockPi, type MockPi } from "../mocks/pi-mocks.ts";
+import { contentText, fakeTui } from "../mocks/test-helpers.ts";
 
 // --- Shared mocks -----------------------------------------------------------
 
@@ -56,27 +55,27 @@ function makeFakeChild(pid = 4242) {
   return child;
 }
 
-function getTool(mockPi: DeepMocked<ExtensionAPI>, name: string) {
+function getTool(mockPi: MockPi, name: string) {
   for (const call of mockPi.registerTool.mock.calls) {
     if (call[0].name === name) return call[0];
   }
   throw new Error(`Tool ${name} not registered`);
 }
 
-function getEventHandler(mockPi: DeepMocked<ExtensionAPI>, eventType: string) {
+function getEventHandler(mockPi: MockPi, eventType: string) {
   for (const call of mockPi.on.mock.calls) {
     if (call[0] === eventType) return call[1];
   }
   throw new Error(`Event handler for ${eventType} not found`);
 }
 
-function wakeTexts(mockPi: DeepMocked<ExtensionAPI>): string[] {
+function wakeTexts(mockPi: MockPi): string[] {
   return mockPi.sendMessage.mock.calls.map((call) => (call[0].content[0] as { text: string }).text);
 }
 
 async function startBackgroundJob(
-  mockPi: DeepMocked<ExtensionAPI>,
-  mockCtx: DeepMocked<ExtensionCommandContext>,
+  mockPi: MockPi,
+  mockCtx: MockCommandContext,
   params: Record<string, unknown>,
 ) {
   const tool = getTool(mockPi, "background");
@@ -149,7 +148,7 @@ describe("background-jobs-extension", () => {
 
       const result = await tool.execute("call-1", {}, undefined, undefined, mockCtx);
       expect(result.terminate).toBe(true);
-      expect(result.content[0].text).toContain("command is required");
+      expect(contentText(result)).toContain("command is required");
     });
 
     it("errors on an invalid wake_on_pattern regexp", async () => {
@@ -166,7 +165,7 @@ describe("background-jobs-extension", () => {
         mockCtx,
       );
       expect(result.terminate).toBe(true);
-      expect(result.content[0].text).toContain("Invalid wake_on_pattern");
+      expect(contentText(result)).toContain("Invalid wake_on_pattern");
     });
 
     it("spawns detached under /bin/sh and returns a job id", async () => {
@@ -178,8 +177,8 @@ describe("background-jobs-extension", () => {
       });
 
       expect(result.isError).toBeUndefined();
-      expect(result.content[0].text).toContain("Started background job #1");
-      expect(result.content[0].text).toContain("jobs");
+      expect(contentText(result)).toContain("Started background job #1");
+      expect(contentText(result)).toContain("jobs");
       expect(result.details).toMatchObject({ jobId: 1, status: "running", pid: child.pid });
 
       expect(spawnMock).toHaveBeenCalledTimes(1);
@@ -203,7 +202,7 @@ describe("background-jobs-extension", () => {
         theme: unknown,
       ) => { render: (width: number) => string[] };
       const theme = { fg: (_color: string, text: string) => text };
-      const component = factory({ requestRender: vi.fn() }, theme);
+      const component = factory(fakeTui(), theme);
       const text = component.render(80).join("\n");
 
       expect(text).toContain("Jobs");
@@ -229,7 +228,7 @@ describe("background-jobs-extension", () => {
         theme: unknown,
       ) => { render: (width: number) => string[] };
       const theme = { fg: (_color: string, text: string) => text };
-      const component = factory({ requestRender: vi.fn() }, theme);
+      const component = factory(fakeTui(), theme);
       const text = component.render(80).join("\n");
 
       expect(text).toContain("one");
@@ -326,7 +325,9 @@ describe("background-jobs-extension", () => {
         (call) => call[0] === "background-jobs",
       );
       expect(snapshotCalls.length).toBeGreaterThanOrEqual(2);
-      const lastSnapshot = snapshotCalls[snapshotCalls.length - 1][1];
+      const lastSnapshot = snapshotCalls[snapshotCalls.length - 1][1] as {
+        jobs: unknown[];
+      };
       expect(lastSnapshot.jobs[0]).toMatchObject({
         id: 1,
         kind: "background",
@@ -366,8 +367,8 @@ describe("background-jobs-extension", () => {
     });
 
     function startMonitor(
-      mockPi: DeepMocked<ExtensionAPI>,
-      mockCtx: DeepMocked<ExtensionCommandContext>,
+      mockPi: MockPi,
+      mockCtx: MockCommandContext,
       params: Record<string, unknown>,
     ) {
       const tool = getTool(mockPi, "monitor");
@@ -385,7 +386,7 @@ describe("background-jobs-extension", () => {
 
       const result = await startMonitor(mockPi, mockCtx, { satisfy_on: "exit_zero" });
       expect(result.terminate).toBe(true);
-      expect(result.content[0].text).toContain("command is required");
+      expect(contentText(result)).toContain("command is required");
     });
 
     it("errors when stdout_matches has no pattern", async () => {
@@ -398,7 +399,7 @@ describe("background-jobs-extension", () => {
         satisfy_on: "stdout_matches",
       });
       expect(result.terminate).toBe(true);
-      expect(result.content[0].text).toContain("pattern");
+      expect(contentText(result)).toContain("pattern");
     });
 
     it("errors on an invalid pattern regexp", async () => {
@@ -412,14 +413,14 @@ describe("background-jobs-extension", () => {
         pattern: "([bad",
       });
       expect(result.terminate).toBe(true);
-      expect(result.content[0].text).toContain("Invalid pattern");
+      expect(contentText(result)).toContain("Invalid pattern");
     });
 
     it("polls via /bin/sh and wakes when satisfied", async () => {
       const mockPi = createMockPi();
       const mockCtx = createMockCommandContext();
       await backgroundJobsExtension(mockPi);
-      mockPi.exec.mockResolvedValue({ stdout: "", stderr: "", code: 0 });
+      mockPi.exec.mockResolvedValue({ stdout: "", stderr: "", code: 0, killed: false });
 
       const result = await startMonitor(mockPi, mockCtx, {
         command: "git merge --no-edit",
@@ -427,7 +428,7 @@ describe("background-jobs-extension", () => {
       });
       await vi.advanceTimersByTimeAsync(0);
 
-      expect(result.content[0].text).toContain("Started monitor #1");
+      expect(contentText(result)).toContain("Started monitor #1");
       expect(mockPi.exec).toHaveBeenCalledWith(
         "/bin/sh",
         ["-c", "git merge --no-edit"],
@@ -446,8 +447,8 @@ describe("background-jobs-extension", () => {
       const mockCtx = createMockCommandContext();
       await backgroundJobsExtension(mockPi);
       mockPi.exec
-        .mockResolvedValueOnce({ stdout: "pending\n", stderr: "", code: 1 })
-        .mockResolvedValueOnce({ stdout: "DONE\n", stderr: "", code: 0 });
+        .mockResolvedValueOnce({ stdout: "pending\n", stderr: "", code: 1, killed: false })
+        .mockResolvedValueOnce({ stdout: "DONE\n", stderr: "", code: 0, killed: false });
 
       await startMonitor(mockPi, mockCtx, {
         command: "check",
@@ -469,7 +470,7 @@ describe("background-jobs-extension", () => {
       const mockPi = createMockPi();
       const mockCtx = createMockCommandContext();
       await backgroundJobsExtension(mockPi);
-      mockPi.exec.mockResolvedValue({ stdout: "pending", stderr: "", code: 1 });
+      mockPi.exec.mockResolvedValue({ stdout: "pending", stderr: "", code: 1, killed: false });
 
       await startMonitor(mockPi, mockCtx, {
         command: "check",
@@ -496,6 +497,7 @@ describe("background-jobs-extension", () => {
         stdout: "",
         stderr: "check: command not found",
         code: 127,
+        killed: false,
       });
 
       await startMonitor(mockPi, mockCtx, {
@@ -522,7 +524,7 @@ describe("background-jobs-extension", () => {
         const tool = getTool(mockPi, "jobs");
         const result = await tool.execute("data", { action, jobId: 99 }, undefined, undefined, ctx);
         expect(tool.outputSchema).toBeDefined();
-        expect(Check(tool.outputSchema, result.structuredContent)).toBe(true);
+        expect(Check(tool.outputSchema!, result.structuredContent)).toBe(true);
         const error =
           action === "list" ? undefined : action === "invalid" ? "unknown_action" : "unknown_job";
         expect(result.structuredContent).toEqual({ jobs: [], ...(error ? { error } : {}) });
@@ -557,7 +559,7 @@ describe("background-jobs-extension", () => {
         const tool = getTool(mockPi, "jobs");
         const result = await tool.execute("data", { action, jobId: 1 }, undefined, undefined, ctx);
         expect(tool.outputSchema).toBeDefined();
-        expect(Check(tool.outputSchema, result.structuredContent)).toBe(true);
+        expect(Check(tool.outputSchema!, result.structuredContent)).toBe(true);
         expect(result.structuredContent).toMatchObject({
           jobs: [
             {
@@ -576,7 +578,7 @@ describe("background-jobs-extension", () => {
         };
         expect(data.jobs[0]).not.toHaveProperty("child");
         expect(data.jobs[0]).not.toHaveProperty("timer");
-        expect(data.output).toBe(action === "tail" ? result.content[0].text : undefined);
+        expect(data.output).toBe(action === "tail" ? contentText(result) : undefined);
         expect(result.isError).toBeUndefined();
         expect(result.terminate).toBeUndefined();
       },
@@ -595,7 +597,7 @@ describe("background-jobs-extension", () => {
         undefined,
         mockCtx,
       );
-      expect(result.content[0].text).toContain("No background jobs");
+      expect(contentText(result)).toContain("No background jobs");
     });
 
     it("errors on an unknown action", async () => {
@@ -612,7 +614,7 @@ describe("background-jobs-extension", () => {
         mockCtx,
       );
       expect(result.terminate).toBe(true);
-      expect(result.content[0].text).toContain("Unknown action");
+      expect(contentText(result)).toContain("Unknown action");
     });
 
     it("lists jobs with status markers", async () => {
@@ -630,8 +632,8 @@ describe("background-jobs-extension", () => {
         undefined,
         mockCtx,
       );
-      expect(result.content[0].text).toContain("#1");
-      expect(result.content[0].text).toContain("completed");
+      expect(contentText(result)).toContain("#1");
+      expect(contentText(result)).toContain("completed");
     });
 
     it("errors on status for an unknown job id", async () => {
@@ -648,7 +650,7 @@ describe("background-jobs-extension", () => {
         mockCtx,
       );
       expect(result.terminate).toBe(true);
-      expect(result.content[0].text).toContain("No job #99");
+      expect(contentText(result)).toContain("No job #99");
     });
 
     it("tails captured output for a job", async () => {
@@ -667,8 +669,8 @@ describe("background-jobs-extension", () => {
         undefined,
         mockCtx,
       );
-      expect(result.content[0].text).toContain("line one");
-      expect(result.content[0].text).toContain("line two");
+      expect(contentText(result)).toContain("line one");
+      expect(contentText(result)).toContain("line two");
     });
 
     it("says no output was captured when the buffer is empty", async () => {
@@ -686,7 +688,7 @@ describe("background-jobs-extension", () => {
         mockCtx,
       );
       expect(result.isError).toBeUndefined();
-      expect(result.content[0].text).toContain("No output captured");
+      expect(contentText(result)).toContain("No output captured");
     });
 
     it("caps tail output at a hard character limit", async () => {
@@ -705,8 +707,8 @@ describe("background-jobs-extension", () => {
         undefined,
         mockCtx,
       );
-      expect(result.content[0].text.length).toBeLessThan(7_000);
-      expect(result.content[0].text).toContain("TAILMARKER");
+      expect(contentText(result).length).toBeLessThan(7_000);
+      expect(contentText(result)).toContain("TAILMARKER");
     });
 
     it("reports cancelling a terminal job as a no-op message", async () => {
@@ -725,7 +727,7 @@ describe("background-jobs-extension", () => {
         mockCtx,
       );
       expect(result.isError).toBeUndefined();
-      expect(result.content[0].text).toContain("already completed");
+      expect(contentText(result)).toContain("already completed");
     });
 
     it("does not offer a view action — the panel is user-only", async () => {
@@ -742,21 +744,18 @@ describe("background-jobs-extension", () => {
         mockCtx,
       );
       expect(result.terminate).toBe(true);
-      expect(result.content[0].text).toContain("Unknown action");
+      expect(contentText(result)).toContain("Unknown action");
       expect(mockCtx.ui.custom).not.toHaveBeenCalled();
     });
   });
 
   describe("/jobs command", () => {
-    async function openPanel(
-      mockPi: DeepMocked<ExtensionAPI>,
-      mockCtx: DeepMocked<ExtensionCommandContext>,
-    ) {
+    async function openPanel(mockPi: MockPi, mockCtx: MockCommandContext) {
       const call = mockPi.registerCommand.mock.calls.find((c) => c[0] === "jobs");
       const handler = call?.[1].handler as (args: string, ctx: unknown) => Promise<void>;
       await handler("", mockCtx);
       expect(mockCtx.ui.custom).toHaveBeenCalledTimes(1);
-      return mockCtx.ui.custom.mock.calls[0][0] as (
+      return mockCtx.ui.custom.mock.calls[0][0] as unknown as (
         tui: unknown,
         theme: unknown,
         keybindings: unknown,
@@ -861,7 +860,7 @@ describe("background-jobs-extension", () => {
       // 20-row terminal -> overlay maxHeight is 80% -> 16 rows total, so the
       // frame body budget is 12 (after top/bottom border and padding rows).
       const component = factory(
-        { requestRender: vi.fn(), terminal: { rows: 20 } },
+        fakeTui({ terminal: { rows: 20 } }),
         mockCtx.ui.theme,
         null,
         vi.fn(),
@@ -889,7 +888,7 @@ describe("background-jobs-extension", () => {
 
       const factory = await openPanel(mockPi, mockCtx);
       const component = factory(
-        { requestRender: vi.fn(), terminal: { rows: 60 } },
+        fakeTui({ terminal: { rows: 60 } }),
         mockCtx.ui.theme,
         null,
         vi.fn(),
@@ -911,7 +910,7 @@ describe("background-jobs-extension", () => {
 
       const factory = await openPanel(mockPi, mockCtx);
       const component = factory(
-        { requestRender: vi.fn(), terminal: { rows: 10 } },
+        fakeTui({ terminal: { rows: 10 } }),
         mockCtx.ui.theme,
         null,
         vi.fn(),
@@ -1013,7 +1012,7 @@ describe("background-jobs-extension", () => {
       await vi.advanceTimersByTimeAsync(100);
       const result = await pending;
 
-      expect(result.content[0].text).toContain("cancelled");
+      expect(contentText(result)).toContain("cancelled");
       expect(result.details).toMatchObject({ jobId: 1, status: "cancelled" });
     });
 
@@ -1039,7 +1038,7 @@ describe("background-jobs-extension", () => {
       child.emit("exit", null, "SIGKILL");
       await vi.advanceTimersByTimeAsync(100);
       const result = await pending;
-      expect(result.content[0].text).toContain("cancelled");
+      expect(contentText(result)).toContain("cancelled");
     });
 
     it("records kill_failed when the group survives SIGKILL", async () => {
@@ -1061,7 +1060,7 @@ describe("background-jobs-extension", () => {
       await vi.advanceTimersByTimeAsync(8_000);
 
       const result = await pending;
-      expect(result.content[0].text).toContain("kill_failed");
+      expect(contentText(result)).toContain("kill_failed");
       expect(result.details).toMatchObject({ status: "kill_failed" });
     });
 
@@ -1070,7 +1069,7 @@ describe("background-jobs-extension", () => {
       const mockPi = createMockPi();
       const mockCtx = createMockCommandContext();
       await backgroundJobsExtension(mockPi);
-      mockPi.exec.mockResolvedValue({ stdout: "pending", stderr: "", code: 1 });
+      mockPi.exec.mockResolvedValue({ stdout: "pending", stderr: "", code: 1, killed: false });
       const monitorTool = getTool(mockPi, "monitor");
       await monitorTool.execute(
         "call-1",
@@ -1089,7 +1088,7 @@ describe("background-jobs-extension", () => {
         undefined,
         mockCtx,
       );
-      expect(result.content[0].text).toContain("cancelled");
+      expect(contentText(result)).toContain("cancelled");
     });
   });
 
@@ -1137,7 +1136,7 @@ describe("background-jobs-extension", () => {
         undefined,
         mockCtx,
       );
-      expect(result.content[0].text).toContain("No background jobs");
+      expect(contentText(result)).toContain("No background jobs");
     });
   });
 

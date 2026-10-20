@@ -1,7 +1,6 @@
 import { mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import missionsExtension from "../../extensions/missions/missions.ts";
@@ -22,14 +21,14 @@ import {
 import { runGit } from "../../lib/git.ts";
 import { projectStateRelative } from "../../lib/paths.ts";
 import { __resetWidgetStrip, STRIP_KEY_ABOVE } from "../../lib/widget-strip.ts";
-import { createMockCommandContext } from "../mocks/context-mocks.ts";
-import type { DeepMocked } from "../mocks/mock-types.ts";
-import { createMockPi as createBasePi } from "../mocks/pi-mocks.ts";
+import { createMockCommandContext, type MockCommandContext } from "../mocks/context-mocks.ts";
+import { createMockPi as createBasePi, type MockPi } from "../mocks/pi-mocks.ts";
+import { contentText, sessionEntries } from "../mocks/test-helpers.ts";
 
 describe("missions-extension", () => {
   let cwd: string;
-  let mockPi: DeepMocked<ExtensionAPI>;
-  let mockCtx: DeepMocked<ExtensionCommandContext>;
+  let mockPi: MockPi;
+  let mockCtx: MockCommandContext;
 
   const executeTool = async (params: Record<string, unknown>) => {
     const tool = mockPi.registerTool.mock.calls[0][0];
@@ -53,17 +52,19 @@ describe("missions-extension", () => {
   beforeEach(async () => {
     __resetWidgetStrip();
     cwd = await mkdtemp(join(tmpdir(), "missions-test-"));
-    mockPi = createBasePi() as DeepMocked<ExtensionAPI>;
+    mockPi = createBasePi() as MockPi;
     mockCtx = createMockCommandContext();
     (mockCtx as { cwd: string }).cwd = cwd;
     await missionsExtension(mockPi);
     // The session branch must round-trip appendEntry records the way the real
     // transcript does, or reloadActive can't see this session's pointer.
-    mockCtx.sessionManager.getBranch = vi.fn(() => [
-      ...mockPi.appendEntry.mock.calls
-        .filter(([type]) => type === "missions-active")
-        .map(([, data]) => ({ type: "custom", customType: "missions-active", data })),
-    ]);
+    mockCtx.sessionManager.getBranch = vi.fn(() =>
+      sessionEntries([
+        ...mockPi.appendEntry.mock.calls
+          .filter(([type]) => type === "missions-active")
+          .map(([, data]) => ({ type: "custom", customType: "missions-active", data })),
+      ]),
+    );
   });
 
   /** Spy restorers so a throwing test cannot leak process-global mocks. */
@@ -89,7 +90,7 @@ describe("missions-extension", () => {
       title: "Build widget",
       objective: "A working widget with tests",
     });
-    const text = result.content[0].text as string;
+    const text = contentText(result) as string;
     expect(text).toContain("Created mission-");
     expect(text).toContain("planning");
 
@@ -114,7 +115,7 @@ describe("missions-extension", () => {
 
     // Session-scoped pointers: the second session sees no active mission and
     // creates its own without touching the first.
-    const secondPi = createBasePi() as DeepMocked<ExtensionAPI>;
+    const secondPi = createBasePi() as MockPi;
     const secondCtx = createMockCommandContext();
     (secondCtx as { cwd: string }).cwd = cwd;
     await missionsExtension(secondPi);
@@ -150,7 +151,7 @@ describe("missions-extension", () => {
     });
     const sharedId = created.details.missionId as string;
 
-    const secondPi = createBasePi() as DeepMocked<ExtensionAPI>;
+    const secondPi = createBasePi() as MockPi;
     const secondCtx = createMockCommandContext();
     (secondCtx as { cwd: string }).cwd = cwd;
     await missionsExtension(secondPi);
@@ -216,7 +217,7 @@ describe("missions-extension", () => {
       status: "done",
       summary: "A done",
     });
-    expect(res.content[0].text).toContain("done");
+    expect(contentText(res)).toContain("done");
 
     await expect(
       executeTool({ action: "task_update", taskId: bId, status: "done", summary: "B done" }),
@@ -227,7 +228,7 @@ describe("missions-extension", () => {
     await executeTool({ action: "create", title: "t", objective: "o", maxTokens: 100 });
     const res = await executeTool({ action: "spend", tokens: 150 });
     expect(res.details.overBudget).toBe(true);
-    expect(res.content[0].text).toContain("OVER BUDGET");
+    expect(contentText(res)).toContain("OVER BUDGET");
   });
 
   it("completes only when every task is done or failed", async () => {
@@ -283,7 +284,7 @@ describe("missions-extension", () => {
     });
 
     const res = await executeTool({ action: "reconcile" });
-    const text = res.content[0].text as string;
+    const text = contentText(res) as string;
     expect(text).toContain("2 verified task(s) re-checked");
     expect(text).toContain("1 task(s) REGRESSED");
     expect(text).toContain("check-output");
@@ -291,7 +292,7 @@ describe("missions-extension", () => {
     expect(res.details.report.regressed[0].taskId).toBe(fail.details.taskId);
 
     const status = await executeTool({ action: "status" });
-    expect(status.content[0].text).toContain("⚠");
+    expect(contentText(status)).toContain("⚠");
   });
 
   it("switch selects another mission by id", async () => {
@@ -317,7 +318,7 @@ describe("missions-extension", () => {
     );
 
     const res = await executeTool({ action: "switch", id: secondId });
-    expect(res.content[0].text).toContain(`Switched to ${secondId}`);
+    expect(contentText(res)).toContain(`Switched to ${secondId}`);
     expect(lastActiveEntryId()).toBe(secondId);
   });
 
@@ -354,9 +355,9 @@ describe("missions-extension", () => {
       JSON.stringify(mission),
     );
     // The active pointer lives in the session transcript now.
-    mockCtx.sessionManager.getBranch = vi.fn(() => [
-      { type: "custom", customType: "missions-active", data: { id: restoredId } },
-    ]);
+    mockCtx.sessionManager.getBranch = vi.fn(() =>
+      sessionEntries([{ type: "custom", customType: "missions-active", data: { id: restoredId } }]),
+    );
 
     const handler = getEventHandler("session_start");
     await handler({ type: "session_start", reason: "startup" }, mockCtx);
@@ -442,7 +443,7 @@ describe("missions-extension", () => {
     expect(second.details.missionId).toBeDefined();
 
     const res = await executeTool({ action: "list" });
-    const text = res.content[0].text as string;
+    const text = contentText(res) as string;
     expect(text).toContain("visible");
     expect(text).toContain("current");
     expect(res.details.count).toBe(2);
@@ -462,7 +463,7 @@ describe("missions-extension", () => {
       summary: "agreed on scope",
       commit: "abc1234",
     });
-    expect(res.content[0].text).toContain("Checkpoint");
+    expect(contentText(res)).toContain("Checkpoint");
     expect(res.details.checkpointId).toMatch(/^ckpt-/);
 
     const stored = JSON.parse(
@@ -474,7 +475,7 @@ describe("missions-extension", () => {
   it("decision records a decision", async () => {
     await executeTool({ action: "create", title: "t", objective: "o" });
     const res = await executeTool({ action: "decision", text: "Use sqlite for storage" });
-    expect(res.content[0].text).toContain("Decision recorded.");
+    expect(contentText(res)).toContain("Decision recorded.");
 
     const stored = JSON.parse(
       await readFile(join(cwd, CONFIG_DIR_NAME, "missions", `${lastActiveEntryId()}.json`), "utf8"),
@@ -506,10 +507,10 @@ describe("missions-extension", () => {
       taskId,
       verification: { command: "npm test", description: "suite passes" },
     });
-    expect(set.content[0].text).toContain("npm test");
+    expect(contentText(set)).toContain("npm test");
 
     const cleared = await executeTool({ action: "task_verify", taskId });
-    expect(cleared.content[0].text).toContain("cleared");
+    expect(contentText(cleared)).toContain("cleared");
   });
 
   it("spend rejects negative amounts and requires iterations or tokens", async () => {
@@ -618,7 +619,7 @@ describe("missions-extension", () => {
     await writeFile(join(cwd, CONFIG_DIR_NAME, "missions", corruptFile), "{ this is not json");
 
     const res = await executeTool({ action: "list" });
-    const text = res.content[0].text as string;
+    const text = contentText(res) as string;
     expect(text).toContain("healthy");
     expect(text).toContain(corruptFile);
     expect(res.details.count).toBe(1);
@@ -860,7 +861,7 @@ describe("missions-extension", () => {
 
     const res = await executeTool({ action: "list" });
     expect(res.details.count).toBe(1);
-    expect(res.content[0].text).toContain("real");
+    expect(contentText(res)).toContain("real");
   });
 });
 
@@ -884,7 +885,7 @@ function craftMission(id: string): Record<string, unknown> {
 }
 
 /** Instantiate the last widget factory the extension published and render it. */
-function renderLastWidget(mockCtx: DeepMocked<ExtensionCommandContext>, width = 80): string[] {
+function renderLastWidget(mockCtx: MockCommandContext, width = 80): string[] {
   const lastCall = mockCtx.ui.setWidget.mock.calls.at(-1) as unknown[];
   const factory = lastCall[1] as
     | ((tui: unknown, theme: unknown) => { render(w: number): string[] })

@@ -5,6 +5,7 @@ import {
   SearchableSelect,
   type SearchableSelectOptions,
 } from "../../lib/searchable-select.ts";
+import { fakeTui } from "../mocks/test-helpers.ts";
 
 const ITEMS: SelectItem[] = [
   { value: "brave", label: "Brave Search", description: "Independent web index" },
@@ -57,7 +58,7 @@ describe("SearchableSelect", () => {
 
   it("highlights the active item without changing its label", () => {
     const selector = new SearchableSelect({
-      tui: { requestRender: vi.fn() },
+      tui: fakeTui(),
       theme: {
         fg: (color, text) => `<${color}>${text}</${color}>`,
         bold: (text) => text,

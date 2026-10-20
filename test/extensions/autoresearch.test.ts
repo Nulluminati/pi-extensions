@@ -4,7 +4,6 @@ import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import autoresearchExtension from "../../extensions/autoresearch/autoresearch.ts";
@@ -21,9 +20,9 @@ import type { RunEntry } from "../../extensions/autoresearch/src/types.ts";
 import { cleanGitEnv } from "../../lib/git.ts";
 import { projectStateRelative } from "../../lib/paths.ts";
 import { __resetWidgetStrip, STRIP_KEY_ABOVE } from "../../lib/widget-strip.ts";
-import { createMockContext } from "../mocks/context-mocks.ts";
-import type { DeepMocked } from "../mocks/mock-types.ts";
-import { createMockPi } from "../mocks/pi-mocks.ts";
+import { createMockContext, type MockContext } from "../mocks/context-mocks.ts";
+import { createMockPi, type MockPi } from "../mocks/pi-mocks.ts";
+import { contentText } from "../mocks/test-helpers.ts";
 
 const execFileAsync = promisify(execFile);
 const gitOpts = (cwd: string) => ({ cwd, env: cleanGitEnv() });
@@ -67,15 +66,15 @@ async function initGitRepo(cwd: string): Promise<void> {
 
 describe("autoresearch-extension", () => {
   let cwd: string;
-  let mockPi: DeepMocked<ExtensionAPI>;
-  let mockCtx: DeepMocked<ExtensionContext>;
+  let mockPi: MockPi;
+  let mockCtx: MockContext;
 
   const executeTool = async (params: Record<string, unknown>) => {
     const tool = mockPi.registerTool.mock.calls[0][0];
     return tool.execute("call-1", params as never, undefined, undefined, mockCtx);
   };
 
-  const getEventHandler = (eventType: string, pi: DeepMocked<ExtensionAPI> = mockPi) => {
+  const getEventHandler = (eventType: string, pi: MockPi = mockPi) => {
     for (const call of pi.on.mock.calls) {
       if (call[0] === eventType) return call[1];
     }
@@ -113,7 +112,7 @@ describe("autoresearch-extension", () => {
     __resetWidgetStrip();
     cwd = await mkdtemp(join(tmpdir(), "autoresearch-test-"));
     await initGitRepo(cwd);
-    mockPi = createMockPi() as DeepMocked<ExtensionAPI>;
+    mockPi = createMockPi() as MockPi;
     mockCtx = createMockContext();
     (mockCtx as { cwd: string }).cwd = cwd;
     await autoresearchExtension(mockPi);
@@ -148,7 +147,7 @@ describe("autoresearch-extension", () => {
 
   it("init records the baseline and writes .pi/autoresearch files", async () => {
     const res = await initSession();
-    expect(res.content[0].text).toContain("Baseline: 100");
+    expect(contentText(res)).toContain("Baseline: 100");
 
     const config = await loadConfig(cwd);
     expect(config?.metric).toBe("time");
@@ -271,7 +270,7 @@ describe("autoresearch-extension", () => {
       status: "keep",
       description: "experiment on metric only",
     });
-    expect(log.content[0].text).toContain("Kept (commit");
+    expect(contentText(log)).toContain("Kept (commit");
 
     const shown = await execFileAsync(
       "git",
@@ -297,7 +296,7 @@ describe("autoresearch-extension", () => {
       status: "keep",
       description: "experiment that makes state",
     });
-    expect(log.content[0].text).toContain("Kept (commit");
+    expect(contentText(log)).toContain("Kept (commit");
 
     const shown = await execFileAsync(
       "git",
@@ -338,7 +337,7 @@ describe("autoresearch-extension", () => {
     await writeFile(join(stateDir, "config.json"), JSON.stringify({ hello: "world" }));
 
     const status = await executeTool({ action: "status" });
-    expect(status.content[0].text).toContain("No autoresearch session");
+    expect(contentText(status)).toContain("No autoresearch session");
   });
 
   it("a missing config.json still reads as no session", async () => {
@@ -346,7 +345,7 @@ describe("autoresearch-extension", () => {
     await rm(join(cwd, CONFIG_DIR_NAME, "autoresearch", "config.json"));
 
     const status = await executeTool({ action: "status" });
-    expect(status.content[0].text).toContain("No autoresearch session");
+    expect(contentText(status)).toContain("No autoresearch session");
   });
 
   it("an unreadable config.json throws with the file path", async () => {
@@ -368,7 +367,7 @@ describe("autoresearch-extension", () => {
     await writeFile(join(cwd, CONFIG_DIR_NAME, "missions", "x.json"), "{}");
 
     const res = await initSession();
-    expect(res.content[0].text).toContain("Baseline: 100");
+    expect(contentText(res)).toContain("Baseline: 100");
     expect(existsSync(join(cwd, CONFIG_DIR_NAME, "missions", "x.json"))).toBe(true);
   });
 
@@ -387,7 +386,7 @@ describe("autoresearch-extension", () => {
     await initSession();
     const log = await runAndLog("90", "keep", "narrow the loop");
 
-    expect(log.content[0].text).toContain("Kept (commit");
+    expect(contentText(log)).toContain("Kept (commit");
     const entries = await readLog(cwd);
     const kept = entries.find((e) => e.status === "keep");
     expect(kept?.metric).toBe(90);
@@ -442,7 +441,7 @@ describe("autoresearch-extension", () => {
       status: "keep",
       description: "second experiment",
     });
-    expect(log.content[0].text).toContain("Kept (commit");
+    expect(contentText(log)).toContain("Kept (commit");
 
     const shown = await execFileAsync(
       "git",
@@ -469,7 +468,7 @@ describe("autoresearch-extension", () => {
     expect(pendingOnDisk.description).toBe("pending experiment");
 
     // Simulate a reload: a fresh extension instance over the same cwd.
-    const mockPi2 = createMockPi() as DeepMocked<ExtensionAPI>;
+    const mockPi2 = createMockPi() as MockPi;
     const mockCtx2 = createMockContext();
     (mockCtx2 as { cwd: string }).cwd = cwd;
     await autoresearchExtension(mockPi2);
@@ -486,7 +485,7 @@ describe("autoresearch-extension", () => {
       mockCtx2,
     );
 
-    expect(log.content[0].text).toContain("Discarded");
+    expect(contentText(log)).toContain("Discarded");
     expect(await readFile(join(cwd, "code.txt"), "utf8")).toBe("v1\n");
     expect(existsSync(join(cwd, CONFIG_DIR_NAME, "autoresearch", "pending.json"))).toBe(false);
   });
@@ -538,13 +537,13 @@ describe("autoresearch-extension", () => {
 
   it("status reports without an active campaign and after stop", async () => {
     const fresh = await executeTool({ action: "status" });
-    expect(fresh.content[0].text).toContain("No autoresearch session");
+    expect(contentText(fresh)).toContain("No autoresearch session");
     expect(fresh.details.active).toBe(false);
 
     await initSession();
     await executeTool({ action: "stop" });
     const stopped = await executeTool({ action: "status" });
-    expect(stopped.content[0].text).toContain("STOPPED");
+    expect(contentText(stopped)).toContain("STOPPED");
     expect(stopped.details.summary.active).toBe(false);
   });
 
@@ -586,7 +585,7 @@ describe("autoresearch-extension", () => {
       (mockCtx as { cwd: string }).cwd = wt;
 
       const res = await initSession();
-      expect(res.content[0].text).toContain("Baseline: 100");
+      expect(contentText(res)).toContain("Baseline: 100");
 
       const excludePath = (
         await execFileAsync("git", ["rev-parse", "--git-path", "info/exclude"], gitOpts(wt))
@@ -604,13 +603,13 @@ describe("autoresearch-extension", () => {
   it("parses retained metric output even when the measure command exits non-zero", async () => {
     const res = await initSession({ measure: "printf 'METRIC time=42\\n'; exit 3" });
 
-    expect(res.content[0].text).toContain("Baseline: 42");
+    expect(contentText(res)).toContain("Baseline: 42");
     let entries = await readLog(cwd);
     expect(entries[0].status).toBe("baseline");
     expect(entries[0].metric).toBe(42);
 
     const run = await executeTool({ action: "run", description: "failed command with result" });
-    expect(run.content[0].text).toContain("time=42");
+    expect(contentText(run)).toContain("time=42");
     await executeTool({ action: "log", status: "discard" });
     entries = await readLog(cwd);
     expect(entries[1].metric).toBe(42);
@@ -619,7 +618,7 @@ describe("autoresearch-extension", () => {
   it("does not mistake a process error code for a reported metric", async () => {
     const res = await initSession({ measure: "exit 3" });
 
-    expect(res.content[0].text).toContain("unparseable");
+    expect(contentText(res)).toContain("unparseable");
     const entries = await readLog(cwd);
     expect(entries[0].status).toBe("invalid");
     expect(entries[0].metric).toBeUndefined();
@@ -638,7 +637,7 @@ describe("autoresearch-extension", () => {
     await runAndLog("90", "keep", "keep this");
     const log = await runAndLog("120", "discard", "too slow");
 
-    expect(log.content[0].text).toContain("Discarded");
+    expect(contentText(log)).toContain("Discarded");
     expect(await readFile(join(cwd, "metric.txt"), "utf8")).toContain("90");
     const entries = await readLog(cwd);
     expect(entries.filter((e) => e.status === "discard")).toHaveLength(1);
@@ -650,7 +649,7 @@ describe("autoresearch-extension", () => {
     await writeFile(join(cwd, "metric.txt"), "50\n");
 
     const run = await executeTool({ action: "run", description: "cheat the metric" });
-    expect(run.content[0].text).toContain("CHECKS FAILED");
+    expect(contentText(run)).toContain("CHECKS FAILED");
     // Working tree reverted to committed state.
     expect(await readFile(join(cwd, "code.txt"), "utf8")).toBe("v1\n");
     const entries = await readLog(cwd);
@@ -662,8 +661,8 @@ describe("autoresearch-extension", () => {
     await writeFile(join(cwd, "metric.txt"), "not a number\n");
 
     const run = await executeTool({ action: "run", description: "unparseable metric" });
-    expect(run.content[0].text).toContain("status=discard");
-    expect(run.content[0].text).toContain("reverts the working-tree changes");
+    expect(contentText(run)).toContain("status=discard");
+    expect(contentText(run)).toContain("reverts the working-tree changes");
   });
 
   it("corrupt pending JSON blocks run, log, stop, and status without changing experiment files", async () => {
@@ -755,7 +754,7 @@ describe("autoresearch-extension", () => {
     await executeTool({ action: "run", description: "legacy keep" });
 
     const log = await executeTool({ action: "log", status: "keep", description: "legacy keep" });
-    expect(log.content[0].text).toContain("Kept (commit");
+    expect(contentText(log)).toContain("Kept (commit");
 
     // Legacy: with no snapshot, every untracked file is fair game for a keep.
     const shown = await execFileAsync(
@@ -828,7 +827,7 @@ describe("autoresearch-extension", () => {
     // repo and must never leak into the campaign repo's commits.
     vi.stubEnv("GIT_INDEX_FILE", "/tmp/definitely-not-a-real-index");
     const log = await runAndLog("90", "keep", "env-poison keep");
-    expect(log.content[0].text).toContain("Kept (commit");
+    expect(contentText(log)).toContain("Kept (commit");
   });
 
   it("reports a descriptive spread score once enough kept runs exist", async () => {
@@ -838,8 +837,8 @@ describe("autoresearch-extension", () => {
     const log = await runAndLog("99.96", "keep", "tiny change");
     // Spread is descriptive (|best - baseline| relative to run-to-run
     // variation); it must not claim whether the result is real or noise.
-    expect(log.content[0].text).toMatch(/Spread: [0-9.]+x MAD/);
-    expect(log.content[0].text).not.toMatch(/[Cc]onfidence|likely real|within noise|marginal/);
+    expect(contentText(log)).toMatch(/Spread: [0-9.]+x MAD/);
+    expect(contentText(log)).not.toMatch(/[Cc]onfidence|likely real|within noise|marginal/);
   });
 
   it.each([
@@ -895,16 +894,16 @@ describe("autoresearch-extension", () => {
     // working tree does not contain that result.
     await runAndLog("50.0", "discard", "too good, reverted");
     const log = await runAndLog("99.9", "discard", "tiny change");
-    expect(log.content[0].text).toContain("Best: 99");
-    expect(log.content[0].text).not.toContain("Best: 50");
+    expect(contentText(log)).toContain("Best: 99");
+    expect(contentText(log)).not.toContain("Best: 50");
   });
 
   it("a kept regression cannot displace the baseline as the headline best", async () => {
     await initSession();
     await runAndLog("120", "keep", "kept regression");
     const log = await runAndLog("119", "keep", "another kept regression");
-    expect(log.content[0].text).toContain("Best: 100 (run 1)");
-    expect(log.content[0].text).not.toContain("Best: 120");
+    expect(contentText(log)).toContain("Best: 100 (run 1)");
+    expect(contentText(log)).not.toContain("Best: 120");
   });
 
   it("iteration cap stops the loop", async () => {
@@ -944,7 +943,7 @@ describe("autoresearch-extension", () => {
     await initSession();
 
     // A second session over the same project state: fresh instance, fresh id.
-    const mockPi2 = createMockPi() as DeepMocked<ExtensionAPI>;
+    const mockPi2 = createMockPi() as MockPi;
     const mockCtx2 = createMockContext();
     (mockCtx2 as { cwd: string }).cwd = cwd;
     mockCtx2.sessionManager.getSessionId = vi.fn(() => "session-B");
@@ -1071,7 +1070,7 @@ describe("autoresearch-extension", () => {
   it("status and stop act on the stored config", async () => {
     await initSession();
     const status = await executeTool({ action: "status" });
-    expect(status.content[0].text).toContain("ACTIVE");
+    expect(contentText(status)).toContain("ACTIVE");
 
     // Restore a pending measurement across sessions via pending.json.
     await writeFile(join(cwd, "code.txt"), "uncommitted experiment\n");
@@ -1080,10 +1079,10 @@ describe("autoresearch-extension", () => {
     expect(existsSync(pendingPath)).toBe(true);
     await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
     const statusWithPending = await executeTool({ action: "status" });
-    expect(statusWithPending.content[0].text).toContain("pending experiment");
+    expect(contentText(statusWithPending)).toContain("pending experiment");
 
     const stop = await executeTool({ action: "stop" });
-    expect(stop.content[0].text).toContain(`kept in ${projectStateRelative("autoresearch")}/`);
+    expect(contentText(stop)).toContain(`kept in ${projectStateRelative("autoresearch")}/`);
     expect(stop.details.active).toBe(false);
     expect((await loadConfig(cwd))?.stopped).toBe(true);
     expect(existsSync(pendingPath)).toBe(false);

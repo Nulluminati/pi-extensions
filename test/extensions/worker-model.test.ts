@@ -4,8 +4,9 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import workerModelExtension from "../../extensions/worker-model/worker-model.ts";
 import { createMockCommandContext, createMockModel } from "../mocks/context-mocks.ts";
+import { mockFn } from "../mocks/mock-types.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
-import { getCommandHandler } from "../mocks/test-helpers.ts";
+import { fakeTui, getCommandHandler } from "../mocks/test-helpers.ts";
 
 const temporaryDirectories: string[] = [];
 
@@ -58,11 +59,11 @@ describe("worker-model-extension", () => {
     ctx.modelRegistry.getAvailable = vi.fn(() => [flashModel, haikuModel]);
 
     let initialRender = "";
-    ctx.ui.custom = vi.fn(
+    ctx.ui.custom = mockFn(
       (factory) =>
         new Promise((resolve) => {
           const component = factory(
-            { requestRender: vi.fn() },
+            fakeTui(),
             ctx.ui.theme,
             { matches: matchesPickerKey },
             resolve,

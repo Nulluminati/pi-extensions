@@ -10,6 +10,7 @@ import {
   type ModelConfigValue,
   selectModelWithSearch,
 } from "../../lib/model-picker.ts";
+import { fakeTui } from "../mocks/test-helpers.ts";
 
 const ITEMS: SelectItem[] = [
   {
@@ -73,7 +74,7 @@ describe("selectModelWithSearch", () => {
       (factory: any) =>
         new Promise<string | undefined>((resolve) => {
           component = factory(
-            { requestRender: vi.fn() },
+            fakeTui(),
             { fg: (_color: string, text: string) => text, bold: (text: string) => text },
             { matches: matchesPickerKey },
             resolve,
@@ -192,7 +193,7 @@ describe("createModelConfigFlow", () => {
       (factory: any) =>
         new Promise<string | undefined>((resolve) => {
           component = factory(
-            { requestRender: vi.fn() },
+            fakeTui(),
             { fg: (_color: string, text: string) => text, bold: (text: string) => text },
             { matches: matchesPickerKey },
             resolve,

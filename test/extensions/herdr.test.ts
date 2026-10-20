@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import herdrExtension from "../../extensions/herdr/herdr.ts";
 import { createMockContext } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
+import { sessionEntries } from "../mocks/test-helpers.ts";
 
 const { connect } = vi.hoisted(() => ({ connect: vi.fn() }));
 vi.mock("node:net", () => ({ createConnection: connect }));
@@ -215,9 +216,11 @@ describe("Herdr status adapter", () => {
 
   it("restores main-session and worker cost together at startup", async () => {
     const fixture = await setup();
-    fixture.ctx.sessionManager.getBranch.mockReturnValue([
-      { type: "message", message: { role: "assistant", usage: { cost: { total: 0.026 } } } },
-    ]);
+    fixture.ctx.sessionManager.getBranch.mockReturnValue(
+      sessionEntries([
+        { type: "message", message: { role: "assistant", usage: { cost: { total: 0.026 } } } },
+      ]),
+    );
     fixture.emit("workers:state", { running: 0, workerCostUsd: 0.005, workerTokens: 100 });
     await fixture.start();
     expect(latestRequest().params.tokens).toMatchObject({
@@ -231,15 +234,19 @@ describe("Herdr status adapter", () => {
     async (event) => {
       const fixture = await setup();
       await fixture.start();
-      fixture.ctx.sessionManager.getBranch.mockReturnValue([
-        { type: "message", message: { role: "assistant", usage: { cost: { total: 0.026 } } } },
-      ]);
+      fixture.ctx.sessionManager.getBranch.mockReturnValue(
+        sessionEntries([
+          { type: "message", message: { role: "assistant", usage: { cost: { total: 0.026 } } } },
+        ]),
+      );
       await fireCostEvent(fixture, event);
       await flushUpdates();
       expect(latestRequest().params.tokens.pi_cost).toBe("$0.026");
-      fixture.ctx.sessionManager.getBranch.mockReturnValue([
-        { type: "message", message: { role: "assistant", usage: { cost: { total: 0.041 } } } },
-      ]);
+      fixture.ctx.sessionManager.getBranch.mockReturnValue(
+        sessionEntries([
+          { type: "message", message: { role: "assistant", usage: { cost: { total: 0.041 } } } },
+        ]),
+      );
       await fireCostEvent(fixture, event);
       await flushUpdates();
       expect(latestRequest().params.tokens.pi_cost).toBe("$0.041");
@@ -248,17 +255,19 @@ describe("Herdr status adapter", () => {
 
   it("counts nested usage only through its top-level tool result", async () => {
     const fixture = await setup();
-    fixture.ctx.sessionManager.getBranch.mockReturnValue([
-      { type: "message", message: { role: "assistant", usage: { cost: { total: 0.026 } } } },
-      {
-        type: "message",
-        message: {
-          role: "toolResult",
-          usage: { cost: { total: 0.01 } },
-          details: { nested: { usage: { cost: { total: 10 } } } },
+    fixture.ctx.sessionManager.getBranch.mockReturnValue(
+      sessionEntries([
+        { type: "message", message: { role: "assistant", usage: { cost: { total: 0.026 } } } },
+        {
+          type: "message",
+          message: {
+            role: "toolResult",
+            usage: { cost: { total: 0.01 } },
+            details: { nested: { usage: { cost: { total: 10 } } } },
+          },
         },
-      },
-    ]);
+      ]),
+    );
     await fixture.start();
     fixture.emit("workers:state", { running: 0, workerCostUsd: 0.005 });
     await flushUpdates();
@@ -271,9 +280,11 @@ describe("Herdr status adapter", () => {
 
   it("adds unrounded costs before formatting the combined total", async () => {
     const fixture = await setup();
-    fixture.ctx.sessionManager.getBranch.mockReturnValue([
-      { type: "message", message: { role: "assistant", usage: { cost: { total: 0.00026 } } } },
-    ]);
+    fixture.ctx.sessionManager.getBranch.mockReturnValue(
+      sessionEntries([
+        { type: "message", message: { role: "assistant", usage: { cost: { total: 0.00026 } } } },
+      ]),
+    );
     fixture.emit("workers:state", { running: 1, workerCostUsd: 0.00026 });
     await fixture.start();
     expect(latestRequest().params.tokens.pi_worker_cost).toBe("$0.0003");
@@ -282,9 +293,11 @@ describe("Herdr status adapter", () => {
 
   it("updates combined cost even when the formatted worker cost does not change", async () => {
     const fixture = await setup();
-    fixture.ctx.sessionManager.getBranch.mockReturnValue([
-      { type: "message", message: { role: "assistant", usage: { cost: { total: 0.000051 } } } },
-    ]);
+    fixture.ctx.sessionManager.getBranch.mockReturnValue(
+      sessionEntries([
+        { type: "message", message: { role: "assistant", usage: { cost: { total: 0.000051 } } } },
+      ]),
+    );
     fixture.emit("workers:state", { running: 1, workerCostUsd: 0.0014489 });
     await fixture.start();
     expect(latestRequest().params.tokens.pi_cost).toBe("$0.001");
@@ -296,14 +309,16 @@ describe("Herdr status adapter", () => {
 
   it("resets combined cost across sessions and clears it on shutdown", async () => {
     const fixture = await setup();
-    fixture.ctx.sessionManager.getBranch.mockReturnValue([
-      { type: "message", message: { role: "assistant", usage: { cost: { total: 0.026 } } } },
-    ]);
+    fixture.ctx.sessionManager.getBranch.mockReturnValue(
+      sessionEntries([
+        { type: "message", message: { role: "assistant", usage: { cost: { total: 0.026 } } } },
+      ]),
+    );
     fixture.emit("workers:state", { running: 0, workerCostUsd: 0.005 });
     await fixture.start();
     await fixture.stop();
     expect(latestRequest().params.tokens.pi_cost).toBeNull();
-    fixture.ctx.sessionManager.getBranch.mockReturnValue([]);
+    fixture.ctx.sessionManager.getBranch.mockReturnValue(sessionEntries([]));
     await fixture.start();
     expect(latestRequest().params.tokens.pi_cost).toBe("$0.000");
   });
@@ -311,9 +326,9 @@ describe("Herdr status adapter", () => {
   it("reads fresh session costs during periodic metadata refresh", async () => {
     const fixture = await setup();
     await fixture.start();
-    fixture.ctx.sessionManager.getBranch.mockReturnValue([
-      { type: "usage", usage: { cost: { total: 0.004 } } },
-    ]);
+    fixture.ctx.sessionManager.getBranch.mockReturnValue(
+      sessionEntries([{ type: "usage", usage: { cost: { total: 0.004 } } }]),
+    );
     await vi.advanceTimersByTimeAsync(20_000);
     expect(latestRequest().params.tokens.pi_cost).toBe("$0.004");
   });
@@ -978,7 +993,9 @@ describe("Herdr pane name sync", () => {
   it("reports workers and names without creating or closing board panes", async () => {
     const fixture = await setup();
     fixture.pi.getSessionName.mockReturnValue("Named session");
-    fixture.ctx.sessionManager.getBranch.mockReturnValue([workerEntry("w-owned-1")]);
+    fixture.ctx.sessionManager.getBranch.mockReturnValue(
+      sessionEntries([workerEntry("w-owned-1")]),
+    );
     fixture.emit("workers:state", { running: 1, workerCostUsd: 0.125, workerTokens: 300 });
     await fixture.start();
     await flushUpdates();

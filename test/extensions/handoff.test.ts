@@ -5,8 +5,14 @@ import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import handoffExtension from "../../extensions/handoff/handoff.ts";
 import { createMockCommandContext, createMockModel } from "../mocks/context-mocks.ts";
+import { mockFn } from "../mocks/mock-types.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
-import { firstContentText, getCommandHandler } from "../mocks/test-helpers.ts";
+import {
+  fakeTui,
+  firstContentText,
+  getCommandHandler,
+  sessionEntries,
+} from "../mocks/test-helpers.ts";
 
 // test/setup/pi-coding-agent.ts stubs the package; the session manager is real.
 const { SessionManager } = await vi.importActual<typeof import("@earendil-works/pi-coding-agent")>(
@@ -103,7 +109,7 @@ describe("handoff-extension", () => {
     mockCustomResolvesOnDone(mockCtx);
     const setupSessionManager = SessionManager.inMemory();
     vi.spyOn(setupSessionManager, "appendSessionInfo");
-    mockCtx.sessionManager.getBranch = vi.fn(buildBranch);
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildBranch()));
     mockCtx.sessionManager.getSessionFile = vi.fn(() => "/sessions/old.json");
     mockCtx.ui.editor = vi.fn(() => Promise.resolve("edited summary"));
     mockCtx.newSession = vi.fn(
@@ -134,7 +140,7 @@ describe("handoff-extension", () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     mockCtx.hasUI = false;
-    mockCtx.sessionManager.getBranch = vi.fn(buildBranch);
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildBranch()));
 
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
@@ -165,7 +171,7 @@ describe("handoff-extension", () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     mockCustomResolvesOnDone(mockCtx);
-    mockCtx.sessionManager.getBranch = vi.fn(buildBranch);
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildBranch()));
     mockCtx.modelRegistry.find = vi.fn(() => undefined);
 
     await runHandoff(mockPi, mockCtx, "finish the refactor");
@@ -181,7 +187,7 @@ describe("handoff-extension", () => {
   it("errors when there is no conversation to hand off", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
-    mockCtx.sessionManager.getBranch = vi.fn(() => []);
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries([]));
 
     await runHandoff(mockPi, mockCtx, "finish the refactor");
 
@@ -191,15 +197,15 @@ describe("handoff-extension", () => {
   it("shows an inline loading modal while the summary is generating", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
-    mockCtx.sessionManager.getBranch = vi.fn(buildBranch);
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildBranch()));
     mockCtx.sessionManager.getSessionFile = vi.fn(() => "/sessions/old.json");
     mockCtx.ui.editor = vi.fn(() => Promise.resolve("edited summary"));
 
     let modalComponent: { render(width: number): string[] } | undefined;
     // biome-ignore lint/suspicious/noExplicitAny: test mock
-    mockCtx.ui.custom = vi.fn((factory: any) => {
+    mockCtx.ui.custom = mockFn((factory: any) => {
       return new Promise((resolve) => {
-        modalComponent = factory({ requestRender: vi.fn() }, mockCtx.ui.theme, {}, resolve);
+        modalComponent = factory(fakeTui(), mockCtx.ui.theme, {}, resolve);
       });
     });
 
@@ -222,34 +228,36 @@ describe("handoff-extension", () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     mockCustomResolvesOnDone(mockCtx);
-    mockCtx.sessionManager.getBranch = vi.fn(() => [
-      {
-        type: "message",
-        message: {
-          role: "user",
-          content: [{ type: "text", text: `EARLY_MARKER ${"x".repeat(1200)}` }],
+    mockCtx.sessionManager.getBranch = vi.fn(() =>
+      sessionEntries([
+        {
+          type: "message",
+          message: {
+            role: "user",
+            content: [{ type: "text", text: `EARLY_MARKER ${"x".repeat(1200)}` }],
+          },
         },
-      },
-      ...Array.from({ length: 35 }, (_, index) => ({
-        type: "message",
-        message: {
-          role: "assistant",
-          content: [
-            {
-              type: "text",
-              text: `${index === 15 ? "MID_BUDGET_MARKER" : `middle-${index}`} ${"x".repeat(1200)}`,
-            },
-          ],
+        ...Array.from({ length: 35 }, (_, index) => ({
+          type: "message",
+          message: {
+            role: "assistant",
+            content: [
+              {
+                type: "text",
+                text: `${index === 15 ? "MID_BUDGET_MARKER" : `middle-${index}`} ${"x".repeat(1200)}`,
+              },
+            ],
+          },
+        })),
+        {
+          type: "message",
+          message: {
+            role: "user",
+            content: [{ type: "text", text: "RECENT_MARKER finish this work" }],
+          },
         },
-      })),
-      {
-        type: "message",
-        message: {
-          role: "user",
-          content: [{ type: "text", text: "RECENT_MARKER finish this work" }],
-        },
-      },
-    ]);
+      ]),
+    );
     mockCtx.ui.editor = vi.fn(() => Promise.resolve(undefined));
 
     const { completeSimple } = await import("@earendil-works/pi-ai/compat");
@@ -274,25 +282,27 @@ describe("handoff-extension", () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     mockCustomResolvesOnDone(mockCtx);
-    mockCtx.sessionManager.getBranch = vi.fn(() => [
-      {
-        type: "message",
-        message: {
-          role: "user",
-          content: [
-            { type: "text", text: "First part." },
-            { type: "text", text: "Second part." },
-          ],
+    mockCtx.sessionManager.getBranch = vi.fn(() =>
+      sessionEntries([
+        {
+          type: "message",
+          message: {
+            role: "user",
+            content: [
+              { type: "text", text: "First part." },
+              { type: "text", text: "Second part." },
+            ],
+          },
         },
-      },
-      {
-        type: "message",
-        message: {
-          role: "assistant",
-          content: [{ type: "text", text: "Done." }],
+        {
+          type: "message",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "Done." }],
+          },
         },
-      },
-    ]);
+      ]),
+    );
     mockCtx.ui.editor = vi.fn(() => Promise.resolve(undefined));
 
     const { completeSimple } = await import("@earendil-works/pi-ai/compat");
@@ -322,7 +332,7 @@ describe("handoff-extension", () => {
     });
     vi.stubEnv("PI_SMALL_MODEL", "small-provider/small-model");
     mockCtx.modelRegistry.find = vi.fn(() => smallModel);
-    mockCtx.sessionManager.getBranch = vi.fn(buildBranch);
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildBranch()));
     mockCtx.sessionManager.getSessionFile = vi.fn(() => "/sessions/old.json");
     mockCtx.ui.editor = vi.fn(() => Promise.resolve("edited summary"));
 
@@ -374,7 +384,7 @@ describe("handoff-extension", () => {
     };
     const setupSessionManager = SessionManager.inMemory();
     vi.spyOn(setupSessionManager, "appendSessionInfo");
-    mockCtx.sessionManager.getBranch = vi.fn(buildBranch);
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildBranch()));
     mockCtx.sessionManager.getSessionFile = vi.fn(() => "/sessions/old.json");
     mockCtx.ui.editor = vi.fn(() => Promise.resolve("edited summary"));
     mockCtx.ui.notify = vi.fn(() => {
@@ -412,7 +422,7 @@ describe("handoff-extension", () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     mockCtx.hasUI = false;
-    mockCtx.sessionManager.getBranch = vi.fn(buildBranch);
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildBranch()));
 
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
@@ -434,7 +444,7 @@ describe("handoff-extension", () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     mockCustomResolvesOnDone(mockCtx);
-    mockCtx.sessionManager.getBranch = vi.fn(buildBranch);
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildBranch()));
     mockCtx.ui.editor = vi.fn(() => Promise.resolve(undefined));
 
     const { completeSimple } = await import("@earendil-works/pi-ai/compat");
@@ -452,7 +462,7 @@ describe("handoff-extension", () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     mockCustomResolvesOnDone(mockCtx);
-    mockCtx.sessionManager.getBranch = vi.fn(buildBranch);
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildBranch()));
 
     const { completeSimple } = await import("@earendil-works/pi-ai/compat");
     vi.mocked(completeSimple).mockRejectedValue(new Error("rate limited"));
@@ -470,7 +480,7 @@ describe("handoff-extension", () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     mockCustomResolvesOnDone(mockCtx);
-    mockCtx.sessionManager.getBranch = vi.fn(buildBranch);
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildBranch()));
 
     const { completeSimple } = await import("@earendil-works/pi-ai/compat");
     vi.mocked(completeSimple).mockResolvedValue(fauxAssistantMessage([]));
@@ -487,7 +497,7 @@ describe("handoff-extension", () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     mockCustomResolvesOnDone(mockCtx);
-    mockCtx.sessionManager.getBranch = vi.fn(buildBranch);
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildBranch()));
     mockCtx.sessionManager.getSessionFile = vi.fn(() => "/sessions/old.json");
     mockCtx.ui.editor = vi.fn(() => Promise.resolve("edited summary"));
     mockCtx.newSession = vi.fn(() => Promise.resolve({ cancelled: true }));
@@ -511,9 +521,9 @@ describe("handoff-extension", () => {
  */
 function mockCustomResolvesOnDone(mockCtx: ReturnType<typeof createMockCommandContext>): void {
   // biome-ignore lint/suspicious/noExplicitAny: test mock
-  mockCtx.ui.custom = vi.fn((factory: any) => {
+  mockCtx.ui.custom = mockFn((factory: any) => {
     return new Promise((resolve) => {
-      const component = factory({ requestRender: vi.fn() }, mockCtx.ui.theme, {}, resolve);
+      const component = factory(fakeTui(), mockCtx.ui.theme, {}, resolve);
       component?.dispose?.();
     });
   });

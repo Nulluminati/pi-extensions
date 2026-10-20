@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import { createApprovalDialog, promptApproval } from "../../extensions/approval-mode/src/dialog.ts";
 import { PANEL_OVERLAY_OPTIONS } from "../../lib/overlay-options.ts";
 import { createMockContext } from "../mocks/context-mocks.ts";
+import { mockFn } from "../mocks/mock-types.ts";
+import { fakeTui } from "../mocks/test-helpers.ts";
 
 describe("Approval Mode confirmation dialog", () => {
   it("uses the shared frame and defaults to Block", () => {
@@ -90,18 +92,13 @@ describe("promptApproval abort handling", () => {
   function captureDialog(ctx: ReturnType<typeof createMockContext>) {
     let component: ReturnType<typeof createApprovalDialog> | undefined;
     let doneCalls = 0;
-    ctx.ui.custom = vi.fn(
+    ctx.ui.custom = mockFn(
       (factory) =>
         new Promise((resolve) => {
-          const opened = factory(
-            { requestRender: vi.fn() },
-            theme,
-            keybindings,
-            (value: unknown) => {
-              doneCalls++;
-              resolve(value);
-            },
-          );
+          const opened = factory(fakeTui(), theme, keybindings, (value: unknown) => {
+            doneCalls++;
+            resolve(value);
+          });
           // The factory under test is synchronous; the component it builds is
           // createApprovalDialog's return plus the dispose override.
           if (!(opened instanceof Promise)) {
@@ -171,7 +168,7 @@ describe("promptApproval abort handling", () => {
 describe("promptApproval overlay capture", () => {
   it("opens a focused panel overlay so page keys reach the dialog", async () => {
     const ctx = createMockContext();
-    ctx.ui.custom = vi.fn(() => Promise.resolve("Block" as const));
+    ctx.ui.custom = mockFn(() => Promise.resolve("Block" as const));
 
     await promptApproval(ctx, "git push origin main", "reject", "Jev rejected this");
 
@@ -190,7 +187,7 @@ describe("promptApproval overlay capture", () => {
 
 function setup(command: string) {
   const done = vi.fn();
-  const tui = { requestRender: vi.fn() };
+  const tui = fakeTui();
   const theme = {
     fg: (_color: string, text: string) => text,
     bold: (text: string) => text,

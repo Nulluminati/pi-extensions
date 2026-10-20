@@ -1,7 +1,6 @@
 import { chmod, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import workerBlockerExtension from "../../extensions/worker-blocker/worker-blocker.ts";
 import {
@@ -10,17 +9,17 @@ import {
   sanitizeBlockerReason,
   WORKER_STREAM_ENV_VAR,
 } from "../../lib/worker-blocker.ts";
-import { createMockContext } from "../mocks/context-mocks.ts";
-import type { DeepMocked } from "../mocks/mock-types.ts";
-import { createMockPi } from "../mocks/pi-mocks.ts";
+import { createMockContext, type MockContext } from "../mocks/context-mocks.ts";
+import { createMockPi, type MockPi } from "../mocks/pi-mocks.ts";
+import { contentText } from "../mocks/test-helpers.ts";
 
 // --- Suite ---
 
 describe("worker-blocker-extension", () => {
   let root: string;
   let spoolPath: string;
-  let mockPi: DeepMocked<ExtensionAPI>;
-  let mockCtx: DeepMocked<ExtensionContext>;
+  let mockPi: MockPi;
+  let mockCtx: MockContext;
   const oldEnv: Record<string, string | undefined> = {};
 
   const setEnv = (key: string, value: string | undefined) => {
@@ -38,7 +37,7 @@ describe("worker-blocker-extension", () => {
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), "worker-blocker-"));
     spoolPath = join(root, "streams", "w-1.jsonl");
-    mockPi = createMockPi() as DeepMocked<ExtensionAPI>;
+    mockPi = createMockPi() as MockPi;
     mockCtx = createMockContext();
     setEnv("PI_WORKER", "1");
     setEnv(WORKER_STREAM_ENV_VAR, spoolPath);
@@ -94,7 +93,7 @@ describe("worker-blocker-extension", () => {
     expect(marker.reason).toBe("no node_modules and no parent checkout in this VM");
     expect(result.details).toMatchObject({ reported: true, truncated: false });
     // The reason stays out of the tool result: the parent pulls it.
-    expect(result.content[0].text).not.toContain("node_modules");
+    expect(contentText(result)).not.toContain("node_modules");
   });
 
   it("truncates oversized reasons to the cap and says so", async () => {
@@ -124,7 +123,7 @@ describe("worker-blocker-extension", () => {
       mockCtx,
     );
 
-    expect(result.content[0].text).toMatch(/no blocker reported/i);
+    expect(contentText(result)).toMatch(/no blocker reported/i);
     await expect(readFile(spoolPath, "utf8")).rejects.toThrow();
   });
 

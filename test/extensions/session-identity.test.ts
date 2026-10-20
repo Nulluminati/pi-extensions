@@ -1,13 +1,12 @@
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveSessionIdentity } from "../../extensions/messenger/src/session-identity.ts";
-import { createMockContext } from "../mocks/context-mocks.ts";
-import type { DeepMocked } from "../mocks/mock-types.ts";
-import { createMockPi } from "../mocks/pi-mocks.ts";
+import { createMockContext, type MockContext } from "../mocks/context-mocks.ts";
+import { createMockPi, type MockPi } from "../mocks/pi-mocks.ts";
+import { sessionEntries } from "../mocks/test-helpers.ts";
 
 describe("session-identity", () => {
-  let mockPi: DeepMocked<ExtensionAPI>;
-  let mockCtx: DeepMocked<ExtensionContext>;
+  let mockPi: MockPi;
+  let mockCtx: MockContext;
   const oldEnv: Record<string, string | undefined> = {};
 
   const identityOptions = {
@@ -23,7 +22,7 @@ describe("session-identity", () => {
   };
 
   beforeEach(() => {
-    mockPi = createMockPi() as DeepMocked<ExtensionAPI>;
+    mockPi = createMockPi() as MockPi;
     mockCtx = createMockContext();
     setEnv("PI_TEST_IDENTITY", undefined);
   });
@@ -37,9 +36,11 @@ describe("session-identity", () => {
 
   it("prefers the environment override over the persisted identity", async () => {
     setEnv("PI_TEST_IDENTITY", "env-agent");
-    vi.mocked(mockCtx.sessionManager.getBranch).mockReturnValue([
-      { type: "custom", customType: "test-identity", data: { name: "persisted-agent" } },
-    ]);
+    vi.mocked(mockCtx.sessionManager.getBranch).mockReturnValue(
+      sessionEntries([
+        { type: "custom", customType: "test-identity", data: { name: "persisted-agent" } },
+      ]),
+    );
 
     const name = await resolveSessionIdentity(mockPi, mockCtx, identityOptions);
 
@@ -48,9 +49,11 @@ describe("session-identity", () => {
   });
 
   it("reuses the name persisted in the session branch", async () => {
-    vi.mocked(mockCtx.sessionManager.getBranch).mockReturnValue([
-      { type: "custom", customType: "test-identity", data: { name: "persisted-agent" } },
-    ]);
+    vi.mocked(mockCtx.sessionManager.getBranch).mockReturnValue(
+      sessionEntries([
+        { type: "custom", customType: "test-identity", data: { name: "persisted-agent" } },
+      ]),
+    );
 
     const name = await resolveSessionIdentity(mockPi, mockCtx, identityOptions);
 
@@ -59,10 +62,12 @@ describe("session-identity", () => {
   });
 
   it("scans newest-first when multiple identity entries exist", async () => {
-    vi.mocked(mockCtx.sessionManager.getBranch).mockReturnValue([
-      { type: "custom", customType: "test-identity", data: { name: "older-agent" } },
-      { type: "custom", customType: "test-identity", data: { name: "newer-agent" } },
-    ]);
+    vi.mocked(mockCtx.sessionManager.getBranch).mockReturnValue(
+      sessionEntries([
+        { type: "custom", customType: "test-identity", data: { name: "older-agent" } },
+        { type: "custom", customType: "test-identity", data: { name: "newer-agent" } },
+      ]),
+    );
 
     const name = await resolveSessionIdentity(mockPi, mockCtx, identityOptions);
 
@@ -70,10 +75,12 @@ describe("session-identity", () => {
   });
 
   it("ignores entries from other extensions and malformed entries", async () => {
-    vi.mocked(mockCtx.sessionManager.getBranch).mockReturnValue([
-      { type: "custom", customType: "goal-state", data: { goal: {} } },
-      { type: "custom", customType: "test-identity", data: {} },
-    ]);
+    vi.mocked(mockCtx.sessionManager.getBranch).mockReturnValue(
+      sessionEntries([
+        { type: "custom", customType: "goal-state", data: { goal: {} } },
+        { type: "custom", customType: "test-identity", data: {} },
+      ]),
+    );
 
     const name = await resolveSessionIdentity(mockPi, mockCtx, identityOptions);
 
@@ -82,7 +89,7 @@ describe("session-identity", () => {
   });
 
   it("generates and persists a name when nothing exists", async () => {
-    vi.mocked(mockCtx.sessionManager.getBranch).mockReturnValue([]);
+    vi.mocked(mockCtx.sessionManager.getBranch).mockReturnValue(sessionEntries([]));
 
     const name = await resolveSessionIdentity(mockPi, mockCtx, identityOptions);
 

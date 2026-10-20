@@ -10,8 +10,16 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import btwExtension from "../../extensions/btw/btw.ts";
 import { createMockCommandContext, createMockModel } from "../mocks/context-mocks.ts";
+import { mockFn } from "../mocks/mock-types.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
-import { firstContentText, getCommandHandler, getEventHandler } from "../mocks/test-helpers.ts";
+import {
+  fakeTui,
+  firstContentText,
+  fixtureAs,
+  getCommandHandler,
+  getEventHandler,
+  sessionEntries,
+} from "../mocks/test-helpers.ts";
 
 vi.mock("@earendil-works/pi-ai/compat", () => ({
   stream: vi.fn(),
@@ -188,7 +196,7 @@ function setupContext(confirms: boolean[] = []) {
       })[keybinding]?.includes(data) ?? false,
   };
   // biome-ignore lint/suspicious/noExplicitAny: test mock
-  mockCtx.ui.custom = vi.fn((factory: any, options?: any) => {
+  mockCtx.ui.custom = mockFn((factory: any, options?: any) => {
     const handle: FakeHandle = {
       focus: vi.fn(),
       unfocus: vi.fn(),
@@ -196,7 +204,7 @@ function setupContext(confirms: boolean[] = []) {
       hide: vi.fn(),
       setHidden: vi.fn(),
     };
-    const tui = { requestRender: vi.fn(), terminal: { write: vi.fn() } };
+    const tui = fakeTui({ terminal: { write: vi.fn() } });
     let resolveClose: (value?: unknown) => void;
     const done = vi.fn((value?: unknown) => resolveClose(value));
     const promise = new Promise<unknown>((resolve) => {
@@ -454,24 +462,28 @@ describe("btw-extension", () => {
       mockCtx.getSystemPrompt.mockReturnValue(
         "MAIN AGENT PROMPT\n\nAvailable tools:\n- web_search: Search the web",
       );
-      mockCtx.getSystemPromptOptions.mockReturnValue({
-        cwd: "/work/project",
-        contextFiles: [
-          { path: "/home/test/.pi/agent/AGENTS.md", content: "Global agent instructions" },
-          { path: "/work/project/AGENTS.md", content: "Project agent instructions" },
-        ],
-        toolSnippets: {
-          read: "Read file contents",
-          bash: "Execute shell commands",
-          edit: "Edit files using exact text replacements",
-          write: "Create or overwrite files",
-          web_search: "Search the web",
-        },
-        skills: [{ name: "unused-skill" }],
-      });
-      mockCtx.sessionManager.getBranch = vi.fn(() => [
-        { type: "message", message: { role: "user", content: "main chat details" } },
-      ]);
+      mockCtx.getSystemPromptOptions.mockReturnValue(
+        fixtureAs({
+          cwd: "/work/project",
+          contextFiles: [
+            { path: "/home/test/.pi/agent/AGENTS.md", content: "Global agent instructions" },
+            { path: "/work/project/AGENTS.md", content: "Project agent instructions" },
+          ],
+          toolSnippets: {
+            read: "Read file contents",
+            bash: "Execute shell commands",
+            edit: "Edit files using exact text replacements",
+            write: "Create or overwrite files",
+            web_search: "Search the web",
+          },
+          skills: [{ name: "unused-skill" }],
+        }),
+      );
+      mockCtx.sessionManager.getBranch = vi.fn(() =>
+        sessionEntries([
+          { type: "message", message: { role: "user", content: "main chat details" } },
+        ]),
+      );
 
       await registerAll(mockPi);
       await getCommandHandler(mockPi, "btw")("side question", mockCtx);
@@ -631,9 +643,11 @@ describe("btw-extension", () => {
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       const mockPi = createMockPi() as any;
       const { mockCtx } = setupContext();
-      mockCtx.sessionManager.getBranch = vi.fn(() => [
-        { type: "message", message: { role: "user", content: "fix the login bug" } },
-      ]);
+      mockCtx.sessionManager.getBranch = vi.fn(() =>
+        sessionEntries([
+          { type: "message", message: { role: "user", content: "fix the login bug" } },
+        ]),
+      );
       await registerAll(mockPi);
       await getCommandHandler(mockPi, "btw")("what is the login bug?", mockCtx);
       await flush();
@@ -646,18 +660,20 @@ describe("btw-extension", () => {
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       const mockPi = createMockPi() as any;
       const { mockCtx } = setupContext();
-      mockCtx.sessionManager.getBranch = vi.fn(() => [
-        {
-          type: "message",
-          message: {
-            role: "assistant",
-            content: [
-              { type: "text", text: "part one" },
-              { type: "text", text: "part two" },
-            ],
+      mockCtx.sessionManager.getBranch = vi.fn(() =>
+        sessionEntries([
+          {
+            type: "message",
+            message: {
+              role: "assistant",
+              content: [
+                { type: "text", text: "part one" },
+                { type: "text", text: "part two" },
+              ],
+            },
           },
-        },
-      ]);
+        ]),
+      );
       await registerAll(mockPi);
       await getCommandHandler(mockPi, "btw")("what is the login bug?", mockCtx);
       await flush();
@@ -669,9 +685,11 @@ describe("btw-extension", () => {
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       const mockPi = createMockPi() as any;
       const { mockCtx, overlays } = setupContext();
-      mockCtx.sessionManager.getBranch = vi.fn(() => [
-        { type: "message", message: { role: "user", content: "secret main work" } },
-      ]);
+      mockCtx.sessionManager.getBranch = vi.fn(() =>
+        sessionEntries([
+          { type: "message", message: { role: "user", content: "secret main work" } },
+        ]),
+      );
       await registerAll(mockPi);
       await getCommandHandler(mockPi, "btw:tangent")("a clean-slate question?", mockCtx);
       await flush();
@@ -1026,9 +1044,11 @@ describe("btw-extension", () => {
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       const mockPi = createMockPi() as any;
       const { mockCtx, overlays } = setupContext();
-      mockCtx.sessionManager.getBranch = vi.fn(() => [
-        { type: "custom", customType: "btw-thread", data: { state: persistedState } },
-      ]);
+      mockCtx.sessionManager.getBranch = vi.fn(() =>
+        sessionEntries([
+          { type: "custom", customType: "btw-thread", data: { state: persistedState } },
+        ]),
+      );
       await registerAll(mockPi);
       const handler = getEventHandler(mockPi, "session_start");
       await handler({ type: "session_start", reason: "resume" }, mockCtx);
@@ -1071,7 +1091,7 @@ describe("btw-extension", () => {
         customType: "btw-thread",
         data: { state: persistedState },
       };
-      mockCtx.sessionManager.getBranch = vi.fn(() => [branchEntry]);
+      mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries([branchEntry]));
       await registerAll(mockPi);
       const handler = getEventHandler(mockPi, "session_start");
       await handler({ type: "session_start", reason: "resume" }, mockCtx);

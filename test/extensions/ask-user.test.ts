@@ -22,7 +22,9 @@ import {
 } from "../../extensions/ask-user/src/schema.ts";
 import type { ToolRenderContext } from "../../lib/pi-types.ts";
 import { createMockContext } from "../mocks/context-mocks.ts";
+import { mockFn } from "../mocks/mock-types.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
+import { fakeTui } from "../mocks/test-helpers.ts";
 
 vi.mock("typebox", () => ({
   Type: {
@@ -115,11 +117,11 @@ describe("ask-user-extension", () => {
     let secondQuestionRender = "";
     let customRender = "";
     let reviewRender = "";
-    ctx.ui.custom = vi.fn(
+    ctx.ui.custom = mockFn(
       (factory) =>
         new Promise((resolve) => {
           const component = factory(
-            { requestRender: vi.fn() },
+            fakeTui(),
             ctx.ui.theme,
             { matches: matchesQuestionnaireKey },
             resolve,
@@ -176,11 +178,11 @@ describe("ask-user-extension", () => {
     const pi = createMockPi();
     const ctx = createMockContext();
     let initialRender = "";
-    ctx.ui.custom = vi.fn(
+    ctx.ui.custom = mockFn(
       (factory) =>
         new Promise((resolve) => {
           const component = factory(
-            { requestRender: vi.fn() },
+            fakeTui(),
             ctx.ui.theme,
             { matches: matchesQuestionnaireKey },
             resolve,
@@ -217,11 +219,11 @@ describe("ask-user-extension", () => {
     let reviewRender = "";
     let restoredNotesRender = "";
     let previousQuestionRender = "";
-    ctx.ui.custom = vi.fn(
+    ctx.ui.custom = mockFn(
       (factory) =>
         new Promise((resolve) => {
           const component = factory(
-            { requestRender: vi.fn() },
+            fakeTui(),
             ctx.ui.theme,
             { matches: matchesQuestionnaireKey },
             resolve,
@@ -263,11 +265,11 @@ describe("ask-user-extension", () => {
   it("returns control to the user when the questionnaire is dismissed", async () => {
     const pi = createMockPi();
     const ctx = createMockContext();
-    ctx.ui.custom = vi.fn(
+    ctx.ui.custom = mockFn(
       (factory) =>
         new Promise((resolve) => {
           const component = factory(
-            { requestRender: vi.fn() },
+            fakeTui(),
             ctx.ui.theme,
             { matches: matchesQuestionnaireKey },
             resolve,
@@ -308,11 +310,11 @@ describe("ask-user-extension", () => {
     const ctx = createMockContext();
     const controller = new AbortController();
     let doneCalls = 0;
-    ctx.ui.custom = vi.fn(
+    ctx.ui.custom = mockFn(
       (factory) =>
         new Promise((resolve) => {
           factory(
-            { requestRender: vi.fn() },
+            fakeTui(),
             ctx.ui.theme,
             { matches: matchesQuestionnaireKey },
             (value: unknown) => {
@@ -502,7 +504,7 @@ describe("ask-user Herdr blocked events", () => {
       const pi = createMockPi();
       const ctx = createMockContext();
       let finish: (value: unknown) => void = () => {};
-      ctx.ui.custom = vi.fn(
+      ctx.ui.custom = mockFn(
         () =>
           new Promise((resolve) => {
             finish = resolve;
@@ -541,7 +543,7 @@ describe("ask-user Herdr blocked events", () => {
     const pi = createMockPi();
     const ctx = createMockContext();
     const finishers: Array<(value: unknown) => void> = [];
-    ctx.ui.custom = vi.fn(
+    ctx.ui.custom = mockFn(
       () =>
         new Promise((resolve) => {
           finishers.push(resolve);
@@ -655,13 +657,8 @@ describe("ask-user schema and state", () => {
     const pi = createMockPi();
     const ctx = createMockContext();
     let component: Component | undefined;
-    ctx.ui.custom = vi.fn((factory) => {
-      component = factory(
-        { requestRender: vi.fn() },
-        ctx.ui.theme,
-        { matches: matchesQuestionnaireKey },
-        vi.fn(),
-      );
+    ctx.ui.custom = mockFn((factory) => {
+      component = factory(fakeTui(), ctx.ui.theme, { matches: matchesQuestionnaireKey }, vi.fn());
       return Promise.resolve({ status: "dismissed" });
     });
     await askUserExtension(pi);

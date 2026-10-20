@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import sessionNameExtension from "../../extensions/session-name/session-name.ts";
 import { createMockContext, createMockModel } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
+import { fixtureAs, sessionEntries } from "../mocks/test-helpers.ts";
 
 const TEMP = "Pi · project · 12345678";
 const ENTRY = "session-name:state";
@@ -49,14 +50,14 @@ async function setup(options: { name?: string; branch?: unknown[] } = {}) {
   pi.appendEntry.mockImplementation((customType, data) =>
     branch.push({ type: "custom", customType, data }),
   );
-  ctx.sessionManager.getBranch.mockImplementation(() => branch);
+  ctx.sessionManager.getBranch.mockImplementation(() => sessionEntries(branch));
   const small = createMockModel({ id: "title-model", provider: "title-provider", reasoning: true });
   ctx.modelRegistry.find.mockImplementation((provider, id) =>
     provider === small.provider && id === small.id ? small : undefined,
   );
-  ctx.modelRegistry.streamSimple.mockImplementation((model, payload, options) => ({
-    result: () => complete(model, payload, options),
-  }));
+  ctx.modelRegistry.streamSimple.mockImplementation((model, payload, options) =>
+    fixtureAs({ result: () => complete(model, payload, options) }),
+  );
   ctx.modelRegistry.getApiKeyAndHeaders.mockResolvedValue({
     ok: true,
     apiKey: "title-key",

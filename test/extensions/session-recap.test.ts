@@ -6,7 +6,7 @@ import sessionRecapExtension from "../../extensions/session-recap/session-recap.
 import { __resetWidgetStrip, STRIP_KEY_ABOVE } from "../../lib/widget-strip.ts";
 import { createMockCommandContext, createMockModel } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
-import { getCommandHandler, getEventHandler } from "../mocks/test-helpers.ts";
+import { getCommandHandler, getEventHandler, sessionEntries } from "../mocks/test-helpers.ts";
 
 vi.mock("@earendil-works/pi-ai/compat", () => ({
   completeSimple: vi.fn(),
@@ -217,7 +217,7 @@ describe("session-recap-extension", () => {
 
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
-    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildMeaningfulBranch()));
     mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
     await sessionRecapExtension(mockPi);
 
@@ -252,7 +252,7 @@ describe("session-recap-extension", () => {
 
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
-    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildMeaningfulBranch()));
     mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
     await sessionRecapExtension(mockPi);
 
@@ -281,7 +281,7 @@ describe("session-recap-extension", () => {
 
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
-    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildMeaningfulBranch()));
     mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
     await sessionRecapExtension(mockPi);
 
@@ -311,7 +311,7 @@ describe("session-recap-extension", () => {
 
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
-    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildMeaningfulBranch()));
     mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
     await sessionRecapExtension(mockPi);
 
@@ -345,7 +345,7 @@ describe("session-recap-extension", () => {
 
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
-    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildMeaningfulBranch()));
     mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
     await sessionRecapExtension(mockPi);
 
@@ -390,7 +390,7 @@ describe("session-recap-extension", () => {
 
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
-    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildMeaningfulBranch()));
     mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
     await sessionRecapExtension(mockPi);
 
@@ -422,7 +422,7 @@ describe("session-recap-extension", () => {
 
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
-    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildMeaningfulBranch()));
     mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
     await sessionRecapExtension(mockPi);
 
@@ -449,7 +449,7 @@ describe("session-recap-extension", () => {
 
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
-    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildMeaningfulBranch()));
     mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
     await sessionRecapExtension(mockPi);
 
@@ -477,7 +477,7 @@ describe("session-recap-extension", () => {
 
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
-    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildMeaningfulBranch()));
     mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
     await sessionRecapExtension(mockPi);
 
@@ -504,7 +504,7 @@ describe("session-recap-extension", () => {
 
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
-    mockCtx.sessionManager.getBranch = vi.fn(() => []);
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries([]));
     await sessionRecapExtension(mockPi);
 
     await getCommandHandler(mockPi, "recap")("", mockCtx);
@@ -519,7 +519,7 @@ describe("session-recap-extension", () => {
 
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
-    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildMeaningfulBranch()));
     mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
     await sessionRecapExtension(mockPi);
 
@@ -544,7 +544,7 @@ describe("session-recap-extension", () => {
 
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
-    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildMeaningfulBranch()));
     mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
     await sessionRecapExtension(mockPi);
 
@@ -554,10 +554,12 @@ describe("session-recap-extension", () => {
     // Simulate the todo tool persisting state mid-generation: the leaf
     // advances but no new conversation content appears.
     mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-2");
-    mockCtx.sessionManager.getBranch = vi.fn(() => [
-      ...buildMeaningfulBranch(),
-      { type: "custom", customType: "todos-state", data: { items: [] } },
-    ]);
+    mockCtx.sessionManager.getBranch = vi.fn(() =>
+      sessionEntries([
+        ...buildMeaningfulBranch(),
+        { type: "custom", customType: "todos-state", data: { items: [] } },
+      ]),
+    );
 
     releaseGeneration(fauxAssistantMessage([{ type: "text", text: "recap: not stale" }]));
     await recapDone;
@@ -572,7 +574,7 @@ describe("session-recap-extension", () => {
 
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
-    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildMeaningfulBranch()));
     mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
     await sessionRecapExtension(mockPi);
 
@@ -581,14 +583,16 @@ describe("session-recap-extension", () => {
 
     // A new user message means the conversation moved on; the recap is stale.
     mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-2");
-    mockCtx.sessionManager.getBranch = vi.fn(() => [
-      ...buildMeaningfulBranch(),
-      {
-        type: "message",
-        id: "msg-3",
-        message: { role: "user", content: [{ type: "text", text: "new question" }] },
-      },
-    ]);
+    mockCtx.sessionManager.getBranch = vi.fn(() =>
+      sessionEntries([
+        ...buildMeaningfulBranch(),
+        {
+          type: "message",
+          id: "msg-3",
+          message: { role: "user", content: [{ type: "text", text: "new question" }] },
+        },
+      ]),
+    );
 
     releaseGeneration(fauxAssistantMessage([{ type: "text", text: "recap: stale" }]));
     await recapDone;
@@ -615,7 +619,7 @@ describe("session-recap-extension", () => {
     });
     vi.stubEnv("PI_SMALL_MODEL", "small-provider/small-model");
     mockCtx.modelRegistry.find = vi.fn(() => smallModel);
-    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildMeaningfulBranch()));
     mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
     await sessionRecapExtension(mockPi);
 
@@ -639,7 +643,7 @@ describe("session-recap-extension", () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     mockCtx.modelRegistry.find = vi.fn(() => undefined);
-    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildMeaningfulBranch()));
     mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
     await sessionRecapExtension(mockPi);
 
@@ -659,7 +663,7 @@ describe("session-recap-extension", () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     mockCtx.modelRegistry.find = vi.fn(() => undefined);
-    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildMeaningfulBranch()));
     mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
     await sessionRecapExtension(mockPi);
 
@@ -700,7 +704,7 @@ describe("session-recap-extension", () => {
     });
     let modelAvailable = false;
     mockCtx.modelRegistry.find = vi.fn(() => (modelAvailable ? smallModel : undefined));
-    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildMeaningfulBranch()));
     mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
     await sessionRecapExtension(mockPi);
 
@@ -736,15 +740,17 @@ describe("session-recap-extension", () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     // Branch with only a short assistant message (< 50 words)
-    mockCtx.sessionManager.getBranch = vi.fn(() => [
-      {
-        type: "message",
-        message: {
-          role: "assistant",
-          content: [{ type: "text", text: "ok done" }],
+    mockCtx.sessionManager.getBranch = vi.fn(() =>
+      sessionEntries([
+        {
+          type: "message",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "ok done" }],
+          },
         },
-      },
-    ]);
+      ]),
+    );
     mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
     await sessionRecapExtension(mockPi);
 
@@ -792,7 +798,7 @@ describe("session-recap-extension", () => {
 
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
-    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildMeaningfulBranch()));
     mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
     await sessionRecapExtension(mockPi);
 
@@ -829,7 +835,7 @@ describe("session-recap-extension", () => {
 
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
-    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildMeaningfulBranch()));
     mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
     await sessionRecapExtension(mockPi);
 
@@ -866,7 +872,7 @@ describe("session-recap-extension", () => {
 
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
-    mockCtx.sessionManager.getBranch = vi.fn(() => buildMeaningfulBranch());
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildMeaningfulBranch()));
     mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
     await sessionRecapExtension(mockPi);
 

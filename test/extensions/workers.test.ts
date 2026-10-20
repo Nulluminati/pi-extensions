@@ -14,7 +14,6 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -85,6 +84,7 @@ import { withFileLock } from "../../lib/file-lock.ts";
 import { cleanGitEnv, runGit } from "../../lib/git.ts";
 import { projectStateRelative } from "../../lib/paths.ts";
 import { isProcessAlive } from "../../lib/presence-shards.ts";
+import { contentText, sessionEntries } from "../mocks/test-helpers.ts";
 
 // Call-through spy: real cross-process locking behavior stays active for
 // every code path, while tests can assert who took which lock.
@@ -115,9 +115,8 @@ vi.mock("../../lib/git.ts", async (importOriginal) => {
 });
 
 import { __resetWidgetStrip, STRIP_KEY_ABOVE } from "../../lib/widget-strip.ts";
-import { createMockContext } from "../mocks/context-mocks.ts";
-import type { DeepMocked } from "../mocks/mock-types.ts";
-import { createMockPi } from "../mocks/pi-mocks.ts";
+import { createMockContext, type MockContext } from "../mocks/context-mocks.ts";
+import { createMockPi, type MockPi } from "../mocks/pi-mocks.ts";
 
 const execFileAsync = promisify(execFile);
 const gitOpts = (cwd: string) => ({ cwd, env: cleanGitEnv() });
@@ -235,7 +234,7 @@ interface WakeOptionsShape {
   deliverAs: string;
 }
 
-function findWakeCall(pi: DeepMocked<ExtensionAPI>): {
+function findWakeCall(pi: MockPi): {
   message: WakeMessageShape;
   options: WakeOptionsShape;
 } {
@@ -252,7 +251,7 @@ function findWakeCall(pi: DeepMocked<ExtensionAPI>): {
 }
 
 /** The wake is emitted after the registry write, so poll rather than read once. */
-async function waitForWake(pi: DeepMocked<ExtensionAPI>, timeoutMs = 5_000): Promise<void> {
+async function waitForWake(pi: MockPi, timeoutMs = 5_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const found = pi.sendMessage.mock.calls.some(
@@ -314,8 +313,8 @@ function removedEntry(id: string): { type: string; customType: string; data: { i
 describe("workers-extension", () => {
   let cwd: string;
   let fixtureDir: string;
-  let mockPi: DeepMocked<ExtensionAPI>;
-  let mockCtx: DeepMocked<ExtensionContext>;
+  let mockPi: MockPi;
+  let mockCtx: MockContext;
   const oldEnv: Record<string, string | undefined> = {};
 
   const executeTool = async (
@@ -345,7 +344,7 @@ describe("workers-extension", () => {
     __resetWidgetStrip();
     cwd = await mkdtemp(join(tmpdir(), "workers-test-"));
     fixtureDir = await mkdtemp(join(tmpdir(), "workers-fixture-"));
-    mockPi = createMockPi() as DeepMocked<ExtensionAPI>;
+    mockPi = createMockPi() as MockPi;
     mockCtx = createMockContext();
     (mockCtx as { cwd: string }).cwd = cwd;
     // Default test configuration: most tests spawn workers, so a worker model
@@ -663,7 +662,7 @@ ${SUCCESS_WORKER}`,
     const id = started.details.workerId as string;
 
     const cancelled = await executeTool("workers", { action: "cancel", id });
-    expect(cancelled.content[0].text).toContain("cancelled");
+    expect(contentText(cancelled)).toContain("cancelled");
     expect(cancelled.details.worker.status).toBe("cancelled");
     expect(cancelled.details.worker.error).toBe("cancelled by user");
     const saved = await loadWorker(cwd, id);
@@ -919,7 +918,7 @@ sleep 30
     const id = started.details.worker.id as string;
 
     const status = await executeTool("workers", { action: "status", id });
-    expect(status.content[0].text).toContain("JWT tokens");
+    expect(contentText(status)).toContain("JWT tokens");
   });
 
   it("workers status throws for an unknown id", async () => {
@@ -1027,7 +1026,7 @@ sleep 30
       startedAt: Date.now() - 5_000,
       streamFormat: "raw",
     });
-    mockCtx.sessionManager.getBranch = vi.fn(() => [branchEntry(record)]);
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries([branchEntry(record)]));
     const spoolDir = join(cwd, CONFIG_DIR_NAME, "workers", "streams");
     await mkdir(spoolDir, { recursive: true });
     await writeFile(
@@ -1060,7 +1059,7 @@ sleep 30
       startedAt: Date.now() - 5_000,
       streamFormat: "raw",
     });
-    mockCtx.sessionManager.getBranch = vi.fn(() => [branchEntry(record)]);
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries([branchEntry(record)]));
 
     await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
 
@@ -1152,7 +1151,7 @@ sleep 30
     const id = started.details.workerId as string;
 
     const cancelled = await executeTool("workers", { action: "cancel", id });
-    expect(cancelled.content[0].text).toContain("cancelled");
+    expect(contentText(cancelled)).toContain("cancelled");
     expect(cancelled.details.worker.status).toBe("cancelled");
     const record = await loadWorker(cwd, id);
     expect(record?.status).toBe("cancelled");
@@ -1164,10 +1163,10 @@ sleep 30
     await seedRecord(cwd, makeWorkerRecord({ id: "w-timed", name: "timed", status: "timeout" }));
 
     const result = await executeTool("workers", { action: "cancel", id: "w-timed" });
-    expect(result.content[0].text).toContain("is already timeout");
-    expect(result.content[0].text).toContain("slot is free");
-    expect(result.content[0].text).toContain("action=remove");
-    expect(result.content[0].text).toContain("spawn_worker to start a new worker");
+    expect(contentText(result)).toContain("is already timeout");
+    expect(contentText(result)).toContain("slot is free");
+    expect(contentText(result)).toContain("action=remove");
+    expect(contentText(result)).toContain("spawn_worker to start a new worker");
   });
 
   it("workers remove rejects traversal before touching another worker's worktree", async () => {
@@ -1440,7 +1439,7 @@ sleep 30
     await captureWorktreePatch(worker.worktree as string, worker.patchPath as string);
 
     const collected = await executeTool("workers", { action: "collect", id });
-    expect(collected.content[0].text).toContain("Applied patch");
+    expect(contentText(collected)).toContain("Applied patch");
     expect(await readFile(join(cwd, "FEATURE.md"), "utf8")).toBe("feature\n");
     // Worktree cleaned up.
     const { existsSync } = await import("node:fs");
@@ -1510,7 +1509,7 @@ sleep 30
       apply: false,
     });
 
-    expect(collected.content[0].text).toContain("Patch left unapplied");
+    expect(contentText(collected)).toContain("Patch left unapplied");
     expect(existsSync(join(cwd, "UNAPPLIED.md"))).toBe(false);
     const record = await loadWorker(cwd, worker.id as string);
     expect(record?.collectedAt).toBeDefined();
@@ -1553,9 +1552,7 @@ sleep 30
 
     const collected = await executeTool("workers", { action: "collect", id: "w-empty" });
 
-    expect(collected.content[0].text).toBe(
-      "No changes in worker reader's patch; nothing to apply.",
-    );
+    expect(contentText(collected)).toBe("No changes in worker reader's patch; nothing to apply.");
     expect(vi.mocked(runGit).mock.calls.some((call) => call[1][0] === "apply")).toBe(false);
     const record = await loadWorker(cwd, "w-empty");
     expect(record?.collectedAt).toBeDefined();
@@ -1576,7 +1573,7 @@ sleep 30
       cleanup: false,
     });
 
-    expect(collected.content[0].text).toBe("No changes in worker blank's patch; nothing to apply.");
+    expect(contentText(collected)).toBe("No changes in worker blank's patch; nothing to apply.");
     expect(vi.mocked(runGit).mock.calls.some((call) => call[1][0] === "apply")).toBe(false);
   });
 
@@ -1750,7 +1747,7 @@ sleep 30
       const id = (started.details.worker as WorkerRecord).id;
 
       const tail = await executeTool("workers", { action: "tail", id });
-      const text = tail.content[0].text as string;
+      const text = contentText(tail) as string;
       expect(text).toContain("▸ read src/auth.ts");
       expect(text).toContain("✓ read");
       expect(text).toContain("✎ Reading auth module");
@@ -1836,7 +1833,7 @@ sleep 30
 
       // The tail display stays bounded regardless.
       const tail = await executeTool("workers", { action: "tail", id: worker.id, lines: 40 });
-      const text = tail.content[0].text as string;
+      const text = contentText(tail) as string;
       expect(text.split("\n")).toHaveLength(41); // 40 entries + omission note
     });
   });
@@ -1854,7 +1851,7 @@ sleep 30
         const status = await executeTool("workers", { action: "status", id });
         const worker = status.details.worker as WorkerRecord;
         expect(worker.blocker).toMatchObject({ reason: BLOCKER_REASON, at: 123 });
-        expect(status.content[0].text).toContain(`Blocker: ${BLOCKER_REASON}`);
+        expect(contentText(status)).toContain(`Blocker: ${BLOCKER_REASON}`);
       });
 
       // Reporting a blocker does not kill the worker; the parent decides.
@@ -1918,7 +1915,7 @@ sleep 30
       const id = (started.details.worker as WorkerRecord).id;
 
       const tail = await executeTool("workers", { action: "tail", id });
-      expect(tail.content[0].text).toContain("⚠ blocker blocked briefly, worked around it");
+      expect(contentText(tail)).toContain("⚠ blocker blocked briefly, worked around it");
     });
   });
   it("workers remove deletes a finished worker's record and artifacts", async () => {
@@ -1936,7 +1933,7 @@ sleep 30
     await writeFile(patchFile, "diff", "utf8");
 
     const result = await executeTool("workers", { action: "remove", id: "w-done" });
-    expect(result.content[0].text).toContain("removed");
+    expect(contentText(result)).toContain("removed");
     expect(await loadWorker(cwd, "w-done")).toBeUndefined();
     await expect(stat(patchFile)).rejects.toMatchObject({ code: "ENOENT" });
 
@@ -1964,7 +1961,7 @@ sleep 30
       endedAt: 2,
     });
     await seedRecord(cwd, removed);
-    mockCtx.sessionManager.getBranch = vi.fn(() => [branchEntry(removed)]);
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries([branchEntry(removed)]));
     await executeTool("workers", { action: "remove", id });
     expect(await loadWorker(cwd, id)).toBeUndefined();
 
@@ -1987,10 +1984,10 @@ sleep 30
       `{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"salvaged report"}]}}\n`,
       "utf8",
     );
-    const mockPi2 = createMockPi() as DeepMocked<ExtensionAPI>;
+    const mockPi2 = createMockPi() as MockPi;
     const mockCtx2 = createMockContext();
     (mockCtx2 as { cwd: string }).cwd = cwd;
-    mockCtx2.sessionManager.getBranch = vi.fn(() => [branchEntry(running)]);
+    mockCtx2.sessionManager.getBranch = vi.fn(() => sessionEntries([branchEntry(running)]));
     await workersExtension(mockPi2);
     const startHandler = mockPi2.on.mock.calls.find((call) => call[0] === "session_start")?.[1];
     if (!startHandler) throw new Error("handler for session_start not found");
@@ -2030,7 +2027,7 @@ sleep 30
 
     const result = await executeTool("workers", { action: "remove", id: "w-wt" });
 
-    expect(result.content[0].text).toContain("Worktree and branch discarded");
+    expect(contentText(result)).toContain("Worktree and branch discarded");
     expect(existsSync(wt.path)).toBe(false);
     await expect(runGit(cwd, ["rev-parse", "--verify", "workers/w-wt"])).rejects.toThrow();
     expect(await loadWorker(cwd, "w-wt")).toBeUndefined();
@@ -2067,7 +2064,7 @@ sleep 30
 
     const result = await executeTool("workers", { action: "remove", id: "w-lost" });
 
-    expect(result.content[0].text).toContain("worktree");
+    expect(contentText(result)).toContain("worktree");
     expect(existsSync(wt.path)).toBe(false);
     await expect(runGit(cwd, ["rev-parse", "--verify", "workers/w-lost"])).rejects.toThrow();
   });
@@ -2082,10 +2079,10 @@ sleep 30
       endedAt: Date.now(),
     });
     let branch: unknown[] = [branchEntry(record)];
-    mockCtx.sessionManager.getBranch = vi.fn(() => branch);
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(branch));
 
     const removed = await executeTool("workers", { action: "remove", id: "w-gone" });
-    expect(removed.content[0].text).toContain("removed");
+    expect(contentText(removed)).toContain("removed");
     expect(mockPi.appendEntry).toHaveBeenCalledWith(
       WORKER_REMOVED_ENTRY,
       expect.objectContaining({ id: "w-gone" }),
@@ -2097,11 +2094,11 @@ sleep 30
     branch = [branchEntry(record), removedEntry("w-gone")];
 
     const relisted = await executeTool("workers", { action: "list" });
-    expect(relisted.content[0].text).not.toContain("w-gone");
+    expect(contentText(relisted)).not.toContain("w-gone");
 
     await getEventHandler("session_start")({ type: "session_start", reason: "reload" }, mockCtx);
     const afterReload = await executeTool("workers", { action: "list" });
-    expect(afterReload.content[0].text).toContain("No workers yet");
+    expect(contentText(afterReload)).toContain("No workers yet");
     await expect(executeTool("workers", { action: "status", id: "w-gone" })).rejects.toThrow(
       /Unknown worker/,
     );
@@ -2116,17 +2113,17 @@ sleep 30
       endedAt: Date.now(),
     });
     let branch: unknown[] = [branchEntry(record)];
-    mockCtx.sessionManager.getBranch = vi.fn(() => branch);
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(branch));
 
     // First action caches the record in memory.
     const first = await executeTool("workers", { action: "list" });
-    expect(first.content[0].text).toContain("drop");
+    expect(contentText(first)).toContain("drop");
 
     // A reload (or another writer of this session) replays the branch with
     // the marker: the cached record must be dropped, not just shadowed.
     branch = [branchEntry(record), removedEntry("w-drop")];
     const second = await executeTool("workers", { action: "list" });
-    expect(second.content[0].text).toContain("No workers yet");
+    expect(contentText(second)).toContain("No workers yet");
   });
 
   it("removing an orphan deletes its artifacts but refuses another live session's worker", async () => {
@@ -2180,10 +2177,10 @@ sleep 30
     // The record file was pruned or lost; the transcript entry alone kept
     // resurrecting this worker on every reload. No disk artifacts exist.
     let branch: unknown[] = [branchEntry(record)];
-    mockCtx.sessionManager.getBranch = vi.fn(() => branch);
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(branch));
 
     const removed = await executeTool("workers", { action: "remove", id: "w-ghost" });
-    expect(removed.content[0].text).toContain("removed");
+    expect(contentText(removed)).toContain("removed");
     expect(mockPi.appendEntry).toHaveBeenCalledWith(
       WORKER_REMOVED_ENTRY,
       expect.objectContaining({ id: "w-ghost" }),
@@ -2350,7 +2347,7 @@ sleep 30
       expect(existsSync(spawnMarker)).toBe(false); // nothing spawned
 
       const removed = await executeTool("workers", { action: "remove", id: record.id });
-      expect(removed.content[0].text).toContain("Worktree and branch discarded");
+      expect(contentText(removed)).toContain("Worktree and branch discarded");
       expect(existsSync(wt)).toBe(false);
       expect(await loadWorker(cwd, record.id)).toBeUndefined();
     });
@@ -2568,7 +2565,7 @@ sleep 30
       const worker = result.details.worker as WorkerRecord;
       expect(worker.status).toBe("completed");
       expect(worker.provision).toMatchObject({ state: "skipped", detail: "no worktree" });
-      expect(result.content[0].text).toContain("Provision: skipped — no worktree");
+      expect(contentText(result)).toContain("Provision: skipped — no worktree");
       const args = (await readFile(argsFile, "utf8")).split("\n");
       const environment = args.find((line) => line.startsWith("ENVIRONMENT:"));
       expect(environment).toContain("Provision: skipped — no worktree");
@@ -2615,7 +2612,7 @@ sleep 30
         state: "yes",
         detail: "carry 1, hook exit 0 (16s), setup committed",
       });
-      expect(started.content[0].text).toContain("Provision: yes — carry 1, hook exit 0 (16s)");
+      expect(contentText(started)).toContain("Provision: yes — carry 1, hook exit 0 (16s)");
       // The child writes its argv and root files before it exits; wait for
       // the completed record so the reads cannot race the spawned process.
       const record = await waitForRecord(cwd, id, "completed");
@@ -4769,8 +4766,8 @@ describe("worker store (session-scoped)", () => {
 describe("worker session scoping", () => {
   let cwd: string;
   let fixtureDir: string;
-  let mockPi: DeepMocked<ExtensionAPI>;
-  let mockCtx: DeepMocked<ExtensionContext>;
+  let mockPi: MockPi;
+  let mockCtx: MockContext;
   const oldEnv: Record<string, string | undefined> = {};
 
   const executeTool = async (
@@ -4778,7 +4775,7 @@ describe("worker session scoping", () => {
     params: Record<string, unknown>,
     sessionBranch: unknown[] = [],
   ) => {
-    mockCtx.sessionManager.getBranch = vi.fn(() => sessionBranch);
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(sessionBranch));
     const call = mockPi.registerTool.mock.calls.find((c) => c[0].name === name);
     if (!call) throw new Error(`tool ${name} not registered`);
     return call[0].execute("call-1", params as never, undefined, undefined, mockCtx);
@@ -4794,7 +4791,7 @@ describe("worker session scoping", () => {
     __resetWidgetStrip();
     cwd = await mkdtemp(join(tmpdir(), "workers-scope-"));
     fixtureDir = await mkdtemp(join(tmpdir(), "workers-scope-fixture-"));
-    mockPi = createMockPi() as DeepMocked<ExtensionAPI>;
+    mockPi = createMockPi() as MockPi;
     mockCtx = createMockContext();
     (mockCtx as { cwd: string }).cwd = cwd;
     setEnv("PI_WORKER_MODEL", "opencode-go/glm-5.3-flash");
@@ -4828,7 +4825,7 @@ describe("worker session scoping", () => {
     );
 
     const result = await executeTool("workers", { action: "list" });
-    const text = result.content[0].text as string;
+    const text = contentText(result) as string;
     expect(text).toContain("No workers yet");
     expect(text).not.toContain("theirs");
   });
@@ -4848,12 +4845,12 @@ describe("worker session scoping", () => {
     );
 
     const result = await executeTool("workers", { action: "list", scope: "orphans" });
-    const text = result.content[0].text as string;
+    const text = contentText(result) as string;
     expect(text).toContain("[orphan]");
     expect(text).toContain("abandoned");
     // Orphans remain actionable: status reads their report.
     const status = await executeTool("workers", { action: "status", id: "w-orphan" });
-    expect(status.content[0].text).toContain("orphan report");
+    expect(contentText(status)).toContain("orphan report");
   });
 
   it("workers list scope=all tags workers of other live sessions", async () => {
@@ -4868,7 +4865,7 @@ describe("worker session scoping", () => {
     );
 
     const result = await executeTool("workers", { action: "list", scope: "all" });
-    const text = result.content[0].text as string;
+    const text = contentText(result) as string;
     expect(text).toContain("[other session]");
     expect(text).toContain("theirs");
   });
@@ -4948,7 +4945,7 @@ describe("worker session scoping", () => {
       id: "w-orphan",
       apply: false,
     });
-    expect(collected.content[0].text).toContain("Patch left unapplied");
+    expect(contentText(collected)).toContain("Patch left unapplied");
     const stored = await loadWorker(cwd, "w-orphan");
     expect(stored?.collectedAt).toBeDefined();
     // No transcript entry: this session never owned the worker.
@@ -5060,7 +5057,7 @@ describe("worker session scoping", () => {
     try {
       expect(sleeper.pid !== undefined && killSync(sleeper.pid)).toBe(true);
       const result = await executeTool("workers", { action: "cancel", id: "w-runaway" });
-      expect(result.content[0].text).toContain("orphaned worker");
+      expect(contentText(result)).toContain("orphaned worker");
       const stored = await loadWorker(cwd, "w-runaway");
       expect(stored?.status).toBe("cancelled");
       // No transcript entry: this session never owned the worker.
@@ -5091,7 +5088,7 @@ describe("worker session scoping", () => {
     );
 
     try {
-      mockCtx.sessionManager.getBranch = vi.fn(() => [branchEntry(record)]);
+      mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries([branchEntry(record)]));
       await getEventHandlerFrom(mockPi, "session_start")(
         { type: "session_start", reason: "startup" },
         mockCtx,
@@ -5290,7 +5287,7 @@ describe("worker session scoping", () => {
     );
 
     try {
-      mockCtx.sessionManager.getBranch = vi.fn(() => [branchEntry(record)]);
+      mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries([branchEntry(record)]));
       await getEventHandlerFrom(mockPi, "session_start")(
         { type: "session_start", reason: "startup" },
         mockCtx,
@@ -5349,7 +5346,7 @@ describe("worker session scoping", () => {
     });
 
     try {
-      mockCtx.sessionManager.getBranch = vi.fn(() => [branchEntry(record)]);
+      mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries([branchEntry(record)]));
       await getEventHandlerFrom(mockPi, "session_start")(
         { type: "session_start", reason: "startup" },
         mockCtx,
@@ -5379,7 +5376,7 @@ describe("worker session scoping", () => {
     await seedRecord(cwd, record);
 
     try {
-      mockCtx.sessionManager.getBranch = vi.fn(() => [branchEntry(record)]);
+      mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries([branchEntry(record)]));
       await getEventHandlerFrom(mockPi, "session_start")(
         { type: "session_start", reason: "startup" },
         mockCtx,
@@ -5414,14 +5411,14 @@ describe("worker session scoping", () => {
     await seedRecord(cwd, record);
 
     try {
-      mockCtx.sessionManager.getBranch = vi.fn(() => [branchEntry(record)]);
+      mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries([branchEntry(record)]));
       await getEventHandlerFrom(mockPi, "session_start")(
         { type: "session_start", reason: "startup" },
         mockCtx,
       );
 
       const result = await executeTool("workers", { action: "cancel", id: "w-adopt-cancel" });
-      expect(result.content[0].text).toContain("cancelled");
+      expect(contentText(result)).toContain("cancelled");
       expect(await waitForRecord(cwd, "w-adopt-cancel", "cancelled")).toMatchObject({
         error: "cancelled by user",
       });
@@ -5464,7 +5461,7 @@ describe("worker session scoping", () => {
     await seedRecord(cwd, record);
 
     try {
-      mockCtx.sessionManager.getBranch = vi.fn(() => [branchEntry(record)]);
+      mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries([branchEntry(record)]));
       await getEventHandlerFrom(mockPi, "session_start")(
         { type: "session_start", reason: "startup" },
         mockCtx,
@@ -5542,7 +5539,7 @@ describe("worker session scoping", () => {
 
     // pi -r restores the branch, entries included.
     const result = await executeTool("workers", { action: "list" }, [branchEntry(record)]);
-    const text = result.content[0].text as string;
+    const text = contentText(result) as string;
     expect(text).toContain("mine");
     expect(text).not.toContain("[orphan]");
   });
@@ -5560,7 +5557,7 @@ function killSync(pid: number): boolean {
   }
 }
 
-function getEventHandlerFrom(mockPi: DeepMocked<ExtensionAPI>, eventType: string) {
+function getEventHandlerFrom(mockPi: MockPi, eventType: string) {
   for (const call of mockPi.on.mock.calls) {
     if (call[0] === eventType) return call[1];
   }

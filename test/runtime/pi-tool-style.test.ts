@@ -4,13 +4,14 @@ import { stripVTControlCharacters } from "node:util";
 import { Text, visibleWidth } from "@earendil-works/pi-tui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { installRailStyles, type RailController } from "../../extensions/tool-style/src/rails.ts";
+import { fakeTui } from "../mocks/test-helpers.ts";
 
 const sdk = await import(import.meta.resolve("@earendil-works/pi-coding-agent"));
 const agentDist = dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent")));
 const { initTheme, theme } = await import(
   pathToFileURL(resolve(agentDist, "modes/interactive/theme/theme.js")).href
 );
-const ui = { requestRender: vi.fn(), terminal: { rows: 30, columns: 80 } };
+const ui = fakeTui({ terminal: { rows: 30, columns: 80 } });
 let controller: RailController | undefined;
 const renderFailure = vi.fn();
 

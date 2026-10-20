@@ -4,8 +4,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { decodeHtmlEntities } from "../../extensions/web-search/src/html.ts";
 import webSearchExtension from "../../extensions/web-search/web-search.ts";
 import { createMockCommandContext } from "../mocks/context-mocks.ts";
+import { mockFn } from "../mocks/mock-types.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
-import { getCommandHandler, getEventHandler } from "../mocks/test-helpers.ts";
+import { fakeTui, getCommandHandler, getEventHandler } from "../mocks/test-helpers.ts";
 
 // ---------------------------------------------------------------------------
 // Mock global fetch
@@ -885,7 +886,7 @@ describe("web-search-extension", () => {
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       let capturedFactory: ((tui: any, theme: any, kb: any, done: any) => any) | undefined;
       // biome-ignore lint/suspicious/noExplicitAny: test mock
-      mockCtx.ui.custom = vi.fn((factory: any) => {
+      mockCtx.ui.custom = mockFn((factory: any) => {
         capturedFactory = factory;
         return Promise.resolve("synthetic");
         // biome-ignore lint/suspicious/noExplicitAny: test mock
@@ -897,7 +898,7 @@ describe("web-search-extension", () => {
       // Selector listed both providers with their labels.
       const factory = capturedFactory;
       expect(factory).toBeDefined();
-      const component = factory?.({ requestRender: vi.fn() }, THEME, null, vi.fn());
+      const component = factory?.(fakeTui(), THEME, null, vi.fn());
       const lines = component.render(80) as string[];
       expect(lines.some((l: string) => l.includes("Brave Search"))).toBe(true);
       expect(lines.some((l: string) => l.includes("Synthetic"))).toBe(true);
@@ -919,7 +920,7 @@ describe("web-search-extension", () => {
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       let capturedFactory: ((tui: any, theme: any, kb: any, done: any) => any) | undefined;
       // biome-ignore lint/suspicious/noExplicitAny: test mock
-      mockCtx.ui.custom = vi.fn((factory: any) => {
+      mockCtx.ui.custom = mockFn((factory: any) => {
         capturedFactory = factory;
         return Promise.resolve(null);
         // biome-ignore lint/suspicious/noExplicitAny: test mock
@@ -929,12 +930,7 @@ describe("web-search-extension", () => {
       await handler("", mockCtx);
 
       const fg = vi.fn((_color: string, text: string) => text);
-      const component = capturedFactory?.(
-        { requestRender: vi.fn() },
-        { ...THEME, fg },
-        null,
-        vi.fn(),
-      );
+      const component = capturedFactory?.(fakeTui(), { ...THEME, fg }, null, vi.fn());
       const lines = component.render(80) as string[];
       expect(lines[0]).toContain("╭── Web Search ");
       expect(lines.join("\n")).not.toContain("Select Web Search Provider");
@@ -951,7 +947,7 @@ describe("web-search-extension", () => {
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       let capturedFactory: ((tui: any, theme: any, kb: any, done: any) => any) | undefined;
       // biome-ignore lint/suspicious/noExplicitAny: test mock
-      mockCtx.ui.custom = vi.fn((factory: any) => {
+      mockCtx.ui.custom = mockFn((factory: any) => {
         capturedFactory = factory;
         return Promise.resolve(null);
         // biome-ignore lint/suspicious/noExplicitAny: test mock
@@ -959,12 +955,7 @@ describe("web-search-extension", () => {
 
       await getCommandHandler(mockPi, "websearch:select")("", mockCtx);
 
-      const component = capturedFactory?.(
-        { requestRender: vi.fn() },
-        THEME,
-        { matches: matchesPickerKey },
-        vi.fn(),
-      );
+      const component = capturedFactory?.(fakeTui(), THEME, { matches: matchesPickerKey }, vi.fn());
       for (const character of "independent") component.handleInput(character);
       const rendered = component.render(80).join("\n");
       expect(rendered).toContain("Brave Search");
@@ -996,7 +987,7 @@ describe("web-search-extension", () => {
       await webSearchExtension(mockPi);
       const mockCtx = createMockCommandContext();
       // biome-ignore lint/suspicious/noExplicitAny: test mock
-      mockCtx.ui.custom = vi.fn(() => Promise.resolve(null)) as any;
+      mockCtx.ui.custom = mockFn(() => Promise.resolve(null)) as any;
 
       const handler = getCommandHandler(mockPi, "websearch:select");
       await handler("", mockCtx);

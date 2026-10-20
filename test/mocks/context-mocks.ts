@@ -1,18 +1,19 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type {
   ExtensionCommandContext,
-  ExtensionContext,
+  ExtensionToolContext,
   ExtensionUIContext,
   ModelRegistry,
   Theme,
 } from "@earendil-works/pi-coding-agent";
 import { vi } from "vitest";
-import { asSdkMock, type DeepMocked } from "./mock-types.ts";
+import type { EditorFactory } from "../../lib/pi-types.ts";
+import { asSdkMock, type DeepMocked, mockFn } from "./mock-types.ts";
 
 export function createMockUI(): DeepMocked<ExtensionUIContext> {
   // Track the editor component so getEditorComponent mirrors real Pi (returns
   // the last factory set via setEditorComponent) instead of always undefined.
-  let editorComponent: unknown;
+  let editorComponent: EditorFactory | undefined;
   return {
     select: vi.fn(),
     confirm: vi.fn(),
@@ -24,17 +25,17 @@ export function createMockUI(): DeepMocked<ExtensionUIContext> {
     setWorkingVisible: vi.fn(),
     setWorkingIndicator: vi.fn(),
     setHiddenThinkingLabel: vi.fn(),
-    setWidget: vi.fn(),
+    setWidget: mockFn(),
     setFooter: vi.fn(),
     setHeader: vi.fn(),
     setTitle: vi.fn(),
-    custom: vi.fn(),
+    custom: mockFn(),
     pasteToEditor: vi.fn(),
     setEditorText: vi.fn(),
     getEditorText: vi.fn(() => ""),
     editor: vi.fn(),
     addAutocompleteProvider: vi.fn(),
-    setEditorComponent: vi.fn((factory: unknown) => {
+    setEditorComponent: vi.fn((factory: EditorFactory | undefined) => {
       editorComponent = factory;
     }),
     getEditorComponent: vi.fn(() => editorComponent),
@@ -80,7 +81,7 @@ export function createMockModel(overrides: Partial<Model<Api>> = {}): Model<Api>
   };
 }
 
-export function createMockContext(): DeepMocked<ExtensionContext> {
+export function createMockContext(): DeepMocked<ExtensionToolContext> {
   const model = createMockModel();
   return {
     ui: createMockUI(),
@@ -93,7 +94,7 @@ export function createMockContext(): DeepMocked<ExtensionContext> {
       getSessionId: vi.fn(() => "test-session"),
       getSessionFile: vi.fn(() => undefined),
       getSessionName: vi.fn(() => undefined),
-      getLeafId: vi.fn(() => undefined),
+      getLeafId: vi.fn(() => null),
       getLeafEntry: vi.fn(() => undefined),
       getEntry: vi.fn(() => undefined),
       getLabel: vi.fn(() => undefined),
@@ -110,13 +111,13 @@ export function createMockContext(): DeepMocked<ExtensionContext> {
       hasConfiguredAuth: vi.fn(() => true),
       getProviderAuthStatus: vi.fn(),
       getProvider: vi.fn(() => undefined),
-      stream: vi.fn(),
-      complete: vi.fn(),
+      stream: mockFn(),
+      complete: mockFn(),
       generateImages: vi.fn(),
       getProviderDisplayName: vi.fn((provider: string) => provider),
       getProviderAuth: vi.fn(),
       isUsingOAuth: vi.fn(() => false),
-      registerProvider: vi.fn(),
+      registerProvider: mockFn(),
       unregisterProvider: vi.fn(),
       registerVirtualModel: vi.fn(),
       unregisterVirtualModel: vi.fn(),
@@ -130,7 +131,7 @@ export function createMockContext(): DeepMocked<ExtensionContext> {
       getModelsOfType: vi.fn(() => []),
       getAvailableOfType: vi.fn(() => Promise.resolve([])),
       getModelOfType: vi.fn(() => undefined),
-      classify: vi.fn(() =>
+      classify: mockFn(() =>
         Promise.resolve({ answers: {}, stopReason: "error", timestamp: Date.now() }),
       ),
       getApiKeyAndHeaders: vi.fn(() =>
@@ -143,6 +144,8 @@ export function createMockContext(): DeepMocked<ExtensionContext> {
     }),
     model,
     scopedModels: [],
+    tools: [],
+    executeTool: vi.fn(),
     isIdle: vi.fn(() => true),
     isProjectTrusted: vi.fn(() => false),
     signal: undefined,
@@ -155,7 +158,10 @@ export function createMockContext(): DeepMocked<ExtensionContext> {
   };
 }
 
-export function createMockCommandContext(): DeepMocked<ExtensionCommandContext> {
+/** A command context that can also run tools, since tests reuse one context for both. */
+export function createMockCommandContext(): DeepMocked<
+  ExtensionCommandContext & ExtensionToolContext
+> {
   return {
     ...createMockContext(),
     getSystemPromptOptions: vi.fn(() => ({
@@ -176,3 +182,6 @@ export function createMockCommandContext(): DeepMocked<ExtensionCommandContext> 
     reload: vi.fn(),
   };
 }
+
+export type MockContext = ReturnType<typeof createMockContext>;
+export type MockCommandContext = ReturnType<typeof createMockCommandContext>;

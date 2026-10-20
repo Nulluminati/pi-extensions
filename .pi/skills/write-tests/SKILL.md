@@ -174,7 +174,14 @@ Choose the test style by what the behavior depends on:
 
 ### Mock Factory Pattern
 
-Use the repo's `createMockPi()` and `createMockCommandContext()` factories. They are typed as `DeepMocked<T>` of the real SDK types (`ExtensionAPI`, `ExtensionContext`, `ExtensionCommandContext`), so a member that Pi adds, renames or removes fails `tsc -p tsconfig.test.json` until the mock is updated. Keep the mocks complete; do not cast a mock to silence a missing member.
+Use the repo's `createMockPi()` and `createMockCommandContext()` factories, and annotate variables with their types `MockPi`, `MockContext` and `MockCommandContext`. They are typed as `DeepMocked<T>` of the real SDK types, and every mocked function is `Mock<T>` of the real signature. So a member that Pi adds, renames or removes, a wrong argument, a wrong return value and a replacement `vi.fn` with the wrong shape all fail `tsc -p tsconfig.test.json`. `test/mocks/mock-types.test.ts` proves this with `@ts-expect-error` lines. Keep the mocks complete; do not cast a mock to silence an error.
+
+Two kinds of SDK function cannot be checked against one implementation:
+
+- Overloaded or generic methods (`pi.on`, `pi.registerTool`, `ui.custom`, `ui.setWidget`): assign `mockFn()` from `test/mocks/mock-types.ts`. Calls and `.mock` keep the real type; the implementation is not checked.
+- Recorded `pi.on` and `pi.registerTool` calls: `MockPi` reads them back as (event name, handler for any event) and as a tool of any schema. Use `getEventHandler` and `getCommandHandler` from `test/mocks/test-helpers.ts`.
+
+For deliberate partial fakes, use the helpers in `test/mocks/test-helpers.ts`. Each one is the single documented place where a fixture is asserted as the SDK type: `fakeTui()`, `fakeTheme({...})`, `fakeKeybindings()`, `sessionEntries([...])` for `getBranch` and `getEntries`, and `fixtureAs({...})` for other partial SDK objects. Read tool results with `contentText(result)`. For a partial return value on a single function, `vi.mocked(fn, { partial: true })` is also fine.
 
 `Theme` and `ModelRegistry` are classes with private fields. Their mocks go through `asSdkMock` in `test/mocks/mock-types.ts`, which checks the public members and then asserts the class type, so a mock context still passes where the SDK context type is expected.
 

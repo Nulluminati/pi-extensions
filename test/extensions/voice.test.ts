@@ -56,8 +56,14 @@ import {
   installEditorFactoryLayer,
 } from "../../lib/editor-factory.ts";
 import { createMockCommandContext, createMockModel } from "../mocks/context-mocks.ts";
+import { mockFn } from "../mocks/mock-types.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
-import { getCommandHandler, getEventHandler } from "../mocks/test-helpers.ts";
+import {
+  fakeTui,
+  getCommandHandler,
+  getEventHandler,
+  sessionEntries,
+} from "../mocks/test-helpers.ts";
 
 vi.mock("@earendil-works/pi-ai/compat", () => ({
   completeSimple: vi.fn(),
@@ -144,6 +150,9 @@ afterEach(() => {
   // runs do not accumulate thousands of leftover directories.
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
+
+// The editor layers under test never read these arguments.
+const EDITOR_FACTORY_ARGS = [{}, {}, {}] as unknown as Parameters<EditorFactory>;
 
 describe("voice-extension", () => {
   describe("file structure", () => {
@@ -597,7 +606,7 @@ describe("voice-extension", () => {
       const baseEditor: { handleInput: ReturnType<typeof vi.fn>; wantsKeyRelease?: boolean } = {
         handleInput: vi.fn(),
       };
-      const previousFactory = vi.fn(() => baseEditor);
+      const previousFactory = mockFn<EditorFactory>(() => baseEditor);
       ctx.ui.setEditorComponent(previousFactory);
       ctx.ui.setEditorComponent.mockClear();
       await voiceExtension(mockPi);
@@ -608,7 +617,7 @@ describe("voice-extension", () => {
       expect(ctx.ui.setEditorComponent).toHaveBeenCalledWith(expect.any(Function));
       expect(ctx.ui.onTerminalInput).toHaveBeenCalledWith(expect.any(Function));
       const installedFactory = ctx.ui.getEditorComponent();
-      expect(installedFactory({}, {}, {})).toBe(baseEditor);
+      expect(installedFactory?.(...EDITOR_FACTORY_ARGS)).toBe(baseEditor);
       expect(baseEditor.wantsKeyRelease).toBe(true);
 
       const sessionShutdown = getEventHandler(mockPi, "session_shutdown");
@@ -827,7 +836,7 @@ describe("voice-extension", () => {
       const laterEditor: { handleInput: ReturnType<typeof vi.fn>; wantsKeyRelease?: boolean } = {
         handleInput: vi.fn(),
       };
-      const laterFactory = vi.fn(() => laterEditor);
+      const laterFactory = mockFn<EditorFactory>(() => laterEditor);
       ctx.ui.setEditorComponent(laterFactory);
       ctx.ui.setEditorComponent.mockClear();
 
@@ -835,7 +844,7 @@ describe("voice-extension", () => {
 
       expect(ctx.ui.setEditorComponent).toHaveBeenCalledWith(expect.any(Function));
       const installedFactory = ctx.ui.getEditorComponent();
-      expect(installedFactory({}, {}, {})).toBe(laterEditor);
+      expect(installedFactory?.(...EDITOR_FACTORY_ARGS)).toBe(laterEditor);
       expect(laterEditor.wantsKeyRelease).toBe(true);
     });
   });
@@ -982,9 +991,11 @@ describe("voice-extension", () => {
     it("summarizes and speaks the latest assistant message", async () => {
       const dir = createDownloadedTtsModel();
       const ctx = createMockCommandContext();
-      ctx.sessionManager.getBranch = vi.fn(() => [
-        { type: "message", message: { role: "assistant", content: "A detailed answer." } },
-      ]);
+      ctx.sessionManager.getBranch = vi.fn(() =>
+        sessionEntries([
+          { type: "message", message: { role: "assistant", content: "A detailed answer." } },
+        ]),
+      );
       const summarize = vi.fn(async () => "A short summary.");
       const speak = vi.fn(async () => {});
 
@@ -1002,9 +1013,11 @@ describe("voice-extension", () => {
     it("shows a Thinking-style speaking indicator widget during speech, then clears it", async () => {
       const dir = createDownloadedTtsModel();
       const ctx = createMockCommandContext();
-      ctx.sessionManager.getBranch = vi.fn(() => [
-        { type: "message", message: { role: "assistant", content: "A detailed answer." } },
-      ]);
+      ctx.sessionManager.getBranch = vi.fn(() =>
+        sessionEntries([
+          { type: "message", message: { role: "assistant", content: "A detailed answer." } },
+        ]),
+      );
       const speak = vi.fn(async () => {});
 
       await runVoiceSpeak("", ctx, {
@@ -1026,12 +1039,9 @@ describe("voice-extension", () => {
             tui: unknown,
             theme: unknown,
           ) => { render: (width: number) => string[] };
-          const component = factory(
-            { requestRender: vi.fn() },
-            {
-              fg: (_color: string, text: string) => text,
-            },
-          );
+          const component = factory(fakeTui(), {
+            fg: (_color: string, text: string) => text,
+          });
           return component.render(80).join("\n");
         })
         .join("\n");
@@ -1044,12 +1054,14 @@ describe("voice-extension", () => {
     it("speaks the cleaned full message without calling the summary model", async () => {
       const dir = createDownloadedTtsModel();
       const ctx = createMockCommandContext();
-      ctx.sessionManager.getBranch = vi.fn(() => [
-        {
-          type: "message",
-          message: { role: "assistant", content: "**Done.** `npm test` passes." },
-        },
-      ]);
+      ctx.sessionManager.getBranch = vi.fn(() =>
+        sessionEntries([
+          {
+            type: "message",
+            message: { role: "assistant", content: "**Done.** `npm test` passes." },
+          },
+        ]),
+      );
       const summarize = vi.fn();
       const speak = vi.fn(async () => {});
 
@@ -1066,9 +1078,11 @@ describe("voice-extension", () => {
       writeFileSync(join(modelDir, "duration.onnx"), "stub");
       writeFileSync(join(modelDir, "decode.onnx"), "stub");
       const ctx = createMockCommandContext();
-      ctx.sessionManager.getBranch = vi.fn(() => [
-        { type: "message", message: { role: "assistant", content: "Inflect response." } },
-      ]);
+      ctx.sessionManager.getBranch = vi.fn(() =>
+        sessionEntries([
+          { type: "message", message: { role: "assistant", content: "Inflect response." } },
+        ]),
+      );
       const speak = vi.fn(async () => {});
 
       await runVoiceSpeak("full", ctx, {
@@ -1098,9 +1112,11 @@ describe("voice-extension", () => {
         writeFileSync(join(modelDir, file), "stub");
       }
       const ctx = createMockCommandContext();
-      ctx.sessionManager.getBranch = vi.fn(() => [
-        { type: "message", message: { role: "assistant", content: "Supertonic response." } },
-      ]);
+      ctx.sessionManager.getBranch = vi.fn(() =>
+        sessionEntries([
+          { type: "message", message: { role: "assistant", content: "Supertonic response." } },
+        ]),
+      );
       const speak = vi.fn(async () => {});
 
       await runVoiceSpeak("full", ctx, {
@@ -1127,9 +1143,9 @@ describe("voice-extension", () => {
 
     it("reports missing local TTS model files", async () => {
       const ctx = createMockCommandContext();
-      ctx.sessionManager.getBranch = vi.fn(() => [
-        { type: "message", message: { role: "assistant", content: "Answer" } },
-      ]);
+      ctx.sessionManager.getBranch = vi.fn(() =>
+        sessionEntries([{ type: "message", message: { role: "assistant", content: "Answer" } }]),
+      );
       await runVoiceSpeak("", ctx, {
         modelsDir: tempDir("pi-voice-no-tts-"),
         summarize: vi.fn(),
@@ -1713,8 +1729,8 @@ describe("voice-extension", () => {
       let component:
         | { render(width: number): string[]; handleInput?(data: string): void }
         | undefined;
-      ctx.ui.custom = vi.fn(async (factory) => {
-        component = await factory({ requestRender: vi.fn() }, createTestTheme(), {}, vi.fn());
+      ctx.ui.custom = mockFn(async (factory) => {
+        component = await factory(fakeTui(), createTestTheme(), {}, vi.fn());
         return undefined;
       });
 
@@ -1771,8 +1787,8 @@ describe("voice-extension", () => {
       let component:
         | { handleInput?(data: string): void; render(width: number): string[] }
         | undefined;
-      ctx.ui.custom = vi.fn(async (factory) => {
-        component = await factory({ requestRender: vi.fn() }, createTestTheme(), {}, vi.fn());
+      ctx.ui.custom = mockFn(async (factory) => {
+        component = await factory(fakeTui(), createTestTheme(), {}, vi.fn());
         return undefined;
       });
 
@@ -1845,8 +1861,8 @@ describe("voice-extension", () => {
       let component:
         | { handleInput?(data: string): void; render(width: number): string[] }
         | undefined;
-      ctx.ui.custom = vi.fn(async (factory) => {
-        component = await factory({ requestRender: vi.fn() }, createTestTheme(), {}, vi.fn());
+      ctx.ui.custom = mockFn(async (factory) => {
+        component = await factory(fakeTui(), createTestTheme(), {}, vi.fn());
         return undefined;
       });
 
@@ -1925,8 +1941,8 @@ describe("voice-extension", () => {
       const modelsDir = createDownloadedVoiceModels();
       const ctx = createMockCommandContext();
       let releaseOverlay: ((result: string | null) => void) | undefined;
-      ctx.ui.custom = vi.fn((factory) => {
-        factory({ requestRender: vi.fn() }, createTestTheme(), {}, vi.fn());
+      ctx.ui.custom = mockFn((factory) => {
+        factory(fakeTui(), createTestTheme(), {}, vi.fn());
         return new Promise<string | null>((resolve) => {
           releaseOverlay = resolve;
         });
@@ -1975,8 +1991,8 @@ describe("voice-extension", () => {
       const ctx = createMockCommandContext();
       // The factory runs (overlay component + render interval start), then the
       // dialog promise rejects, as it can during terminal teardown.
-      ctx.ui.custom = vi.fn((factory) => {
-        factory({ requestRender: vi.fn() }, createTestTheme(), {}, vi.fn());
+      ctx.ui.custom = mockFn((factory) => {
+        factory(fakeTui(), createTestTheme(), {}, vi.fn());
         return Promise.reject(new Error("dialog crashed"));
       });
       const stt = { recognize: vi.fn(() => "") } as unknown as SttEngine;
@@ -2215,9 +2231,11 @@ describe("voice-extension", () => {
       const mockPi = createMockPi();
       await voiceExtension(mockPi);
       const ctx = createMockCommandContext();
-      ctx.sessionManager.getBranch = vi.fn(() => [
-        { type: "message", message: { role: "assistant", content: "Hello world." } },
-      ]);
+      ctx.sessionManager.getBranch = vi.fn(() =>
+        sessionEntries([
+          { type: "message", message: { role: "assistant", content: "Hello world." } },
+        ]),
+      );
 
       // First speak uses the default Kitten model.
       await getCommandHandler(mockPi, "voice:speak")("full", ctx);
@@ -2226,9 +2244,9 @@ describe("voice-extension", () => {
 
       // Switch the speech-model row to Supertonic 3.
       let component: { handleInput?(data: string): void } | undefined;
-      ctx.ui.custom = vi.fn(async (factory) => {
+      ctx.ui.custom = mockFn(async (factory) => {
         component = await factory(
-          { requestRender: vi.fn() },
+          fakeTui(),
           { fg: (_color: string, text: string) => text, bold: (text: string) => text },
           {},
           vi.fn(),
@@ -2376,8 +2394,8 @@ function captureCustomComponent(
   ctx: ReturnType<typeof createMockCommandContext>,
 ): () => TestComponent {
   let component: TestComponent | undefined;
-  ctx.ui.custom = vi.fn(async (factory) => {
-    component = await factory({ requestRender: vi.fn() }, createTestTheme(), {}, vi.fn());
+  ctx.ui.custom = mockFn(async (factory) => {
+    component = await factory(fakeTui(), createTestTheme(), {}, vi.fn());
     return undefined;
   });
   return () => {

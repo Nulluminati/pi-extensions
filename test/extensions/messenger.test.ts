@@ -13,7 +13,6 @@ import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import messengerExtension from "../../extensions/messenger/messenger.ts";
@@ -41,6 +40,7 @@ import {
 } from "../../extensions/messenger/src/store.ts";
 import { createInboxWatcher } from "../../extensions/messenger/src/watcher.ts";
 import { withFileLock } from "../../lib/file-lock.ts";
+import { contentText, sessionEntries } from "../mocks/test-helpers.ts";
 
 // Call-through spy: lets tests assert who took which lock while keeping the
 // real cross-process locking behavior for every code path under test.
@@ -58,9 +58,8 @@ vi.mock("node:fs", async (importOriginal) => {
 });
 
 import { runGit } from "../../lib/git.ts";
-import { createMockContext } from "../mocks/context-mocks.ts";
-import type { DeepMocked } from "../mocks/mock-types.ts";
-import { createMockPi } from "../mocks/pi-mocks.ts";
+import { createMockContext, type MockContext } from "../mocks/context-mocks.ts";
+import { createMockPi, type MockPi } from "../mocks/pi-mocks.ts";
 
 const execFileAsync = promisify(execFile);
 const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -93,8 +92,8 @@ async function removeTempDir(path: string): Promise<void> {
 
 describe("messenger-extension", () => {
   let cwd: string;
-  let mockPi: DeepMocked<ExtensionAPI>;
-  let mockCtx: DeepMocked<ExtensionContext>;
+  let mockPi: MockPi;
+  let mockCtx: MockContext;
 
   const executeTool = async (params: Record<string, unknown>) => {
     const tool = mockPi.registerTool.mock.calls[0][0];
@@ -110,7 +109,7 @@ describe("messenger-extension", () => {
 
   beforeEach(async () => {
     cwd = await mkdtemp(join(tmpdir(), "messenger-test-"));
-    mockPi = createMockPi() as DeepMocked<ExtensionAPI>;
+    mockPi = createMockPi() as MockPi;
     mockCtx = createMockContext();
     (mockCtx as { cwd: string }).cwd = cwd;
     // Deterministic regardless of the host shell: the variable starts unset
@@ -235,9 +234,11 @@ describe("messenger-extension", () => {
   });
 
   it("session_start reuses the identity persisted in the session", async () => {
-    vi.mocked(mockCtx.sessionManager.getBranch).mockReturnValue([
-      { type: "custom", customType: "messenger-identity", data: { name: "persisted-agent" } },
-    ]);
+    vi.mocked(mockCtx.sessionManager.getBranch).mockReturnValue(
+      sessionEntries([
+        { type: "custom", customType: "messenger-identity", data: { name: "persisted-agent" } },
+      ]),
+    );
     await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
 
     expect((await loadRegistry(cwd))["persisted-agent"]).toBeDefined();
@@ -257,9 +258,11 @@ describe("messenger-extension", () => {
 
   it("PI_MESSENGER_NAME overrides the persisted identity", async () => {
     vi.stubEnv("PI_MESSENGER_NAME", "env-agent");
-    vi.mocked(mockCtx.sessionManager.getBranch).mockReturnValue([
-      { type: "custom", customType: "messenger-identity", data: { name: "persisted-agent" } },
-    ]);
+    vi.mocked(mockCtx.sessionManager.getBranch).mockReturnValue(
+      sessionEntries([
+        { type: "custom", customType: "messenger-identity", data: { name: "persisted-agent" } },
+      ]),
+    );
     await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
 
     expect((await loadRegistry(cwd))["env-agent"]).toBeDefined();
@@ -275,7 +278,7 @@ describe("messenger-extension", () => {
     const branch: Array<{ type: string; customType?: string; data?: { name?: string } }> = [
       { type: "custom", customType: "messenger-identity", data: { name: "w1" } },
     ];
-    mockCtx.sessionManager.getBranch = vi.fn(() => branch);
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(branch));
     mockPi.appendEntry.mockImplementation((customType: string, data: unknown) => {
       branch.push({ type: "custom", customType, data: data as { name: string } });
     });
@@ -303,16 +306,18 @@ describe("messenger-extension", () => {
     expect((await loadRegistry(cwd)).w1).toBeUndefined();
 
     const res = await executeTool({ action: "inbox" });
-    expect(res.content[0].text).toContain("for the fork");
+    expect(contentText(res)).toContain("for the fork");
     expect(res.details.count).toBe(1);
   });
 
   it("an env override keeps a persisted claimed suffix of the same lineage", async () => {
     vi.stubEnv("PI_MESSENGER_NAME", "w1");
-    vi.mocked(mockCtx.sessionManager.getBranch).mockReturnValue([
-      { type: "custom", customType: "messenger-identity", data: { name: "w1" } },
-      { type: "custom", customType: "messenger-identity", data: { name: "w1-2" } },
-    ]);
+    vi.mocked(mockCtx.sessionManager.getBranch).mockReturnValue(
+      sessionEntries([
+        { type: "custom", customType: "messenger-identity", data: { name: "w1" } },
+        { type: "custom", customType: "messenger-identity", data: { name: "w1-2" } },
+      ]),
+    );
     await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
 
     expect((await loadRegistry(cwd))["w1-2"]).toMatchObject({ pid: process.pid });
@@ -322,10 +327,12 @@ describe("messenger-extension", () => {
 
   it("a changed env override abandons a foreign lineage suffix", async () => {
     vi.stubEnv("PI_MESSENGER_NAME", "w9");
-    vi.mocked(mockCtx.sessionManager.getBranch).mockReturnValue([
-      { type: "custom", customType: "messenger-identity", data: { name: "w1" } },
-      { type: "custom", customType: "messenger-identity", data: { name: "w1-2" } },
-    ]);
+    vi.mocked(mockCtx.sessionManager.getBranch).mockReturnValue(
+      sessionEntries([
+        { type: "custom", customType: "messenger-identity", data: { name: "w1" } },
+        { type: "custom", customType: "messenger-identity", data: { name: "w1-2" } },
+      ]),
+    );
     await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
 
     expect((await loadRegistry(cwd)).w9).toBeDefined();
@@ -364,7 +371,7 @@ describe("messenger-extension", () => {
     expect((await readInbox(cwd, "receiver")).unread).toHaveLength(1);
 
     const res = await executeTool({ action: "inbox" });
-    expect(res.content[0].text).toContain("hello from tests");
+    expect(contentText(res)).toContain("hello from tests");
     expect(res.details.count).toBe(1);
     // Cleared after reading.
     expect((await readInbox(cwd, "receiver")).unread).toHaveLength(0);
@@ -375,7 +382,7 @@ describe("messenger-extension", () => {
     await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
 
     const res = await executeTool({ action: "send", to: "ghost", text: "anyone there?" });
-    expect(res.content[0].text).toContain("not currently online");
+    expect(contentText(res)).toContain("not currently online");
     expect((await readInbox(cwd, "ghost")).unread).toHaveLength(1);
   });
 
@@ -447,7 +454,7 @@ describe("messenger-extension", () => {
     const sibling = join(cwd, "sibling-worktree");
     await mkdir(sibling);
     await heartbeat(sibling, "peer-worker", { pid: process.pid, cwd: sibling });
-    const presence = (await executeTool({ action: "list" })).content[0].text;
+    const presence = contentText(await executeTool({ action: "list" }));
     expect(presence).toContain("parent-agent");
     expect(presence).toContain("peer-worker");
     expect(
@@ -566,8 +573,10 @@ describe("messenger-extension", () => {
       },
       mockCtx,
     );
-    expect(result).toMatchObject({ block: true });
-    expect(result.reason).toContain("other-session");
+    expect(result).toMatchObject({
+      block: true,
+      reason: expect.stringContaining("other-session"),
+    });
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(
       expect.stringContaining("reserved by other-session"),
       "warning",
@@ -766,8 +775,8 @@ describe("messenger-extension", () => {
     await heartbeat(cwd, "peer-session", { pid: process.pid, cwd, status: "testing" });
 
     const res = await executeTool({ action: "list" });
-    expect(res.content[0].text).toContain("(you)");
-    expect(res.content[0].text).toContain("peer-session");
+    expect(contentText(res)).toContain("(you)");
+    expect(contentText(res)).toContain("peer-session");
   });
 
   it("whoami reports the resolved identity and never terminates the turn", async () => {
@@ -775,7 +784,7 @@ describe("messenger-extension", () => {
     await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
 
     const res = await executeTool({ action: "whoami" });
-    expect(res.content[0].text).toBe('You are "narcissus".');
+    expect(contentText(res)).toBe('You are "narcissus".');
     expect(res.details).toEqual({ name: "narcissus" });
     expect(res.terminate).toBeUndefined();
   });
@@ -803,11 +812,11 @@ describe("messenger-extension", () => {
     await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
 
     const set = await executeTool({ action: "status", status: "refactoring auth" });
-    expect(set.content[0].text).toBe("Status set: refactoring auth");
+    expect(contentText(set)).toBe("Status set: refactoring auth");
     expect((await loadRegistry(cwd)).statusful?.status).toBe("refactoring auth");
 
     const cleared = await executeTool({ action: "status" });
-    expect(cleared.content[0].text).toBe("Status cleared.");
+    expect(contentText(cleared)).toBe("Status cleared.");
     // Cleared means removed, not stored as an empty string.
     expect((await loadRegistry(cwd)).statusful?.status).toBeUndefined();
     const shard = JSON.parse(
@@ -823,7 +832,7 @@ describe("messenger-extension", () => {
 
     for (const value of ["working", "blocked", "waiting"]) {
       const res = await executeTool({ action: "status", status: value });
-      expect(res.content[0].text).toBe(`Status set: ${value}`);
+      expect(contentText(res)).toBe(`Status set: ${value}`);
       expect((await loadRegistry(cwd))["worker-status"]?.status).toBe(value);
     }
   });
@@ -847,7 +856,7 @@ describe("messenger-extension", () => {
 
     await executeTool({ action: "status", status: "working" });
     const cleared = await executeTool({ action: "status", status: "" });
-    expect(cleared.content[0].text).toBe("Status cleared.");
+    expect(contentText(cleared)).toBe("Status cleared.");
     expect((await loadRegistry(cwd))["worker-status"]?.status).toBeUndefined();
   });
 
@@ -894,7 +903,7 @@ describe("messenger-extension", () => {
 
     const res = await executeTool({ action: "release", paths: ["src/one"] });
 
-    expect(res.content[0].text).toBe("Released: src/one");
+    expect(contentText(res)).toBe("Released: src/one");
     const reservations = await loadReservations(cwd);
     expect(reservations["src/one"]).toBeUndefined();
     expect(reservations["src/two"]).toBeDefined();
@@ -916,8 +925,10 @@ describe("messenger-extension", () => {
       },
       mockCtx,
     );
-    expect(result).toMatchObject({ block: true });
-    expect(result.reason).toContain("other-session");
+    expect(result).toMatchObject({
+      block: true,
+      reason: expect.stringContaining("other-session"),
+    });
     expect(mockCtx.ui.notify).not.toHaveBeenCalled();
   });
 

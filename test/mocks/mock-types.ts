@@ -1,10 +1,12 @@
 import type { ModelRegistry, Theme } from "@earendil-works/pi-coding-agent";
-import type { Mock } from "vitest";
+import { type Mock, vi } from "vitest";
 
 /**
  * Deeply mock an interface: replace all function properties with Vitest Mock instances.
  *
- * - Function properties become `Mock` (preserving `.mock` access in tests)
+ * - Function properties become `Mock<T>` of the real signature, so a wrong
+ *   argument, return value or replacement mock fails to compile. For a
+ *   deliberately partial fake, use `vi.mocked(fn, { partial: true })`.
  * - Constructable types (class instances like `Date`, `AbortSignal`, `Array`) are preserved
  *   to avoid mocking built-in methods that tests may need as real values
  * - `any` types are preserved to avoid infinite recursion
@@ -29,7 +31,7 @@ export type DeepMocked<T> = 0 extends 1 & T
             ...args: any[]
             // biome-ignore lint/suspicious/noExplicitAny: see comment above
           ) => any
-        ? Mock
+        ? Mock<T> & T
         : T extends PrivateFieldClass
           ? MockedSdk<T>
           : T extends object
@@ -60,3 +62,17 @@ export function asSdkMock<T extends PrivateFieldClass>(
 ): MockedSdk<T> {
   return mock as MockedSdk<T>;
 }
+
+/**
+ * A `vi.fn` typed as the real SDK function `T`, for overloaded or generic
+ * methods such as `pi.on`, `registerTool` and `ui.custom`. TypeScript cannot
+ * check one implementation against every overload or type parameter, so the
+ * implementation is not checked; calls and `.mock` access keep the real type.
+ * Prefer a plain `vi.fn` for every other method, which checks the signature.
+ */
+export function mockFn<T extends AnyFunction>(implementation?: AnyFunction): Mock<T> & T {
+  return vi.fn(implementation) as unknown as Mock<T> & T;
+}
+
+// biome-ignore lint/suspicious/noExplicitAny: matches any function signature
+type AnyFunction = (...args: any[]) => any;

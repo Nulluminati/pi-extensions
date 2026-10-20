@@ -4,8 +4,9 @@ import approvalMode from "../../extensions/approval-mode/approval-mode.ts";
 import { judgeCommand } from "../../extensions/approval-mode/src/jev.ts";
 import { classifyCommand } from "../../extensions/approval-mode/src/policy.ts";
 import { connectWorkerApprovalChannel } from "../../lib/worker-approval.ts";
-import { createMockContext } from "../mocks/context-mocks.ts";
+import { createMockCommandContext } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
+import { fakeKeybindings, fakeTui, sessionEntries } from "../mocks/test-helpers.ts";
 
 const workerChannel = vi.hoisted(() => ({ request: vi.fn(), close: vi.fn() }));
 vi.mock("../../lib/worker-approval.ts", async (importOriginal) => {
@@ -689,9 +690,9 @@ describe("approval-mode extension", () => {
 
   it("allows exact Git status without Jev after a reload acknowledgment", async () => {
     const { handler, ctx } = await setup({ classifiers: [] });
-    ctx.sessionManager.getBranch = vi.fn(() => [
-      { type: "message", message: { role: "user", content: "I have reloaded." } },
-    ]);
+    ctx.sessionManager.getBranch = vi.fn(() =>
+      sessionEntries([{ type: "message", message: { role: "user", content: "I have reloaded." } }]),
+    );
     expect(
       await handler({ toolName: "bash", input: { command: "git status --short" } }, ctx),
     ).toBeUndefined();
@@ -923,7 +924,7 @@ describe("approval-mode Herdr blocked events", () => {
       return new Promise((resolve) => {
         const factory = ctx.ui.custom.mock.calls.at(-1)?.[0];
         if (!factory) throw new Error("Missing dialog factory");
-        factory({ requestRender: vi.fn() }, ctx.ui.theme, { matches: () => false }, resolve);
+        factory(fakeTui(), ctx.ui.theme, fakeKeybindings(), resolve);
       });
     });
     const controller = new AbortController();
@@ -1083,11 +1084,13 @@ async function setup(
   const pi = createMockPi();
   const unsubscribe = vi.fn();
   pi.events.on.mockReturnValue(unsubscribe);
-  const ctx = createMockContext();
+  const ctx = createMockCommandContext();
   ctx.hasUI = hasUI;
-  ctx.sessionManager.getBranch = vi.fn(() => [
-    { type: "message", message: { role: "user", content: "Run tests for this project" } },
-  ]);
+  ctx.sessionManager.getBranch = vi.fn(() =>
+    sessionEntries([
+      { type: "message", message: { role: "user", content: "Run tests for this project" } },
+    ]),
+  );
   const registry = ctx.modelRegistry as unknown as {
     getAvailableOfType: (type: "classifier") => Promise<unknown[]>;
     classify: ClassifyMock;

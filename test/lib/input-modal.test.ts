@@ -5,6 +5,8 @@ import {
   createInputModal,
   promptText,
 } from "../../lib/input-modal.ts";
+import { mockFn } from "../mocks/mock-types.ts";
+import { fakeTui } from "../mocks/test-helpers.ts";
 
 function createModal(
   overrides: { onSubmit?: (value: string) => void; onCancel?: () => void } = {},
@@ -39,7 +41,7 @@ describe("createInputModal", () => {
   it("seeds the input with initialValue for prefilled editing", () => {
     const onSubmit = vi.fn();
     const modal = createInputModal({
-      tui: { requestRender: vi.fn() },
+      tui: fakeTui(),
       theme: { fg: (_c, t) => t, bold: (t) => t },
       keybindings: { matches: matchesKey },
       title: "Edit goal objective",
@@ -83,14 +85,11 @@ describe("createInputModal", () => {
 describe("promptText", () => {
   it("resolves with the submitted value", async () => {
     const ctx = createMockPromptContext();
-    ctx.ui.custom = vi.fn((factory: (...args: unknown[]) => unknown) => {
+    ctx.ui.custom = mockFn((factory: (...args: unknown[]) => unknown) => {
       return new Promise((resolve) => {
-        const component = factory(
-          { requestRender: vi.fn() },
-          ctx.ui.theme,
-          { matches: matchesKey },
-          resolve,
-        ) as { handleInput(data: string): void };
+        const component = factory(fakeTui(), ctx.ui.theme, { matches: matchesKey }, resolve) as {
+          handleInput(data: string): void;
+        };
         for (const character of "my goal") component.handleInput(character);
         component.handleInput("\r");
       });
@@ -101,14 +100,11 @@ describe("promptText", () => {
 
   it("resolves undefined when cancelled", async () => {
     const ctx = createMockPromptContext();
-    ctx.ui.custom = vi.fn((factory: (...args: unknown[]) => unknown) => {
+    ctx.ui.custom = mockFn((factory: (...args: unknown[]) => unknown) => {
       return new Promise((resolve) => {
-        const component = factory(
-          { requestRender: vi.fn() },
-          ctx.ui.theme,
-          { matches: matchesKey },
-          resolve,
-        ) as { handleInput(data: string): void };
+        const component = factory(fakeTui(), ctx.ui.theme, { matches: matchesKey }, resolve) as {
+          handleInput(data: string): void;
+        };
         component.handleInput("");
       });
     });
@@ -160,7 +156,7 @@ describe("createConfirmModal", () => {
 
   it("wraps long body lines to the frame width instead of truncating", () => {
     const modal = createConfirmModal({
-      tui: { requestRender: vi.fn() },
+      tui: fakeTui(),
       theme: { fg: (_color, text) => text, bold: (text) => text },
       keybindings: { matches: matchesKey },
       title: "Replace current goal?",
@@ -201,14 +197,11 @@ describe("createConfirmModal", () => {
 describe("confirmModal", () => {
   it("resolves true when confirmed in TUI mode", async () => {
     const ctx = createMockPromptContext();
-    ctx.ui.custom = vi.fn((factory: (...args: unknown[]) => unknown) => {
+    ctx.ui.custom = mockFn((factory: (...args: unknown[]) => unknown) => {
       return new Promise((resolve) => {
-        const component = factory(
-          { requestRender: vi.fn() },
-          ctx.ui.theme,
-          { matches: matchesKey },
-          resolve,
-        ) as { handleInput(data: string): void };
+        const component = factory(fakeTui(), ctx.ui.theme, { matches: matchesKey }, resolve) as {
+          handleInput(data: string): void;
+        };
         component.handleInput("\r");
       });
     });
@@ -219,14 +212,11 @@ describe("confirmModal", () => {
 
   it("resolves false when cancelled in TUI mode", async () => {
     const ctx = createMockPromptContext();
-    ctx.ui.custom = vi.fn((factory: (...args: unknown[]) => unknown) => {
+    ctx.ui.custom = mockFn((factory: (...args: unknown[]) => unknown) => {
       return new Promise((resolve) => {
-        const component = factory(
-          { requestRender: vi.fn() },
-          ctx.ui.theme,
-          { matches: matchesKey },
-          resolve,
-        ) as { handleInput(data: string): void };
+        const component = factory(fakeTui(), ctx.ui.theme, { matches: matchesKey }, resolve) as {
+          handleInput(data: string): void;
+        };
         component.handleInput("\x1b");
       });
     });

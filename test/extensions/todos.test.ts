@@ -6,8 +6,14 @@ import todosExtension from "../../extensions/todos/todos.ts";
 import { getTodoItems } from "../../lib/todos.ts";
 import { STRIP_KEY_ABOVE } from "../../lib/widget-strip.ts";
 import { createMockCommandContext } from "../mocks/context-mocks.ts";
+import { mockFn } from "../mocks/mock-types.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
-import { getCommandHandler, getEventHandler } from "../mocks/test-helpers.ts";
+import {
+  fakeTui,
+  getCommandHandler,
+  getEventHandler,
+  sessionEntries,
+} from "../mocks/test-helpers.ts";
 
 describe("todos-extension", () => {
   beforeEach(() => {
@@ -478,18 +484,20 @@ describe("todos-extension", () => {
     it("reconstructs and renders persisted todos on session start", async () => {
       const mockPi = createMockPi();
       const mockCtx = createMockCommandContext();
-      mockCtx.sessionManager.getBranch = vi.fn(() => [
-        {
-          type: "custom",
-          customType: "todos-state",
-          data: {
-            items: [
-              { text: "done task", completed: true },
-              { text: "open task", completed: false },
-            ],
+      mockCtx.sessionManager.getBranch = vi.fn(() =>
+        sessionEntries([
+          {
+            type: "custom",
+            customType: "todos-state",
+            data: {
+              items: [
+                { text: "done task", completed: true },
+                { text: "open task", completed: false },
+              ],
+            },
           },
-        },
-      ]);
+        ]),
+      );
       await todosExtension(mockPi);
 
       const sessionStart = getEventHandler(mockPi, "session_start");
@@ -521,12 +529,12 @@ describe("todos-extension", () => {
 
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       let component: any;
-      mockCtx.ui.custom = vi.fn(
+      mockCtx.ui.custom = mockFn(
         // biome-ignore lint/suspicious/noExplicitAny: test mock
         (factory: any) =>
           new Promise<void>((resolve) => {
             component = factory(
-              { requestRender: vi.fn(), terminal: { rows: 40 } },
+              fakeTui({ terminal: { rows: 40 } }),
               mockCtx.ui.theme,
               NULL_KEYBINDINGS,
               resolve,
@@ -559,12 +567,12 @@ describe("todos-extension", () => {
 
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       let component: any;
-      mockCtx.ui.custom = vi.fn(
+      mockCtx.ui.custom = mockFn(
         // biome-ignore lint/suspicious/noExplicitAny: test mock
         (factory: any) =>
           new Promise<void>((resolve) => {
             component = factory(
-              { requestRender: vi.fn(), terminal: { rows: 40 } },
+              fakeTui({ terminal: { rows: 40 } }),
               mockCtx.ui.theme,
               NULL_KEYBINDINGS,
               resolve,
@@ -598,12 +606,12 @@ describe("todos-extension", () => {
 
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       let component: any;
-      mockCtx.ui.custom = vi.fn(
+      mockCtx.ui.custom = mockFn(
         // biome-ignore lint/suspicious/noExplicitAny: test mock
         (factory: any) =>
           new Promise<void>((resolve) => {
             component = factory(
-              { requestRender: vi.fn(), terminal: { rows: 40 } },
+              fakeTui({ terminal: { rows: 40 } }),
               mockCtx.ui.theme,
               NULL_KEYBINDINGS,
               resolve,
@@ -631,7 +639,7 @@ describe("todos-extension", () => {
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       let component: any;
       const done = vi.fn();
-      mockCtx.ui.custom = vi.fn(
+      mockCtx.ui.custom = mockFn(
         // biome-ignore lint/suspicious/noExplicitAny: test mock
         (factory: any) =>
           new Promise<void>(() => {
@@ -642,7 +650,7 @@ describe("todos-extension", () => {
               },
             };
             component = factory(
-              { requestRender: vi.fn(), terminal: { rows: 40 } },
+              fakeTui({ terminal: { rows: 40 } }),
               mockCtx.ui.theme,
               keybindings,
               done,
