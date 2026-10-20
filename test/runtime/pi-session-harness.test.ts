@@ -61,4 +61,23 @@ describe("in-memory Pi session harness", () => {
     expect(process.env.PI_CODING_AGENT_DIR).not.toBe(cwd);
     expect(existsSync(join(cwd, "auth.json"))).toBe(false);
   });
+
+  it("records a request after the scripted responses run out", async () => {
+    harness = await createPiSession();
+
+    await harness.session.prompt("hello");
+
+    expect(harness.requests).toHaveLength(1);
+    expect(JSON.stringify(harness.requests[0]?.messages)).toContain("hello");
+  });
+
+  it("records requests answered by appended responses", async () => {
+    harness = await createPiSession();
+    harness.faux.appendResponses([fauxAssistantMessage("done")]);
+
+    await harness.session.prompt("hello");
+
+    expect(harness.requests).toHaveLength(1);
+    expect(harness.session.messages.at(-1)).toMatchObject({ role: "assistant" });
+  });
 });

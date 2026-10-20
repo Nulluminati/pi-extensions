@@ -23,6 +23,7 @@ import {
   type FauxProviderHandle,
   type FauxResponseStep,
   fauxProvider,
+  type Provider,
   type TranscriptContext,
 } from "@earendil-works/pi-ai";
 import {
@@ -42,7 +43,11 @@ export interface PiSessionOptions {
   extensions?: ExtensionFactory[];
   /** Extension entry files to load through Pi's own extension loader. */
   extensionPaths?: string[];
-  /** Model replies, in request order. */
+  /**
+   * Model replies, in request order. A request after the last reply gets a faux
+   * error turn, not a thrown error, so script the closing reply when a test
+   * checks the final assistant message.
+   */
   responses?: FauxResponseStep[];
   /** Settings merged over the harness defaults (no compaction, no retry). */
   settings?: Settings;
@@ -77,12 +82,19 @@ export async function createPiSession(options: PiSessionOptions = {}): Promise<P
   try {
     const requests: TranscriptContext[] = [];
     const faux = fauxProvider();
-    faux.setResponses(
-      (options.responses ?? []).map((step) => (context, streamOptions, state, model) => {
+    faux.setResponses(options.responses ?? []);
+    // Record at the provider, so requests that no scripted response answers count too.
+    const recordingProvider: Provider = {
+      ...faux.provider,
+      stream: (model, context, streamOptions) => {
         requests.push(structuredClone(context));
-        return typeof step === "function" ? step(context, streamOptions, state, model) : step;
-      }),
-    );
+        return faux.provider.stream(model, context, streamOptions);
+      },
+      streamSimple: (model, context, streamOptions) => {
+        requests.push(structuredClone(context));
+        return faux.provider.streamSimple(model, context, streamOptions);
+      },
+    };
 
     const modelRuntime = await ModelRuntime.create({
       authPath: join(cwd, "auth.json"),
@@ -91,7 +103,7 @@ export async function createPiSession(options: PiSessionOptions = {}): Promise<P
       refreshOnCreate: false,
       allowModelNetwork: false,
     });
-    modelRuntime.registerNativeProvider(faux.provider);
+    modelRuntime.registerNativeProvider(recordingProvider);
 
     const sessionManager = SessionManager.inMemory(cwd);
     options.setup?.(sessionManager);
