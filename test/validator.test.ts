@@ -174,6 +174,8 @@ export default async (pi: any) => {
 import { Type } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { completeSimple } from "@earendil-works/pi-ai/compat";
 export default async function (pi: any) {
   pi.registerCommand("hello", { description: "Hi", handler: async () => {} });
 }

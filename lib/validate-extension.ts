@@ -122,6 +122,8 @@ export function validateFile(filePath: string): { passed: boolean; messages: str
       "pi",
       "typebox",
       "@earendil-works/pi-ai",
+      "@earendil-works/pi-ai/compat",
+      "@earendil-works/pi-agent-core",
       "@earendil-works/pi-tui",
       "@earendil-works/pi-coding-agent",
       "@anthropic-ai/sandbox-runtime",
