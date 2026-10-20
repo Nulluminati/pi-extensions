@@ -67,9 +67,10 @@ The extension ships a hardcoded list of always-on, tools-capable models with kno
 | hf:Qwen/Qwen3.8-27B | 262K | ✓ | ✓ | $0.45 / $2.20 |
 | hf:nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4 | 262K | ✓ | — | $0.30 / $1.00 |
 | hf:deepseek-ai/DeepSeek-V4.1-Flash | 524K | ✓ | — | $0.80 / $1.20 |
+| hf:deepseek-ai/DeepSeek-V4.1-Flash-1017 | 524K | ✓ | ✓ | $0.60 / $1.20 |
 | hf:openai/gpt-oss-120b | 131K | ✓ (always on) | — | $0.10 / $0.10 |
 
-Two models (`gpt-oss-120b` and `GLM-5.3`) always think and cannot be turned off, so their `off` thinking level is hidden. Every other reasoning model accepts the full `none`/`minimal`/`low`/`medium`/`high`/`xhigh` enum. GLM-5.3-Flash, Qwen3.8-27B, and DeepSeek-V4.1-Flash carry an `always_on` flag in the catalog, but probing shows `none` still disables thinking on all three, so they get the normal `off: "none"` map (the full GLM-5.3 behaves the opposite way: its probe shows thinking even at `none`). `Kimi-K2.7-Code` and `MiniMax-M3` were retired by Synthetic (HTTP 404 "no longer supported") and are no longer listed.
+Two models (`gpt-oss-120b` and `GLM-5.3`) always think and cannot be turned off, so their `off` thinking level is hidden. Every other reasoning model accepts the full `none`/`minimal`/`low`/`medium`/`high`/`xhigh` enum. GLM-5.3-Flash, Qwen3.8-27B, and the DeepSeek-V4.1-Flash snapshots carry an `always_on` flag in the catalog, but probing shows `none` still disables thinking on all of them, so they get the normal `off: "none"` map (the full GLM-5.3 behaves the opposite way: its probe shows thinking even at `none`). Synthetic serves both DeepSeek-V4.1-Flash ids (the undated model and the 10/17 snapshot), so both stay registered. `Kimi-K2.7-Code` and `MiniMax-M3` were retired by Synthetic (HTTP 404 "no longer supported") and are no longer listed.
 
 ### Startup staleness check
 

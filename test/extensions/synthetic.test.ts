@@ -28,6 +28,7 @@ const EXPECTED_MODEL_IDS = [
   "hf:zai-org/GLM-4.7-Flash",
   "hf:nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4",
   "hf:deepseek-ai/DeepSeek-V4.1-Flash",
+  "hf:deepseek-ai/DeepSeek-V4.1-Flash-1017",
   "hf:openai/gpt-oss-120b",
   "infinite:small:vision",
 ];
@@ -147,6 +148,34 @@ describe("synthetic-extension", () => {
         thinkingLevelMap: expect.objectContaining({ off: null, xhigh: "xhigh" }),
       }),
     );
+  });
+
+  it("configures DeepSeek-V4.1-Flash-1017 as a distinct vision snapshot of V4.1-Flash", () => {
+    // Probed 2026-10: the dated snapshot accepts every pi level and `none`
+    // disables thinking, so it keeps the disableable identity map. It returns
+    // the thinking block under `reasoning_content`, unlike the base
+    // DeepSeek-V4.1-Flash entry, which returns it under `reasoning`.
+    const snapshot = STATIC_MODELS.find((m) => m.id === "hf:deepseek-ai/DeepSeek-V4.1-Flash-1017");
+    expect(snapshot).toEqual(
+      expect.objectContaining({
+        name: "DeepSeek-V4.1-Flash-1017",
+        reasoning: true,
+        thinkingLevelMap: {
+          off: "none",
+          minimal: "minimal",
+          low: "low",
+          medium: "medium",
+          high: "high",
+          xhigh: "xhigh",
+        },
+        input: ["text", "image"],
+        cost: { input: 0.6, output: 1.2, cacheRead: 0.03, cacheWrite: 0 },
+        contextWindow: 524288,
+        maxTokens: 65536,
+      }),
+    );
+    // The undated entry stays registered: Synthetic serves both snapshots.
+    expect(STATIC_MODELS.some((m) => m.id === "hf:deepseek-ai/DeepSeek-V4.1-Flash")).toBe(true);
   });
 
   it("maps every reasoning model through the full identity map (incl. medium)", () => {

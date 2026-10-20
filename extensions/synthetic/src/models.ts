@@ -281,6 +281,25 @@ export const STATIC_MODELS: ProviderModelConfig[] = [
     maxTokens: 65536,
     compat: SYNTHETIC_COMPAT,
   },
+  // DeepSeek-V4.1-Flash-1017 — dated 10/17 snapshot of DeepSeek-V4.1-Flash.
+  // Synthetic serves both ids, so both stay registered. Probed 2026-10: none
+  // disables thinking and every pi level is accepted (medium/high/xhigh
+  // engage), so the identity map applies despite the catalog's always_on flag.
+  // Unlike the undated entry, this snapshot returns the thinking block under
+  // `reasoning_content`. Catalog advertises image input; a direct vision
+  // request succeeds, so input includes image.
+  {
+    id: "hf:deepseek-ai/DeepSeek-V4.1-Flash-1017",
+    name: "DeepSeek-V4.1-Flash-1017",
+    api: "openai-completions",
+    reasoning: true,
+    thinkingLevelMap: DISABLEABLE_THINKING_MAP,
+    input: ["text", "image"],
+    cost: { input: 0.6, output: 1.2, cacheRead: 0.03, cacheWrite: 0 },
+    contextWindow: 524288,
+    maxTokens: 65536,
+    compat: SYNTHETIC_COMPAT,
+  },
 
   // --- gpt-oss (reasoning, always on) ---
   {
