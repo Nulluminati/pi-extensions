@@ -1,8 +1,10 @@
-/** Opt-in task-boundary routers for the virtual-model pilot. Never changes saved selections. */
+/** Opt-in virtual-model routers. Never changes saved selections. */
 import { appendFile } from "node:fs/promises";
 import type { ExtensionAPI } from "pi";
 import { extractProviderUsage, installClassifierMeasurement } from "./src/measurement.ts";
 import { createRouter } from "./src/router.ts";
+import { WORKER_POLICY_VERSION } from "./src/worker-policy.ts";
+import { createWorkerRouter, recoverWorkerRequest } from "./src/worker-router.ts";
 
 // --- Extension ---
 
@@ -68,4 +70,17 @@ export default async function (pi: ExtensionAPI) {
       }),
     });
   }
+  pi.on("agent_before_settle", (event, ctx) => recoverWorkerRequest(event, ctx, role));
+  pi.registerVirtualModel({
+    provider: "virtual-models",
+    id: WORKER_POLICY_VERSION,
+    name: "Automatic worker selection and recovery v1",
+    thinkingLevels: ["low", "medium", "high", "xhigh", "max"],
+    contextWindow: 500000,
+    maxTokens: 128000,
+    input: ["text"],
+    route: createWorkerRouter(role, async (entry) => {
+      await record("route", entry);
+    }),
+  });
 }

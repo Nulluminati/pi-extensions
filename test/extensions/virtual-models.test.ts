@@ -122,6 +122,11 @@ describe("opt-in virtual model routers", () => {
       thinkingLevels: ["low", "medium", "high", "xhigh", "max"],
     });
     expect(jev.id).toBe("jev-v1");
+    expect(pi.registerVirtualModel.mock.calls.map(([definition]) => definition.id)).toEqual([
+      "rules-v1",
+      "jev-v1",
+      "worker-auto-v1",
+    ]);
     expect(pi.setModel).not.toHaveBeenCalled();
     expect(pi.setThinkingLevel).not.toHaveBeenCalled();
   });
