@@ -9,6 +9,7 @@ import type {
 } from "pi";
 import { extractText } from "../../../lib/session-utils.ts";
 import type { RouteRecord } from "./router.ts";
+import { classifyWorkerModel } from "./worker-classifier.ts";
 import {
   approvedWorkerModel,
   WORKER_POLICY_VERSION,
@@ -21,12 +22,7 @@ import {
 function spec(model: Model): string {
   return `${model.provider}/${model.id}`;
 }
-function destination(
-  ctx: ExtensionContext,
-  history: WorkerHistory,
-  prompt: string,
-  preferred?: string,
-): Model | undefined {
+function eligibleModels(ctx: ExtensionContext, history: WorkerHistory): Map<string, Model> {
   const available = new Map<string, Model>();
   for (const model of ctx.modelRegistry.getAvailable()) {
     if (typeof model.provider !== "string") continue;
@@ -39,10 +35,7 @@ function destination(
     )
       available.set(modelSpec, model);
   }
-  for (const candidate of [preferred, ...workerOrder(prompt)]) {
-    if (candidate && available.has(candidate)) return available.get(candidate);
-  }
-  return undefined;
+  return available;
 }
 function restoredModel(state: unknown): string | undefined {
   if (!state || typeof state !== "object") return undefined;
@@ -92,13 +85,34 @@ export function createWorkerRouter(
             ? spec(request.failed.model)
             : (restoredModel(request.state) ??
               (request.previous ? spec(request.previous.model) : history.latest?.modelSpec));
-      const model = destination(ctx, history, prompt, preferred);
+      const candidates = eligibleModels(ctx, history);
+      let model = preferred ? candidates.get(preferred) : undefined;
+      if (model) entry.reason = "sticky";
+      else if (candidates.size === 1) {
+        model = candidates.values().next().value;
+        entry.reason = "only-eligible";
+      } else if (candidates.size > 1) {
+        const classified = await classifyWorkerModel(
+          [...candidates.values()],
+          prompt,
+          request.reason,
+          history,
+          ctx,
+          request.signal,
+        );
+        entry.classifier = classified.record;
+        model = classified.modelSpec ? candidates.get(classified.modelSpec) : undefined;
+        entry.reason = model ? "classifier-choice" : "classifier-fallback";
+        if (!model) {
+          const fallback = workerOrder(prompt).find((candidate) => candidates.has(candidate));
+          model = fallback ? candidates.get(fallback) : undefined;
+        }
+      }
+      if (request.signal?.aborted) throw new Error("Worker routing cancelled");
       if (!model)
         throw new Error("Approved worker model pool exhausted or has no available credentials");
       const modelSpec = spec(model);
       const thinkingLevel = clampThinkingLevel(model, request.thinkingLevel);
-      entry.reason =
-        preferred === modelSpec ? "sticky" : preferred ? "availability-switch" : "assignment";
       entry.dispatched = modelSpec;
       if (preferred !== undefined) entry.previous = preferred;
       entry.switched = preferred !== undefined && preferred !== modelSpec;
@@ -134,8 +148,9 @@ export function recoverWorkerRequest(
   if (!failed || !approvedWorkerModel(failed.modelSpec)) return undefined;
   const failureKind = workerFailure(failed.message);
   if (!failureKind) return undefined;
-  const next = destination(ctx, history, history.prompt, failed.modelSpec);
-  const nextSpec = next ? spec(next) : null;
+  const candidates = eligibleModels(ctx, history);
+  const retry = candidates.get(failed.modelSpec);
+  const nextSpec = retry ? spec(retry) : null;
   const audit = {
     type: "custom" as const,
     customType: "virtual-models-worker-recovery",
@@ -145,13 +160,13 @@ export function recoverWorkerRequest(
       failureKind,
       from: failed.modelSpec,
       to: nextSpec,
-      decision:
-        nextSpec === null ? "exhausted" : nextSpec === failed.modelSpec ? "retry" : "switch",
+      decision: candidates.size === 0 ? "exhausted" : retry ? "retry" : "select",
+      candidates: [...candidates.keys()].sort(),
       blockedProviders: [...history.blockedProviders].sort(),
       blockedModels: [...history.blockedModels].sort(),
     },
   };
-  if (!next) return { entries: [audit], continue: false };
+  if (candidates.size === 0) return { entries: [audit], continue: false };
   // Omit only the failed response. Raw history and completed tool results remain intact.
   return {
     entries: [{ type: "context_edit", targetId: failed.id, replacement: null }, audit],

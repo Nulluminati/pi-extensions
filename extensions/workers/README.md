@@ -49,6 +49,7 @@ Worker extensions resolve to the spawn_worker `extensions` param → `PI_WORKER_
 Workers should use a cheap model; keep design decisions, integration, and review in the main session. The worker model has no built-in default and must be selected with `/worker-model` or `PI_WORKER_MODEL`. That selection applies to every spawn_worker call.
 
 For opt-in task selection and availability recovery, use [`virtual-models/worker-auto-v1`](../virtual-models/README.md#worker-selection-and-recovery).
+Jev selects initial and replacement models. Rules apply only when classification cannot return a valid choice.
 It continues the same worker after recognized quota or repeated temporary provider failures. Direct compaction failures remain outside that recovery.
 Load `virtual-models` in the worker extension list as well as the parent. Follow the temporary setup instructions to preserve saved defaults.
 Mandatory sandbox controls, parent approvals, and isolation settings remain unchanged.

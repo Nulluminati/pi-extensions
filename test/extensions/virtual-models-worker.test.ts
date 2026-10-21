@@ -1,5 +1,5 @@
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
-import type { ExtensionVirtualModel, Model, ModelRouteRequest } from "pi";
+import type { ClassifierResult, ExtensionVirtualModel, Model, ModelRouteRequest } from "pi";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MODEL_POOL } from "../../extensions/virtual-models/src/policy.ts";
 import extension from "../../extensions/virtual-models/virtual-models.ts";
@@ -98,12 +98,239 @@ async function boot(entries: unknown[] = [], worker = true) {
   if (!recover) throw new Error("Missing worker recovery boundary");
   return { pi, ctx, pool, router, recover };
 }
+function classification(choice = "sol", keys = ["sol", "deepseek", "glm"]): ClassifierResult {
+  return {
+    api: "typesafe-system-one",
+    provider: "typesafe",
+    model: "jev-latest",
+    timestamp: 1,
+    stopReason: "stop",
+    usage: { input: 20, output: 3, totalTokens: 23 },
+    answers: {
+      route: {
+        type: "choice",
+        choice,
+        confidence: 1,
+        probabilities: Object.fromEntries(keys.map((key) => [key, key === choice ? 1 : 0])),
+      },
+    },
+  };
+}
+function enableJev(ctx: ReturnType<typeof createMockContext>, result = classification()) {
+  const classifier = model("typesafe/jev-latest", "typesafe-system-one");
+  ctx.modelRegistry.findOfType.mockReturnValue(classifier);
+  ctx.modelRegistry.getAvailableOfType.mockResolvedValue([classifier]);
+  ctx.modelRegistry.classify.mockResolvedValue(result);
+}
 beforeEach(() => {
   vi.resetAllMocks();
   vi.unstubAllEnvs();
   vi.stubEnv("PI_VIRTUAL_MODEL_TRACE", "");
 });
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllEnvs();
+});
+
+describe("Jev-primary worker model routing", () => {
+  it("honors Jev over a different rule preference and records classifier usage", async () => {
+    const { ctx, pi, router } = await boot();
+    enableJev(ctx);
+    const route = await router.route(request(), ctx);
+    expect(`${route.model.provider}/${route.model.id}`).toBe(MODEL_POOL.sol);
+    expect(ctx.modelRegistry.classify).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: "typesafe", id: "jev-latest" }),
+      expect.objectContaining({
+        state: expect.objectContaining({ role: "worker", assignment: "Find the configuration" }),
+        questions: expect.objectContaining({ route: expect.objectContaining({ type: "choice" }) }),
+      }),
+      expect.objectContaining({ maxRetries: 0, timeoutMs: 10000 }),
+    );
+    expect(pi.appendEntry).toHaveBeenCalledWith(
+      "virtual-models-route",
+      expect.objectContaining({
+        reason: "classifier-choice",
+        classifier: expect.objectContaining({
+          attempted: true,
+          status: "ok",
+          usage: { input: 20, output: 3, totalTokens: 23 },
+        }),
+      }),
+    );
+  });
+
+  it("uses Jev to select a replacement only from eligible physical models", async () => {
+    const { ctx, router, recover } = await boot([
+      assignment,
+      assistant("quota", MODEL_POOL.glm, "weekly usage limit reached"),
+    ]);
+    enableJev(ctx, classification("sol", ["sol", "deepseek"]));
+    const resume = await recover(boundary(), ctx);
+    expect(resume).toMatchObject({ continue: true });
+    expect(ctx.modelRegistry.classify).not.toHaveBeenCalled();
+    const route = await router.route(
+      request({
+        reason: "continuation",
+        state: { policyVersion: "worker-auto-v1", modelSpec: MODEL_POOL.glm },
+      }),
+      ctx,
+    );
+    expect(route.model.id).toBe("gpt-6.1-sol");
+    const context = ctx.modelRegistry.classify.mock.calls[0]?.[1];
+    expect(Object.keys(context?.questions.route?.criteria ?? {}).sort()).toEqual([
+      "deepseek",
+      "sol",
+    ]);
+    expect(JSON.stringify(context)).not.toContain("weekly usage limit reached");
+    expect(ctx.modelRegistry.classify).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not classify healthy continuations or the first same-model temporary retry", async () => {
+    const { ctx, router } = await boot();
+    enableJev(ctx);
+    const initial = await router.route(request(), ctx);
+    ctx.modelRegistry.classify.mockClear();
+    const next = await router.route(request({ reason: "continuation", state: initial.state }), ctx);
+    expect(next.model.id).toBe("gpt-6.1-sol");
+    expect(ctx.modelRegistry.classify).not.toHaveBeenCalled();
+    const error = assistant("temporary", MODEL_POOL.sol, "503 service unavailable");
+    ctx.sessionManager.getBranch.mockReturnValue([error]);
+    const retry = await router.route(
+      request({
+        reason: "retry",
+        state: initial.state,
+        failed: {
+          model: initial.model,
+          message: error.message as ReturnType<typeof fauxAssistantMessage>,
+        },
+      }),
+      ctx,
+    );
+    expect(retry.model.id).toBe("gpt-6.1-sol");
+    expect(ctx.modelRegistry.classify).not.toHaveBeenCalled();
+  });
+
+  it.each(["error", "throw", "malformed", "missing-credentials"])(
+    "uses rules only after classifier %s",
+    async (failure) => {
+      const { ctx, pi, router } = await boot();
+      enableJev(ctx);
+      if (failure === "error")
+        ctx.modelRegistry.classify.mockResolvedValue({ ...classification(), stopReason: "error" });
+      if (failure === "throw")
+        ctx.modelRegistry.classify.mockRejectedValue(new Error("classifier unavailable"));
+      if (failure === "malformed")
+        ctx.modelRegistry.classify.mockResolvedValue(classification("outside"));
+      if (failure === "missing-credentials")
+        ctx.modelRegistry.getAvailableOfType.mockResolvedValue([]);
+      expect((await router.route(request(), ctx)).model.id).toBe("glm-5.3-flash");
+      expect(pi.appendEntry).toHaveBeenCalledWith(
+        "virtual-models-route",
+        expect.objectContaining({
+          reason: "classifier-fallback",
+          classifier: expect.objectContaining({
+            status:
+              failure === "malformed"
+                ? "malformed"
+                : failure === "missing-credentials"
+                  ? "unavailable"
+                  : "error",
+          }),
+        }),
+      );
+    },
+  );
+
+  it("does not allow a classifier to select an excluded model", async () => {
+    const { ctx, router } = await boot([
+      assistant("quota", MODEL_POOL.glm, "weekly usage limit reached"),
+    ]);
+    enableJev(ctx, classification("glm"));
+    expect((await router.route(request(), ctx)).model.id).toBe("deepseek-v4.1-flash");
+  });
+
+  it.each(["keys", "sum", "argmax", "confidence"])(
+    "rejects invalid classifier distribution %s",
+    async (fault) => {
+      const { ctx, router } = await boot();
+      const result = classification();
+      const answer = result.answers.route;
+      if (answer?.type !== "choice") throw new Error("Missing fixture choice");
+      if (fault === "keys") delete answer.probabilities.glm;
+      if (fault === "sum") answer.probabilities.sol = 0.5;
+      if (fault === "argmax") {
+        answer.probabilities.sol = 0;
+        answer.probabilities.glm = 1;
+      }
+      if (fault === "confidence") answer.confidence = Number.NaN;
+      enableJev(ctx, result);
+      expect((await router.route(request(), ctx)).model.id).toBe("glm-5.3-flash");
+    },
+  );
+
+  it("accepts a valid low-confidence preference without an arbitrary threshold", async () => {
+    const { ctx, router } = await boot();
+    const result = classification();
+    const answer = result.answers.route;
+    if (answer?.type !== "choice") throw new Error("Missing fixture choice");
+    answer.confidence = 0;
+    answer.probabilities = { sol: 1 / 3, deepseek: 1 / 3, glm: 1 / 3 };
+    enableJev(ctx, result);
+    expect((await router.route(request(), ctx)).model.id).toBe("gpt-6.1-sol");
+  });
+
+  it.each(["availability", "inference"])(
+    "bounds hung classifier %s before rule fallback",
+    async (stage) => {
+      vi.useFakeTimers();
+      const { ctx, pi, router } = await boot();
+      enableJev(ctx);
+      if (stage === "availability")
+        ctx.modelRegistry.getAvailableOfType.mockImplementation(() => new Promise(() => {}));
+      else ctx.modelRegistry.classify.mockImplementation(() => new Promise(() => {}));
+      const pending = router.route(request(), ctx);
+      await vi.advanceTimersByTimeAsync(10001);
+      expect((await pending).model.id).toBe("glm-5.3-flash");
+      expect(pi.appendEntry).toHaveBeenCalledWith(
+        "virtual-models-route",
+        expect.objectContaining({ classifier: expect.objectContaining({ status: "timeout" }) }),
+      );
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
+  it("does not fall back to rules after cancellation during classification", async () => {
+    const { ctx, router } = await boot();
+    enableJev(ctx);
+    const controller = new AbortController();
+    let entered = () => {};
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    ctx.modelRegistry.classify.mockImplementation(() => {
+      entered();
+      return new Promise(() => {});
+    });
+    const pending = router.route(request({ signal: controller.signal }), ctx);
+    await started;
+    controller.abort();
+    await expect(pending).rejects.toThrow(/cancel|abort/i);
+  });
+
+  it("handles a single eligible destination as a constraint rather than rule ranking", async () => {
+    const { ctx, pi, pool, router } = await boot();
+    enableJev(ctx);
+    ctx.modelRegistry.getAvailable.mockReturnValue(
+      pool.filter((entry) => entry.id === "deepseek-v4.1-flash"),
+    );
+    expect((await router.route(request(), ctx)).model.id).toBe("deepseek-v4.1-flash");
+    expect(ctx.modelRegistry.classify).not.toHaveBeenCalled();
+    expect(pi.appendEntry).toHaveBeenCalledWith(
+      "virtual-models-route",
+      expect.objectContaining({ reason: "only-eligible" }),
+    );
+  });
+});
 
 describe("opt-in automatic worker model policy", () => {
   it("registers without changing main or worker defaults", async () => {
@@ -333,9 +560,10 @@ describe("worker failure continuation boundary", () => {
           data: expect.objectContaining({
             policyVersion: "worker-auto-v1",
             from: MODEL_POOL.glm,
-            to: MODEL_POOL.deepseek,
+            to: null,
+            candidates: expect.arrayContaining([MODEL_POOL.deepseek, MODEL_POOL.sol]),
             failureKind: "quota",
-            decision: "switch",
+            decision: "select",
           }),
         }),
       ]),

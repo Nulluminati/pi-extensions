@@ -2,7 +2,7 @@
 
 Registers three opt-in selections. None changes saved main or worker defaults.
 
-- `virtual-models/worker-auto-v1` selects worker models and recovers recognized availability failures.
+- `virtual-models/worker-auto-v1` uses Jev to select worker models and recover recognized availability failures. Rules are a classifier fallback only.
 - `virtual-models/rules-v1` uses observable request features for the frozen `teop` pilot.
 - `virtual-models/jev-v1` asks authenticated `typesafe/jev-latest` to choose from the same physical pool for that pilot.
 
@@ -11,21 +11,34 @@ See [the evaluation](../../docs/virtual-models-evaluation.md) for pilot evidence
 ## Worker selection and recovery
 
 `worker-auto-v1` requires Pi 1.3.0 and a worker session. It rejects main-session dispatch.
-It uses rules, not a routing classifier. It does not switch from planning to implementation models.
+Authenticated `typesafe/jev-latest` chooses the initial physical model and any replacement after an availability failure.
+It chooses only among currently eligible members of the approved pool. Code enforces credentials, quota exclusions, and retry limits before classification.
+It does not switch from planning to implementation models.
 
-| Assignment | Initial preference and fallback order |
+Jev receives the worker assignment, capped at 12,000 characters, eligible model metadata, and a sanitized failure category when relevant.
+It does not receive tool results or raw provider error text. One ten-second deadline covers classifier availability and inference.
+Classifier requests use no retries. The router validates the returned choice, probability distribution, and confidence range.
+It does not treat low distribution concentration as proof that a preference is wrong.
+
+Rules choose only when Jev is unavailable, fails, times out, or returns an invalid choice.
+Cancellation stops routing instead of triggering rule fallback. A single eligible destination needs no semantic choice or rule ranking.
+Healthy continuations and the first same-model temporary retry do not call Jev again.
+
+| Assignment | Rule fallback order |
 |---|---|
 | Bounded lookup | GLM → DeepSeek → Sol |
 | Diagnosis, implementation, tested fixes, renames | DeepSeek → GLM → Sol |
 | Safety review, architecture, demanding reasoning | Sol → DeepSeek → GLM |
 
-The exact keyword rules come from `src/policy.ts`. Routing is a heuristic, not a quality guarantee.
+The fallback keyword rules come from `src/policy.ts`. They do not override a valid Jev choice.
+Routing is a heuristic, not a quality guarantee.
 The router skips models without available credentials and never chooses outside the physical pool below.
 Healthy continuations retain their physical model. Worker thinking follows the requested setting, clamped to physical support.
 
 Recognized subscription exhaustion excludes that provider from subsequent requests in the worker branch.
 A first temporary failure permits one retry on the same model. A second consecutive temporary failure excludes that model.
-The router then chooses the next eligible model. Pi controls its configured automatic retry delays.
+Jev then chooses among the remaining eligible models, with rules only as a classifier fallback.
+Pi controls its configured automatic retry delays.
 The recovery boundary also works when Pi's automatic retries are disabled or exhausted; it adds no delay itself.
 This explicit policy does not change saved retry settings.
 
@@ -52,7 +65,9 @@ They can still fail on quota exhaustion. The offline integration test verifies t
 A model change can lose prompt-cache reuse. The pilot did not measure this recovery policy or its long-session cache costs.
 
 Normal worker event streams include `virtual-models-route` and `virtual-models-worker-recovery` custom entries.
-They record selections, retry or switch decisions, and pool exhaustion without copying raw error text.
+They record selections, classifier outcomes and usage when reported, retry decisions, and pool exhaustion without copying raw error text.
+A recovery entry with `decision: "select"` lists eligible candidates; the following route entry records the actual destination.
+`reason: "classifier-choice"` identifies a Jev decision. `reason: "classifier-fallback"` identifies degraded rule selection.
 Assistant messages retain physical model identities and provider error details. No experiment trace flag is required for these records.
 
 ### Temporary opt-in

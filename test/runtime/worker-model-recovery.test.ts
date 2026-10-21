@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { Message } from "@earendil-works/pi-ai";
+import type { ClassifierContext } from "pi";
 import { Type } from "typebox";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startWorker } from "../../extensions/workers/src/runner.ts";
@@ -151,6 +152,73 @@ describe("real SDK worker recovery with offline providers", () => {
     );
   });
 
+  it("uses Jev for initial and replacement choices without duplicate classification or repeated tools", async () => {
+    const { ai, runtime, session, providers, executions } = await offlineSession(false);
+    const calls: ClassifierContext[] = [];
+    runtime.registerNativeProvider(
+      ai.createProvider({
+        id: "typesafe",
+        auth: { apiKey: { name: "Offline Jev", resolve: async () => ({ auth: {} }) } },
+        models: [
+          {
+            type: "classifier",
+            id: "jev-latest",
+            provider: "typesafe",
+            name: "Offline Jev",
+            api: "typesafe-system-one",
+            input: ["text"],
+          },
+        ],
+        classifiers: {
+          "typesafe-system-one": {
+            classify: async (_model: unknown, context: ClassifierContext) => {
+              calls.push(context);
+              const question = context.questions.route;
+              if (question?.type !== "choice") throw new Error("Missing routing choice");
+              const keys = Object.keys(question.criteria);
+              const choice = keys.includes("sol") ? "sol" : "deepseek";
+              return {
+                api: "typesafe-system-one",
+                provider: "typesafe",
+                model: "jev-latest",
+                timestamp: 1,
+                stopReason: "stop",
+                answers: {
+                  route: {
+                    type: "choice",
+                    choice,
+                    confidence: 1,
+                    probabilities: Object.fromEntries(
+                      keys.map((key) => [key, key === choice ? 1 : 0]),
+                    ),
+                  },
+                },
+                usage: { input: 12, output: 1, totalTokens: 13 },
+              };
+            },
+          },
+        },
+      }),
+    );
+    await runtime.refresh({ allowNetwork: false });
+    providers[2].setResponses([
+      ai.fauxAssistantMessage(ai.fauxToolCall("complete_once", {})),
+      ai.fauxAssistantMessage("", {
+        stopReason: "error",
+        errorMessage: "weekly usage limit reached",
+      }),
+    ]);
+    providers[1].setResponses([ai.fauxAssistantMessage("Jev recovered")]);
+    await session.prompt("Find configuration. Complete the operation once, then finish.");
+    expect(session.getLastAssistantText()).toBe("Jev recovered");
+    expect(providers.map((provider) => provider.state.callCount)).toEqual([0, 1, 2]);
+    expect(executions()).toBe(1);
+    expect(calls).toHaveLength(2);
+    const replacement = calls[1]?.questions.route;
+    if (replacement?.type !== "choice") throw new Error("Missing replacement question");
+    expect(Object.keys(replacement.criteria).sort()).toEqual(["deepseek", "glm"]);
+  });
+
   it("keeps one transient retry on the same model before selecting an alternative", async () => {
     const { ai, session, providers } = await offlineSession();
     providers[0].setResponses(
@@ -285,7 +353,7 @@ describe("actual worker process recovery with mandatory safety extensions", () =
         `import {appendFileSync} from "node:fs";
 import {createProvider,fauxProvider,fauxAssistantMessage,fauxToolCall} from ${JSON.stringify(import.meta.resolve("@earendil-works/pi-ai"))};
 export default async function(pi){
- pi.registerProvider(createProvider({id:"typesafe",auth:{apiKey:{name:"Offline classifier",resolve:async()=>({auth:{}})}},models:[{type:"classifier",provider:"typesafe",id:"jev-latest",name:"Offline approval classifier",api:"typesafe-system-one",input:["text"]}],classifiers:{"typesafe-system-one":{classify:async(model,context)=>{appendFileSync(${JSON.stringify(classifierPath)},JSON.stringify({provider:model.provider,questions:Object.keys(context.questions).sort()})+"\\n");return{provider:"typesafe",model:model.id,api:"typesafe-system-one",timestamp:Date.now(),stopReason:"stop",answers:{harm:{type:"bool",probability:1},secrets:{type:"bool",probability:0},externalChange:{type:"bool",probability:0}}};}}}}));
+ pi.registerProvider(createProvider({id:"typesafe",auth:{apiKey:{name:"Offline classifier",resolve:async()=>({auth:{}})}},models:[{type:"classifier",provider:"typesafe",id:"jev-latest",name:"Offline approval classifier",api:"typesafe-system-one",input:["text"]}],classifiers:{"typesafe-system-one":{classify:async(model,context)=>{appendFileSync(${JSON.stringify(classifierPath)},JSON.stringify({provider:model.provider,questions:Object.keys(context.questions).sort()})+"\\n");if(context.questions.route){const keys=Object.keys(context.questions.route.criteria);const choice=keys.includes("glm")?"glm":keys.includes("deepseek")?"deepseek":"sol";return{provider:"typesafe",model:model.id,api:"typesafe-system-one",timestamp:Date.now(),stopReason:"stop",answers:{route:{type:"choice",choice,confidence:1,probabilities:Object.fromEntries(keys.map(key=>[key,key===choice?1:0]))}}};}return{provider:"typesafe",model:model.id,api:"typesafe-system-one",timestamp:Date.now(),stopReason:"stop",answers:{harm:{type:"bool",probability:1},secrets:{type:"bool",probability:0},externalChange:{type:"bool",probability:0}}};}}}}));
  for(const [provider,id] of ${JSON.stringify(pool)}){
   const faux=fauxProvider({provider,models:[{id,reasoning:false,contextWindow:500000}],tokensPerSecond:1000000});
   const note=(context)=>appendFileSync(${JSON.stringify(callsPath)},JSON.stringify({provider,pid:process.pid,userMessages:context.messages.filter(m=>m.role==="user").length,toolResults:context.messages.filter(m=>m.role==="toolResult").length,failedAssistant:context.messages.some(m=>m.role==="assistant"&&m.stopReason==="error")})+"\\n");
@@ -393,6 +461,8 @@ export default async function(pi){
           .split("\n")
           .map((line) => JSON.parse(line));
         expect(classifiers).toEqual([
+          { provider: "typesafe", questions: ["route"] },
+          { provider: "typesafe", questions: ["route"] },
           { provider: "typesafe", questions: ["externalChange", "harm", "secrets"] },
         ]);
         expect(results[2].message.toolName).toBe("bash");

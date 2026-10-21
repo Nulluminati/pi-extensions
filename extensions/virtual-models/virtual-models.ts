@@ -74,7 +74,7 @@ export default async function (pi: ExtensionAPI) {
   pi.registerVirtualModel({
     provider: "virtual-models",
     id: WORKER_POLICY_VERSION,
-    name: "Automatic worker selection and recovery v1",
+    name: "Jev worker selection and recovery v1",
     thinkingLevels: ["low", "medium", "high", "xhigh", "max"],
     contextWindow: 500000,
     maxTokens: 128000,
