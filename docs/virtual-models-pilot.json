@@ -1,0 +1,7221 @@
+{
+  "schemaVersion": "teop-pilot-evidence-v1",
+  "capturedAt": "2026-10-21T04:05:33.901Z",
+  "planned": 48,
+  "completed": 48,
+  "passed": 46,
+  "pending": [],
+  "versions": {
+    "pi": "1.3.0",
+    "node": "v26.9.0",
+    "taskBaseline": "cc936d4",
+    "policy": "teop-policy-v1",
+    "fixtures": "teop-fixtures-v1",
+    "runnerVersions": [
+      "teop-runner-v1",
+      "teop-runner-v2"
+    ],
+    "sourceCommits": [
+      "e34808755ba7785959645fe9a224060f8b165e97",
+      "23ffec26609463b8e28c9e77c9bf8ea185b3b758"
+    ],
+    "fingerprints": [
+      "5a86e7c9edb0e9bab626594362b45a891f495e152d18e13e73613cb42586d719",
+      "cae80b7a2da32339b2223e0c6e4f2d1546c1aa016736d8b6300f093d16715206"
+    ],
+    "unchangedHashes": [
+      {
+        "path": "extensions/virtual-models/virtual-models.ts",
+        "sha256": "f01ae0437ee1ddf002dfb793932b61c5027ddf891e46b44373bd8f1bf957f132"
+      },
+      {
+        "path": "extensions/virtual-models/src/policy.ts",
+        "sha256": "bbefd158b02cad4a38a17582569f0fb20aafd827dfdaffdc68afdb5f5f2dbfce"
+      },
+      {
+        "path": "extensions/virtual-models/src/router.ts",
+        "sha256": "3ae600f33fe1fd5f4de383d1d8b8f98c9a02a6f1ee22c6f75aba2a07a134ff87"
+      },
+      {
+        "path": "extensions/virtual-models/src/measurement.ts",
+        "sha256": "da77714e8c7ff9a7a9543748bef14e7b3543feaca9d96eb46724336cf7546cef"
+      },
+      {
+        "path": "scripts/virtual-models-eval/tasks.ts",
+        "sha256": "9927c642d453ca52e1f93e4aeff092b0a4f682f0a9e2362692a8b9f7f3c56ae2"
+      }
+    ]
+  },
+  "modelIds": [
+    "openai-codex/gpt-6.1-sol",
+    "opencode-go/deepseek-v4.1-flash",
+    "zai/glm-5.3-flash"
+  ],
+  "classifier": "typesafe/jev-latest",
+  "originalConfigurationUnchanged": true,
+  "tokenFormula": "input + output + cacheRead + cacheWrite; missing reports and SDK failure placeholders remain unknown",
+  "cases": [
+    {
+      "id": "main-boundaries-deepseek-r1",
+      "attempt": "main-boundaries-deepseek-r1-a1",
+      "directory": "pilot-e348087/main-boundaries",
+      "runnerVersion": "teop-runner-v1",
+      "role": "main",
+      "task": "boundaries",
+      "arm": "deepseek",
+      "passed": true,
+      "reason": "matched independent reference",
+      "focusUsage": {
+        "input": 45502,
+        "output": 4507,
+        "cacheRead": 127104,
+        "cacheWrite": 0,
+        "aggregate": 177113,
+        "providerTotal": 177113
+      },
+      "mainUsage": {
+        "input": 20006,
+        "output": 1663,
+        "cacheRead": 79104,
+        "cacheWrite": 0,
+        "aggregate": 100773,
+        "providerTotal": 100773
+      },
+      "workerUsage": {
+        "input": 22545,
+        "output": 2676,
+        "cacheRead": 48000,
+        "cacheWrite": 0,
+        "aggregate": 73221,
+        "providerTotal": 73221
+      },
+      "classifierUsage": {
+        "input": 2951,
+        "output": 168,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 3119,
+        "providerTotal": 3119
+      },
+      "classifierMainUsage": {
+        "input": 2951,
+        "output": 168,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 3119,
+        "providerTotal": 3119
+      },
+      "classifierWorkerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "totalUsage": {
+        "input": 45502,
+        "output": 4507,
+        "cacheRead": 127104,
+        "cacheWrite": 0,
+        "aggregate": 177113,
+        "providerTotal": 177113
+      },
+      "wallMs": 86837.840695,
+      "workerMs": 61556,
+      "models": [
+        "opencode-go/deepseek-v4.1-flash"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 173994,
+      "literalChatReports": 10,
+      "chatCalls": 10,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 45502,
+        "output": 4507,
+        "cacheRead": 127104,
+        "cacheWrite": 0,
+        "aggregate": 177113,
+        "providerTotal": 177113
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 45502,
+        "output": 4507,
+        "cacheRead": 127104,
+        "cacheWrite": 0,
+        "aggregate": 177113,
+        "providerTotal": 177113
+      },
+      "requestedThinking": "medium",
+      "routeLatencyMs": 0,
+      "routeChoices": [],
+      "classifierCalls": 3
+    },
+    {
+      "id": "main-boundaries-glm-r1",
+      "attempt": "main-boundaries-glm-r1-a1",
+      "directory": "pilot-e348087/main-boundaries",
+      "runnerVersion": "teop-runner-v1",
+      "role": "main",
+      "task": "boundaries",
+      "arm": "glm",
+      "passed": true,
+      "reason": "matched independent reference",
+      "focusUsage": {
+        "input": 51833,
+        "output": 5418,
+        "cacheRead": 149440,
+        "cacheWrite": 0,
+        "aggregate": 206691,
+        "providerTotal": 206691
+      },
+      "mainUsage": {
+        "input": 34625,
+        "output": 3008,
+        "cacheRead": 70272,
+        "cacheWrite": 0,
+        "aggregate": 107905,
+        "providerTotal": 107905
+      },
+      "workerUsage": {
+        "input": 16193,
+        "output": 2354,
+        "cacheRead": 79168,
+        "cacheWrite": 0,
+        "aggregate": 97715,
+        "providerTotal": 97715
+      },
+      "classifierUsage": {
+        "input": 1015,
+        "output": 56,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 1071,
+        "providerTotal": 1071
+      },
+      "classifierMainUsage": {
+        "input": 1015,
+        "output": 56,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 1071,
+        "providerTotal": 1071
+      },
+      "classifierWorkerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "totalUsage": {
+        "input": 51833,
+        "output": 5418,
+        "cacheRead": 149440,
+        "cacheWrite": 0,
+        "aggregate": 206691,
+        "providerTotal": 206691
+      },
+      "wallMs": 134926.595371,
+      "workerMs": 68614,
+      "models": [
+        "zai/glm-5.3-flash"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 205620,
+      "literalChatReports": 12,
+      "chatCalls": 12,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 51833,
+        "output": 5418,
+        "cacheRead": 149440,
+        "cacheWrite": 0,
+        "aggregate": 206691,
+        "providerTotal": 206691
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 51833,
+        "output": 5418,
+        "cacheRead": 149440,
+        "cacheWrite": 0,
+        "aggregate": 206691,
+        "providerTotal": 206691
+      },
+      "requestedThinking": "medium",
+      "routeLatencyMs": 0,
+      "routeChoices": [],
+      "classifierCalls": 1
+    },
+    {
+      "id": "main-boundaries-jev-r1",
+      "attempt": "main-boundaries-jev-r1-a1",
+      "directory": "pilot-e348087/main-boundaries",
+      "runnerVersion": "teop-runner-v1",
+      "role": "main",
+      "task": "boundaries",
+      "arm": "jev",
+      "passed": true,
+      "reason": "matched independent reference",
+      "focusUsage": {
+        "input": 43312,
+        "output": 5824,
+        "cacheRead": 141568,
+        "cacheWrite": 0,
+        "aggregate": 190704,
+        "providerTotal": 190704
+      },
+      "mainUsage": {
+        "input": 20021,
+        "output": 3613,
+        "cacheRead": 74240,
+        "cacheWrite": 0,
+        "aggregate": 97874,
+        "providerTotal": 97874
+      },
+      "workerUsage": {
+        "input": 22624,
+        "output": 2172,
+        "cacheRead": 67328,
+        "cacheWrite": 0,
+        "aggregate": 92124,
+        "providerTotal": 92124
+      },
+      "classifierUsage": {
+        "input": 667,
+        "output": 39,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 706,
+        "providerTotal": 706
+      },
+      "classifierMainUsage": {
+        "input": 667,
+        "output": 39,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 706,
+        "providerTotal": 706
+      },
+      "classifierWorkerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "routerClassifierUsage": {
+        "input": 667,
+        "output": 39,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 706,
+        "providerTotal": 706
+      },
+      "totalUsage": {
+        "input": 43312,
+        "output": 5824,
+        "cacheRead": 141568,
+        "cacheWrite": 0,
+        "aggregate": 190704,
+        "providerTotal": 190704
+      },
+      "wallMs": 132078.13797600003,
+      "workerMs": 61162,
+      "models": [
+        "zai/glm-5.3-flash"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 189998,
+      "literalChatReports": 9,
+      "chatCalls": 9,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 43312,
+        "output": 5824,
+        "cacheRead": 141568,
+        "cacheWrite": 0,
+        "aggregate": 190704,
+        "providerTotal": 190704
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 43312,
+        "output": 5824,
+        "cacheRead": 141568,
+        "cacheWrite": 0,
+        "aggregate": 190704,
+        "providerTotal": 190704
+      },
+      "requestedThinking": "medium",
+      "routeLatencyMs": 143.8742709999915,
+      "routeChoices": [
+        {
+          "selected": "virtual-models/jev-v1",
+          "dispatched": "zai/glm-5.3-flash",
+          "reason": "classifier-choice",
+          "requestedThinking": "medium",
+          "effectiveThinking": "high",
+          "latencyMs": 143.295924,
+          "classifierStatus": "ok",
+          "classifierAttempted": true
+        }
+      ],
+      "classifierCalls": 1
+    },
+    {
+      "id": "main-boundaries-rules-r1",
+      "attempt": "main-boundaries-rules-r1-a1",
+      "directory": "pilot-e348087/main-boundaries",
+      "runnerVersion": "teop-runner-v1",
+      "role": "main",
+      "task": "boundaries",
+      "arm": "rules",
+      "passed": true,
+      "reason": "matched independent reference",
+      "focusUsage": {
+        "input": 46102,
+        "output": 5425,
+        "cacheRead": 171328,
+        "cacheWrite": 0,
+        "aggregate": 222855,
+        "providerTotal": 222855
+      },
+      "mainUsage": {
+        "input": 24748,
+        "output": 2876,
+        "cacheRead": 97728,
+        "cacheWrite": 0,
+        "aggregate": 125352,
+        "providerTotal": 125352
+      },
+      "workerUsage": {
+        "input": 19423,
+        "output": 2437,
+        "cacheRead": 73600,
+        "cacheWrite": 0,
+        "aggregate": 95460,
+        "providerTotal": 95460
+      },
+      "classifierUsage": {
+        "input": 1931,
+        "output": 112,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 2043,
+        "providerTotal": 2043
+      },
+      "classifierMainUsage": {
+        "input": 1931,
+        "output": 112,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 2043,
+        "providerTotal": 2043
+      },
+      "classifierWorkerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "totalUsage": {
+        "input": 46102,
+        "output": 5425,
+        "cacheRead": 171328,
+        "cacheWrite": 0,
+        "aggregate": 222855,
+        "providerTotal": 222855
+      },
+      "wallMs": 140612.071076,
+      "workerMs": 69576,
+      "models": [
+        "zai/glm-5.3-flash"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 220812,
+      "literalChatReports": 13,
+      "chatCalls": 13,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 46102,
+        "output": 5425,
+        "cacheRead": 171328,
+        "cacheWrite": 0,
+        "aggregate": 222855,
+        "providerTotal": 222855
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 46102,
+        "output": 5425,
+        "cacheRead": 171328,
+        "cacheWrite": 0,
+        "aggregate": 222855,
+        "providerTotal": 222855
+      },
+      "requestedThinking": "medium",
+      "routeLatencyMs": 1.8213750000169284,
+      "routeChoices": [
+        {
+          "selected": "virtual-models/rules-v1",
+          "dispatched": "zai/glm-5.3-flash",
+          "reason": "rule-choice",
+          "requestedThinking": "medium",
+          "effectiveThinking": "high",
+          "latencyMs": 0.9907500000000482,
+          "classifierStatus": null,
+          "classifierAttempted": false
+        }
+      ],
+      "classifierCalls": 2
+    },
+    {
+      "id": "main-boundaries-sol-r1",
+      "attempt": "main-boundaries-sol-r1-a1",
+      "directory": "pilot-e348087/main-boundaries",
+      "runnerVersion": "teop-runner-v1",
+      "role": "main",
+      "task": "boundaries",
+      "arm": "sol",
+      "passed": true,
+      "reason": "matched independent reference",
+      "focusUsage": {
+        "input": 48911,
+        "output": 3180,
+        "cacheRead": 113856,
+        "cacheWrite": 0,
+        "aggregate": 165947,
+        "providerTotal": 165947
+      },
+      "mainUsage": {
+        "input": 22910,
+        "output": 415,
+        "cacheRead": 31744,
+        "cacheWrite": 0,
+        "aggregate": 55069,
+        "providerTotal": 55069
+      },
+      "workerUsage": {
+        "input": 26001,
+        "output": 2765,
+        "cacheRead": 82112,
+        "cacheWrite": 0,
+        "aggregate": 110878,
+        "providerTotal": 110878
+      },
+      "classifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierMainUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierWorkerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "totalUsage": {
+        "input": 48911,
+        "output": 3180,
+        "cacheRead": 113856,
+        "cacheWrite": 0,
+        "aggregate": 165947,
+        "providerTotal": 165947
+      },
+      "wallMs": 93405.78994,
+      "workerMs": 77633,
+      "models": [
+        "openai-codex/gpt-6.1-sol"
+      ],
+      "thinking": [
+        "medium"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 165947,
+      "literalChatReports": 11,
+      "chatCalls": 11,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 48911,
+        "output": 3180,
+        "cacheRead": 113856,
+        "cacheWrite": 0,
+        "aggregate": 165947,
+        "providerTotal": 165947
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 48911,
+        "output": 3180,
+        "cacheRead": 113856,
+        "cacheWrite": 0,
+        "aggregate": 165947,
+        "providerTotal": 165947
+      },
+      "requestedThinking": "medium",
+      "routeLatencyMs": 0,
+      "routeChoices": [],
+      "classifierCalls": 0
+    },
+    {
+      "id": "main-diagnosis-deepseek-r1",
+      "attempt": "main-diagnosis-deepseek-r1-a1",
+      "directory": "pilot-e348087/main-diagnosis",
+      "runnerVersion": "teop-runner-v1",
+      "role": "main",
+      "task": "diagnosis",
+      "arm": "deepseek",
+      "passed": true,
+      "reason": "matched independent reference",
+      "focusUsage": {
+        "input": 18623,
+        "output": 1351,
+        "cacheRead": 50688,
+        "cacheWrite": 0,
+        "aggregate": 70662,
+        "providerTotal": 70662
+      },
+      "mainUsage": {
+        "input": 13843,
+        "output": 1071,
+        "cacheRead": 50688,
+        "cacheWrite": 0,
+        "aggregate": 65602,
+        "providerTotal": 65602
+      },
+      "workerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierUsage": {
+        "input": 4780,
+        "output": 280,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 5060,
+        "providerTotal": 5060
+      },
+      "classifierMainUsage": {
+        "input": 4780,
+        "output": 280,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 5060,
+        "providerTotal": 5060
+      },
+      "classifierWorkerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "totalUsage": {
+        "input": 18623,
+        "output": 1351,
+        "cacheRead": 50688,
+        "cacheWrite": 0,
+        "aggregate": 70662,
+        "providerTotal": 70662
+      },
+      "wallMs": 34066.589228,
+      "workerMs": 0,
+      "models": [
+        "opencode-go/deepseek-v4.1-flash"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 65602,
+      "literalChatReports": 5,
+      "chatCalls": 5,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 18623,
+        "output": 1351,
+        "cacheRead": 50688,
+        "cacheWrite": 0,
+        "aggregate": 70662,
+        "providerTotal": 70662
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 18623,
+        "output": 1351,
+        "cacheRead": 50688,
+        "cacheWrite": 0,
+        "aggregate": 70662,
+        "providerTotal": 70662
+      },
+      "requestedThinking": "medium",
+      "routeLatencyMs": 0,
+      "routeChoices": [],
+      "classifierCalls": 5
+    },
+    {
+      "id": "main-diagnosis-glm-r1",
+      "attempt": "main-diagnosis-glm-r1-a1",
+      "directory": "pilot-e348087/main-diagnosis",
+      "runnerVersion": "teop-runner-v1",
+      "role": "main",
+      "task": "diagnosis",
+      "arm": "glm",
+      "passed": false,
+      "reason": "Expected exactly one VIRTUAL_RESULT line",
+      "focusUsage": {
+        "input": 18251,
+        "output": 1089,
+        "cacheRead": 46080,
+        "cacheWrite": 0,
+        "aggregate": 65420,
+        "providerTotal": 65420
+      },
+      "mainUsage": {
+        "input": 15418,
+        "output": 921,
+        "cacheRead": 46080,
+        "cacheWrite": 0,
+        "aggregate": 62419,
+        "providerTotal": 62419
+      },
+      "workerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierUsage": {
+        "input": 2833,
+        "output": 168,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 3001,
+        "providerTotal": 3001
+      },
+      "classifierMainUsage": {
+        "input": 2833,
+        "output": 168,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 3001,
+        "providerTotal": 3001
+      },
+      "classifierWorkerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "totalUsage": {
+        "input": 18251,
+        "output": 1089,
+        "cacheRead": 46080,
+        "cacheWrite": 0,
+        "aggregate": 65420,
+        "providerTotal": 65420
+      },
+      "wallMs": 39042.98977199999,
+      "workerMs": 0,
+      "models": [
+        "zai/glm-5.3-flash"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 62419,
+      "literalChatReports": 5,
+      "chatCalls": 5,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 18251,
+        "output": 1089,
+        "cacheRead": 46080,
+        "cacheWrite": 0,
+        "aggregate": 65420,
+        "providerTotal": 65420
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 18251,
+        "output": 1089,
+        "cacheRead": 46080,
+        "cacheWrite": 0,
+        "aggregate": 65420,
+        "providerTotal": 65420
+      },
+      "requestedThinking": "medium",
+      "routeLatencyMs": 0,
+      "routeChoices": [],
+      "classifierCalls": 3
+    },
+    {
+      "id": "main-diagnosis-sol-r1",
+      "attempt": "main-diagnosis-sol-r1-a1",
+      "directory": "pilot-e348087/main-diagnosis",
+      "runnerVersion": "teop-runner-v1",
+      "role": "main",
+      "task": "diagnosis",
+      "arm": "sol",
+      "passed": true,
+      "reason": "matched independent reference",
+      "focusUsage": {
+        "input": 13268,
+        "output": 406,
+        "cacheRead": 38912,
+        "cacheWrite": 0,
+        "aggregate": 52586,
+        "providerTotal": 52586
+      },
+      "mainUsage": {
+        "input": 11406,
+        "output": 294,
+        "cacheRead": 38912,
+        "cacheWrite": 0,
+        "aggregate": 50612,
+        "providerTotal": 50612
+      },
+      "workerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierUsage": {
+        "input": 1862,
+        "output": 112,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 1974,
+        "providerTotal": 1974
+      },
+      "classifierMainUsage": {
+        "input": 1862,
+        "output": 112,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 1974,
+        "providerTotal": 1974
+      },
+      "classifierWorkerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "totalUsage": {
+        "input": 13268,
+        "output": 406,
+        "cacheRead": 38912,
+        "cacheWrite": 0,
+        "aggregate": 52586,
+        "providerTotal": 52586
+      },
+      "wallMs": 18101.213878000002,
+      "workerMs": 0,
+      "models": [
+        "openai-codex/gpt-6.1-sol"
+      ],
+      "thinking": [
+        "medium"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 50612,
+      "literalChatReports": 5,
+      "chatCalls": 5,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 13268,
+        "output": 406,
+        "cacheRead": 38912,
+        "cacheWrite": 0,
+        "aggregate": 52586,
+        "providerTotal": 52586
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 13268,
+        "output": 406,
+        "cacheRead": 38912,
+        "cacheWrite": 0,
+        "aggregate": 52586,
+        "providerTotal": 52586
+      },
+      "requestedThinking": "medium",
+      "routeLatencyMs": 0,
+      "routeChoices": [],
+      "classifierCalls": 2
+    },
+    {
+      "id": "main-fix-glm-r1",
+      "attempt": "main-fix-glm-r1-a1",
+      "directory": "pilot-e348087/main-fix-available",
+      "runnerVersion": "teop-runner-v1",
+      "role": "main",
+      "task": "fix",
+      "arm": "glm",
+      "passed": true,
+      "reason": "matched independent reference",
+      "focusUsage": {
+        "input": 21998,
+        "output": 1605,
+        "cacheRead": 103040,
+        "cacheWrite": 0,
+        "aggregate": 126643,
+        "providerTotal": 126643
+      },
+      "mainUsage": {
+        "input": 17308,
+        "output": 1325,
+        "cacheRead": 103040,
+        "cacheWrite": 0,
+        "aggregate": 121673,
+        "providerTotal": 121673
+      },
+      "workerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierUsage": {
+        "input": 4690,
+        "output": 280,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 4970,
+        "providerTotal": 4970
+      },
+      "classifierMainUsage": {
+        "input": 4690,
+        "output": 280,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 4970,
+        "providerTotal": 4970
+      },
+      "classifierWorkerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "totalUsage": {
+        "input": 21998,
+        "output": 1605,
+        "cacheRead": 103040,
+        "cacheWrite": 0,
+        "aggregate": 126643,
+        "providerTotal": 126643
+      },
+      "wallMs": 59198.762650000004,
+      "workerMs": 0,
+      "models": [
+        "zai/glm-5.3-flash"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 121673,
+      "literalChatReports": 9,
+      "chatCalls": 9,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 21998,
+        "output": 1605,
+        "cacheRead": 103040,
+        "cacheWrite": 0,
+        "aggregate": 126643,
+        "providerTotal": 126643
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 21998,
+        "output": 1605,
+        "cacheRead": 103040,
+        "cacheWrite": 0,
+        "aggregate": 126643,
+        "providerTotal": 126643
+      },
+      "requestedThinking": "medium",
+      "routeLatencyMs": 0,
+      "routeChoices": [],
+      "classifierCalls": 5
+    },
+    {
+      "id": "main-fix-sol-r1",
+      "attempt": "main-fix-sol-r1-a1",
+      "directory": "pilot-e348087/main-fix-available",
+      "runnerVersion": "teop-runner-v1",
+      "role": "main",
+      "task": "fix",
+      "arm": "sol",
+      "passed": true,
+      "reason": "matched independent reference",
+      "focusUsage": {
+        "input": 21087,
+        "output": 878,
+        "cacheRead": 129536,
+        "cacheWrite": 0,
+        "aggregate": 151501,
+        "providerTotal": 151501
+      },
+      "mainUsage": {
+        "input": 16381,
+        "output": 598,
+        "cacheRead": 129536,
+        "cacheWrite": 0,
+        "aggregate": 146515,
+        "providerTotal": 146515
+      },
+      "workerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierUsage": {
+        "input": 4706,
+        "output": 280,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 4986,
+        "providerTotal": 4986
+      },
+      "classifierMainUsage": {
+        "input": 4706,
+        "output": 280,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 4986,
+        "providerTotal": 4986
+      },
+      "classifierWorkerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "totalUsage": {
+        "input": 21087,
+        "output": 878,
+        "cacheRead": 129536,
+        "cacheWrite": 0,
+        "aggregate": 151501,
+        "providerTotal": 151501
+      },
+      "wallMs": 33888.430922,
+      "workerMs": 0,
+      "models": [
+        "openai-codex/gpt-6.1-sol"
+      ],
+      "thinking": [
+        "medium"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 146515,
+      "literalChatReports": 11,
+      "chatCalls": 11,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 21087,
+        "output": 878,
+        "cacheRead": 129536,
+        "cacheWrite": 0,
+        "aggregate": 151501,
+        "providerTotal": 151501
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 21087,
+        "output": 878,
+        "cacheRead": 129536,
+        "cacheWrite": 0,
+        "aggregate": 151501,
+        "providerTotal": 151501
+      },
+      "requestedThinking": "medium",
+      "routeLatencyMs": 0,
+      "routeChoices": [],
+      "classifierCalls": 5
+    },
+    {
+      "id": "main-rename-glm-r1",
+      "attempt": "main-rename-glm-r1-a1",
+      "directory": "pilot-e348087/main-rename-available",
+      "runnerVersion": "teop-runner-v1",
+      "role": "main",
+      "task": "rename",
+      "arm": "glm",
+      "passed": true,
+      "reason": "matched independent reference",
+      "focusUsage": {
+        "input": 21911,
+        "output": 6768,
+        "cacheRead": 144000,
+        "cacheWrite": 0,
+        "aggregate": 172679,
+        "providerTotal": 172679
+      },
+      "mainUsage": {
+        "input": 14016,
+        "output": 6320,
+        "cacheRead": 144000,
+        "cacheWrite": 0,
+        "aggregate": 164336,
+        "providerTotal": 164336
+      },
+      "workerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierUsage": {
+        "input": 7895,
+        "output": 448,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 8343,
+        "providerTotal": 8343
+      },
+      "classifierMainUsage": {
+        "input": 7895,
+        "output": 448,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 8343,
+        "providerTotal": 8343
+      },
+      "classifierWorkerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "totalUsage": {
+        "input": 21911,
+        "output": 6768,
+        "cacheRead": 144000,
+        "cacheWrite": 0,
+        "aggregate": 172679,
+        "providerTotal": 172679
+      },
+      "wallMs": 157413.107139,
+      "workerMs": 0,
+      "models": [
+        "zai/glm-5.3-flash"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 164336,
+      "literalChatReports": 9,
+      "chatCalls": 9,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 21911,
+        "output": 6768,
+        "cacheRead": 144000,
+        "cacheWrite": 0,
+        "aggregate": 172679,
+        "providerTotal": 172679
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 21911,
+        "output": 6768,
+        "cacheRead": 144000,
+        "cacheWrite": 0,
+        "aggregate": 172679,
+        "providerTotal": 172679
+      },
+      "requestedThinking": "medium",
+      "routeLatencyMs": 0,
+      "routeChoices": [],
+      "classifierCalls": 8
+    },
+    {
+      "id": "main-rename-sol-r1",
+      "attempt": "main-rename-sol-r1-a1",
+      "directory": "pilot-e348087/main-rename-available",
+      "runnerVersion": "teop-runner-v1",
+      "role": "main",
+      "task": "rename",
+      "arm": "sol",
+      "passed": true,
+      "reason": "matched independent reference",
+      "focusUsage": {
+        "input": 18450,
+        "output": 815,
+        "cacheRead": 83456,
+        "cacheWrite": 0,
+        "aggregate": 102721,
+        "providerTotal": 102721
+      },
+      "mainUsage": {
+        "input": 14525,
+        "output": 591,
+        "cacheRead": 83456,
+        "cacheWrite": 0,
+        "aggregate": 98572,
+        "providerTotal": 98572
+      },
+      "workerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierUsage": {
+        "input": 3925,
+        "output": 224,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 4149,
+        "providerTotal": 4149
+      },
+      "classifierMainUsage": {
+        "input": 3925,
+        "output": 224,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 4149,
+        "providerTotal": 4149
+      },
+      "classifierWorkerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "totalUsage": {
+        "input": 18450,
+        "output": 815,
+        "cacheRead": 83456,
+        "cacheWrite": 0,
+        "aggregate": 102721,
+        "providerTotal": 102721
+      },
+      "wallMs": 30006.56226800001,
+      "workerMs": 0,
+      "models": [
+        "openai-codex/gpt-6.1-sol"
+      ],
+      "thinking": [
+        "medium"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 98572,
+      "literalChatReports": 8,
+      "chatCalls": 8,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 18450,
+        "output": 815,
+        "cacheRead": 83456,
+        "cacheWrite": 0,
+        "aggregate": 102721,
+        "providerTotal": 102721
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 18450,
+        "output": 815,
+        "cacheRead": 83456,
+        "cacheWrite": 0,
+        "aggregate": 102721,
+        "providerTotal": 102721
+      },
+      "requestedThinking": "medium",
+      "routeLatencyMs": 0,
+      "routeChoices": [],
+      "classifierCalls": 4
+    },
+    {
+      "id": "main-review-glm-r1",
+      "attempt": "main-review-glm-r1-a1",
+      "directory": "pilot-e348087/main-review-available",
+      "runnerVersion": "teop-runner-v1",
+      "role": "main",
+      "task": "review",
+      "arm": "glm",
+      "passed": true,
+      "reason": "matched independent review reference",
+      "focusUsage": {
+        "input": 30291,
+        "output": 7504,
+        "cacheRead": 381760,
+        "cacheWrite": 0,
+        "aggregate": 419555,
+        "providerTotal": 419555
+      },
+      "mainUsage": {
+        "input": 20421,
+        "output": 6944,
+        "cacheRead": 381760,
+        "cacheWrite": 0,
+        "aggregate": 409125,
+        "providerTotal": 409125
+      },
+      "workerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierUsage": {
+        "input": 9870,
+        "output": 560,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 10430,
+        "providerTotal": 10430
+      },
+      "classifierMainUsage": {
+        "input": 9870,
+        "output": 560,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 10430,
+        "providerTotal": 10430
+      },
+      "classifierWorkerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "totalUsage": {
+        "input": 30291,
+        "output": 7504,
+        "cacheRead": 381760,
+        "cacheWrite": 0,
+        "aggregate": 419555,
+        "providerTotal": 419555
+      },
+      "wallMs": 235320.148557,
+      "workerMs": 0,
+      "models": [
+        "zai/glm-5.3-flash"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 409125,
+      "literalChatReports": 20,
+      "chatCalls": 20,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 30291,
+        "output": 7504,
+        "cacheRead": 381760,
+        "cacheWrite": 0,
+        "aggregate": 419555,
+        "providerTotal": 419555
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 30291,
+        "output": 7504,
+        "cacheRead": 381760,
+        "cacheWrite": 0,
+        "aggregate": 419555,
+        "providerTotal": 419555
+      },
+      "requestedThinking": "medium",
+      "routeLatencyMs": 0,
+      "routeChoices": [],
+      "classifierCalls": 10
+    },
+    {
+      "id": "main-review-rules-r1",
+      "attempt": "main-review-rules-r1-a1",
+      "directory": "pilot-e348087/main-review-available",
+      "runnerVersion": "teop-runner-v1",
+      "role": "main",
+      "task": "review",
+      "arm": "rules",
+      "passed": true,
+      "reason": "matched independent review reference",
+      "focusUsage": {
+        "input": 18183,
+        "output": 518,
+        "cacheRead": 42880,
+        "cacheWrite": 0,
+        "aggregate": 61581,
+        "providerTotal": 61581
+      },
+      "mainUsage": {
+        "input": 17205,
+        "output": 462,
+        "cacheRead": 42880,
+        "cacheWrite": 0,
+        "aggregate": 60547,
+        "providerTotal": 60547
+      },
+      "workerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierUsage": {
+        "input": 978,
+        "output": 56,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 1034,
+        "providerTotal": 1034
+      },
+      "classifierMainUsage": {
+        "input": 978,
+        "output": 56,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 1034,
+        "providerTotal": 1034
+      },
+      "classifierWorkerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "totalUsage": {
+        "input": 18183,
+        "output": 518,
+        "cacheRead": 42880,
+        "cacheWrite": 0,
+        "aggregate": 61581,
+        "providerTotal": 61581
+      },
+      "wallMs": 19582.287523000006,
+      "workerMs": 0,
+      "models": [
+        "openai-codex/gpt-6.1-sol"
+      ],
+      "thinking": [
+        "medium"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 60547,
+      "literalChatReports": 5,
+      "chatCalls": 5,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 18183,
+        "output": 518,
+        "cacheRead": 42880,
+        "cacheWrite": 0,
+        "aggregate": 61581,
+        "providerTotal": 61581
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 18183,
+        "output": 518,
+        "cacheRead": 42880,
+        "cacheWrite": 0,
+        "aggregate": 61581,
+        "providerTotal": 61581
+      },
+      "requestedThinking": "medium",
+      "routeLatencyMs": 1.059444999999755,
+      "routeChoices": [
+        {
+          "selected": "virtual-models/rules-v1",
+          "dispatched": "openai-codex/gpt-6.1-sol",
+          "reason": "rule-choice",
+          "requestedThinking": "medium",
+          "effectiveThinking": "medium",
+          "latencyMs": 0.6950590000000147,
+          "classifierStatus": null,
+          "classifierAttempted": false
+        }
+      ],
+      "classifierCalls": 1
+    },
+    {
+      "id": "main-review-sol-r1",
+      "attempt": "main-review-sol-r1-a1",
+      "directory": "pilot-e348087/main-review-available",
+      "runnerVersion": "teop-runner-v1",
+      "role": "main",
+      "task": "review",
+      "arm": "sol",
+      "passed": true,
+      "reason": "matched independent review reference",
+      "focusUsage": {
+        "input": 20821,
+        "output": 688,
+        "cacheRead": 65152,
+        "cacheWrite": 0,
+        "aggregate": 86661,
+        "providerTotal": 86661
+      },
+      "mainUsage": {
+        "input": 18854,
+        "output": 576,
+        "cacheRead": 65152,
+        "cacheWrite": 0,
+        "aggregate": 84582,
+        "providerTotal": 84582
+      },
+      "workerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierUsage": {
+        "input": 1967,
+        "output": 112,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 2079,
+        "providerTotal": 2079
+      },
+      "classifierMainUsage": {
+        "input": 1967,
+        "output": 112,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 2079,
+        "providerTotal": 2079
+      },
+      "classifierWorkerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "totalUsage": {
+        "input": 20821,
+        "output": 688,
+        "cacheRead": 65152,
+        "cacheWrite": 0,
+        "aggregate": 86661,
+        "providerTotal": 86661
+      },
+      "wallMs": 20667.942619999987,
+      "workerMs": 0,
+      "models": [
+        "openai-codex/gpt-6.1-sol"
+      ],
+      "thinking": [
+        "medium"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 84582,
+      "literalChatReports": 6,
+      "chatCalls": 6,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 20821,
+        "output": 688,
+        "cacheRead": 65152,
+        "cacheWrite": 0,
+        "aggregate": 86661,
+        "providerTotal": 86661
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 20821,
+        "output": 688,
+        "cacheRead": 65152,
+        "cacheWrite": 0,
+        "aggregate": 86661,
+        "providerTotal": 86661
+      },
+      "requestedThinking": "medium",
+      "routeLatencyMs": 0,
+      "routeChoices": [],
+      "classifierCalls": 2
+    },
+    {
+      "id": "main-schedule-glm-r1",
+      "attempt": "main-schedule-glm-r1-a1",
+      "directory": "pilot-e348087/main-schedule-available",
+      "runnerVersion": "teop-runner-v1",
+      "role": "main",
+      "task": "schedule",
+      "arm": "glm",
+      "passed": true,
+      "reason": "independently verified optimal feasible schedule",
+      "focusUsage": {
+        "input": 28002,
+        "output": 12670,
+        "cacheRead": 20672,
+        "cacheWrite": 0,
+        "aggregate": 61344,
+        "providerTotal": 61344
+      },
+      "mainUsage": {
+        "input": 26603,
+        "output": 12614,
+        "cacheRead": 20672,
+        "cacheWrite": 0,
+        "aggregate": 59889,
+        "providerTotal": 59889
+      },
+      "workerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierUsage": {
+        "input": 1399,
+        "output": 56,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 1455,
+        "providerTotal": 1455
+      },
+      "classifierMainUsage": {
+        "input": 1399,
+        "output": 56,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 1455,
+        "providerTotal": 1455
+      },
+      "classifierWorkerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "totalUsage": {
+        "input": 28002,
+        "output": 12670,
+        "cacheRead": 20672,
+        "cacheWrite": 0,
+        "aggregate": 61344,
+        "providerTotal": 61344
+      },
+      "wallMs": 231769.80071700003,
+      "workerMs": 0,
+      "models": [
+        "zai/glm-5.3-flash"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 59889,
+      "literalChatReports": 3,
+      "chatCalls": 3,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 28002,
+        "output": 12670,
+        "cacheRead": 20672,
+        "cacheWrite": 0,
+        "aggregate": 61344,
+        "providerTotal": 61344
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 28002,
+        "output": 12670,
+        "cacheRead": 20672,
+        "cacheWrite": 0,
+        "aggregate": 61344,
+        "providerTotal": 61344
+      },
+      "requestedThinking": "medium",
+      "routeLatencyMs": 0,
+      "routeChoices": [],
+      "classifierCalls": 1
+    },
+    {
+      "id": "main-schedule-rules-r1",
+      "attempt": "main-schedule-rules-r1-a1",
+      "directory": "pilot-e348087/main-schedule-available",
+      "runnerVersion": "teop-runner-v1",
+      "role": "main",
+      "task": "schedule",
+      "arm": "rules",
+      "passed": true,
+      "reason": "independently verified optimal feasible schedule",
+      "focusUsage": {
+        "input": 12453,
+        "output": 1056,
+        "cacheRead": 19328,
+        "cacheWrite": 0,
+        "aggregate": 32837,
+        "providerTotal": 32837
+      },
+      "mainUsage": {
+        "input": 11156,
+        "output": 1000,
+        "cacheRead": 19328,
+        "cacheWrite": 0,
+        "aggregate": 31484,
+        "providerTotal": 31484
+      },
+      "workerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierUsage": {
+        "input": 1297,
+        "output": 56,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 1353,
+        "providerTotal": 1353
+      },
+      "classifierMainUsage": {
+        "input": 1297,
+        "output": 56,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 1353,
+        "providerTotal": 1353
+      },
+      "classifierWorkerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "totalUsage": {
+        "input": 12453,
+        "output": 1056,
+        "cacheRead": 19328,
+        "cacheWrite": 0,
+        "aggregate": 32837,
+        "providerTotal": 32837
+      },
+      "wallMs": 28105.74207,
+      "workerMs": 0,
+      "models": [
+        "openai-codex/gpt-6.1-sol"
+      ],
+      "thinking": [
+        "medium"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 31484,
+      "literalChatReports": 3,
+      "chatCalls": 3,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 12453,
+        "output": 1056,
+        "cacheRead": 19328,
+        "cacheWrite": 0,
+        "aggregate": 32837,
+        "providerTotal": 32837
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 12453,
+        "output": 1056,
+        "cacheRead": 19328,
+        "cacheWrite": 0,
+        "aggregate": 32837,
+        "providerTotal": 32837
+      },
+      "requestedThinking": "medium",
+      "routeLatencyMs": 0.92763100000343,
+      "routeChoices": [
+        {
+          "selected": "virtual-models/rules-v1",
+          "dispatched": "openai-codex/gpt-6.1-sol",
+          "reason": "rule-choice",
+          "requestedThinking": "medium",
+          "effectiveThinking": "medium",
+          "latencyMs": 0.7670839999998407,
+          "classifierStatus": null,
+          "classifierAttempted": false
+        }
+      ],
+      "classifierCalls": 1
+    },
+    {
+      "id": "main-schedule-sol-r1",
+      "attempt": "main-schedule-sol-r1-a1",
+      "directory": "pilot-e348087/main-schedule-available",
+      "runnerVersion": "teop-runner-v1",
+      "role": "main",
+      "task": "schedule",
+      "arm": "sol",
+      "passed": true,
+      "reason": "independently verified optimal feasible schedule",
+      "focusUsage": {
+        "input": 12425,
+        "output": 1056,
+        "cacheRead": 19328,
+        "cacheWrite": 0,
+        "aggregate": 32809,
+        "providerTotal": 32809
+      },
+      "mainUsage": {
+        "input": 11145,
+        "output": 1000,
+        "cacheRead": 19328,
+        "cacheWrite": 0,
+        "aggregate": 31473,
+        "providerTotal": 31473
+      },
+      "workerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierUsage": {
+        "input": 1280,
+        "output": 56,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 1336,
+        "providerTotal": 1336
+      },
+      "classifierMainUsage": {
+        "input": 1280,
+        "output": 56,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 1336,
+        "providerTotal": 1336
+      },
+      "classifierWorkerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "totalUsage": {
+        "input": 12425,
+        "output": 1056,
+        "cacheRead": 19328,
+        "cacheWrite": 0,
+        "aggregate": 32809,
+        "providerTotal": 32809
+      },
+      "wallMs": 25560.481956999996,
+      "workerMs": 0,
+      "models": [
+        "openai-codex/gpt-6.1-sol"
+      ],
+      "thinking": [
+        "medium"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 31473,
+      "literalChatReports": 3,
+      "chatCalls": 3,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 12425,
+        "output": 1056,
+        "cacheRead": 19328,
+        "cacheWrite": 0,
+        "aggregate": 32809,
+        "providerTotal": 32809
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 12425,
+        "output": 1056,
+        "cacheRead": 19328,
+        "cacheWrite": 0,
+        "aggregate": 32809,
+        "providerTotal": 32809
+      },
+      "requestedThinking": "medium",
+      "routeLatencyMs": 0,
+      "routeChoices": [],
+      "classifierCalls": 1
+    },
+    {
+      "id": "worker-boundaries-glm-r1",
+      "attempt": "worker-boundaries-glm-r1-a1",
+      "directory": "pilot-e348087/worker-boundaries-available",
+      "runnerVersion": "teop-runner-v1",
+      "role": "worker",
+      "task": "boundaries",
+      "arm": "glm",
+      "passed": true,
+      "reason": "matched independent reference",
+      "focusUsage": {
+        "input": 29525,
+        "output": 2042,
+        "cacheRead": 45248,
+        "cacheWrite": 0,
+        "aggregate": 76815,
+        "providerTotal": 76815
+      },
+      "mainUsage": {
+        "input": 11824,
+        "output": 309,
+        "cacheRead": 20224,
+        "cacheWrite": 0,
+        "aggregate": 32357,
+        "providerTotal": 32357
+      },
+      "workerUsage": {
+        "input": 27663,
+        "output": 1930,
+        "cacheRead": 45248,
+        "cacheWrite": 0,
+        "aggregate": 74841,
+        "providerTotal": 74841
+      },
+      "classifierUsage": {
+        "input": 1862,
+        "output": 112,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 1974,
+        "providerTotal": 1974
+      },
+      "classifierMainUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierWorkerUsage": {
+        "input": 1862,
+        "output": 112,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 1974,
+        "providerTotal": 1974
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "totalUsage": {
+        "input": 41349,
+        "output": 2351,
+        "cacheRead": 65472,
+        "cacheWrite": 0,
+        "aggregate": 109172,
+        "providerTotal": 109172
+      },
+      "wallMs": 75540.50957600001,
+      "workerMs": 62801,
+      "models": [
+        "zai/glm-5.3-flash"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 107198,
+      "literalChatReports": 8,
+      "chatCalls": 8,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 29525,
+        "output": 2042,
+        "cacheRead": 45248,
+        "cacheWrite": 0,
+        "aggregate": 76815,
+        "providerTotal": 76815
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 41349,
+        "output": 2351,
+        "cacheRead": 65472,
+        "cacheWrite": 0,
+        "aggregate": 109172,
+        "providerTotal": 109172
+      },
+      "requestedThinking": "high",
+      "routeLatencyMs": 0,
+      "routeChoices": [],
+      "classifierCalls": 2
+    },
+    {
+      "id": "worker-boundaries-rules-r1",
+      "attempt": "worker-boundaries-rules-r1-a1",
+      "directory": "pilot-e348087/worker-boundaries-available",
+      "runnerVersion": "teop-runner-v1",
+      "role": "worker",
+      "task": "boundaries",
+      "arm": "rules",
+      "passed": true,
+      "reason": "matched independent reference",
+      "focusUsage": {
+        "input": 20273,
+        "output": 1832,
+        "cacheRead": 52672,
+        "cacheWrite": 0,
+        "aggregate": 74777,
+        "providerTotal": 74777
+      },
+      "mainUsage": {
+        "input": 11880,
+        "output": 294,
+        "cacheRead": 20224,
+        "cacheWrite": 0,
+        "aggregate": 32398,
+        "providerTotal": 32398
+      },
+      "workerUsage": {
+        "input": 20273,
+        "output": 1832,
+        "cacheRead": 52672,
+        "cacheWrite": 0,
+        "aggregate": 74777,
+        "providerTotal": 74777
+      },
+      "classifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierMainUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierWorkerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "totalUsage": {
+        "input": 32153,
+        "output": 2126,
+        "cacheRead": 72896,
+        "cacheWrite": 0,
+        "aggregate": 107175,
+        "providerTotal": 107175
+      },
+      "wallMs": 69381.48609399999,
+      "workerMs": 55881,
+      "models": [
+        "zai/glm-5.3-flash"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 107175,
+      "literalChatReports": 8,
+      "chatCalls": 8,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 20273,
+        "output": 1832,
+        "cacheRead": 52672,
+        "cacheWrite": 0,
+        "aggregate": 74777,
+        "providerTotal": 74777
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 32153,
+        "output": 2126,
+        "cacheRead": 72896,
+        "cacheWrite": 0,
+        "aggregate": 107175,
+        "providerTotal": 107175
+      },
+      "requestedThinking": "high",
+      "routeLatencyMs": 1.6502490000011676,
+      "routeChoices": [
+        {
+          "selected": "virtual-models/rules-v1",
+          "dispatched": "zai/glm-5.3-flash",
+          "reason": "rule-choice",
+          "requestedThinking": "high",
+          "effectiveThinking": "high",
+          "latencyMs": 0.7773999999999432,
+          "classifierStatus": null,
+          "classifierAttempted": false
+        }
+      ],
+      "classifierCalls": 0
+    },
+    {
+      "id": "main-diagnosis-jev-r1",
+      "attempt": "main-diagnosis-jev-r1-a1",
+      "directory": "pilot-runner-v2/main-diagnosis-jev-r1",
+      "runnerVersion": "teop-runner-v2",
+      "role": "main",
+      "task": "diagnosis",
+      "arm": "jev",
+      "passed": true,
+      "reason": "matched independent reference",
+      "focusUsage": {
+        "input": 26844,
+        "output": 1042,
+        "cacheRead": 14976,
+        "cacheWrite": 0,
+        "aggregate": 42862,
+        "providerTotal": 42862
+      },
+      "mainUsage": {
+        "input": 23459,
+        "output": 834,
+        "cacheRead": 14976,
+        "cacheWrite": 0,
+        "aggregate": 39269,
+        "providerTotal": 39269
+      },
+      "workerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierUsage": {
+        "input": 3385,
+        "output": 208,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 3593,
+        "providerTotal": 3593
+      },
+      "classifierMainUsage": {
+        "input": 3385,
+        "output": 208,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 3593,
+        "providerTotal": 3593
+      },
+      "classifierWorkerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "routerClassifierUsage": {
+        "input": 538,
+        "output": 40,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 578,
+        "providerTotal": 578
+      },
+      "totalUsage": {
+        "input": 26844,
+        "output": 1042,
+        "cacheRead": 14976,
+        "cacheWrite": 0,
+        "aggregate": 42862,
+        "providerTotal": 42862
+      },
+      "wallMs": 14272.246226000001,
+      "workerMs": 0,
+      "models": [
+        "opencode-go/deepseek-v4.1-flash"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 39269,
+      "literalChatReports": 3,
+      "chatCalls": 3,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 26844,
+        "output": 1042,
+        "cacheRead": 14976,
+        "cacheWrite": 0,
+        "aggregate": 42862,
+        "providerTotal": 42862
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 26844,
+        "output": 1042,
+        "cacheRead": 14976,
+        "cacheWrite": 0,
+        "aggregate": 42862,
+        "providerTotal": 42862
+      },
+      "requestedThinking": "medium",
+      "routeLatencyMs": 221.7938679999993,
+      "routeChoices": [
+        {
+          "selected": "virtual-models/jev-v1",
+          "dispatched": "opencode-go/deepseek-v4.1-flash",
+          "reason": "classifier-choice",
+          "requestedThinking": "medium",
+          "effectiveThinking": "high",
+          "latencyMs": 219.7070719999997,
+          "classifierStatus": "ok",
+          "classifierAttempted": true
+        }
+      ],
+      "classifierCalls": 4
+    },
+    {
+      "id": "main-diagnosis-rules-r1",
+      "attempt": "main-diagnosis-rules-r1-a1",
+      "directory": "pilot-runner-v2/main-diagnosis-rules-r1",
+      "runnerVersion": "teop-runner-v2",
+      "role": "main",
+      "task": "diagnosis",
+      "arm": "rules",
+      "passed": true,
+      "reason": "matched independent reference",
+      "focusUsage": {
+        "input": 16705,
+        "output": 1495,
+        "cacheRead": 70272,
+        "cacheWrite": 0,
+        "aggregate": 88472,
+        "providerTotal": 88472
+      },
+      "mainUsage": {
+        "input": 12870,
+        "output": 1271,
+        "cacheRead": 70272,
+        "cacheWrite": 0,
+        "aggregate": 84413,
+        "providerTotal": 84413
+      },
+      "workerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierUsage": {
+        "input": 3835,
+        "output": 224,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 4059,
+        "providerTotal": 4059
+      },
+      "classifierMainUsage": {
+        "input": 3835,
+        "output": 224,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 4059,
+        "providerTotal": 4059
+      },
+      "classifierWorkerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "totalUsage": {
+        "input": 16705,
+        "output": 1495,
+        "cacheRead": 70272,
+        "cacheWrite": 0,
+        "aggregate": 88472,
+        "providerTotal": 88472
+      },
+      "wallMs": 21715.149972,
+      "workerMs": 0,
+      "models": [
+        "opencode-go/deepseek-v4.1-flash"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 84413,
+      "literalChatReports": 6,
+      "chatCalls": 6,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 16705,
+        "output": 1495,
+        "cacheRead": 70272,
+        "cacheWrite": 0,
+        "aggregate": 88472,
+        "providerTotal": 88472
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 16705,
+        "output": 1495,
+        "cacheRead": 70272,
+        "cacheWrite": 0,
+        "aggregate": 88472,
+        "providerTotal": 88472
+      },
+      "requestedThinking": "medium",
+      "routeLatencyMs": 8.997906999997213,
+      "routeChoices": [
+        {
+          "selected": "virtual-models/rules-v1",
+          "dispatched": "opencode-go/deepseek-v4.1-flash",
+          "reason": "rule-choice",
+          "requestedThinking": "medium",
+          "effectiveThinking": "high",
+          "latencyMs": 7.289998000000196,
+          "classifierStatus": null,
+          "classifierAttempted": false
+        }
+      ],
+      "classifierCalls": 4
+    },
+    {
+      "id": "main-fix-deepseek-r1",
+      "attempt": "main-fix-deepseek-r1-a1",
+      "directory": "pilot-runner-v2/main-fix-deepseek-r1",
+      "runnerVersion": "teop-runner-v2",
+      "role": "main",
+      "task": "fix",
+      "arm": "deepseek",
+      "passed": true,
+      "reason": "matched independent reference",
+      "focusUsage": {
+        "input": 19638,
+        "output": 1519,
+        "cacheRead": 96512,
+        "cacheWrite": 0,
+        "aggregate": 117669,
+        "providerTotal": 117669
+      },
+      "mainUsage": {
+        "input": 13752,
+        "output": 1183,
+        "cacheRead": 96512,
+        "cacheWrite": 0,
+        "aggregate": 111447,
+        "providerTotal": 111447
+      },
+      "workerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierUsage": {
+        "input": 5886,
+        "output": 336,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 6222,
+        "providerTotal": 6222
+      },
+      "classifierMainUsage": {
+        "input": 5886,
+        "output": 336,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 6222,
+        "providerTotal": 6222
+      },
+      "classifierWorkerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "totalUsage": {
+        "input": 19638,
+        "output": 1519,
+        "cacheRead": 96512,
+        "cacheWrite": 0,
+        "aggregate": 117669,
+        "providerTotal": 117669
+      },
+      "wallMs": 35331.679484,
+      "workerMs": 0,
+      "models": [
+        "opencode-go/deepseek-v4.1-flash"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 111447,
+      "literalChatReports": 8,
+      "chatCalls": 8,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 19638,
+        "output": 1519,
+        "cacheRead": 96512,
+        "cacheWrite": 0,
+        "aggregate": 117669,
+        "providerTotal": 117669
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 19638,
+        "output": 1519,
+        "cacheRead": 96512,
+        "cacheWrite": 0,
+        "aggregate": 117669,
+        "providerTotal": 117669
+      },
+      "requestedThinking": "medium",
+      "routeLatencyMs": 0,
+      "routeChoices": [],
+      "classifierCalls": 6
+    },
+    {
+      "id": "main-fix-jev-r1",
+      "attempt": "main-fix-jev-r1-a1",
+      "directory": "pilot-runner-v2/main-fix-jev-r1",
+      "runnerVersion": "teop-runner-v2",
+      "role": "main",
+      "task": "fix",
+      "arm": "jev",
+      "passed": true,
+      "reason": "matched independent reference",
+      "focusUsage": {
+        "input": 18057,
+        "output": 1805,
+        "cacheRead": 100864,
+        "cacheWrite": 0,
+        "aggregate": 120726,
+        "providerTotal": 120726
+      },
+      "mainUsage": {
+        "input": 12762,
+        "output": 1485,
+        "cacheRead": 100864,
+        "cacheWrite": 0,
+        "aggregate": 115111,
+        "providerTotal": 115111
+      },
+      "workerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierUsage": {
+        "input": 5295,
+        "output": 320,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 5615,
+        "providerTotal": 5615
+      },
+      "classifierMainUsage": {
+        "input": 5295,
+        "output": 320,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 5615,
+        "providerTotal": 5615
+      },
+      "classifierWorkerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "routerClassifierUsage": {
+        "input": 569,
+        "output": 40,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 609,
+        "providerTotal": 609
+      },
+      "totalUsage": {
+        "input": 18057,
+        "output": 1805,
+        "cacheRead": 100864,
+        "cacheWrite": 0,
+        "aggregate": 120726,
+        "providerTotal": 120726
+      },
+      "wallMs": 24262.057773,
+      "workerMs": 0,
+      "models": [
+        "opencode-go/deepseek-v4.1-flash"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 115111,
+      "literalChatReports": 8,
+      "chatCalls": 8,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 18057,
+        "output": 1805,
+        "cacheRead": 100864,
+        "cacheWrite": 0,
+        "aggregate": 120726,
+        "providerTotal": 120726
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 18057,
+        "output": 1805,
+        "cacheRead": 100864,
+        "cacheWrite": 0,
+        "aggregate": 120726,
+        "providerTotal": 120726
+      },
+      "requestedThinking": "medium",
+      "routeLatencyMs": 192.5570200000011,
+      "routeChoices": [
+        {
+          "selected": "virtual-models/jev-v1",
+          "dispatched": "opencode-go/deepseek-v4.1-flash",
+          "reason": "classifier-choice",
+          "requestedThinking": "medium",
+          "effectiveThinking": "high",
+          "latencyMs": 189.24596199999996,
+          "classifierStatus": "ok",
+          "classifierAttempted": true
+        }
+      ],
+      "classifierCalls": 6
+    },
+    {
+      "id": "main-fix-rules-r1",
+      "attempt": "main-fix-rules-r1-a1",
+      "directory": "pilot-runner-v2/main-fix-rules-r1",
+      "runnerVersion": "teop-runner-v2",
+      "role": "main",
+      "task": "fix",
+      "arm": "rules",
+      "passed": true,
+      "reason": "matched independent reference",
+      "focusUsage": {
+        "input": 18157,
+        "output": 1178,
+        "cacheRead": 66816,
+        "cacheWrite": 0,
+        "aggregate": 86151,
+        "providerTotal": 86151
+      },
+      "mainUsage": {
+        "input": 14302,
+        "output": 954,
+        "cacheRead": 66816,
+        "cacheWrite": 0,
+        "aggregate": 82072,
+        "providerTotal": 82072
+      },
+      "workerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierUsage": {
+        "input": 3855,
+        "output": 224,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 4079,
+        "providerTotal": 4079
+      },
+      "classifierMainUsage": {
+        "input": 3855,
+        "output": 224,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 4079,
+        "providerTotal": 4079
+      },
+      "classifierWorkerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "totalUsage": {
+        "input": 18157,
+        "output": 1178,
+        "cacheRead": 66816,
+        "cacheWrite": 0,
+        "aggregate": 86151,
+        "providerTotal": 86151
+      },
+      "wallMs": 19076.160929,
+      "workerMs": 0,
+      "models": [
+        "opencode-go/deepseek-v4.1-flash"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 82072,
+      "literalChatReports": 6,
+      "chatCalls": 6,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 18157,
+        "output": 1178,
+        "cacheRead": 66816,
+        "cacheWrite": 0,
+        "aggregate": 86151,
+        "providerTotal": 86151
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 18157,
+        "output": 1178,
+        "cacheRead": 66816,
+        "cacheWrite": 0,
+        "aggregate": 86151,
+        "providerTotal": 86151
+      },
+      "requestedThinking": "medium",
+      "routeLatencyMs": 2.143730999998752,
+      "routeChoices": [
+        {
+          "selected": "virtual-models/rules-v1",
+          "dispatched": "opencode-go/deepseek-v4.1-flash",
+          "reason": "rule-choice",
+          "requestedThinking": "medium",
+          "effectiveThinking": "high",
+          "latencyMs": 1.0025289999998677,
+          "classifierStatus": null,
+          "classifierAttempted": false
+        }
+      ],
+      "classifierCalls": 4
+    },
+    {
+      "id": "main-rename-deepseek-r1",
+      "attempt": "main-rename-deepseek-r1-a1",
+      "directory": "pilot-runner-v2/main-rename-deepseek-r1",
+      "runnerVersion": "teop-runner-v2",
+      "role": "main",
+      "task": "rename",
+      "arm": "deepseek",
+      "passed": true,
+      "reason": "matched independent reference",
+      "focusUsage": {
+        "input": 28150,
+        "output": 3950,
+        "cacheRead": 145536,
+        "cacheWrite": 0,
+        "aggregate": 177636,
+        "providerTotal": 177636
+      },
+      "mainUsage": {
+        "input": 21048,
+        "output": 3558,
+        "cacheRead": 145536,
+        "cacheWrite": 0,
+        "aggregate": 170142,
+        "providerTotal": 170142
+      },
+      "workerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierUsage": {
+        "input": 7102,
+        "output": 392,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 7494,
+        "providerTotal": 7494
+      },
+      "classifierMainUsage": {
+        "input": 7102,
+        "output": 392,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 7494,
+        "providerTotal": 7494
+      },
+      "classifierWorkerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "totalUsage": {
+        "input": 28150,
+        "output": 3950,
+        "cacheRead": 145536,
+        "cacheWrite": 0,
+        "aggregate": 177636,
+        "providerTotal": 177636
+      },
+      "wallMs": 35707.581053,
+      "workerMs": 0,
+      "models": [
+        "opencode-go/deepseek-v4.1-flash"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 170142,
+      "literalChatReports": 8,
+      "chatCalls": 8,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 28150,
+        "output": 3950,
+        "cacheRead": 145536,
+        "cacheWrite": 0,
+        "aggregate": 177636,
+        "providerTotal": 177636
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 28150,
+        "output": 3950,
+        "cacheRead": 145536,
+        "cacheWrite": 0,
+        "aggregate": 177636,
+        "providerTotal": 177636
+      },
+      "requestedThinking": "medium",
+      "routeLatencyMs": 0,
+      "routeChoices": [],
+      "classifierCalls": 7
+    },
+    {
+      "id": "main-rename-jev-r1",
+      "attempt": "main-rename-jev-r1-a1",
+      "directory": "pilot-runner-v2/main-rename-jev-r1",
+      "runnerVersion": "teop-runner-v2",
+      "role": "main",
+      "task": "rename",
+      "arm": "jev",
+      "passed": true,
+      "reason": "matched independent reference",
+      "focusUsage": {
+        "input": 49819,
+        "output": 5123,
+        "cacheRead": 165760,
+        "cacheWrite": 0,
+        "aggregate": 220702,
+        "providerTotal": 220702
+      },
+      "mainUsage": {
+        "input": 35690,
+        "output": 4299,
+        "cacheRead": 165760,
+        "cacheWrite": 0,
+        "aggregate": 205749,
+        "providerTotal": 205749
+      },
+      "workerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierUsage": {
+        "input": 14129,
+        "output": 824,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 14953,
+        "providerTotal": 14953
+      },
+      "classifierMainUsage": {
+        "input": 14129,
+        "output": 824,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 14953,
+        "providerTotal": 14953
+      },
+      "classifierWorkerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "routerClassifierUsage": {
+        "input": 546,
+        "output": 40,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 586,
+        "providerTotal": 586
+      },
+      "totalUsage": {
+        "input": 49819,
+        "output": 5123,
+        "cacheRead": 165760,
+        "cacheWrite": 0,
+        "aggregate": 220702,
+        "providerTotal": 220702
+      },
+      "wallMs": 49039.29757,
+      "workerMs": 0,
+      "models": [
+        "opencode-go/deepseek-v4.1-flash"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 205749,
+      "literalChatReports": 10,
+      "chatCalls": 10,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 49819,
+        "output": 5123,
+        "cacheRead": 165760,
+        "cacheWrite": 0,
+        "aggregate": 220702,
+        "providerTotal": 220702
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 49819,
+        "output": 5123,
+        "cacheRead": 165760,
+        "cacheWrite": 0,
+        "aggregate": 220702,
+        "providerTotal": 220702
+      },
+      "requestedThinking": "medium",
+      "routeLatencyMs": 163.27826799999684,
+      "routeChoices": [
+        {
+          "selected": "virtual-models/jev-v1",
+          "dispatched": "opencode-go/deepseek-v4.1-flash",
+          "reason": "classifier-choice",
+          "requestedThinking": "medium",
+          "effectiveThinking": "high",
+          "latencyMs": 160.53465300000016,
+          "classifierStatus": "ok",
+          "classifierAttempted": true
+        }
+      ],
+      "classifierCalls": 15
+    },
+    {
+      "id": "main-rename-rules-r1",
+      "attempt": "main-rename-rules-r1-a1",
+      "directory": "pilot-runner-v2/main-rename-rules-r1",
+      "runnerVersion": "teop-runner-v2",
+      "role": "main",
+      "task": "rename",
+      "arm": "rules",
+      "passed": true,
+      "reason": "matched independent reference",
+      "focusUsage": {
+        "input": 23042,
+        "output": 3059,
+        "cacheRead": 114432,
+        "cacheWrite": 0,
+        "aggregate": 140533,
+        "providerTotal": 140533
+      },
+      "mainUsage": {
+        "input": 16208,
+        "output": 2667,
+        "cacheRead": 114432,
+        "cacheWrite": 0,
+        "aggregate": 133307,
+        "providerTotal": 133307
+      },
+      "workerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierUsage": {
+        "input": 6834,
+        "output": 392,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 7226,
+        "providerTotal": 7226
+      },
+      "classifierMainUsage": {
+        "input": 6834,
+        "output": 392,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 7226,
+        "providerTotal": 7226
+      },
+      "classifierWorkerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "totalUsage": {
+        "input": 23042,
+        "output": 3059,
+        "cacheRead": 114432,
+        "cacheWrite": 0,
+        "aggregate": 140533,
+        "providerTotal": 140533
+      },
+      "wallMs": 28106.589418000003,
+      "workerMs": 0,
+      "models": [
+        "opencode-go/deepseek-v4.1-flash"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 133307,
+      "literalChatReports": 8,
+      "chatCalls": 8,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 23042,
+        "output": 3059,
+        "cacheRead": 114432,
+        "cacheWrite": 0,
+        "aggregate": 140533,
+        "providerTotal": 140533
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 23042,
+        "output": 3059,
+        "cacheRead": 114432,
+        "cacheWrite": 0,
+        "aggregate": 140533,
+        "providerTotal": 140533
+      },
+      "requestedThinking": "medium",
+      "routeLatencyMs": 5.607788999996956,
+      "routeChoices": [
+        {
+          "selected": "virtual-models/rules-v1",
+          "dispatched": "opencode-go/deepseek-v4.1-flash",
+          "reason": "rule-choice",
+          "requestedThinking": "medium",
+          "effectiveThinking": "high",
+          "latencyMs": 2.940034000000196,
+          "classifierStatus": null,
+          "classifierAttempted": false
+        }
+      ],
+      "classifierCalls": 7
+    },
+    {
+      "id": "main-review-deepseek-r1",
+      "attempt": "main-review-deepseek-r1-a1",
+      "directory": "pilot-runner-v2/main-review-deepseek-r1",
+      "runnerVersion": "teop-runner-v2",
+      "role": "main",
+      "task": "review",
+      "arm": "deepseek",
+      "passed": true,
+      "reason": "matched independent review reference",
+      "focusUsage": {
+        "input": 44352,
+        "output": 4749,
+        "cacheRead": 225664,
+        "cacheWrite": 0,
+        "aggregate": 274765,
+        "providerTotal": 274765
+      },
+      "mainUsage": {
+        "input": 30799,
+        "output": 3965,
+        "cacheRead": 225664,
+        "cacheWrite": 0,
+        "aggregate": 260428,
+        "providerTotal": 260428
+      },
+      "workerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierUsage": {
+        "input": 13553,
+        "output": 784,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 14337,
+        "providerTotal": 14337
+      },
+      "classifierMainUsage": {
+        "input": 13553,
+        "output": 784,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 14337,
+        "providerTotal": 14337
+      },
+      "classifierWorkerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "totalUsage": {
+        "input": 44352,
+        "output": 4749,
+        "cacheRead": 225664,
+        "cacheWrite": 0,
+        "aggregate": 274765,
+        "providerTotal": 274765
+      },
+      "wallMs": 33437.533919,
+      "workerMs": 0,
+      "models": [
+        "opencode-go/deepseek-v4.1-flash"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 260428,
+      "literalChatReports": 10,
+      "chatCalls": 10,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 44352,
+        "output": 4749,
+        "cacheRead": 225664,
+        "cacheWrite": 0,
+        "aggregate": 274765,
+        "providerTotal": 274765
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 44352,
+        "output": 4749,
+        "cacheRead": 225664,
+        "cacheWrite": 0,
+        "aggregate": 274765,
+        "providerTotal": 274765
+      },
+      "requestedThinking": "medium",
+      "routeLatencyMs": 0,
+      "routeChoices": [],
+      "classifierCalls": 14
+    },
+    {
+      "id": "main-review-jev-r1",
+      "attempt": "main-review-jev-r1-a1",
+      "directory": "pilot-runner-v2/main-review-jev-r1",
+      "runnerVersion": "teop-runner-v2",
+      "role": "main",
+      "task": "review",
+      "arm": "jev",
+      "passed": true,
+      "reason": "matched independent review reference",
+      "focusUsage": {
+        "input": 26915,
+        "output": 610,
+        "cacheRead": 36480,
+        "cacheWrite": 0,
+        "aggregate": 64005,
+        "providerTotal": 64005
+      },
+      "mainUsage": {
+        "input": 25348,
+        "output": 515,
+        "cacheRead": 36480,
+        "cacheWrite": 0,
+        "aggregate": 62343,
+        "providerTotal": 62343
+      },
+      "workerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierUsage": {
+        "input": 1567,
+        "output": 95,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 1662,
+        "providerTotal": 1662
+      },
+      "classifierMainUsage": {
+        "input": 1567,
+        "output": 95,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 1662,
+        "providerTotal": 1662
+      },
+      "classifierWorkerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "routerClassifierUsage": {
+        "input": 561,
+        "output": 39,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 600,
+        "providerTotal": 600
+      },
+      "totalUsage": {
+        "input": 26915,
+        "output": 610,
+        "cacheRead": 36480,
+        "cacheWrite": 0,
+        "aggregate": 64005,
+        "providerTotal": 64005
+      },
+      "wallMs": 26444.319388999997,
+      "workerMs": 0,
+      "models": [
+        "openai-codex/gpt-6.1-sol"
+      ],
+      "thinking": [
+        "medium"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 62343,
+      "literalChatReports": 5,
+      "chatCalls": 5,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 26915,
+        "output": 610,
+        "cacheRead": 36480,
+        "cacheWrite": 0,
+        "aggregate": 64005,
+        "providerTotal": 64005
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 26915,
+        "output": 610,
+        "cacheRead": 36480,
+        "cacheWrite": 0,
+        "aggregate": 64005,
+        "providerTotal": 64005
+      },
+      "requestedThinking": "medium",
+      "routeLatencyMs": 171.10503500000095,
+      "routeChoices": [
+        {
+          "selected": "virtual-models/jev-v1",
+          "dispatched": "openai-codex/gpt-6.1-sol",
+          "reason": "classifier-choice",
+          "requestedThinking": "medium",
+          "effectiveThinking": "medium",
+          "latencyMs": 170.44281499999988,
+          "classifierStatus": "ok",
+          "classifierAttempted": true
+        }
+      ],
+      "classifierCalls": 2
+    },
+    {
+      "id": "main-schedule-deepseek-r1",
+      "attempt": "main-schedule-deepseek-r1-a1",
+      "directory": "pilot-runner-v2/main-schedule-deepseek-r1",
+      "runnerVersion": "teop-runner-v2",
+      "role": "main",
+      "task": "schedule",
+      "arm": "deepseek",
+      "passed": true,
+      "reason": "independently verified optimal feasible schedule",
+      "focusUsage": {
+        "input": 63227,
+        "output": 30188,
+        "cacheRead": 833664,
+        "cacheWrite": 0,
+        "aggregate": 927079,
+        "providerTotal": 927079
+      },
+      "mainUsage": {
+        "input": 42898,
+        "output": 29012,
+        "cacheRead": 833664,
+        "cacheWrite": 0,
+        "aggregate": 905574,
+        "providerTotal": 905574
+      },
+      "workerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierUsage": {
+        "input": 20329,
+        "output": 1176,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 21505,
+        "providerTotal": 21505
+      },
+      "classifierMainUsage": {
+        "input": 20329,
+        "output": 1176,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 21505,
+        "providerTotal": 21505
+      },
+      "classifierWorkerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "totalUsage": {
+        "input": 63227,
+        "output": 30188,
+        "cacheRead": 833664,
+        "cacheWrite": 0,
+        "aggregate": 927079,
+        "providerTotal": 927079
+      },
+      "wallMs": 307814.904199,
+      "workerMs": 0,
+      "models": [
+        "opencode-go/deepseek-v4.1-flash"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 905574,
+      "literalChatReports": 34,
+      "chatCalls": 34,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 63227,
+        "output": 30188,
+        "cacheRead": 833664,
+        "cacheWrite": 0,
+        "aggregate": 927079,
+        "providerTotal": 927079
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 63227,
+        "output": 30188,
+        "cacheRead": 833664,
+        "cacheWrite": 0,
+        "aggregate": 927079,
+        "providerTotal": 927079
+      },
+      "requestedThinking": "medium",
+      "routeLatencyMs": 0,
+      "routeChoices": [],
+      "classifierCalls": 21
+    },
+    {
+      "id": "main-schedule-jev-r1",
+      "attempt": "main-schedule-jev-r1-a1",
+      "directory": "pilot-runner-v2/main-schedule-jev-r1",
+      "runnerVersion": "teop-runner-v2",
+      "role": "main",
+      "task": "schedule",
+      "arm": "jev",
+      "passed": true,
+      "reason": "independently verified optimal feasible schedule",
+      "focusUsage": {
+        "input": 13041,
+        "output": 1165,
+        "cacheRead": 19328,
+        "cacheWrite": 0,
+        "aggregate": 33534,
+        "providerTotal": 33534
+      },
+      "mainUsage": {
+        "input": 11173,
+        "output": 1070,
+        "cacheRead": 19328,
+        "cacheWrite": 0,
+        "aggregate": 31571,
+        "providerTotal": 31571
+      },
+      "workerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierUsage": {
+        "input": 1868,
+        "output": 95,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 1963,
+        "providerTotal": 1963
+      },
+      "classifierMainUsage": {
+        "input": 1868,
+        "output": 95,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 1963,
+        "providerTotal": 1963
+      },
+      "classifierWorkerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "routerClassifierUsage": {
+        "input": 606,
+        "output": 39,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 645,
+        "providerTotal": 645
+      },
+      "totalUsage": {
+        "input": 13041,
+        "output": 1165,
+        "cacheRead": 19328,
+        "cacheWrite": 0,
+        "aggregate": 33534,
+        "providerTotal": 33534
+      },
+      "wallMs": 34019.281187,
+      "workerMs": 0,
+      "models": [
+        "openai-codex/gpt-6.1-sol"
+      ],
+      "thinking": [
+        "medium"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 31571,
+      "literalChatReports": 3,
+      "chatCalls": 3,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 13041,
+        "output": 1165,
+        "cacheRead": 19328,
+        "cacheWrite": 0,
+        "aggregate": 33534,
+        "providerTotal": 33534
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 13041,
+        "output": 1165,
+        "cacheRead": 19328,
+        "cacheWrite": 0,
+        "aggregate": 33534,
+        "providerTotal": 33534
+      },
+      "requestedThinking": "medium",
+      "routeLatencyMs": 133.71087399999737,
+      "routeChoices": [
+        {
+          "selected": "virtual-models/jev-v1",
+          "dispatched": "openai-codex/gpt-6.1-sol",
+          "reason": "classifier-choice",
+          "requestedThinking": "medium",
+          "effectiveThinking": "medium",
+          "latencyMs": 133.4536230000001,
+          "classifierStatus": "ok",
+          "classifierAttempted": true
+        }
+      ],
+      "classifierCalls": 2
+    },
+    {
+      "id": "worker-boundaries-jev-r1",
+      "attempt": "worker-boundaries-jev-r1-a1",
+      "directory": "pilot-runner-v2/worker-boundaries-jev-r1",
+      "runnerVersion": "teop-runner-v2",
+      "role": "worker",
+      "task": "boundaries",
+      "arm": "jev",
+      "passed": true,
+      "reason": "matched independent reference",
+      "focusUsage": {
+        "input": 27634,
+        "output": 2291,
+        "cacheRead": 24384,
+        "cacheWrite": 0,
+        "aggregate": 54309,
+        "providerTotal": 54309
+      },
+      "mainUsage": {
+        "input": 7728,
+        "output": 291,
+        "cacheRead": 24832,
+        "cacheWrite": 0,
+        "aggregate": 32851,
+        "providerTotal": 32851
+      },
+      "workerUsage": {
+        "input": 27006,
+        "output": 2252,
+        "cacheRead": 24384,
+        "cacheWrite": 0,
+        "aggregate": 53642,
+        "providerTotal": 53642
+      },
+      "classifierUsage": {
+        "input": 628,
+        "output": 39,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 667,
+        "providerTotal": 667
+      },
+      "classifierMainUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierWorkerUsage": {
+        "input": 628,
+        "output": 39,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 667,
+        "providerTotal": 667
+      },
+      "routerClassifierUsage": {
+        "input": 628,
+        "output": 39,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 667,
+        "providerTotal": 667
+      },
+      "totalUsage": {
+        "input": 35362,
+        "output": 2582,
+        "cacheRead": 49216,
+        "cacheWrite": 0,
+        "aggregate": 87160,
+        "providerTotal": 87160
+      },
+      "wallMs": 92470.087692,
+      "workerMs": 77836,
+      "models": [
+        "zai/glm-5.3-flash"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 86493,
+      "literalChatReports": 7,
+      "chatCalls": 7,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 27634,
+        "output": 2291,
+        "cacheRead": 24384,
+        "cacheWrite": 0,
+        "aggregate": 54309,
+        "providerTotal": 54309
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 35362,
+        "output": 2582,
+        "cacheRead": 49216,
+        "cacheWrite": 0,
+        "aggregate": 87160,
+        "providerTotal": 87160
+      },
+      "requestedThinking": "high",
+      "routeLatencyMs": 121.17126000000667,
+      "routeChoices": [
+        {
+          "selected": "virtual-models/jev-v1",
+          "dispatched": "zai/glm-5.3-flash",
+          "reason": "classifier-choice",
+          "requestedThinking": "high",
+          "effectiveThinking": "high",
+          "latencyMs": 119.5153130000001,
+          "classifierStatus": "ok",
+          "classifierAttempted": true
+        }
+      ],
+      "classifierCalls": 1
+    },
+    {
+      "id": "worker-diagnosis-glm-r1",
+      "attempt": "worker-diagnosis-glm-r1-a1",
+      "directory": "pilot-runner-v2/worker-diagnosis-glm-r1",
+      "runnerVersion": "teop-runner-v2",
+      "role": "worker",
+      "task": "diagnosis",
+      "arm": "glm",
+      "passed": true,
+      "reason": "matched independent reference",
+      "focusUsage": {
+        "input": 11169,
+        "output": 939,
+        "cacheRead": 32512,
+        "cacheWrite": 0,
+        "aggregate": 44620,
+        "providerTotal": 44620
+      },
+      "mainUsage": {
+        "input": 11591,
+        "output": 255,
+        "cacheRead": 31232,
+        "cacheWrite": 0,
+        "aggregate": 43078,
+        "providerTotal": 43078
+      },
+      "workerUsage": {
+        "input": 9227,
+        "output": 827,
+        "cacheRead": 32512,
+        "cacheWrite": 0,
+        "aggregate": 42566,
+        "providerTotal": 42566
+      },
+      "classifierUsage": {
+        "input": 1942,
+        "output": 112,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 2054,
+        "providerTotal": 2054
+      },
+      "classifierMainUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierWorkerUsage": {
+        "input": 1942,
+        "output": 112,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 2054,
+        "providerTotal": 2054
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "totalUsage": {
+        "input": 22760,
+        "output": 1194,
+        "cacheRead": 63744,
+        "cacheWrite": 0,
+        "aggregate": 87698,
+        "providerTotal": 87698
+      },
+      "wallMs": 88867.061654,
+      "workerMs": 49295,
+      "models": [
+        "zai/glm-5.3-flash"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 85644,
+      "literalChatReports": 9,
+      "chatCalls": 9,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 11169,
+        "output": 939,
+        "cacheRead": 32512,
+        "cacheWrite": 0,
+        "aggregate": 44620,
+        "providerTotal": 44620
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 22760,
+        "output": 1194,
+        "cacheRead": 63744,
+        "cacheWrite": 0,
+        "aggregate": 87698,
+        "providerTotal": 87698
+      },
+      "requestedThinking": "high",
+      "routeLatencyMs": 0,
+      "routeChoices": [],
+      "classifierCalls": 2
+    },
+    {
+      "id": "worker-diagnosis-jev-r1",
+      "attempt": "worker-diagnosis-jev-r1-a1",
+      "directory": "pilot-runner-v2/worker-diagnosis-jev-r1",
+      "runnerVersion": "teop-runner-v2",
+      "role": "worker",
+      "task": "diagnosis",
+      "arm": "jev",
+      "passed": true,
+      "reason": "matched independent reference",
+      "focusUsage": {
+        "input": null,
+        "output": null,
+        "cacheRead": null,
+        "cacheWrite": null,
+        "aggregate": null,
+        "providerTotal": null
+      },
+      "mainUsage": {
+        "input": 11639,
+        "output": 253,
+        "cacheRead": 30976,
+        "cacheWrite": 0,
+        "aggregate": 42868,
+        "providerTotal": 42868
+      },
+      "workerUsage": {
+        "input": null,
+        "output": null,
+        "cacheRead": null,
+        "cacheWrite": null,
+        "aggregate": null,
+        "providerTotal": null
+      },
+      "classifierUsage": {
+        "input": 3492,
+        "output": 208,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 3700,
+        "providerTotal": 3700
+      },
+      "classifierMainUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierWorkerUsage": {
+        "input": 3492,
+        "output": 208,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 3700,
+        "providerTotal": 3700
+      },
+      "routerClassifierUsage": {
+        "input": 590,
+        "output": 40,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 630,
+        "providerTotal": 630
+      },
+      "totalUsage": {
+        "input": null,
+        "output": null,
+        "cacheRead": null,
+        "cacheWrite": null,
+        "aggregate": null,
+        "providerTotal": null
+      },
+      "wallMs": 84383.228029,
+      "workerMs": 26733,
+      "models": [
+        "opencode-go/deepseek-v4.1-flash"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 1,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": null,
+      "literalChatReports": 8,
+      "chatCalls": 9,
+      "literalChatMatchesAggregate": null,
+      "focusKnownLowerBoundUsage": {
+        "input": 13410,
+        "output": 1382,
+        "cacheRead": 26368,
+        "cacheWrite": 0,
+        "aggregate": 41160,
+        "providerTotal": 41160
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 25049,
+        "output": 1635,
+        "cacheRead": 57344,
+        "cacheWrite": 0,
+        "aggregate": 84028,
+        "providerTotal": 84028
+      },
+      "requestedThinking": "high",
+      "routeLatencyMs": 208.28107799999907,
+      "routeChoices": [
+        {
+          "selected": "virtual-models/jev-v1",
+          "dispatched": "opencode-go/deepseek-v4.1-flash",
+          "reason": "classifier-choice",
+          "requestedThinking": "high",
+          "effectiveThinking": "high",
+          "latencyMs": 206.3072689999999,
+          "classifierStatus": "ok",
+          "classifierAttempted": true
+        }
+      ],
+      "classifierCalls": 4
+    },
+    {
+      "id": "worker-diagnosis-rules-r1",
+      "attempt": "worker-diagnosis-rules-r1-a1",
+      "directory": "pilot-runner-v2/worker-diagnosis-rules-r1",
+      "runnerVersion": "teop-runner-v2",
+      "role": "worker",
+      "task": "diagnosis",
+      "arm": "rules",
+      "passed": true,
+      "reason": "matched independent reference",
+      "focusUsage": {
+        "input": 11323,
+        "output": 906,
+        "cacheRead": 25984,
+        "cacheWrite": 0,
+        "aggregate": 38213,
+        "providerTotal": 38213
+      },
+      "mainUsage": {
+        "input": 11553,
+        "output": 257,
+        "cacheRead": 30848,
+        "cacheWrite": 0,
+        "aggregate": 42658,
+        "providerTotal": 42658
+      },
+      "workerUsage": {
+        "input": 9390,
+        "output": 794,
+        "cacheRead": 25984,
+        "cacheWrite": 0,
+        "aggregate": 36168,
+        "providerTotal": 36168
+      },
+      "classifierUsage": {
+        "input": 1933,
+        "output": 112,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 2045,
+        "providerTotal": 2045
+      },
+      "classifierMainUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierWorkerUsage": {
+        "input": 1933,
+        "output": 112,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 2045,
+        "providerTotal": 2045
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "totalUsage": {
+        "input": 22876,
+        "output": 1163,
+        "cacheRead": 56832,
+        "cacheWrite": 0,
+        "aggregate": 80871,
+        "providerTotal": 80871
+      },
+      "wallMs": 74524.621948,
+      "workerMs": 21632,
+      "models": [
+        "opencode-go/deepseek-v4.1-flash"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 78826,
+      "literalChatReports": 8,
+      "chatCalls": 8,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 11323,
+        "output": 906,
+        "cacheRead": 25984,
+        "cacheWrite": 0,
+        "aggregate": 38213,
+        "providerTotal": 38213
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 22876,
+        "output": 1163,
+        "cacheRead": 56832,
+        "cacheWrite": 0,
+        "aggregate": 80871,
+        "providerTotal": 80871
+      },
+      "requestedThinking": "high",
+      "routeLatencyMs": 2.155627999998387,
+      "routeChoices": [
+        {
+          "selected": "virtual-models/rules-v1",
+          "dispatched": "opencode-go/deepseek-v4.1-flash",
+          "reason": "rule-choice",
+          "requestedThinking": "high",
+          "effectiveThinking": "high",
+          "latencyMs": 1.4818290000000616,
+          "classifierStatus": null,
+          "classifierAttempted": false
+        }
+      ],
+      "classifierCalls": 2
+    },
+    {
+      "id": "worker-fix-glm-r1",
+      "attempt": "worker-fix-glm-r1-a1",
+      "directory": "pilot-runner-v2/worker-fix-glm-r1",
+      "runnerVersion": "teop-runner-v2",
+      "role": "worker",
+      "task": "fix",
+      "arm": "glm",
+      "passed": true,
+      "reason": "matched independent reference",
+      "focusUsage": {
+        "input": 13055,
+        "output": 1416,
+        "cacheRead": 43200,
+        "cacheWrite": 0,
+        "aggregate": 57671,
+        "providerTotal": 57671
+      },
+      "mainUsage": {
+        "input": 11703,
+        "output": 270,
+        "cacheRead": 30848,
+        "cacheWrite": 0,
+        "aggregate": 42821,
+        "providerTotal": 42821
+      },
+      "workerUsage": {
+        "input": 10043,
+        "output": 1248,
+        "cacheRead": 43200,
+        "cacheWrite": 0,
+        "aggregate": 54491,
+        "providerTotal": 54491
+      },
+      "classifierUsage": {
+        "input": 3012,
+        "output": 168,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 3180,
+        "providerTotal": 3180
+      },
+      "classifierMainUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierWorkerUsage": {
+        "input": 3012,
+        "output": 168,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 3180,
+        "providerTotal": 3180
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "totalUsage": {
+        "input": 24758,
+        "output": 1686,
+        "cacheRead": 74048,
+        "cacheWrite": 0,
+        "aggregate": 100492,
+        "providerTotal": 100492
+      },
+      "wallMs": 102044.136082,
+      "workerMs": 64637,
+      "models": [
+        "zai/glm-5.3-flash"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 97312,
+      "literalChatReports": 10,
+      "chatCalls": 10,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 13055,
+        "output": 1416,
+        "cacheRead": 43200,
+        "cacheWrite": 0,
+        "aggregate": 57671,
+        "providerTotal": 57671
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 24758,
+        "output": 1686,
+        "cacheRead": 74048,
+        "cacheWrite": 0,
+        "aggregate": 100492,
+        "providerTotal": 100492
+      },
+      "requestedThinking": "high",
+      "routeLatencyMs": 0,
+      "routeChoices": [],
+      "classifierCalls": 3
+    },
+    {
+      "id": "worker-fix-jev-r1",
+      "attempt": "worker-fix-jev-r1-a1",
+      "directory": "pilot-runner-v2/worker-fix-jev-r1",
+      "runnerVersion": "teop-runner-v2",
+      "role": "worker",
+      "task": "fix",
+      "arm": "jev",
+      "passed": true,
+      "reason": "matched independent reference",
+      "focusUsage": {
+        "input": 14308,
+        "output": 1144,
+        "cacheRead": 43904,
+        "cacheWrite": 0,
+        "aggregate": 59356,
+        "providerTotal": 59356
+      },
+      "mainUsage": {
+        "input": 11061,
+        "output": 274,
+        "cacheRead": 30976,
+        "cacheWrite": 0,
+        "aggregate": 42311,
+        "providerTotal": 42311
+      },
+      "workerUsage": {
+        "input": 10631,
+        "output": 936,
+        "cacheRead": 43904,
+        "cacheWrite": 0,
+        "aggregate": 55471,
+        "providerTotal": 55471
+      },
+      "classifierUsage": {
+        "input": 3677,
+        "output": 208,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 3885,
+        "providerTotal": 3885
+      },
+      "classifierMainUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierWorkerUsage": {
+        "input": 3677,
+        "output": 208,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 3885,
+        "providerTotal": 3885
+      },
+      "routerClassifierUsage": {
+        "input": 621,
+        "output": 40,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 661,
+        "providerTotal": 661
+      },
+      "totalUsage": {
+        "input": 25369,
+        "output": 1418,
+        "cacheRead": 74880,
+        "cacheWrite": 0,
+        "aggregate": 101667,
+        "providerTotal": 101667
+      },
+      "wallMs": 73761.907523,
+      "workerMs": 36109,
+      "models": [
+        "opencode-go/deepseek-v4.1-flash"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 97782,
+      "literalChatReports": 10,
+      "chatCalls": 10,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 14308,
+        "output": 1144,
+        "cacheRead": 43904,
+        "cacheWrite": 0,
+        "aggregate": 59356,
+        "providerTotal": 59356
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 25369,
+        "output": 1418,
+        "cacheRead": 74880,
+        "cacheWrite": 0,
+        "aggregate": 101667,
+        "providerTotal": 101667
+      },
+      "requestedThinking": "high",
+      "routeLatencyMs": 190.74869799999806,
+      "routeChoices": [
+        {
+          "selected": "virtual-models/jev-v1",
+          "dispatched": "opencode-go/deepseek-v4.1-flash",
+          "reason": "classifier-choice",
+          "requestedThinking": "high",
+          "effectiveThinking": "high",
+          "latencyMs": 189.168811,
+          "classifierStatus": "ok",
+          "classifierAttempted": true
+        }
+      ],
+      "classifierCalls": 4
+    },
+    {
+      "id": "worker-fix-rules-r1",
+      "attempt": "worker-fix-rules-r1-a1",
+      "directory": "pilot-runner-v2/worker-fix-rules-r1",
+      "runnerVersion": "teop-runner-v2",
+      "role": "worker",
+      "task": "fix",
+      "arm": "rules",
+      "passed": true,
+      "reason": "matched independent reference",
+      "focusUsage": {
+        "input": 21071,
+        "output": 999,
+        "cacheRead": 25984,
+        "cacheWrite": 0,
+        "aggregate": 48054,
+        "providerTotal": 48054
+      },
+      "mainUsage": {
+        "input": 11187,
+        "output": 272,
+        "cacheRead": 30976,
+        "cacheWrite": 0,
+        "aggregate": 42435,
+        "providerTotal": 42435
+      },
+      "workerUsage": {
+        "input": 19045,
+        "output": 887,
+        "cacheRead": 25984,
+        "cacheWrite": 0,
+        "aggregate": 45916,
+        "providerTotal": 45916
+      },
+      "classifierUsage": {
+        "input": 2026,
+        "output": 112,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 2138,
+        "providerTotal": 2138
+      },
+      "classifierMainUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierWorkerUsage": {
+        "input": 2026,
+        "output": 112,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 2138,
+        "providerTotal": 2138
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "totalUsage": {
+        "input": 32258,
+        "output": 1271,
+        "cacheRead": 56960,
+        "cacheWrite": 0,
+        "aggregate": 90489,
+        "providerTotal": 90489
+      },
+      "wallMs": 64012.557723,
+      "workerMs": 28003,
+      "models": [
+        "opencode-go/deepseek-v4.1-flash"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 88351,
+      "literalChatReports": 9,
+      "chatCalls": 9,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 21071,
+        "output": 999,
+        "cacheRead": 25984,
+        "cacheWrite": 0,
+        "aggregate": 48054,
+        "providerTotal": 48054
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 32258,
+        "output": 1271,
+        "cacheRead": 56960,
+        "cacheWrite": 0,
+        "aggregate": 90489,
+        "providerTotal": 90489
+      },
+      "requestedThinking": "high",
+      "routeLatencyMs": 1.570628000001534,
+      "routeChoices": [
+        {
+          "selected": "virtual-models/rules-v1",
+          "dispatched": "opencode-go/deepseek-v4.1-flash",
+          "reason": "rule-choice",
+          "requestedThinking": "high",
+          "effectiveThinking": "high",
+          "latencyMs": 0.7162940000000617,
+          "classifierStatus": null,
+          "classifierAttempted": false
+        }
+      ],
+      "classifierCalls": 2
+    },
+    {
+      "id": "worker-rename-glm-r1",
+      "attempt": "worker-rename-glm-r1-a1",
+      "directory": "pilot-runner-v2/worker-rename-glm-r1",
+      "runnerVersion": "teop-runner-v2",
+      "role": "worker",
+      "task": "rename",
+      "arm": "glm",
+      "passed": false,
+      "reason": "Independent worktree check failed",
+      "focusUsage": {
+        "input": 24392,
+        "output": 3815,
+        "cacheRead": 77376,
+        "cacheWrite": 0,
+        "aggregate": 105583,
+        "providerTotal": 105583
+      },
+      "mainUsage": {
+        "input": 11709,
+        "output": 243,
+        "cacheRead": 30976,
+        "cacheWrite": 0,
+        "aggregate": 42928,
+        "providerTotal": 42928
+      },
+      "workerUsage": {
+        "input": 17371,
+        "output": 3423,
+        "cacheRead": 77376,
+        "cacheWrite": 0,
+        "aggregate": 98170,
+        "providerTotal": 98170
+      },
+      "classifierUsage": {
+        "input": 7021,
+        "output": 392,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 7413,
+        "providerTotal": 7413
+      },
+      "classifierMainUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierWorkerUsage": {
+        "input": 7021,
+        "output": 392,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 7413,
+        "providerTotal": 7413
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "totalUsage": {
+        "input": 36101,
+        "output": 4058,
+        "cacheRead": 108352,
+        "cacheWrite": 0,
+        "aggregate": 148511,
+        "providerTotal": 148511
+      },
+      "wallMs": 184922.353623,
+      "workerMs": 146465,
+      "models": [
+        "zai/glm-5.3-flash"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 141098,
+      "literalChatReports": 12,
+      "chatCalls": 12,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 24392,
+        "output": 3815,
+        "cacheRead": 77376,
+        "cacheWrite": 0,
+        "aggregate": 105583,
+        "providerTotal": 105583
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 36101,
+        "output": 4058,
+        "cacheRead": 108352,
+        "cacheWrite": 0,
+        "aggregate": 148511,
+        "providerTotal": 148511
+      },
+      "requestedThinking": "high",
+      "routeLatencyMs": 0,
+      "routeChoices": [],
+      "classifierCalls": 7
+    },
+    {
+      "id": "worker-rename-jev-r1",
+      "attempt": "worker-rename-jev-r1-a1",
+      "directory": "pilot-runner-v2/worker-rename-jev-r1",
+      "runnerVersion": "teop-runner-v2",
+      "role": "worker",
+      "task": "rename",
+      "arm": "jev",
+      "passed": true,
+      "reason": "matched independent reference",
+      "focusUsage": {
+        "input": 26884,
+        "output": 6228,
+        "cacheRead": 152192,
+        "cacheWrite": 0,
+        "aggregate": 185304,
+        "providerTotal": 185304
+      },
+      "mainUsage": {
+        "input": 21327,
+        "output": 245,
+        "cacheRead": 21376,
+        "cacheWrite": 0,
+        "aggregate": 42948,
+        "providerTotal": 42948
+      },
+      "workerUsage": {
+        "input": 13864,
+        "output": 5516,
+        "cacheRead": 152192,
+        "cacheWrite": 0,
+        "aggregate": 171572,
+        "providerTotal": 171572
+      },
+      "classifierUsage": {
+        "input": 13020,
+        "output": 712,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 13732,
+        "providerTotal": 13732
+      },
+      "classifierMainUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierWorkerUsage": {
+        "input": 13020,
+        "output": 712,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 13732,
+        "providerTotal": 13732
+      },
+      "routerClassifierUsage": {
+        "input": 598,
+        "output": 40,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 638,
+        "providerTotal": 638
+      },
+      "totalUsage": {
+        "input": 48211,
+        "output": 6473,
+        "cacheRead": 173568,
+        "cacheWrite": 0,
+        "aggregate": 228252,
+        "providerTotal": 228252
+      },
+      "wallMs": 98778.654399,
+      "workerMs": 62319,
+      "models": [
+        "opencode-go/deepseek-v4.1-flash"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 214520,
+      "literalChatReports": 15,
+      "chatCalls": 15,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 26884,
+        "output": 6228,
+        "cacheRead": 152192,
+        "cacheWrite": 0,
+        "aggregate": 185304,
+        "providerTotal": 185304
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 48211,
+        "output": 6473,
+        "cacheRead": 173568,
+        "cacheWrite": 0,
+        "aggregate": 228252,
+        "providerTotal": 228252
+      },
+      "requestedThinking": "high",
+      "routeLatencyMs": 143.97901399999773,
+      "routeChoices": [
+        {
+          "selected": "virtual-models/jev-v1",
+          "dispatched": "opencode-go/deepseek-v4.1-flash",
+          "reason": "classifier-choice",
+          "requestedThinking": "high",
+          "effectiveThinking": "high",
+          "latencyMs": 141.657913,
+          "classifierStatus": "ok",
+          "classifierAttempted": true
+        }
+      ],
+      "classifierCalls": 13
+    },
+    {
+      "id": "worker-rename-rules-r1",
+      "attempt": "worker-rename-rules-r1-a1",
+      "directory": "pilot-runner-v2/worker-rename-rules-r1",
+      "runnerVersion": "teop-runner-v2",
+      "role": "worker",
+      "task": "rename",
+      "arm": "rules",
+      "passed": true,
+      "reason": "matched independent reference",
+      "focusUsage": {
+        "input": 31611,
+        "output": 3033,
+        "cacheRead": 105984,
+        "cacheWrite": 0,
+        "aggregate": 140628,
+        "providerTotal": 140628
+      },
+      "mainUsage": {
+        "input": 11399,
+        "output": 245,
+        "cacheRead": 30464,
+        "cacheWrite": 0,
+        "aggregate": 42108,
+        "providerTotal": 42108
+      },
+      "workerUsage": {
+        "input": 21675,
+        "output": 2473,
+        "cacheRead": 105984,
+        "cacheWrite": 0,
+        "aggregate": 130132,
+        "providerTotal": 130132
+      },
+      "classifierUsage": {
+        "input": 9936,
+        "output": 560,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 10496,
+        "providerTotal": 10496
+      },
+      "classifierMainUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierWorkerUsage": {
+        "input": 9936,
+        "output": 560,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 10496,
+        "providerTotal": 10496
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "totalUsage": {
+        "input": 43010,
+        "output": 3278,
+        "cacheRead": 136448,
+        "cacheWrite": 0,
+        "aggregate": 182736,
+        "providerTotal": 182736
+      },
+      "wallMs": 78981.343804,
+      "workerMs": 41955,
+      "models": [
+        "opencode-go/deepseek-v4.1-flash"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 172240,
+      "literalChatReports": 12,
+      "chatCalls": 12,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 31611,
+        "output": 3033,
+        "cacheRead": 105984,
+        "cacheWrite": 0,
+        "aggregate": 140628,
+        "providerTotal": 140628
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 43010,
+        "output": 3278,
+        "cacheRead": 136448,
+        "cacheWrite": 0,
+        "aggregate": 182736,
+        "providerTotal": 182736
+      },
+      "requestedThinking": "high",
+      "routeLatencyMs": 2.0142410000016753,
+      "routeChoices": [
+        {
+          "selected": "virtual-models/rules-v1",
+          "dispatched": "opencode-go/deepseek-v4.1-flash",
+          "reason": "rule-choice",
+          "requestedThinking": "high",
+          "effectiveThinking": "high",
+          "latencyMs": 0.6846820000000662,
+          "classifierStatus": null,
+          "classifierAttempted": false
+        }
+      ],
+      "classifierCalls": 10
+    },
+    {
+      "id": "worker-review-glm-r1",
+      "attempt": "worker-review-glm-r1-a1",
+      "directory": "pilot-runner-v2/worker-review-glm-r1",
+      "runnerVersion": "teop-runner-v2",
+      "role": "worker",
+      "task": "review",
+      "arm": "glm",
+      "passed": true,
+      "reason": "matched independent review reference",
+      "focusUsage": {
+        "input": 23021,
+        "output": 2653,
+        "cacheRead": 30080,
+        "cacheWrite": 0,
+        "aggregate": 55754,
+        "providerTotal": 55754
+      },
+      "mainUsage": {
+        "input": 11953,
+        "output": 235,
+        "cacheRead": 20224,
+        "cacheWrite": 0,
+        "aggregate": 32412,
+        "providerTotal": 32412
+      },
+      "workerUsage": {
+        "input": 21105,
+        "output": 2541,
+        "cacheRead": 30080,
+        "cacheWrite": 0,
+        "aggregate": 53726,
+        "providerTotal": 53726
+      },
+      "classifierUsage": {
+        "input": 1916,
+        "output": 112,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 2028,
+        "providerTotal": 2028
+      },
+      "classifierMainUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierWorkerUsage": {
+        "input": 1916,
+        "output": 112,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 2028,
+        "providerTotal": 2028
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "totalUsage": {
+        "input": 34974,
+        "output": 2888,
+        "cacheRead": 50304,
+        "cacheWrite": 0,
+        "aggregate": 88166,
+        "providerTotal": 88166
+      },
+      "wallMs": 111748.25968,
+      "workerMs": 95213,
+      "models": [
+        "zai/glm-5.3-flash"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 86138,
+      "literalChatReports": 8,
+      "chatCalls": 8,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 23021,
+        "output": 2653,
+        "cacheRead": 30080,
+        "cacheWrite": 0,
+        "aggregate": 55754,
+        "providerTotal": 55754
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 34974,
+        "output": 2888,
+        "cacheRead": 50304,
+        "cacheWrite": 0,
+        "aggregate": 88166,
+        "providerTotal": 88166
+      },
+      "requestedThinking": "high",
+      "routeLatencyMs": 0,
+      "routeChoices": [],
+      "classifierCalls": 2
+    },
+    {
+      "id": "worker-review-jev-r1",
+      "attempt": "worker-review-jev-r1-a1",
+      "directory": "pilot-runner-v2/worker-review-jev-r1",
+      "runnerVersion": "teop-runner-v2",
+      "role": "worker",
+      "task": "review",
+      "arm": "jev",
+      "passed": true,
+      "reason": "matched independent review reference",
+      "focusUsage": {
+        "input": 34802,
+        "output": 927,
+        "cacheRead": 66944,
+        "cacheWrite": 0,
+        "aggregate": 102673,
+        "providerTotal": 102673
+      },
+      "mainUsage": {
+        "input": 17753,
+        "output": 288,
+        "cacheRead": 24960,
+        "cacheWrite": 0,
+        "aggregate": 43001,
+        "providerTotal": 43001
+      },
+      "workerUsage": {
+        "input": 34198,
+        "output": 888,
+        "cacheRead": 66944,
+        "cacheWrite": 0,
+        "aggregate": 102030,
+        "providerTotal": 102030
+      },
+      "classifierUsage": {
+        "input": 604,
+        "output": 39,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 643,
+        "providerTotal": 643
+      },
+      "classifierMainUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierWorkerUsage": {
+        "input": 604,
+        "output": 39,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 643,
+        "providerTotal": 643
+      },
+      "routerClassifierUsage": {
+        "input": 604,
+        "output": 39,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 643,
+        "providerTotal": 643
+      },
+      "totalUsage": {
+        "input": 52555,
+        "output": 1215,
+        "cacheRead": 91904,
+        "cacheWrite": 0,
+        "aggregate": 145674,
+        "providerTotal": 145674
+      },
+      "wallMs": 70778.640193,
+      "workerMs": 45027,
+      "models": [
+        "openai-codex/gpt-6.1-sol"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 145031,
+      "literalChatReports": 12,
+      "chatCalls": 12,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 34802,
+        "output": 927,
+        "cacheRead": 66944,
+        "cacheWrite": 0,
+        "aggregate": 102673,
+        "providerTotal": 102673
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 52555,
+        "output": 1215,
+        "cacheRead": 91904,
+        "cacheWrite": 0,
+        "aggregate": 145674,
+        "providerTotal": 145674
+      },
+      "requestedThinking": "high",
+      "routeLatencyMs": 139.83574499999736,
+      "routeChoices": [
+        {
+          "selected": "virtual-models/jev-v1",
+          "dispatched": "openai-codex/gpt-6.1-sol",
+          "reason": "classifier-choice",
+          "requestedThinking": "high",
+          "effectiveThinking": "high",
+          "latencyMs": 137.67710599999987,
+          "classifierStatus": "ok",
+          "classifierAttempted": true
+        }
+      ],
+      "classifierCalls": 1
+    },
+    {
+      "id": "worker-review-rules-r1",
+      "attempt": "worker-review-rules-r1-a1",
+      "directory": "pilot-runner-v2/worker-review-rules-r1",
+      "runnerVersion": "teop-runner-v2",
+      "role": "worker",
+      "task": "review",
+      "arm": "rules",
+      "passed": true,
+      "reason": "matched independent review reference",
+      "focusUsage": {
+        "input": 25101,
+        "output": 904,
+        "cacheRead": 69504,
+        "cacheWrite": 0,
+        "aggregate": 95509,
+        "providerTotal": 95509
+      },
+      "mainUsage": {
+        "input": 6957,
+        "output": 262,
+        "cacheRead": 24448,
+        "cacheWrite": 0,
+        "aggregate": 31667,
+        "providerTotal": 31667
+      },
+      "workerUsage": {
+        "input": 25101,
+        "output": 904,
+        "cacheRead": 69504,
+        "cacheWrite": 0,
+        "aggregate": 95509,
+        "providerTotal": 95509
+      },
+      "classifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierMainUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierWorkerUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "totalUsage": {
+        "input": 32058,
+        "output": 1166,
+        "cacheRead": 93952,
+        "cacheWrite": 0,
+        "aggregate": 127176,
+        "providerTotal": 127176
+      },
+      "wallMs": 68410.244268,
+      "workerMs": 52348,
+      "models": [
+        "openai-codex/gpt-6.1-sol"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 127176,
+      "literalChatReports": 11,
+      "chatCalls": 11,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 25101,
+        "output": 904,
+        "cacheRead": 69504,
+        "cacheWrite": 0,
+        "aggregate": 95509,
+        "providerTotal": 95509
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 32058,
+        "output": 1166,
+        "cacheRead": 93952,
+        "cacheWrite": 0,
+        "aggregate": 127176,
+        "providerTotal": 127176
+      },
+      "requestedThinking": "high",
+      "routeLatencyMs": 2.625245999994604,
+      "routeChoices": [
+        {
+          "selected": "virtual-models/rules-v1",
+          "dispatched": "openai-codex/gpt-6.1-sol",
+          "reason": "rule-choice",
+          "requestedThinking": "high",
+          "effectiveThinking": "high",
+          "latencyMs": 0.9408619999999246,
+          "classifierStatus": null,
+          "classifierAttempted": false
+        }
+      ],
+      "classifierCalls": 0
+    },
+    {
+      "id": "worker-schedule-glm-r1",
+      "attempt": "worker-schedule-glm-r1-a1",
+      "directory": "pilot-runner-v2/worker-schedule-glm-r1",
+      "runnerVersion": "teop-runner-v2",
+      "role": "worker",
+      "task": "schedule",
+      "arm": "glm",
+      "passed": true,
+      "reason": "independently verified optimal feasible schedule",
+      "focusUsage": {
+        "input": 23572,
+        "output": 9732,
+        "cacheRead": 7168,
+        "cacheWrite": 0,
+        "aggregate": 40472,
+        "providerTotal": 40472
+      },
+      "mainUsage": {
+        "input": 23854,
+        "output": 364,
+        "cacheRead": 9600,
+        "cacheWrite": 0,
+        "aggregate": 33818,
+        "providerTotal": 33818
+      },
+      "workerUsage": {
+        "input": 21573,
+        "output": 9676,
+        "cacheRead": 7168,
+        "cacheWrite": 0,
+        "aggregate": 38417,
+        "providerTotal": 38417
+      },
+      "classifierUsage": {
+        "input": 1999,
+        "output": 56,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 2055,
+        "providerTotal": 2055
+      },
+      "classifierMainUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierWorkerUsage": {
+        "input": 1999,
+        "output": 56,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 2055,
+        "providerTotal": 2055
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "totalUsage": {
+        "input": 47426,
+        "output": 10096,
+        "cacheRead": 16768,
+        "cacheWrite": 0,
+        "aggregate": 74290,
+        "providerTotal": 74290
+      },
+      "wallMs": 267318.134318,
+      "workerMs": 251159,
+      "models": [
+        "zai/glm-5.3-flash"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 72235,
+      "literalChatReports": 6,
+      "chatCalls": 6,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 23572,
+        "output": 9732,
+        "cacheRead": 7168,
+        "cacheWrite": 0,
+        "aggregate": 40472,
+        "providerTotal": 40472
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 47426,
+        "output": 10096,
+        "cacheRead": 16768,
+        "cacheWrite": 0,
+        "aggregate": 74290,
+        "providerTotal": 74290
+      },
+      "requestedThinking": "high",
+      "routeLatencyMs": 0,
+      "routeChoices": [],
+      "classifierCalls": 1
+    },
+    {
+      "id": "worker-schedule-jev-r1",
+      "attempt": "worker-schedule-jev-r1-a1",
+      "directory": "pilot-runner-v2/worker-schedule-jev-r1",
+      "runnerVersion": "teop-runner-v2",
+      "role": "worker",
+      "task": "schedule",
+      "arm": "jev",
+      "passed": true,
+      "reason": "independently verified optimal feasible schedule",
+      "focusUsage": {
+        "input": 8410,
+        "output": 1196,
+        "cacheRead": 12160,
+        "cacheWrite": 0,
+        "aggregate": 21766,
+        "providerTotal": 21766
+      },
+      "mainUsage": {
+        "input": 11601,
+        "output": 365,
+        "cacheRead": 20096,
+        "cacheWrite": 0,
+        "aggregate": 32062,
+        "providerTotal": 32062
+      },
+      "workerUsage": {
+        "input": 6404,
+        "output": 1101,
+        "cacheRead": 12160,
+        "cacheWrite": 0,
+        "aggregate": 19665,
+        "providerTotal": 19665
+      },
+      "classifierUsage": {
+        "input": 2006,
+        "output": 95,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 2101,
+        "providerTotal": 2101
+      },
+      "classifierMainUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierWorkerUsage": {
+        "input": 2006,
+        "output": 95,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 2101,
+        "providerTotal": 2101
+      },
+      "routerClassifierUsage": {
+        "input": 649,
+        "output": 39,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 688,
+        "providerTotal": 688
+      },
+      "totalUsage": {
+        "input": 20011,
+        "output": 1561,
+        "cacheRead": 32256,
+        "cacheWrite": 0,
+        "aggregate": 53828,
+        "providerTotal": 53828
+      },
+      "wallMs": 58968.239943,
+      "workerMs": 33144,
+      "models": [
+        "openai-codex/gpt-6.1-sol"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 51727,
+      "literalChatReports": 6,
+      "chatCalls": 6,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 8410,
+        "output": 1196,
+        "cacheRead": 12160,
+        "cacheWrite": 0,
+        "aggregate": 21766,
+        "providerTotal": 21766
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 20011,
+        "output": 1561,
+        "cacheRead": 32256,
+        "cacheWrite": 0,
+        "aggregate": 53828,
+        "providerTotal": 53828
+      },
+      "requestedThinking": "high",
+      "routeLatencyMs": 117.85254400000076,
+      "routeChoices": [
+        {
+          "selected": "virtual-models/jev-v1",
+          "dispatched": "openai-codex/gpt-6.1-sol",
+          "reason": "classifier-choice",
+          "requestedThinking": "high",
+          "effectiveThinking": "high",
+          "latencyMs": 117.41674499999999,
+          "classifierStatus": "ok",
+          "classifierAttempted": true
+        }
+      ],
+      "classifierCalls": 2
+    },
+    {
+      "id": "worker-schedule-rules-r1",
+      "attempt": "worker-schedule-rules-r1-a1",
+      "directory": "pilot-runner-v2/worker-schedule-rules-r1",
+      "runnerVersion": "teop-runner-v2",
+      "role": "worker",
+      "task": "schedule",
+      "arm": "rules",
+      "passed": true,
+      "reason": "independently verified optimal feasible schedule",
+      "focusUsage": {
+        "input": 9121,
+        "output": 1553,
+        "cacheRead": 11264,
+        "cacheWrite": 0,
+        "aggregate": 21938,
+        "providerTotal": 21938
+      },
+      "mainUsage": {
+        "input": 11526,
+        "output": 368,
+        "cacheRead": 20096,
+        "cacheWrite": 0,
+        "aggregate": 31990,
+        "providerTotal": 31990
+      },
+      "workerUsage": {
+        "input": 7466,
+        "output": 1497,
+        "cacheRead": 11264,
+        "cacheWrite": 0,
+        "aggregate": 20227,
+        "providerTotal": 20227
+      },
+      "classifierUsage": {
+        "input": 1655,
+        "output": 56,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 1711,
+        "providerTotal": 1711
+      },
+      "classifierMainUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "classifierWorkerUsage": {
+        "input": 1655,
+        "output": 56,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 1711,
+        "providerTotal": 1711
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "totalUsage": {
+        "input": 20647,
+        "output": 1921,
+        "cacheRead": 31360,
+        "cacheWrite": 0,
+        "aggregate": 53928,
+        "providerTotal": 53928
+      },
+      "wallMs": 68363.426765,
+      "workerMs": 49233,
+      "models": [
+        "openai-codex/gpt-6.1-sol"
+      ],
+      "thinking": [
+        "high"
+      ],
+      "retries": 0,
+      "compactions": 0,
+      "switches": 0,
+      "literalChatTotal": 52217,
+      "literalChatReports": 6,
+      "chatCalls": 6,
+      "literalChatMatchesAggregate": true,
+      "focusKnownLowerBoundUsage": {
+        "input": 9121,
+        "output": 1553,
+        "cacheRead": 11264,
+        "cacheWrite": 0,
+        "aggregate": 21938,
+        "providerTotal": 21938
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 20647,
+        "output": 1921,
+        "cacheRead": 31360,
+        "cacheWrite": 0,
+        "aggregate": 53928,
+        "providerTotal": 53928
+      },
+      "requestedThinking": "high",
+      "routeLatencyMs": 4.412013000003753,
+      "routeChoices": [
+        {
+          "selected": "virtual-models/rules-v1",
+          "dispatched": "openai-codex/gpt-6.1-sol",
+          "reason": "rule-choice",
+          "requestedThinking": "high",
+          "effectiveThinking": "high",
+          "latencyMs": 4.019803000000138,
+          "classifierStatus": null,
+          "classifierAttempted": false
+        }
+      ],
+      "classifierCalls": 1
+    }
+  ],
+  "groups": [
+    {
+      "role": "main",
+      "arm": "sol",
+      "cases": 6,
+      "passed": 6,
+      "focusUsage": {
+        "input": 134962,
+        "output": 7023,
+        "cacheRead": 450240,
+        "cacheWrite": 0,
+        "aggregate": 592225,
+        "providerTotal": 592225
+      },
+      "totalUsage": {
+        "input": 134962,
+        "output": 7023,
+        "cacheRead": 450240,
+        "cacheWrite": 0,
+        "aggregate": 592225,
+        "providerTotal": 592225
+      },
+      "mainUsage": {
+        "input": 95221,
+        "output": 3474,
+        "cacheRead": 368128,
+        "cacheWrite": 0,
+        "aggregate": 466823,
+        "providerTotal": 466823
+      },
+      "workerUsage": {
+        "input": 26001,
+        "output": 2765,
+        "cacheRead": 82112,
+        "cacheWrite": 0,
+        "aggregate": 110878,
+        "providerTotal": 110878
+      },
+      "classifierUsage": {
+        "input": 13740,
+        "output": 784,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 14524,
+        "providerTotal": 14524
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "tokensPerSuccess": 98704.16666666667,
+      "seconds": 221.630421585,
+      "focusKnownLowerBoundUsage": {
+        "input": 134962,
+        "output": 7023,
+        "cacheRead": 450240,
+        "cacheWrite": 0,
+        "aggregate": 592225,
+        "providerTotal": 592225
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 134962,
+        "output": 7023,
+        "cacheRead": 450240,
+        "cacheWrite": 0,
+        "aggregate": 592225,
+        "providerTotal": 592225
+      }
+    },
+    {
+      "role": "main",
+      "arm": "deepseek",
+      "cases": 6,
+      "passed": 6,
+      "focusUsage": {
+        "input": 219492,
+        "output": 46264,
+        "cacheRead": 1479168,
+        "cacheWrite": 0,
+        "aggregate": 1744924,
+        "providerTotal": 1744924
+      },
+      "totalUsage": {
+        "input": 219492,
+        "output": 46264,
+        "cacheRead": 1479168,
+        "cacheWrite": 0,
+        "aggregate": 1744924,
+        "providerTotal": 1744924
+      },
+      "mainUsage": {
+        "input": 142346,
+        "output": 40452,
+        "cacheRead": 1431168,
+        "cacheWrite": 0,
+        "aggregate": 1613966,
+        "providerTotal": 1613966
+      },
+      "workerUsage": {
+        "input": 22545,
+        "output": 2676,
+        "cacheRead": 48000,
+        "cacheWrite": 0,
+        "aggregate": 73221,
+        "providerTotal": 73221
+      },
+      "classifierUsage": {
+        "input": 54601,
+        "output": 3136,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 57737,
+        "providerTotal": 57737
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "tokensPerSuccess": 290820.6666666667,
+      "seconds": 533.196128578,
+      "focusKnownLowerBoundUsage": {
+        "input": 219492,
+        "output": 46264,
+        "cacheRead": 1479168,
+        "cacheWrite": 0,
+        "aggregate": 1744924,
+        "providerTotal": 1744924
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 219492,
+        "output": 46264,
+        "cacheRead": 1479168,
+        "cacheWrite": 0,
+        "aggregate": 1744924,
+        "providerTotal": 1744924
+      }
+    },
+    {
+      "role": "main",
+      "arm": "glm",
+      "cases": 6,
+      "passed": 5,
+      "focusUsage": {
+        "input": 172286,
+        "output": 35054,
+        "cacheRead": 844992,
+        "cacheWrite": 0,
+        "aggregate": 1052332,
+        "providerTotal": 1052332
+      },
+      "totalUsage": {
+        "input": 172286,
+        "output": 35054,
+        "cacheRead": 844992,
+        "cacheWrite": 0,
+        "aggregate": 1052332,
+        "providerTotal": 1052332
+      },
+      "mainUsage": {
+        "input": 128391,
+        "output": 31132,
+        "cacheRead": 765824,
+        "cacheWrite": 0,
+        "aggregate": 925347,
+        "providerTotal": 925347
+      },
+      "workerUsage": {
+        "input": 16193,
+        "output": 2354,
+        "cacheRead": 79168,
+        "cacheWrite": 0,
+        "aggregate": 97715,
+        "providerTotal": 97715
+      },
+      "classifierUsage": {
+        "input": 27702,
+        "output": 1568,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 29270,
+        "providerTotal": 29270
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "tokensPerSuccess": 210466.4,
+      "seconds": 857.671404206,
+      "focusKnownLowerBoundUsage": {
+        "input": 172286,
+        "output": 35054,
+        "cacheRead": 844992,
+        "cacheWrite": 0,
+        "aggregate": 1052332,
+        "providerTotal": 1052332
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 172286,
+        "output": 35054,
+        "cacheRead": 844992,
+        "cacheWrite": 0,
+        "aggregate": 1052332,
+        "providerTotal": 1052332
+      }
+    },
+    {
+      "role": "main",
+      "arm": "rules",
+      "cases": 6,
+      "passed": 6,
+      "focusUsage": {
+        "input": 134642,
+        "output": 12731,
+        "cacheRead": 485056,
+        "cacheWrite": 0,
+        "aggregate": 632429,
+        "providerTotal": 632429
+      },
+      "totalUsage": {
+        "input": 134642,
+        "output": 12731,
+        "cacheRead": 485056,
+        "cacheWrite": 0,
+        "aggregate": 632429,
+        "providerTotal": 632429
+      },
+      "mainUsage": {
+        "input": 96489,
+        "output": 9230,
+        "cacheRead": 411456,
+        "cacheWrite": 0,
+        "aggregate": 517175,
+        "providerTotal": 517175
+      },
+      "workerUsage": {
+        "input": 19423,
+        "output": 2437,
+        "cacheRead": 73600,
+        "cacheWrite": 0,
+        "aggregate": 95460,
+        "providerTotal": 95460
+      },
+      "classifierUsage": {
+        "input": 18730,
+        "output": 1064,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 19794,
+        "providerTotal": 19794
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "tokensPerSuccess": 105404.83333333333,
+      "seconds": 257.198000988,
+      "focusKnownLowerBoundUsage": {
+        "input": 134642,
+        "output": 12731,
+        "cacheRead": 485056,
+        "cacheWrite": 0,
+        "aggregate": 632429,
+        "providerTotal": 632429
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 134642,
+        "output": 12731,
+        "cacheRead": 485056,
+        "cacheWrite": 0,
+        "aggregate": 632429,
+        "providerTotal": 632429
+      }
+    },
+    {
+      "role": "main",
+      "arm": "jev",
+      "cases": 6,
+      "passed": 6,
+      "focusUsage": {
+        "input": 177988,
+        "output": 15569,
+        "cacheRead": 478976,
+        "cacheWrite": 0,
+        "aggregate": 672533,
+        "providerTotal": 672533
+      },
+      "totalUsage": {
+        "input": 177988,
+        "output": 15569,
+        "cacheRead": 478976,
+        "cacheWrite": 0,
+        "aggregate": 672533,
+        "providerTotal": 672533
+      },
+      "mainUsage": {
+        "input": 128453,
+        "output": 11816,
+        "cacheRead": 411648,
+        "cacheWrite": 0,
+        "aggregate": 551917,
+        "providerTotal": 551917
+      },
+      "workerUsage": {
+        "input": 22624,
+        "output": 2172,
+        "cacheRead": 67328,
+        "cacheWrite": 0,
+        "aggregate": 92124,
+        "providerTotal": 92124
+      },
+      "classifierUsage": {
+        "input": 26911,
+        "output": 1581,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 28492,
+        "providerTotal": 28492
+      },
+      "routerClassifierUsage": {
+        "input": 3487,
+        "output": 237,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 3724,
+        "providerTotal": 3724
+      },
+      "tokensPerSuccess": 112088.83333333333,
+      "seconds": 280.11534012100003,
+      "focusKnownLowerBoundUsage": {
+        "input": 177988,
+        "output": 15569,
+        "cacheRead": 478976,
+        "cacheWrite": 0,
+        "aggregate": 672533,
+        "providerTotal": 672533
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 177988,
+        "output": 15569,
+        "cacheRead": 478976,
+        "cacheWrite": 0,
+        "aggregate": 672533,
+        "providerTotal": 672533
+      }
+    },
+    {
+      "role": "worker",
+      "arm": "glm",
+      "cases": 6,
+      "passed": 5,
+      "focusUsage": {
+        "input": 124734,
+        "output": 20597,
+        "cacheRead": 235584,
+        "cacheWrite": 0,
+        "aggregate": 380915,
+        "providerTotal": 380915
+      },
+      "totalUsage": {
+        "input": 207368,
+        "output": 22273,
+        "cacheRead": 378688,
+        "cacheWrite": 0,
+        "aggregate": 608329,
+        "providerTotal": 608329
+      },
+      "mainUsage": {
+        "input": 82634,
+        "output": 1676,
+        "cacheRead": 143104,
+        "cacheWrite": 0,
+        "aggregate": 227414,
+        "providerTotal": 227414
+      },
+      "workerUsage": {
+        "input": 106982,
+        "output": 19645,
+        "cacheRead": 235584,
+        "cacheWrite": 0,
+        "aggregate": 362211,
+        "providerTotal": 362211
+      },
+      "classifierUsage": {
+        "input": 17752,
+        "output": 952,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 18704,
+        "providerTotal": 18704
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "tokensPerSuccess": 76183,
+      "seconds": 830.4404549330001,
+      "focusKnownLowerBoundUsage": {
+        "input": 124734,
+        "output": 20597,
+        "cacheRead": 235584,
+        "cacheWrite": 0,
+        "aggregate": 380915,
+        "providerTotal": 380915
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 207368,
+        "output": 22273,
+        "cacheRead": 378688,
+        "cacheWrite": 0,
+        "aggregate": 608329,
+        "providerTotal": 608329
+      }
+    },
+    {
+      "role": "worker",
+      "arm": "rules",
+      "cases": 6,
+      "passed": 6,
+      "focusUsage": {
+        "input": 118500,
+        "output": 9227,
+        "cacheRead": 291392,
+        "cacheWrite": 0,
+        "aggregate": 419119,
+        "providerTotal": 419119
+      },
+      "totalUsage": {
+        "input": 183002,
+        "output": 10925,
+        "cacheRead": 448448,
+        "cacheWrite": 0,
+        "aggregate": 642375,
+        "providerTotal": 642375
+      },
+      "mainUsage": {
+        "input": 64502,
+        "output": 1698,
+        "cacheRead": 157056,
+        "cacheWrite": 0,
+        "aggregate": 223256,
+        "providerTotal": 223256
+      },
+      "workerUsage": {
+        "input": 102950,
+        "output": 8387,
+        "cacheRead": 291392,
+        "cacheWrite": 0,
+        "aggregate": 402729,
+        "providerTotal": 402729
+      },
+      "classifierUsage": {
+        "input": 15550,
+        "output": 840,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 16390,
+        "providerTotal": 16390
+      },
+      "routerClassifierUsage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 0,
+        "providerTotal": 0
+      },
+      "tokensPerSuccess": 69853.16666666667,
+      "seconds": 423.673680602,
+      "focusKnownLowerBoundUsage": {
+        "input": 118500,
+        "output": 9227,
+        "cacheRead": 291392,
+        "cacheWrite": 0,
+        "aggregate": 419119,
+        "providerTotal": 419119
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 183002,
+        "output": 10925,
+        "cacheRead": 448448,
+        "cacheWrite": 0,
+        "aggregate": 642375,
+        "providerTotal": 642375
+      }
+    },
+    {
+      "role": "worker",
+      "arm": "jev",
+      "cases": 6,
+      "passed": 6,
+      "focusUsage": {
+        "input": null,
+        "output": null,
+        "cacheRead": null,
+        "cacheWrite": null,
+        "aggregate": null,
+        "providerTotal": null
+      },
+      "totalUsage": {
+        "input": null,
+        "output": null,
+        "cacheRead": null,
+        "cacheWrite": null,
+        "aggregate": null,
+        "providerTotal": null
+      },
+      "mainUsage": {
+        "input": 81109,
+        "output": 1716,
+        "cacheRead": 153216,
+        "cacheWrite": 0,
+        "aggregate": 236041,
+        "providerTotal": 236041
+      },
+      "workerUsage": {
+        "input": null,
+        "output": null,
+        "cacheRead": null,
+        "cacheWrite": null,
+        "aggregate": null,
+        "providerTotal": null
+      },
+      "classifierUsage": {
+        "input": 23427,
+        "output": 1301,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 24728,
+        "providerTotal": 24728
+      },
+      "routerClassifierUsage": {
+        "input": 3690,
+        "output": 237,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "aggregate": 3927,
+        "providerTotal": 3927
+      },
+      "tokensPerSuccess": null,
+      "seconds": 479.14075777900007,
+      "focusKnownLowerBoundUsage": {
+        "input": 125448,
+        "output": 13168,
+        "cacheRead": 325952,
+        "cacheWrite": 0,
+        "aggregate": 464568,
+        "providerTotal": 464568
+      },
+      "totalKnownLowerBoundUsage": {
+        "input": 206557,
+        "output": 14884,
+        "cacheRead": 479168,
+        "cacheWrite": 0,
+        "aggregate": 700609,
+        "providerTotal": 700609
+      }
+    }
+  ],
+  "pairedDifferences": [
+    {
+      "role": "main",
+      "router": "rules",
+      "baseline": "sol",
+      "task": "boundaries",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": 56908,
+      "tokenPercent": 34.292876641337294,
+      "secondsDifference": 47.20628113599999
+    },
+    {
+      "role": "main",
+      "router": "rules",
+      "baseline": "sol",
+      "task": "diagnosis",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": 35886,
+      "tokenPercent": 68.24249800327084,
+      "secondsDifference": 3.613936093999997
+    },
+    {
+      "role": "main",
+      "router": "rules",
+      "baseline": "sol",
+      "task": "fix",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": -65350,
+      "tokenPercent": -43.135028811691015,
+      "secondsDifference": -14.812269992999997
+    },
+    {
+      "role": "main",
+      "router": "rules",
+      "baseline": "sol",
+      "task": "rename",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": 37812,
+      "tokenPercent": 36.81038930695768,
+      "secondsDifference": -1.8999728500000055
+    },
+    {
+      "role": "main",
+      "router": "rules",
+      "baseline": "sol",
+      "task": "review",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": -25080,
+      "tokenPercent": -28.940353792363346,
+      "secondsDifference": -1.0856550969999808
+    },
+    {
+      "role": "main",
+      "router": "rules",
+      "baseline": "sol",
+      "task": "schedule",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": 28,
+      "tokenPercent": 0.08534243652656283,
+      "secondsDifference": 2.545260113000004
+    },
+    {
+      "role": "main",
+      "router": "rules",
+      "baseline": "deepseek",
+      "task": "boundaries",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": 45742,
+      "tokenPercent": 25.826449780648513,
+      "secondsDifference": 53.77423038099999
+    },
+    {
+      "role": "main",
+      "router": "rules",
+      "baseline": "deepseek",
+      "task": "diagnosis",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": 17810,
+      "tokenPercent": 25.204494636438255,
+      "secondsDifference": -12.351439255999997
+    },
+    {
+      "role": "main",
+      "router": "rules",
+      "baseline": "deepseek",
+      "task": "fix",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": -31518,
+      "tokenPercent": -26.78530454070316,
+      "secondsDifference": -16.255518555
+    },
+    {
+      "role": "main",
+      "router": "rules",
+      "baseline": "deepseek",
+      "task": "rename",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": -37103,
+      "tokenPercent": -20.887094958229188,
+      "secondsDifference": -7.600991634999999
+    },
+    {
+      "role": "main",
+      "router": "rules",
+      "baseline": "deepseek",
+      "task": "review",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": -213184,
+      "tokenPercent": -77.58775681036522,
+      "secondsDifference": -13.855246395999995
+    },
+    {
+      "role": "main",
+      "router": "rules",
+      "baseline": "deepseek",
+      "task": "schedule",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": -894242,
+      "tokenPercent": -96.45801490487865,
+      "secondsDifference": -279.709162129
+    },
+    {
+      "role": "main",
+      "router": "rules",
+      "baseline": "glm",
+      "task": "boundaries",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": 16164,
+      "tokenPercent": 7.820369537135144,
+      "secondsDifference": 5.68547570499999
+    },
+    {
+      "role": "main",
+      "router": "rules",
+      "baseline": "glm",
+      "task": "diagnosis",
+      "available": true,
+      "successDifference": 1,
+      "tokenDifference": 23052,
+      "tokenPercent": 35.236930602262305,
+      "secondsDifference": -17.327839799999996
+    },
+    {
+      "role": "main",
+      "router": "rules",
+      "baseline": "glm",
+      "task": "fix",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": -40492,
+      "tokenPercent": -31.97334238765664,
+      "secondsDifference": -40.122601721
+    },
+    {
+      "role": "main",
+      "router": "rules",
+      "baseline": "glm",
+      "task": "rename",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": -32146,
+      "tokenPercent": -18.61604479988881,
+      "secondsDifference": -129.306517721
+    },
+    {
+      "role": "main",
+      "router": "rules",
+      "baseline": "glm",
+      "task": "review",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": -357974,
+      "tokenPercent": -85.32230577635828,
+      "secondsDifference": -215.737861034
+    },
+    {
+      "role": "main",
+      "router": "rules",
+      "baseline": "glm",
+      "task": "schedule",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": -28507,
+      "tokenPercent": -46.47072248304643,
+      "secondsDifference": -203.66405864700002
+    },
+    {
+      "role": "main",
+      "router": "jev",
+      "baseline": "sol",
+      "task": "boundaries",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": 24757,
+      "tokenPercent": 14.918618595093614,
+      "secondsDifference": 38.672348036000024
+    },
+    {
+      "role": "main",
+      "router": "jev",
+      "baseline": "sol",
+      "task": "diagnosis",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": -9724,
+      "tokenPercent": -18.49161373749667,
+      "secondsDifference": -3.828967652000001
+    },
+    {
+      "role": "main",
+      "router": "jev",
+      "baseline": "sol",
+      "task": "fix",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": -30775,
+      "tokenPercent": -20.31339727130514,
+      "secondsDifference": -9.626373148999999
+    },
+    {
+      "role": "main",
+      "router": "jev",
+      "baseline": "sol",
+      "task": "rename",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": 117981,
+      "tokenPercent": 114.85577437914351,
+      "secondsDifference": 19.032735301999995
+    },
+    {
+      "role": "main",
+      "router": "jev",
+      "baseline": "sol",
+      "task": "review",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": -22656,
+      "tokenPercent": -26.143247827742584,
+      "secondsDifference": 5.776376769000009
+    },
+    {
+      "role": "main",
+      "router": "jev",
+      "baseline": "sol",
+      "task": "schedule",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": 725,
+      "tokenPercent": 2.209759517205645,
+      "secondsDifference": 8.458799230000004
+    },
+    {
+      "role": "main",
+      "router": "jev",
+      "baseline": "deepseek",
+      "task": "boundaries",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": 13591,
+      "tokenPercent": 7.673632087989024,
+      "secondsDifference": 45.24029728100002
+    },
+    {
+      "role": "main",
+      "router": "jev",
+      "baseline": "deepseek",
+      "task": "diagnosis",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": -27800,
+      "tokenPercent": -39.34222071268857,
+      "secondsDifference": -19.794343001999994
+    },
+    {
+      "role": "main",
+      "router": "jev",
+      "baseline": "deepseek",
+      "task": "fix",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": 3057,
+      "tokenPercent": 2.5979654794380846,
+      "secondsDifference": -11.069621711
+    },
+    {
+      "role": "main",
+      "router": "jev",
+      "baseline": "deepseek",
+      "task": "rename",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": 43066,
+      "tokenPercent": 24.243959557747303,
+      "secondsDifference": 13.331716517
+    },
+    {
+      "role": "main",
+      "router": "jev",
+      "baseline": "deepseek",
+      "task": "review",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": -210760,
+      "tokenPercent": -76.70554837770459,
+      "secondsDifference": -6.993214530000005
+    },
+    {
+      "role": "main",
+      "router": "jev",
+      "baseline": "deepseek",
+      "task": "schedule",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": -893545,
+      "tokenPercent": -96.3828325309925,
+      "secondsDifference": -273.795623012
+    },
+    {
+      "role": "main",
+      "router": "jev",
+      "baseline": "glm",
+      "task": "boundaries",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": -15987,
+      "tokenPercent": -7.734734458684703,
+      "secondsDifference": -2.8484573949999756
+    },
+    {
+      "role": "main",
+      "router": "jev",
+      "baseline": "glm",
+      "task": "diagnosis",
+      "available": true,
+      "successDifference": 1,
+      "tokenDifference": -22558,
+      "tokenPercent": -34.48180984408438,
+      "secondsDifference": -24.77074354599999
+    },
+    {
+      "role": "main",
+      "router": "jev",
+      "baseline": "glm",
+      "task": "fix",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": -5917,
+      "tokenPercent": -4.672188751056118,
+      "secondsDifference": -34.936704877000004
+    },
+    {
+      "role": "main",
+      "router": "jev",
+      "baseline": "glm",
+      "task": "rename",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": 48023,
+      "tokenPercent": 27.810561793848702,
+      "secondsDifference": -108.373809569
+    },
+    {
+      "role": "main",
+      "router": "jev",
+      "baseline": "glm",
+      "task": "review",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": -355550,
+      "tokenPercent": -84.7445507740344,
+      "secondsDifference": -208.87582916800002
+    },
+    {
+      "role": "main",
+      "router": "jev",
+      "baseline": "glm",
+      "task": "schedule",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": -27810,
+      "tokenPercent": -45.33450704225352,
+      "secondsDifference": -197.75051953000005
+    },
+    {
+      "role": "worker",
+      "router": "rules",
+      "baseline": "glm",
+      "task": "boundaries",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": -2038,
+      "tokenPercent": -2.653127644340298,
+      "secondsDifference": -6.159023482000019
+    },
+    {
+      "role": "worker",
+      "router": "rules",
+      "baseline": "glm",
+      "task": "diagnosis",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": -6407,
+      "tokenPercent": -14.35903182429404,
+      "secondsDifference": -14.342439706000004
+    },
+    {
+      "role": "worker",
+      "router": "rules",
+      "baseline": "glm",
+      "task": "fix",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": -9617,
+      "tokenPercent": -16.67562553102946,
+      "secondsDifference": -38.031578359
+    },
+    {
+      "role": "worker",
+      "router": "rules",
+      "baseline": "glm",
+      "task": "rename",
+      "available": true,
+      "successDifference": 1,
+      "tokenDifference": 35045,
+      "tokenPercent": 33.191896422719566,
+      "secondsDifference": -105.941009819
+    },
+    {
+      "role": "worker",
+      "router": "rules",
+      "baseline": "glm",
+      "task": "review",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": 39755,
+      "tokenPercent": 71.30430103669691,
+      "secondsDifference": -43.33801541200001
+    },
+    {
+      "role": "worker",
+      "router": "rules",
+      "baseline": "glm",
+      "task": "schedule",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": -18534,
+      "tokenPercent": -45.79462344336825,
+      "secondsDifference": -198.95470755300002
+    },
+    {
+      "role": "worker",
+      "router": "jev",
+      "baseline": "glm",
+      "task": "boundaries",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": -22506,
+      "tokenPercent": -29.298965045889474,
+      "secondsDifference": 16.92957811599999
+    },
+    {
+      "role": "worker",
+      "router": "jev",
+      "baseline": "glm",
+      "task": "diagnosis",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": null,
+      "tokenPercent": null,
+      "secondsDifference": -4.483833624999999
+    },
+    {
+      "role": "worker",
+      "router": "jev",
+      "baseline": "glm",
+      "task": "fix",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": 1685,
+      "tokenPercent": 2.9217457647691214,
+      "secondsDifference": -28.282228558999996
+    },
+    {
+      "role": "worker",
+      "router": "jev",
+      "baseline": "glm",
+      "task": "rename",
+      "available": true,
+      "successDifference": 1,
+      "tokenDifference": 79721,
+      "tokenPercent": 75.5055264578578,
+      "secondsDifference": -86.143699224
+    },
+    {
+      "role": "worker",
+      "router": "jev",
+      "baseline": "glm",
+      "task": "review",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": 46919,
+      "tokenPercent": 84.15360332890914,
+      "secondsDifference": -40.969619487
+    },
+    {
+      "role": "worker",
+      "router": "jev",
+      "baseline": "glm",
+      "task": "schedule",
+      "available": true,
+      "successDifference": 0,
+      "tokenDifference": -18706,
+      "tokenPercent": -46.219608618304015,
+      "secondsDifference": -208.349894375
+    }
+  ],
+  "overallPairedDifferences": [
+    {
+      "routerKnownTokenMinimum": 632429,
+      "tokenDifferenceMinimum": 40204,
+      "tokenPercentMinimum": 6.78863607581578,
+      "role": "main",
+      "router": "rules",
+      "baseline": "sol",
+      "pairedTasks": 6,
+      "routerSuccesses": 6,
+      "baselineSuccesses": 6,
+      "routerTokens": 632429,
+      "baselineTokens": 592225,
+      "tokenDifference": 40204,
+      "tokenPercent": 6.78863607581578,
+      "processSecondsDifference": 35.567579402999996
+    },
+    {
+      "routerKnownTokenMinimum": 632429,
+      "tokenDifferenceMinimum": -1112495,
+      "tokenPercentMinimum": -63.756071897687235,
+      "role": "main",
+      "router": "rules",
+      "baseline": "deepseek",
+      "pairedTasks": 6,
+      "routerSuccesses": 6,
+      "baselineSuccesses": 6,
+      "routerTokens": 632429,
+      "baselineTokens": 1744924,
+      "tokenDifference": -1112495,
+      "tokenPercent": -63.756071897687235,
+      "processSecondsDifference": -275.99812758999997
+    },
+    {
+      "routerKnownTokenMinimum": 632429,
+      "tokenDifferenceMinimum": -419903,
+      "tokenPercentMinimum": -39.90214114937111,
+      "role": "main",
+      "router": "rules",
+      "baseline": "glm",
+      "pairedTasks": 6,
+      "routerSuccesses": 6,
+      "baselineSuccesses": 5,
+      "routerTokens": 632429,
+      "baselineTokens": 1052332,
+      "tokenDifference": -419903,
+      "tokenPercent": -39.90214114937111,
+      "processSecondsDifference": -600.473403218
+    },
+    {
+      "routerKnownTokenMinimum": 672533,
+      "tokenDifferenceMinimum": 80308,
+      "tokenPercentMinimum": 13.5603866773608,
+      "role": "main",
+      "router": "jev",
+      "baseline": "sol",
+      "pairedTasks": 6,
+      "routerSuccesses": 6,
+      "baselineSuccesses": 6,
+      "routerTokens": 672533,
+      "baselineTokens": 592225,
+      "tokenDifference": 80308,
+      "tokenPercent": 13.5603866773608,
+      "processSecondsDifference": 58.48491853600004
+    },
+    {
+      "routerKnownTokenMinimum": 672533,
+      "tokenDifferenceMinimum": -1072391,
+      "tokenPercentMinimum": -61.457748303077956,
+      "role": "main",
+      "router": "jev",
+      "baseline": "deepseek",
+      "pairedTasks": 6,
+      "routerSuccesses": 6,
+      "baselineSuccesses": 6,
+      "routerTokens": 672533,
+      "baselineTokens": 1744924,
+      "tokenDifference": -1072391,
+      "tokenPercent": -61.457748303077956,
+      "processSecondsDifference": -253.08078845699993
+    },
+    {
+      "routerKnownTokenMinimum": 672533,
+      "tokenDifferenceMinimum": -379799,
+      "tokenPercentMinimum": -36.0911765488458,
+      "role": "main",
+      "router": "jev",
+      "baseline": "glm",
+      "pairedTasks": 6,
+      "routerSuccesses": 6,
+      "baselineSuccesses": 5,
+      "routerTokens": 672533,
+      "baselineTokens": 1052332,
+      "tokenDifference": -379799,
+      "tokenPercent": -36.0911765488458,
+      "processSecondsDifference": -577.556064085
+    },
+    {
+      "routerKnownTokenMinimum": 419119,
+      "tokenDifferenceMinimum": 38204,
+      "tokenPercentMinimum": 10.029534148038277,
+      "role": "worker",
+      "router": "rules",
+      "baseline": "glm",
+      "pairedTasks": 6,
+      "routerSuccesses": 6,
+      "baselineSuccesses": 5,
+      "routerTokens": 419119,
+      "baselineTokens": 380915,
+      "tokenDifference": 38204,
+      "tokenPercent": 10.029534148038277,
+      "processSecondsDifference": -406.7667743310001
+    },
+    {
+      "routerKnownTokenMinimum": 464568,
+      "tokenDifferenceMinimum": 83653,
+      "tokenPercentMinimum": 21.961067429741544,
+      "role": "worker",
+      "router": "jev",
+      "baseline": "glm",
+      "pairedTasks": 6,
+      "routerSuccesses": 6,
+      "baselineSuccesses": 5,
+      "routerTokens": null,
+      "baselineTokens": 380915,
+      "tokenDifference": null,
+      "tokenPercent": null,
+      "processSecondsDifference": -351.299697154
+    }
+  ],
+  "interrupted": [
+    {
+      "id": "main-diagnosis-rules-r1-a1",
+      "caseId": "main-diagnosis-rules-r1",
+      "directory": "pilot-e348087/main-diagnosis",
+      "reason": "Provider request failed after retries; attempt is an infrastructure interruption",
+      "originalRecordedUsage": {
+        "input": 14736,
+        "output": 409,
+        "cacheRead": 12032,
+        "cacheWrite": 0,
+        "aggregate": 27177,
+        "providerTotal": 27177
+      },
+      "correctedTotalUsage": {
+        "input": null,
+        "output": null,
+        "cacheRead": null,
+        "cacheWrite": null,
+        "aggregate": null,
+        "providerTotal": null
+      },
+      "knownTokenLowerBound": 27177,
+      "mainErrors": [
+        "429: {\"type\":\"server_error\",\"message\":\"Upstream request failed: Endpoint is unavailable.\"}",
+        "429: {\"type\":\"server_error\",\"message\":\"Upstream request failed: Endpoint is unavailable.\"}",
+        "429: {\"type\":\"server_error\",\"message\":\"Upstream request failed: Endpoint is unavailable.\"}"
+      ],
+      "originalPassed": false,
+      "invalidation": null,
+      "rawEventsRetained": true
+    },
+    {
+      "id": "main-diagnosis-rules-r1-a2",
+      "caseId": "main-diagnosis-rules-r1",
+      "directory": "pilot-e348087/main-diagnosis",
+      "reason": "Provider request failed after retries; attempt is an infrastructure interruption",
+      "originalRecordedUsage": {
+        "input": 11636,
+        "output": 291,
+        "cacheRead": 2176,
+        "cacheWrite": 0,
+        "aggregate": 14103,
+        "providerTotal": 14103
+      },
+      "correctedTotalUsage": {
+        "input": null,
+        "output": null,
+        "cacheRead": null,
+        "cacheWrite": null,
+        "aggregate": null,
+        "providerTotal": null
+      },
+      "knownTokenLowerBound": 14103,
+      "mainErrors": [
+        "429: {\"type\":\"server_error\",\"message\":\"Upstream request failed: Endpoint is unavailable.\"}",
+        "429: {\"type\":\"server_error\",\"message\":\"Upstream request failed: Endpoint is unavailable.\"}"
+      ],
+      "originalPassed": false,
+      "invalidation": null,
+      "rawEventsRetained": true
+    },
+    {
+      "id": "worker-fix-glm-r1-a1",
+      "caseId": "worker-fix-glm-r1",
+      "directory": "pilot-e348087/worker-fix-available",
+      "reason": "Expected exactly one real delegated worker",
+      "originalRecordedUsage": {
+        "input": 10115,
+        "output": 213,
+        "cacheRead": 9600,
+        "cacheWrite": 0,
+        "aggregate": 19928,
+        "providerTotal": 19928
+      },
+      "correctedTotalUsage": {
+        "input": 10115,
+        "output": 213,
+        "cacheRead": 9600,
+        "cacheWrite": 0,
+        "aggregate": 19928,
+        "providerTotal": 19928
+      },
+      "knownTokenLowerBound": 19928,
+      "mainErrors": [],
+      "originalPassed": false,
+      "invalidation": null,
+      "rawEventsRetained": true
+    }
+  ],
+  "invalidated": [
+    {
+      "id": "worker-diagnosis-glm-r1-a1",
+      "caseId": "worker-diagnosis-glm-r1",
+      "directory": "pilot-e348087/worker-diagnosis-available",
+      "reason": "Vitest never loaded the test. The sandbox could not resolve the external dependency symlink. V1 accepted command presence plus the answer instead of the actual expected assertion failure.",
+      "originalRecordedUsage": {
+        "input": 36293,
+        "output": 6693,
+        "cacheRead": 123328,
+        "cacheWrite": 0,
+        "aggregate": 166314,
+        "providerTotal": 166314
+      },
+      "correctedTotalUsage": {
+        "input": 36293,
+        "output": 6693,
+        "cacheRead": 123328,
+        "cacheWrite": 0,
+        "aggregate": 166314,
+        "providerTotal": 166314
+      },
+      "knownTokenLowerBound": 166314,
+      "mainErrors": [],
+      "originalPassed": true,
+      "invalidation": {
+        "directory": "worker-diagnosis-available",
+        "id": "worker-diagnosis-glm-r1-a1",
+        "caseId": "worker-diagnosis-glm-r1",
+        "originalStatus": "completed",
+        "originalPassed": true,
+        "classification": "invalid-infrastructure-evidence",
+        "reason": "Vitest never loaded the test. The sandbox could not resolve the external dependency symlink. V1 accepted command presence plus the answer instead of the actual expected assertion failure.",
+        "rawDataRetained": true,
+        "usageRetained": true,
+        "requiresRerun": true,
+        "approvedBy": "Zero Cool"
+      },
+      "rawEventsRetained": true
+    }
+  ],
+  "smoke": [
+    {
+      "directory": "smoke-e348087",
+      "id": "main-boundaries-jev-r1-a1",
+      "phase": "unscored",
+      "status": "completed",
+      "passed": true,
+      "reason": "matched independent reference",
+      "wallMs": 159651.903896,
+      "originalRecordedUsage": {
+        "input": 67567,
+        "output": 6190,
+        "cacheRead": 149504,
+        "cacheWrite": 0,
+        "aggregate": 223261,
+        "providerTotal": 223261
+      },
+      "correctedTotalUsage": {
+        "input": 67567,
+        "output": 6190,
+        "cacheRead": 149504,
+        "cacheWrite": 0,
+        "aggregate": 223261,
+        "providerTotal": 223261
+      },
+      "knownTokenLowerBound": 223261
+    },
+    {
+      "directory": "smoke-e348087",
+      "id": "main-boundaries-rules-r1-a1",
+      "phase": "unscored",
+      "status": "completed",
+      "passed": true,
+      "reason": "matched independent reference",
+      "wallMs": 135573.280947,
+      "originalRecordedUsage": {
+        "input": 67124,
+        "output": 4944,
+        "cacheRead": 99648,
+        "cacheWrite": 0,
+        "aggregate": 171716,
+        "providerTotal": 171716
+      },
+      "correctedTotalUsage": {
+        "input": 67124,
+        "output": 4944,
+        "cacheRead": 99648,
+        "cacheWrite": 0,
+        "aggregate": 171716,
+        "providerTotal": 171716
+      },
+      "knownTokenLowerBound": 171716
+    },
+    {
+      "directory": "smoke-e348087",
+      "id": "worker-boundaries-jev-r1-a1",
+      "phase": "unscored",
+      "status": "completed",
+      "passed": true,
+      "reason": "matched independent reference",
+      "wallMs": 77641.63755099999,
+      "originalRecordedUsage": {
+        "input": 31339,
+        "output": 2604,
+        "cacheRead": 84096,
+        "cacheWrite": 0,
+        "aggregate": 118039,
+        "providerTotal": 118039
+      },
+      "correctedTotalUsage": {
+        "input": 31339,
+        "output": 2604,
+        "cacheRead": 84096,
+        "cacheWrite": 0,
+        "aggregate": 118039,
+        "providerTotal": 118039
+      },
+      "knownTokenLowerBound": 118039
+    },
+    {
+      "directory": "smoke-e348087",
+      "id": "worker-boundaries-rules-r1-a1",
+      "phase": "unscored",
+      "status": "interrupted",
+      "passed": false,
+      "reason": "Chat subscription or quota exhausted; no substitute allowed",
+      "wallMs": 56920.000113999995,
+      "originalRecordedUsage": {
+        "input": 34771,
+        "output": 2239,
+        "cacheRead": 6784,
+        "cacheWrite": 0,
+        "aggregate": 43794,
+        "providerTotal": 43794
+      },
+      "correctedTotalUsage": {
+        "input": null,
+        "output": null,
+        "cacheRead": null,
+        "cacheWrite": null,
+        "aggregate": null,
+        "providerTotal": null
+      },
+      "knownTokenLowerBound": 43794
+    },
+    {
+      "directory": "smoke-e348087",
+      "id": "worker-boundaries-rules-r1-a2",
+      "phase": "unscored",
+      "status": "completed",
+      "passed": true,
+      "reason": "matched independent reference",
+      "wallMs": 70564.601292,
+      "originalRecordedUsage": {
+        "input": 33774,
+        "output": 1952,
+        "cacheRead": 60672,
+        "cacheWrite": 0,
+        "aggregate": 96398,
+        "providerTotal": 96398
+      },
+      "correctedTotalUsage": {
+        "input": 33774,
+        "output": 1952,
+        "cacheRead": 60672,
+        "cacheWrite": 0,
+        "aggregate": 96398,
+        "providerTotal": 96398
+      },
+      "knownTokenLowerBound": 96398
+    },
+    {
+      "directory": "smoke-runner-v2-f3a2e30",
+      "id": "worker-diagnosis-glm-r1-a1",
+      "phase": "unscored",
+      "status": "completed",
+      "passed": true,
+      "reason": "matched independent reference",
+      "wallMs": 64622.792157,
+      "originalRecordedUsage": {
+        "input": 20224,
+        "output": 927,
+        "cacheRead": 47232,
+        "cacheWrite": 0,
+        "aggregate": 68383,
+        "providerTotal": 68383
+      },
+      "correctedTotalUsage": {
+        "input": 20224,
+        "output": 927,
+        "cacheRead": 47232,
+        "cacheWrite": 0,
+        "aggregate": 68383,
+        "providerTotal": 68383
+      },
+      "knownTokenLowerBound": 68383
+    },
+    {
+      "directory": "smoke-runner-v2-f3a2e30",
+      "id": "worker-fix-glm-r1-a1",
+      "phase": "unscored",
+      "status": "invalid-infrastructure-evidence",
+      "passed": false,
+      "reason": "Patch capture validated against the common Git directory's main checkout instead of the disposable linked source worktree. Collection therefore could not apply the worker patch.",
+      "wallMs": 96819.51073800001,
+      "originalRecordedUsage": {
+        "input": 27982,
+        "output": 1541,
+        "cacheRead": 90816,
+        "cacheWrite": 0,
+        "aggregate": 120339,
+        "providerTotal": 120339
+      },
+      "correctedTotalUsage": {
+        "input": 27982,
+        "output": 1541,
+        "cacheRead": 90816,
+        "cacheWrite": 0,
+        "aggregate": 120339,
+        "providerTotal": 120339
+      },
+      "knownTokenLowerBound": 120339
+    },
+    {
+      "directory": "smoke-runner-v2-23ffec2",
+      "id": "worker-fix-glm-r1-a1",
+      "phase": "unscored",
+      "status": "completed",
+      "passed": true,
+      "reason": "matched independent reference",
+      "wallMs": 108825.932564,
+      "originalRecordedUsage": {
+        "input": 24987,
+        "output": 1104,
+        "cacheRead": 61568,
+        "cacheWrite": 0,
+        "aggregate": 87659,
+        "providerTotal": 87659
+      },
+      "correctedTotalUsage": {
+        "input": 24987,
+        "output": 1104,
+        "cacheRead": 61568,
+        "cacheWrite": 0,
+        "aggregate": 87659,
+        "providerTotal": 87659
+      },
+      "knownTokenLowerBound": 87659
+    },
+    {
+      "directory": "smoke-runner-v2-23ffec2",
+      "id": "worker-rename-glm-r1-a1",
+      "phase": "unscored",
+      "status": "completed",
+      "passed": true,
+      "reason": "matched independent reference",
+      "wallMs": 282165.306917,
+      "originalRecordedUsage": {
+        "input": 33696,
+        "output": 6406,
+        "cacheRead": 138752,
+        "cacheWrite": 0,
+        "aggregate": 178854,
+        "providerTotal": 178854
+      },
+      "correctedTotalUsage": {
+        "input": 33696,
+        "output": 6406,
+        "cacheRead": 138752,
+        "cacheWrite": 0,
+        "aggregate": 178854,
+        "providerTotal": 178854
+      },
+      "knownTokenLowerBound": 178854
+    }
+  ],
+  "measurementGaps": [
+    "One pre-pilot integration inherited a classifier key and made an unscored request. Cleanup lost its usage trace; cost is unknown, not zero.",
+    "Development-assistant and initial audit costs are outside the case totals.",
+    "Model IDs do not pin hidden provider weight revisions. Runs span service interruptions and approved infrastructure repairs."
+  ],
+  "limitations": [
+    "One repetition of six artificial tasks per role; no statistical-equivalence claim.",
+    "Token counts across tokenizers are not equal money or subscription consumption.",
+    "Main requested medium; physical DeepSeek/GLM dispatches clamp to high. Workers request high.",
+    "Cache warmth, provider load, task scope, and provisioning affect timing.",
+    "The frozen text-rename oracle includes fixture strings; worker GLM intentionally omitted two and failed the exact check despite passing typecheck.",
+    "The custom status-bar footer hides physical dispatch; builtin footer and /model expose it."
+  ]
+}

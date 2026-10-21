@@ -8,6 +8,13 @@ Registers two opt-in selections for the `teop` pilot:
 Neither selection changes saved main or worker defaults. This extension does not establish that routing improves outcomes.
 See [the evaluation](../../docs/virtual-models-evaluation.md) for evidence and limitations.
 
+## Pilot result
+
+The 48-case pilot favors fixed Sol for main sessions. Worker rules gained one exact-contract pass with 10.03% more worker tokens.
+Both routers chose identical models for all six tasks in each role. Jev showed no selection benefit over rules.
+Keep saved defaults unchanged pending review. One worker Jev retry has unknown usage; the evaluation preserves its token lower bound.
+Pi's built-in footer and `/model` expose physical dispatch. The custom status-bar footer does not.
+
 ## Try one session
 
 ```sh
