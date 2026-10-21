@@ -118,9 +118,7 @@ const sherpaHarness = vi.hoisted(() => {
 vi.mock("../../extensions/voice/src/native.ts", () => ({
   loadSherpa: () => ({
     OfflineTts: { createAsync: sherpaHarness.createAsync },
-    GenerationConfig: class GenerationConfig {
-      constructor(_options: unknown) {}
-    },
+    GenerationConfig: class GenerationConfig {},
     writeWave: () => {},
   }),
   loadOnnxRuntime: () => ({}),
