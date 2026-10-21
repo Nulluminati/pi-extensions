@@ -6,8 +6,17 @@
  */
 
 import { existsSync } from "node:fs";
-import { access, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import {
+  access,
+  mkdir,
+  readdir,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { runGit } from "../../../lib/git.ts";
 import { isProjectStatePath, projectStateDir } from "../../../lib/paths.ts";
 import { assertWorkerId } from "./ids.ts";
@@ -17,6 +26,8 @@ import type { WorkerRecord } from "./types.ts";
 
 /** Marker file in the worktree's private git dir holding its fork point. */
 const BASE_COMMIT_FILE = "workers-base";
+/** Marker file naming the caller's source checkout, including linked worktrees. */
+const PARENT_WORKTREE_FILE = "workers-parent";
 /** The project hook creates temporary paths with eight random characters. */
 const PROVISION_SCRATCH = /^provision-tmp-[A-Za-z0-9]{8}$/;
 /** Untracked paths per `git add` invocation, bounded for argv limits. */
@@ -115,13 +126,15 @@ export async function createWorktree(
   const base = (await runGit(path, ["rev-parse", "HEAD"])).trim();
   const gitDir = (await runGit(path, ["rev-parse", "--absolute-git-dir"])).trim();
   await writeFile(join(gitDir, BASE_COMMIT_FILE), `${base}\n`, "utf8");
+  const parent = (await runGit(cwd, ["rev-parse", "--show-toplevel"])).trim();
+  await writeFile(join(gitDir, PARENT_WORKTREE_FILE), `${parent}\n`, { mode: 0o600 });
   return { path, branch };
 }
 
 /**
- * The working tree the patch will be applied to at collect time, when it can
- * be located: a linked worktree's common git dir sits inside the parent
- * checkout. Bare repositories, ancient git, and unknown layouts return
+ * The caller's source checkout, recorded when the worker branches. Workers
+ * without that marker use the common git dir's enclosing main checkout.
+ * Bare repositories, ancient git, and unknown layouts return
  * undefined — capture then stores the patch unvalidated rather than refusing
  * valid work. Note that collect may run `git apply` from a subdirectory of
  * this tree when the session started there; validation from the root is
@@ -137,6 +150,26 @@ async function parentWorktreePath(worktreePath: string): Promise<string | undefi
     return undefined;
   }
   if (commonDir === "") return undefined;
+  const gitDir = (await runGit(worktreePath, ["rev-parse", "--absolute-git-dir"])).trim();
+  let recorded: string | undefined;
+  try {
+    recorded = await readFile(join(gitDir, PARENT_WORKTREE_FILE), "utf8");
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+  }
+  if (recorded !== undefined) {
+    const recordedSource = recorded.trim();
+    if (!isAbsolute(recordedSource))
+      throw new Error("Worker source checkout marker must be absolute");
+    const source = await realpath(recordedSource);
+    const parent = (await runGit(source, ["rev-parse", "--show-toplevel"])).trim();
+    const parentCommon = (
+      await runGit(parent, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
+    ).trim();
+    if ((await realpath(parentCommon)) !== (await realpath(commonDir)))
+      throw new Error("Worker source checkout belongs to a different repository");
+    return parent;
+  }
   const parent = dirname(commonDir);
   const inside = await runGit(parent, ["rev-parse", "--is-inside-work-tree"]).then(
     (out) => out.trim() === "true",
@@ -187,13 +220,13 @@ export async function captureWorktreePatch(worktreePath: string, outFile: string
   const base = await worktreeBaseCommit(worktreePath);
   const diff = await runGit(worktreePath, ["diff", "--binary", "--full-index", "--cached", base]);
 
+  const parent = await parentWorktreePath(worktreePath);
   await mkdir(join(outFile, ".."), { recursive: true });
   // The patch is only stored once it is known to apply: a refused capture
   // leaves neither a broken patch for collect to trip over nor a validation
   // leftover behind.
   const staged = `${outFile}.tmp`;
   await writeFile(staged, diff, "utf8");
-  const parent = await parentWorktreePath(worktreePath);
   if (parent !== undefined && diff.trim() !== "") {
     try {
       await runGit(parent, ["apply", "--check", resolve(staged)]);

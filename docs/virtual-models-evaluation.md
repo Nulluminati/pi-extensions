@@ -201,6 +201,9 @@ Runner v2 commits the fixture and a local dependency-ignore rule before delegati
 
 Diagnostic workers need writable, isolated worktrees for test dependencies and cache files.
 The assignment still forbids source edits. The independent check still requires unchanged tracked sources.
+The edit smoke then exposed a worker defect: patch capture checked the main checkout instead of the linked source worktree.
+Zero Cool approved a narrow fix. Worktree creation records the actual source worktree, and capture validates the patch there.
+Existing conflict checks remain active. No runner-v2 scored cases started before this prerequisite repair.
 Runner v2 also requires the expected assertion failure, not just a command containing the test path.
 
 The first GLM worker diagnosis result is invalid infrastructure evidence: Vitest never loaded the test.

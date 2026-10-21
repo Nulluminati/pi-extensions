@@ -3199,6 +3199,96 @@ describe("workers-units", () => {
     }
   });
 
+  it.each([false, true])(
+    "captureWorktreePatch validates the actual linked source (parent drift: %s)",
+    async (drift) => {
+      const root = await mkdtemp(join(tmpdir(), "workers-linked-source-"));
+      const repo = join(root, "main");
+      const caller = join(root, "caller");
+      await mkdir(repo);
+      try {
+        await initGitRepo(repo);
+        await execFileAsync("git", ["worktree", "add", "--detach", caller, "HEAD"], gitOpts(repo));
+        await writeFile(join(caller, "README.md"), "# linked source\n");
+        await execFileAsync("git", ["add", "README.md"], gitOpts(caller));
+        await execFileAsync("git", ["commit", "-qm", "test: seed linked source"], gitOpts(caller));
+        const wt = await createWorktree(caller, "w-linked-parent");
+        await writeFile(join(wt.path, "README.md"), "# worker change\n");
+        const patch = join(root, "worker.diff");
+        if (drift) {
+          await writeFile(join(caller, "README.md"), "# parent conflict\n");
+          await expect(captureWorktreePatch(wt.path, patch)).rejects.toThrow(/refusing/i);
+          expect(existsSync(patch)).toBe(false);
+          expect(await readFile(join(caller, "README.md"), "utf8")).toBe("# parent conflict\n");
+        } else {
+          await captureWorktreePatch(wt.path, patch);
+          await applyPatch(caller, patch);
+          expect(await readFile(join(caller, "README.md"), "utf8")).toBe("# worker change\n");
+        }
+        expect(await readFile(join(repo, "README.md"), "utf8")).toBe("# base\n");
+        expect(await readFile(join(wt.path, "README.md"), "utf8")).toBe("# worker change\n");
+        await removeWorktree(caller, "w-linked-parent");
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each(["missing", "relative", "foreign", "unavailable", "unreadable"])(
+    "captureWorktreePatch handles a %s source marker without bypassing validation",
+    async (kind) => {
+      const root = await mkdtemp(join(tmpdir(), "workers-source-marker-"));
+      const repo = join(root, "main");
+      await mkdir(repo);
+      try {
+        await initGitRepo(repo);
+        const wt = await createWorktree(repo, "w-source-marker");
+        const { stdout } = await execFileAsync(
+          "git",
+          ["rev-parse", "--absolute-git-dir"],
+          gitOpts(wt.path),
+        );
+        const marker = join(stdout.trim(), "workers-parent");
+        if (kind === "missing") await rm(marker);
+        else if (kind === "relative") await writeFile(marker, "../relative\n");
+        else if (kind === "foreign") {
+          const other = join(root, "other");
+          await mkdir(other);
+          await initGitRepo(other);
+          await writeFile(marker, `${other}\n`);
+        } else if (kind === "unavailable") await writeFile(marker, `${join(root, "gone")}\n`);
+        else {
+          await rm(marker);
+          await mkdir(marker);
+        }
+        await writeFile(join(wt.path, "README.md"), "# worker change\n");
+        const patch = join(root, "worker.diff");
+        if (kind === "missing") {
+          await captureWorktreePatch(wt.path, patch);
+          await applyPatch(repo, patch);
+          expect(await readFile(join(repo, "README.md"), "utf8")).toBe("# worker change\n");
+        } else {
+          const expected =
+            kind === "relative"
+              ? /marker must be absolute/
+              : kind === "foreign"
+                ? /different repository/
+                : kind === "unavailable"
+                  ? /ENOENT/
+                  : /EISDIR/;
+          await expect(captureWorktreePatch(wt.path, patch)).rejects.toThrow(expected);
+          expect(existsSync(patch)).toBe(false);
+          expect(existsSync(`${patch}.tmp`)).toBe(false);
+          expect(await readFile(join(repo, "README.md"), "utf8")).toBe("# base\n");
+        }
+        expect(await readFile(join(wt.path, "README.md"), "utf8")).toBe("# worker change\n");
+        await removeWorktree(repo, "w-source-marker");
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
   it("captureWorktreePatch refuses an unapplicable patch without storing it and keeps the worktree", async () => {
     const repo = await mkdtemp(join(tmpdir(), "workers-wt-refuse-"));
     try {
@@ -5596,6 +5686,7 @@ function fakeWorktreeGit(opts: { configStatus?: string; commitError?: string } =
     const [cmd, sub] = args;
     if (cmd === "rev-parse") {
       if (sub === "--is-inside-work-tree") return "true\n";
+      if (sub === "--show-toplevel") return `${repoCwd}\n`;
       if (sub === "HEAD") return "fakebase\n";
       if (sub === "--absolute-git-dir") {
         const gitDir = `${repoCwd}.git`;
