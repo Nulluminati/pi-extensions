@@ -78,6 +78,8 @@ pi -e extensions/goal/goal.ts
 
 Per-extension configuration (flags, env vars, config files) lives in each extension's own `README.md` under the **Configuration** section.
 
+Most extensions work alone. [docs/extension-dependencies.md](docs/extension-dependencies.md) lists the ones that need a partner extension, such as `workers` and `approval-mode`, and the events that link optional features.
+
 ## Development
 
 ### Type declarations
