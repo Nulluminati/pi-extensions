@@ -103,7 +103,7 @@ function selectCases(cases: Case[], options: ReturnType<typeof parseOptions>): C
 async function main() {
   if (process.argv.includes("--help")) {
     console.log(
-      "Live model calls. Default: unscored smoke. Options: --phase smoke|scored --tasks boundaries,diagnosis,fix,rename,review,schedule --arms sol,deepseek,glm,jev --roles main,worker --repetitions 1 --output-dir PATH --resume PATH",
+      "Live model calls. Default: unscored smoke. Options: --phase smoke|scored --tasks boundaries,diagnosis,fix,rename,review,schedule --arms sol,deepseek,glm --roles main,worker --repetitions 1 --output-dir PATH --resume PATH",
     );
     return;
   }

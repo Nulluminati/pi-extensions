@@ -1,10 +1,24 @@
-import type { ClassifierResult, ExtensionVirtualModel, Model, ModelRouteRequest } from "pi";
+import { fauxAssistantMessage } from "@earendil-works/pi-ai";
+import type { ExtensionVirtualModel, Model, ModelRouteRequest } from "pi";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import extension from "../../extensions/virtual-models/virtual-models.ts";
 import { createMockContext } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
 
-const specs = ["openai-codex/gpt-6.1-sol", "opencode-go/deepseek-v4.1-flash", "zai/glm-5.3-flash"];
+const targets = {
+  "glm-flash-fallback-v1": [
+    "zai/glm-5.3-flash",
+    "synthetic/hf:zai-org/GLM-5.3-Flash",
+    "opencode-go/glm-5.3-flash",
+  ],
+  "deepseek-flash-fallback-v1": [
+    "synthetic/hf:deepseek-ai/DeepSeek-V4.1-Flash-1017",
+    "opencode-go/deepseek-v4.1-flash",
+  ],
+} as const;
+type Profile = keyof typeof targets;
+const profiles = Object.keys(targets) as Profile[];
+const specs = [...Object.values(targets).flat(), "openai-codex/gpt-6.1-sol"];
 function model(spec: string, api = "openai-completions"): Model {
   const slash = spec.indexOf("/");
   return {
@@ -14,7 +28,7 @@ function model(spec: string, api = "openai-completions"): Model {
     api,
     reasoning: true,
     input: ["text"],
-    contextWindow: 1000000,
+    contextWindow: 500000,
     maxTokens: 4096,
     thinkingLevelMap: {
       off: null,
@@ -23,116 +37,253 @@ function model(spec: string, api = "openai-completions"): Model {
       medium: null,
       high: "high",
       xhigh: null,
-      max: "max",
+      max: null,
     },
   };
 }
-function failedMessage(errorMessage: string) {
+function assistant(id: string, spec: string, error?: string) {
+  const physical = model(spec);
   return {
-    role: "assistant" as const,
-    content: [],
-    api: "openai-completions",
-    provider: "opencode-go",
-    model: "deepseek-v4.1-flash",
-    stopReason: "error" as const,
-    errorMessage,
-    timestamp: 1,
-    usage: {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      totalTokens: 0,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    type: "message",
+    id,
+    message: {
+      ...fauxAssistantMessage(error ? "" : "completed"),
+      provider: physical.provider,
+      model: physical.id,
+      stopReason: error ? ("error" as const) : ("stop" as const),
+      ...(error ? { errorMessage: error } : {}),
     },
   };
 }
-const virtual = model("virtual-models/jev-v1", "pi-virtual");
-function request(overrides: Partial<ModelRouteRequest> = {}): ModelRouteRequest {
+function boundary(outcome: "error" | "aborted" | "completed" = "error") {
   return {
-    model: virtual,
-    thinkingLevel: "medium",
-    reason: "user",
-    messages: [{ role: "user", content: "Find the worker model configuration.", timestamp: 1 }],
-    ...overrides,
-  };
-}
-function result(choice = "deepseek"): ClassifierResult {
-  return {
-    api: "typesafe-system-one",
-    provider: "typesafe",
-    model: "jev-latest",
-    timestamp: 1,
-    stopReason: "stop",
-    usage: { input: 31, output: 2, totalTokens: 33 },
-    answers: {
-      route: {
-        type: "choice",
-        choice,
-        confidence: 0.8,
-        probabilities: {
-          sol: choice === "sol" ? 0.8 : 0.1,
-          deepseek: choice === "deepseek" ? 0.8 : 0.1,
-          glm: choice === "glm" ? 0.8 : 0.1,
-        },
-      },
+    type: "agent_before_settle" as const,
+    outcome,
+    entries: [],
+    continue: false,
+    context: {
+      contextEntries: [],
+      contextMessages: [],
+      llmMessages: [],
+      pendingMessages: [],
+      canContinue: false,
     },
   };
 }
-async function boot() {
+async function boot(
+  profile: Profile = "glm-flash-fallback-v1",
+  worker = false,
+  entries: unknown[] = [],
+) {
+  vi.stubEnv("PI_WORKER", worker ? "1" : "");
   const pi = createMockPi();
   const ctx = createMockContext();
+  const virtual = model(`virtual-models/${profile}`, "pi-virtual");
+  ctx.model = virtual;
   const pool = specs.map((spec) => model(spec));
-  ctx.modelRegistry.find.mockImplementation((provider, id) =>
-    pool.find((entry) => entry.provider === provider && entry.id === id),
-  );
   ctx.modelRegistry.getAvailable.mockReturnValue(pool);
-  ctx.modelRegistry.findOfType.mockReturnValue(model("typesafe/jev-latest", "typesafe-system-one"));
-  ctx.modelRegistry.getAvailableOfType.mockResolvedValue([
-    model("typesafe/jev-latest", "typesafe-system-one"),
-  ]);
-  ctx.modelRegistry.classify.mockResolvedValue(result());
-  pi.registerVirtualModel = vi.fn();
+  ctx.modelRegistry.find.mockImplementation((provider, id) =>
+    pool.find((item) => item.provider === provider && item.id === id),
+  );
+  ctx.modelRegistry.classify.mockRejectedValue(
+    new Error("Fixed-family profiles must not call Jev"),
+  );
+  ctx.sessionManager.getBranch.mockReturnValue(entries);
   await extension(pi);
-  const definitions = pi.registerVirtualModel.mock.calls.map(([definition]) => definition);
-  const get = (id: string): ExtensionVirtualModel => {
-    const definition = definitions.find((entry) => entry.id === id);
-    if (!definition) throw new Error("Missing router");
-    return definition;
-  };
-  return { pi, ctx, pool, jev: get("jev-v1") };
+  const router = pi.registerVirtualModel.mock.calls
+    .map(([definition]) => definition)
+    .find((definition) => definition.id === profile) as ExtensionVirtualModel | undefined;
+  const recover = pi.on.mock.calls.find(([name]) => name === "agent_before_settle")?.[1];
+  if (!recover) throw new Error("Missing recovery handler");
+  function route(overrides: Partial<ModelRouteRequest> = {}) {
+    if (!router) throw new Error(`Missing fixed-family router: ${profile}`);
+    return router.route(
+      {
+        model: virtual,
+        thinkingLevel: "medium",
+        reason: "user",
+        messages: [
+          { role: "user", content: "Review architecture and security constraints", timestamp: 1 },
+        ],
+        ...overrides,
+      },
+      ctx,
+    );
+  }
+  return { pi, ctx, pool, route, recover };
 }
 beforeEach(() => {
   vi.resetAllMocks();
   vi.unstubAllEnvs();
-  vi.stubEnv("PI_WORKER", "");
   vi.stubEnv("PI_VIRTUAL_MODEL_TRACE", "");
 });
-afterEach(() => {
-  vi.useRealTimers();
-  vi.unstubAllEnvs();
-});
+afterEach(() => vi.unstubAllEnvs());
 
-describe("opt-in virtual model routers", () => {
-  it("registers separate virtual selections without changing the selected model or defaults", async () => {
-    const { pi, jev } = await boot();
-    expect(jev).toMatchObject({
-      provider: "virtual-models",
-      id: "jev-v1",
-      thinkingLevels: ["low", "medium", "high", "xhigh", "max"],
-    });
+describe("fixed-family fallback virtual models", () => {
+  it("registers both families and worker-auto without retaining pilot routers or changing defaults", async () => {
+    const { pi } = await boot();
     expect(pi.registerVirtualModel.mock.calls.map(([definition]) => definition.id)).toEqual([
-      "jev-v1",
+      "glm-flash-fallback-v1",
+      "deepseek-flash-fallback-v1",
       "worker-auto-v1",
     ]);
     expect(pi.setModel).not.toHaveBeenCalled();
     expect(pi.setThinkingLevel).not.toHaveBeenCalled();
+    expect(pi.setActiveTools).not.toHaveBeenCalled();
   });
-  it("does not collect provider usage in normal sessions without experiment tracing", async () => {
+
+  describe.each(profiles)("%s", (profile) => {
+    const chain = targets[profile];
+    const primary = chain[0];
+    const alternate = chain[1];
+    const state = (modelSpec: string) => ({ policyVersion: profile, modelSpec });
+
+    it.each([false, true])(
+      "uses the preferred provider with no classifier (worker=%s)",
+      async (worker) => {
+        const { route, ctx, pi } = await boot(profile, worker);
+        const result = await route();
+        expect(`${result.model.provider}/${result.model.id}`).toBe(primary);
+        expect(result.thinkingLevel).toBe("high");
+        expect(result.state).toEqual(state(primary));
+        expect(ctx.modelRegistry.findOfType).not.toHaveBeenCalled();
+        expect(ctx.modelRegistry.classify).not.toHaveBeenCalled();
+        expect(pi.appendEntry).toHaveBeenCalledWith(
+          "virtual-models-route",
+          expect.objectContaining({
+            selected: `virtual-models/${profile}`,
+            dispatched: primary,
+            role: worker ? "worker" : "main",
+            effectiveThinking: "high",
+          }),
+        );
+      },
+    );
+
+    it("skips absent credentials and virtual destinations in provider order", async () => {
+      const { route, ctx, pool } = await boot(profile);
+      ctx.modelRegistry.getAvailable.mockReturnValue([
+        model(primary, "pi-virtual"),
+        ...pool.filter((item) => `${item.provider}/${item.id}` !== primary),
+      ]);
+      const result = await route();
+      expect(`${result.model.provider}/${result.model.id}`).toBe(alternate);
+    });
+
+    it.each(["continuation", "user", "direct"] as const)(
+      "retains a healthy alternate for %s requests",
+      async (reason) => {
+        const { route, ctx } = await boot(profile);
+        const result = await route({ reason, state: state(alternate) });
+        expect(`${result.model.provider}/${result.model.id}`).toBe(alternate);
+        expect(ctx.modelRegistry.classify).not.toHaveBeenCalled();
+      },
+    );
+
+    it("ignores another profile's restored state and physical previous model", async () => {
+      const { route } = await boot(profile);
+      const result = await route({
+        reason: "continuation",
+        state: { policyVersion: "other", modelSpec: "openai-codex/gpt-6.1-sol" },
+        previous: { model: model("openai-codex/gpt-6.1-sol") },
+      });
+      expect(`${result.model.provider}/${result.model.id}`).toBe(primary);
+    });
+
+    it.each([false, true])(
+      "recovers quota in the same family and omits only the failed response (worker=%s)",
+      async (worker) => {
+        const failure = assistant("quota", primary, "weekly usage limit reached");
+        const { route, ctx, recover } = await boot(profile, worker, [failure]);
+        const recovery = await recover(boundary(), ctx);
+        expect(recovery).toMatchObject({
+          continue: true,
+          entries: expect.arrayContaining([
+            { type: "context_edit", targetId: "quota", replacement: null },
+            expect.objectContaining({
+              type: "custom",
+              data: expect.objectContaining({
+                policyVersion: profile,
+                from: primary,
+                to: alternate,
+              }),
+            }),
+          ]),
+        });
+        const result = await route({ reason: "user", state: state(primary) });
+        expect(`${result.model.provider}/${result.model.id}`).toBe(alternate);
+        expect(ctx.modelRegistry.classify).not.toHaveBeenCalled();
+      },
+    );
+
+    it("retries one temporary failure and switches after the second consecutive failure", async () => {
+      const first = assistant("first", primary, "503 service unavailable");
+      const { route, ctx, recover } = await boot(profile, false, [first]);
+      expect(await recover(boundary(), ctx)).toMatchObject({ continue: true });
+      expect((await route({ reason: "continuation", state: state(primary) })).model).toMatchObject(
+        model(primary),
+      );
+      ctx.sessionManager.getBranch.mockReturnValue([
+        first,
+        assistant("second", primary, "503 service unavailable"),
+      ]);
+      expect(await recover(boundary(), ctx)).toMatchObject({ continue: true });
+      const result = await route({ reason: "continuation", state: state(primary) });
+      expect(`${result.model.provider}/${result.model.id}`).toBe(alternate);
+    });
+
+    it("exhausts the complete provider chain without switching family or invoking Jev", async () => {
+      const failures = chain.map((spec, index) =>
+        assistant(`quota-${index}`, spec, "weekly usage limit reached"),
+      );
+      const { route, ctx, recover } = await boot(profile, false, failures);
+      expect(await recover(boundary(), ctx)).toMatchObject({ continue: false });
+      await expect(
+        route({ reason: "continuation", state: state(chain[chain.length - 1] ?? primary) }),
+      ).rejects.toThrow(/exhausted|credentials/);
+      expect(ctx.modelRegistry.classify).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      "401 unauthorized",
+      "403 permission denied",
+      "unexpected certificate parsing error",
+      "maximum context length is 100 tokens",
+    ])("does not recover %s", async (error) => {
+      const { ctx, recover } = await boot(profile, false, [assistant("failed", primary, error)]);
+      expect(await recover(boundary(), ctx)).toBeUndefined();
+    });
+
+    it.each(["aborted", "completed"] as const)("does not recover %s outcomes", async (outcome) => {
+      const { ctx, recover } = await boot(profile, false, [
+        assistant("failed", primary, "weekly usage limit reached"),
+      ]);
+      expect(await recover(boundary(outcome), ctx)).toBeUndefined();
+    });
+
+    it("stops cancellation before dispatch or recovery", async () => {
+      const { route, ctx, recover } = await boot(profile, false, [
+        assistant("quota", primary, "weekly usage limit reached"),
+      ]);
+      const controller = new AbortController();
+      controller.abort();
+      await expect(route({ signal: controller.signal })).rejects.toThrow(/cancelled/);
+      expect(await recover(boundary(), { ...ctx, signal: controller.signal })).toBeUndefined();
+    });
+
+    it("does not retry an unrecorded or unsupported failure", async () => {
+      const { route } = await boot(profile);
+      await expect(route({ reason: "retry" })).rejects.toThrow(/recorded failed physical dispatch/);
+    });
+  });
+
+  it("does not collect provider usage or loadouts without tracing or a virtual selection", async () => {
     const { pi, ctx } = await boot();
-    const handler = pi.on.mock.calls.find(([name]) => name === "provider_stream_event")?.[1];
-    if (!handler) throw new Error("Missing provider usage handler");
-    await handler(
+    ctx.model = undefined;
+    const usage = pi.on.mock.calls.find(([name]) => name === "provider_stream_event")?.[1];
+    const startup = pi.on.mock.calls.find(([name]) => name === "session_start")?.[1];
+    if (!usage || !startup) throw new Error("Missing measurement handler");
+    await usage(
       {
         type: "provider_stream_event",
         provider: "zai",
@@ -142,232 +293,20 @@ describe("opt-in virtual model routers", () => {
       },
       ctx,
     );
-    const start = pi.on.mock.calls.find(([name]) => name === "session_start")?.[1];
-    if (!start) throw new Error("Missing startup handler");
-    await start({ type: "session_start", reason: "startup" }, ctx);
+    await startup({ type: "session_start", reason: "startup" }, ctx);
     expect(pi.appendEntry).not.toHaveBeenCalled();
   });
 
-  it("records the effective loadout without exposing tool descriptions or credentials", async () => {
+  it("records the effective loadout without tool descriptions or credentials", async () => {
     const { pi, ctx } = await boot();
-    ctx.model = virtual;
     pi.getActiveTools.mockReturnValue(["read", "bash"]);
     pi.getAllTools.mockReturnValue([]);
-    const handler = pi.on.mock.calls.find(([name]) => name === "session_start")?.[1];
-    if (!handler) throw new Error("Missing loadout handler");
-    await handler({ type: "session_start", reason: "startup" }, ctx);
+    const startup = pi.on.mock.calls.find(([name]) => name === "session_start")?.[1];
+    if (!startup) throw new Error("Missing startup handler");
+    await startup({ type: "session_start", reason: "startup" }, ctx);
     expect(pi.appendEntry).toHaveBeenCalledWith(
       "virtual-models-loadout",
       expect.objectContaining({ activeTools: ["bash", "read"], role: "main" }),
     );
-  });
-
-  it("records Jev dispatch and clamps thinking to physical support", async () => {
-    const { jev, ctx, pool, pi } = await boot();
-    const routed = await jev.route(request(), ctx);
-    expect(routed.model).toEqual(pool[1]);
-    expect(routed.thinkingLevel).toBe("high");
-    expect(pi.appendEntry).toHaveBeenCalledWith(
-      "virtual-models-route",
-      expect.objectContaining({
-        selected: "virtual-models/jev-v1",
-        dispatched: specs[1],
-        requestedThinking: "medium",
-        effectiveThinking: "high",
-        role: "main",
-        policyVersion: "teop-policy-v1",
-        reason: "classifier-choice",
-      }),
-    );
-  });
-
-  it("keeps tool continuations and retries on their physical model without classifying", async () => {
-    const { jev, ctx, pool } = await boot();
-    const previous = { model: pool[2], thinkingLevel: "low" as const };
-    const first = await jev.route(request(), ctx);
-    ctx.modelRegistry.classify.mockClear();
-    const continuation = await jev.route(
-      request({ reason: "continuation", previous, state: first.state }),
-      ctx,
-    );
-    expect(continuation.model).toEqual(pool[2]);
-    expect(continuation.thinkingLevel).toBe("low");
-    expect(continuation.state).toBe(first.state);
-    expect(ctx.modelRegistry.classify).not.toHaveBeenCalled();
-  });
-  it("retries the failed dispatch, not an earlier successful physical model", async () => {
-    const { jev, ctx, pool } = await boot();
-    const failed = {
-      model: pool[1],
-      thinkingLevel: "high" as const,
-      message: failedMessage("overloaded"),
-    };
-    const routed = await jev.route(
-      request({ reason: "retry", previous: { model: pool[2] }, failed }),
-      ctx,
-    );
-    expect(routed.model).toEqual(pool[1]);
-    expect(ctx.modelRegistry.classify).not.toHaveBeenCalled();
-  });
-  it("does not substitute an older model when routing itself failed before physical dispatch", async () => {
-    const { jev, ctx, pool } = await boot();
-    await expect(
-      jev.route(request({ reason: "retry", previous: { model: pool[2] } }), ctx),
-    ).rejects.toThrow("routing failed before physical dispatch");
-    expect(ctx.modelRegistry.classify).not.toHaveBeenCalled();
-  });
-
-  it("pauses exhausted chat subscriptions rather than trying another model", async () => {
-    const { jev, ctx, pool, pi } = await boot();
-    await expect(
-      jev.route(
-        request({
-          reason: "retry",
-          failed: {
-            model: pool[1],
-            message: failedMessage("subscription quota exhausted; reset tomorrow"),
-          },
-        }),
-        ctx,
-      ),
-    ).rejects.toThrow("Experiment paused");
-    expect(ctx.modelRegistry.classify).not.toHaveBeenCalled();
-    expect(pi.appendEntry).toHaveBeenCalledWith(
-      "virtual-models-route",
-      expect.objectContaining({ status: "paused" }),
-    );
-  });
-  it("uses branch-local state when a continuation has no previous response", async () => {
-    const { jev, ctx } = await boot();
-    ctx.modelRegistry.classify
-      .mockResolvedValueOnce(result("sol"))
-      .mockResolvedValueOnce(result("glm"));
-    const branchA = await jev.route(
-      request({ messages: [{ role: "user", content: "Find an optimal schedule", timestamp: 1 }] }),
-      ctx,
-    );
-    const branchB = await jev.route(request(), ctx);
-    const restoredA = await jev.route(
-      request({ reason: "continuation", state: branchA.state }),
-      ctx,
-    );
-    const restoredB = await jev.route(
-      request({ reason: "continuation", state: branchB.state }),
-      ctx,
-    );
-    expect(restoredA.model.id).toBe("gpt-6.1-sol");
-    expect(restoredB.model.id).toBe("glm-5.3-flash");
-    expect(restoredA.state).toBe(branchA.state);
-  });
-  it("routes direct requests conservatively without creating session state or classifying", async () => {
-    const { jev, ctx } = await boot();
-    const routed = await jev.route(request({ reason: "direct" }), ctx);
-    expect(routed.model.id).toBe("gpt-6.1-sol");
-    expect(routed.state).toBeUndefined();
-    expect(ctx.modelRegistry.classify).not.toHaveBeenCalled();
-  });
-  it("rejects missing, unauthenticated, and virtual destinations", async () => {
-    const { jev, ctx } = await boot();
-    ctx.modelRegistry.find.mockReturnValue(undefined);
-    await expect(jev.route(request(), ctx)).rejects.toThrow("not in the catalog");
-    ctx.modelRegistry.find.mockReturnValue(model(specs[1], "pi-virtual"));
-    await expect(jev.route(request(), ctx)).rejects.toThrow("physical");
-    ctx.modelRegistry.find.mockReturnValue(model(specs[1]));
-    ctx.modelRegistry.getAvailable.mockReturnValue([]);
-    await expect(jev.route(request(), ctx)).rejects.toThrow("credentials");
-  });
-  it("bounds classifier evidence, supplies worker role, and captures classifier usage once", async () => {
-    vi.stubEnv("PI_WORKER", "1");
-    const { jev, ctx, pi } = await boot();
-    await jev.route(
-      request({
-        model: model("virtual-models/jev-v1", "pi-virtual"),
-        messages: [{ role: "user", content: "x".repeat(20000), timestamp: 1 }],
-      }),
-      ctx,
-    );
-    expect(ctx.modelRegistry.classify).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "jev-latest" }),
-      expect.objectContaining({ state: { role: "worker", prompt: "x".repeat(12000) } }),
-      expect.objectContaining({ timeoutMs: 10000, maxRetries: 0, signal: expect.any(AbortSignal) }),
-    );
-    expect(pi.appendEntry).toHaveBeenCalledWith(
-      "virtual-models-route",
-      expect.objectContaining({
-        classifier: expect.objectContaining({
-          status: "ok",
-          usage: { input: 31, output: 2, totalTokens: 33 },
-        }),
-      }),
-    );
-  });
-  it.each(["malformed", "error", "credentials"])(
-    "records conservative fallback after classifier %s",
-    async (failure) => {
-      const { jev, ctx, pi } = await boot();
-      if (failure === "credentials") ctx.modelRegistry.getAvailableOfType.mockResolvedValue([]);
-      else
-        ctx.modelRegistry.classify.mockResolvedValue(
-          failure === "error"
-            ? { ...result(), stopReason: "error", errorMessage: "classifier unavailable" }
-            : { ...result(), answers: {} },
-        );
-      const routed = await jev.route(request(), ctx);
-      expect(routed.model.id).toBe("gpt-6.1-sol");
-      expect(pi.appendEntry).toHaveBeenCalledWith(
-        "virtual-models-route",
-        expect.objectContaining({
-          reason: "classifier-fallback",
-          classifier: expect.objectContaining({ status: expect.not.stringMatching(/^ok$/) }),
-        }),
-      );
-    },
-  );
-  it("enforces the classifier deadline even if a provider ignores cancellation", async () => {
-    vi.useFakeTimers();
-    const { jev, ctx, pi } = await boot();
-    ctx.modelRegistry.classify.mockImplementation(() => new Promise(() => {}));
-    const pending = jev.route(request(), ctx);
-    await vi.advanceTimersByTimeAsync(10001);
-    expect((await pending).model.id).toBe("gpt-6.1-sol");
-    expect(pi.appendEntry).toHaveBeenCalledWith(
-      "virtual-models-route",
-      expect.objectContaining({ classifier: expect.objectContaining({ status: "timeout" }) }),
-    );
-    expect(vi.getTimerCount()).toBe(0);
-  });
-  it("bounds classifier availability checks as well as inference", async () => {
-    vi.useFakeTimers();
-    const { jev, ctx, pi } = await boot();
-    ctx.modelRegistry.getAvailableOfType.mockImplementation(() => new Promise(() => {}));
-    const pending = jev.route(request(), ctx);
-    await vi.advanceTimersByTimeAsync(10001);
-    expect((await pending).model.id).toBe("gpt-6.1-sol");
-    expect(pi.appendEntry).toHaveBeenCalledWith(
-      "virtual-models-route",
-      expect.objectContaining({ classifier: expect.objectContaining({ status: "timeout" }) }),
-    );
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
-  it("cancels an active classifier without fallback and removes timers", async () => {
-    vi.useFakeTimers();
-    const { jev, ctx } = await boot();
-    ctx.modelRegistry.classify.mockImplementation(() => new Promise(() => {}));
-    const controller = new AbortController();
-    const pending = jev.route(request({ signal: controller.signal }), ctx);
-    const rejection = expect(pending).rejects.toThrow("cancelled");
-    await vi.advanceTimersByTimeAsync(1);
-    controller.abort();
-    await rejection;
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
-  it("cancels without fallback or classifier dispatch", async () => {
-    const { jev, ctx } = await boot();
-    await expect(jev.route(request({ signal: AbortSignal.abort() }), ctx)).rejects.toThrow(
-      "cancelled",
-    );
-    expect(ctx.modelRegistry.classify).not.toHaveBeenCalled();
   });
 });

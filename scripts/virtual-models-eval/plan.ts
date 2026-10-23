@@ -1,7 +1,7 @@
 import { MODEL_POOL } from "../../extensions/virtual-models/src/policy.ts";
 import { fixtures, TASK_IDS, type TaskId } from "./tasks.ts";
 
-export const ARMS = ["sol", "deepseek", "glm", "jev"] as const;
+export const ARMS = ["sol", "deepseek", "glm"] as const;
 export type Arm = (typeof ARMS)[number];
 export type Role = "main" | "worker";
 export interface Options {
@@ -27,7 +27,7 @@ export interface Case {
   prompt: string;
   timeoutMs: number;
 }
-const selection = (arm: Arm): string => (arm === "jev" ? "virtual-models/jev-v1" : MODEL_POOL[arm]);
+const selection = (arm: Arm): string => MODEL_POOL[arm];
 
 export function parseOptions(args: string[]): Options {
   const values = new Map<string, string>();
@@ -82,7 +82,7 @@ export function parseOptions(args: string[]): Options {
       TASK_IDS,
       phase === "smoke" && !values.has("--resume") ? ["boundaries"] : TASK_IDS,
     ),
-    arms: list("--arms", ARMS, phase === "smoke" && !values.has("--resume") ? ["jev"] : ARMS),
+    arms: list("--arms", ARMS, phase === "smoke" && !values.has("--resume") ? ["glm"] : ARMS),
     roles: list("--roles", ["main", "worker"] as const, ["main", "worker"]),
     repetitions,
     ...(values.has("--output-dir") ? { outputDir: values.get("--output-dir") as string } : {}),
@@ -95,7 +95,7 @@ export function planCases(options: Options): Case[] {
     for (let taskIndex = 0; taskIndex < options.tasks.length; taskIndex++) {
       const task = fixtures.find((entry) => entry.id === options.tasks[taskIndex]);
       if (!task) throw new Error("Unknown fixture");
-      const arms = options.arms.filter((arm) => role !== "worker" || ["glm", "jev"].includes(arm));
+      const arms = options.arms.filter((arm) => role !== "worker" || arm === "glm");
       for (const repetition of options.repetitions) {
         const offset = (TASK_IDS.indexOf(task.id) + repetition - 1) % Math.max(1, arms.length);
         for (const arm of [...arms.slice(offset), ...arms.slice(0, offset)])

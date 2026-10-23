@@ -526,7 +526,8 @@ describe("opt-in automatic worker model policy", () => {
     const { pi, router } = await boot();
     expect(router).toMatchObject({ provider: "virtual-models", id: "worker-auto-v1" });
     expect(pi.registerVirtualModel.mock.calls.map(([definition]) => definition.id)).toEqual([
-      "jev-v1",
+      "glm-flash-fallback-v1",
+      "deepseek-flash-fallback-v1",
       "worker-auto-v1",
     ]);
     expect(pi.setModel).not.toHaveBeenCalled();
@@ -784,7 +785,7 @@ describe("worker failure continuation boundary", () => {
     expect(await recover(boundary(outcome), ctx)).toBeUndefined();
   });
 
-  it.each([MODEL_POOL.glm, "virtual-models/jev-v1"])(
+  it.each([MODEL_POOL.glm, "virtual-models/unregistered"])(
     "leaves selection %s unchanged",
     async (selected) => {
       const { ctx, recover } = await boot([

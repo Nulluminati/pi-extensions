@@ -1,7 +1,7 @@
 import type { ExtensionContext, Model, ModelRouteRequest } from "pi";
 import { createTimeoutController } from "../../../lib/fetch-timeout.ts";
 import type { ModelChoice } from "./policy.ts";
-import type { RouteRecord } from "./router.ts";
+import type { RouteRecord } from "./types.ts";
 import { workerFamily } from "./worker-catalog.ts";
 import { type WorkerHistory, workerFailure } from "./worker-policy.ts";
 

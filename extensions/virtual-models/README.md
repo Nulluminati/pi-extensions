@@ -1,19 +1,19 @@
 # Virtual models
 
-Registers two opt-in selections. None changes saved main or worker defaults.
+Registers three opt-in selections. None changes saved main or worker defaults.
 
-- `virtual-models/worker-auto-v1` uses Jev to select worker models and recover recognized availability failures. Rules are a classifier fallback only.
-- `virtual-models/jev-v1` asks authenticated `typesafe/jev-latest` to choose from the original three-model pilot pool.
+- `virtual-models/glm-flash-fallback-v1` keeps GLM Flash selected and changes providers when necessary. It supports main sessions and workers.
+- `virtual-models/deepseek-flash-fallback-v1` keeps DeepSeek Flash selected and changes providers when necessary. It supports main sessions and workers.
+- `virtual-models/worker-auto-v1` uses Jev to select worker model families and recover recognized availability failures. Rules are a classifier fallback only.
 
-`rules-v1` and its dedicated router tests are removed. Historical pilot evidence retains its results.
+`rules-v1`, `jev-v1`, and their dedicated router implementations and tests are removed. Historical pilot evidence retains their results.
 The internal rule fallback in `worker-auto-v1` remains available when Jev classification fails.
 
 See [the evaluation](../../docs/virtual-models-evaluation.md) for pilot evidence and limitations.
 
-## Worker selection and recovery
+## Provider order
 
-`worker-auto-v1` requires Pi 1.3.0 and a worker session. It rejects main-session dispatch.
-Authenticated `typesafe/jev-latest` chooses a model family. Code selects its first eligible provider in this order:
+The fixed-family profiles use the same provider order as `worker-auto-v1`:
 
 | Model family | Ordered physical endpoints |
 |---|---|
@@ -21,13 +21,29 @@ Authenticated `typesafe/jev-latest` chooses a model family. Code selects its fir
 | GLM 5.3 Flash | `zai/glm-5.3-flash` → `synthetic/hf:zai-org/GLM-5.3-Flash` → `opencode-go/glm-5.3-flash` |
 | GPT-6.1 Sol | `openai-codex/gpt-6.1-sol` only |
 
-Provider order is an explicit preference, not a rule-based model choice. Code enforces credentials, quota exclusions, and retry limits before classification.
-Jev sees one eligible endpoint per family and cannot override provider order.
-The router does not switch from planning to implementation models.
+Provider order is an explicit preference, not a rule-based model choice. Code enforces credentials, quota exclusions, and retry limits.
+Only `worker-auto-v1` classifies families. Jev sees one eligible endpoint per family and cannot override provider order.
+The routers do not switch from planning to implementation models.
 
 The Synthetic `1017` snapshot uses the already-probed catalog definition from main commit `b9ce257`.
 The OpenCode Go DeepSeek identifier does not promise the same dated snapshot.
 
+## Fixed-family selection and recovery
+
+Both fixed-family profiles require Pi 1.3.0. They support main sessions and workers without a routing classifier or rule-based family choice.
+Other extensions can still call classifiers for security checks.
+They select the first eligible provider, retain healthy alternatives across user requests, and stop after their family exhausts its providers.
+They never substitute Sol or the other Flash family. Direct requests also stay within the selected family.
+
+Both profiles use the quota and temporary-error recovery rules below.
+DeepSeek permits at most four failed agent requests in an uninterrupted failure sequence; GLM permits at most six.
+A quota-only sequence stops after at most two DeepSeek requests or three GLM requests.
+Internal transport retries and response times remain separate from these limits.
+
+## Automatic worker selection and recovery
+
+`worker-auto-v1` requires Pi 1.3.0 and a worker session. It rejects main-session dispatch.
+Authenticated `typesafe/jev-latest` chooses a model family.
 Jev receives the worker assignment, capped at 12,000 characters, eligible model metadata, and a sanitized failure category when relevant.
 It does not receive tool results or raw provider error text. One ten-second deadline covers classifier availability and inference.
 Classifier requests use no retries. The router validates the returned choice, probability distribution, and confidence range.
@@ -50,28 +66,29 @@ Registry availability is a cached authentication snapshot, not a quota or servic
 The router does not read remaining subscription allowances or usage percentages.
 It does not convert recorded token counts or catalog prices into subscription usage.
 Healthy continuations retain their physical endpoint, even if a preferred provider becomes available again.
-Worker thinking follows the requested setting, clamped to physical support.
+Thinking follows the requested setting, clamped to physical support.
 
-Recognized subscription exhaustion excludes that provider from subsequent requests in the worker branch.
+Recognized subscription exhaustion excludes that provider from subsequent requests in the session branch.
 A first temporary failure permits one retry on the same endpoint. A second consecutive temporary failure excludes that endpoint.
 The router tries remaining providers in the current family before another family choice.
-After DeepSeek or GLM exhausts its provider chain, Jev chooses another eligible family. Rules remain a classifier fallback only.
+In `worker-auto-v1`, Jev chooses another eligible family after DeepSeek or GLM exhausts its provider chain. Rules remain a classifier fallback only.
+The fixed-family profiles stop instead of choosing another family.
 Sol has no replacement: Codex quota exhaustion or its second consecutive temporary failure stops the worker, even when other families remain available.
 Pi controls its configured automatic retry delays.
 The recovery boundary also works when Pi's automatic retries are disabled or exhausted; it adds no delay itself.
 This policy does not change saved retry settings.
 
 For an uninterrupted failure sequence, each physical endpoint receives at most two failed agent requests.
-Six endpoints permit at most twelve such requests; selecting Codex can stop the sequence earlier.
-A sequence containing only quota failures stops after at most four failed requests, one per provider.
-The worker stops when no eligible destination remains. The existing worker timeout still applies.
+The six `worker-auto-v1` endpoints permit at most twelve such requests; selecting Codex can stop the sequence earlier.
+Its quota-only sequence stops after at most four failed requests, one per provider.
+Each profile stops when no eligible destination remains. The existing worker timeout still applies to workers.
 The policy does not bound provider response time or internal transport retries independently.
 
-Availability knowledge comes from raw assistant entries on the current worker branch, including failures omitted from provider context.
-A successful provider response clears that provider's quota exclusion and that model's temporary-failure count and exclusion.
-The policy does not infer subscription resets or share availability knowledge between workers.
+Availability knowledge comes from raw assistant entries on the current session branch, including failures omitted from provider context.
+A successful response from an approved endpoint clears its provider's quota exclusion and its model's temporary-failure count and exclusion.
+The policies do not infer subscription resets or share availability knowledge between sessions.
 
-Recovery continues the same worker process, conversation, and worktree. It does not create a replacement worker or another user prompt.
+Recovery continues the same session without another user prompt. Worker recovery also retains its process and worktree.
 A context edit omits only the failed assistant response from provider context. Raw history retains the failure.
 Completed tool results remain in context; recovery does not execute their calls again.
 Mandatory coordination, sandbox controls, parent approvals, and the nested-delegation ban remain active.
@@ -104,8 +121,9 @@ The main-session model label remains unchanged.
 
 ### Audit records
 
-Normal worker event streams include `virtual-models-route` and `virtual-models-worker-recovery` custom entries.
-They record selections, classifier outcomes and usage when reported, retry decisions, and pool exhaustion without copying raw error text.
+Normal event streams include `virtual-models-route` custom entries.
+`worker-auto-v1` adds `virtual-models-worker-recovery` entries. The fixed-family profiles add `virtual-models-provider-recovery` entries.
+They record selections, classifier outcomes when used, reported usage, retry decisions, and pool exhaustion without copying raw error text.
 A recovery entry with `decision: "select"` lists eligible candidates; the following route entry records the actual destination.
 `decision: "provider-fallback"` records a same-family provider change. `decision: "stopped"` with `reason: "codex-no-fallback"` records terminal Codex recovery.
 `reason: "classifier-choice"` identifies a Jev decision. `reason: "classifier-fallback"` identifies degraded rule selection.
@@ -142,49 +160,35 @@ Rules and Jev chose identical models for all six tasks in each role. Jev showed 
 Keep saved defaults unchanged pending review. One worker Jev retry has unknown usage; the evaluation preserves its token lower bound.
 Pi's built-in footer and `/model` expose physical dispatch. The custom status-bar footer does not.
 
-## Try one session
+## Main-session selection
+
+Choose GLM Flash:
 
 ```sh
-pi -e extensions/virtual-models/virtual-models.ts --model virtual-models/jev-v1
+pi -e extensions/virtual-models/virtual-models.ts --model virtual-models/glm-flash-fallback-v1
 ```
 
-The Jev pilot router requires authenticated physical models:
+Choose DeepSeek Flash:
 
-```text
-openai-codex/gpt-6.1-sol
-opencode-go/deepseek-v4.1-flash
-zai/glm-5.3-flash
+```sh
+pi -e extensions/virtual-models/virtual-models.ts --model virtual-models/deepseek-flash-fallback-v1
 ```
 
-## Jev pilot routing policy
-
-Policy `teop-policy-v1` chooses at user-task boundaries.
-Its criteria favor GLM for bounded investigation, DeepSeek for implementation and diagnosis, and Sol for difficult reasoning and safety review.
-
-Jev receives the role and at most 12,000 characters from the latest user message.
-It does not receive fixture labels or checking rules. It does not classify tool continuations.
-Its ten-second deadline covers availability checks and inference. A recorded classifier failure falls back to Sol.
-Cancellation does not trigger fallback.
-
-Tool continuations and ordinary retries retain their physical model and thinking level.
-Branch-local state preserves a choice when no previous response exists.
-Direct requests use Sol without session-state assumptions. Pi clamps thinking levels to physical support.
-
-A chat subscription exhaustion error pauses the experiment instead of selecting a substitute.
-Classifier failure and chat subscription exhaustion are different conditions.
+Both commands require credentials for at least one provider in the selected family.
 
 ## Configuration
 
 The extension has no saved configuration file.
 Workers receive their role from `PI_WORKER=1`.
 
-For temporary pilot worker selection, set `PI_WORKER_MODEL=virtual-models/jev-v1`.
+For fixed-family workers, replace the temporary command's `PI_WORKER_MODEL` value with `virtual-models/glm-flash-fallback-v1` or `virtual-models/deepseek-flash-fallback-v1`.
 A temporary `PI_WORKER_EXTENSIONS_CONFIG` file must retain the default worker list and add `virtual-models`.
 The worker resolver retains mandatory coordination, approval, and sandbox extensions. It still rejects nested delegation.
 
 The frozen pilot predates `worker-auto-v1`. Its evidence remains unchanged; use its recorded source versions for reproduction.
 Current source fingerprints do not authorize resuming historical pilot manifests.
-The current evaluator rejects `--arms rules`. Its default smoke run contains two Jev cases; its scored plan contains 36 cases.
+The current evaluator rejects `--arms rules` and `--arms jev`. It launches fixed physical models only.
+Its default smoke run contains two GLM cases; its scored plan contains 24 cases.
 These launch options do not change the recorded 48-case pilot. The offline pilot report retains its historical 48-case plan.
 
 The evaluator sets `PI_VIRTUAL_MODEL_TRACE` to a private output prefix.

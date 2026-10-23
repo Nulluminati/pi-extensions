@@ -333,37 +333,39 @@ describe("real SDK worker recovery with offline providers", () => {
 });
 
 describe("actual worker process recovery with mandatory safety extensions", () => {
-  it.each(["quota", "exhausted"])(
-    "preserves process, sandbox and terminal status for %s",
-    async (scenario) => {
-      const dir = await directory();
-      const forbidden = await directory();
-      await mkdir(join(dir, ".pi"), { recursive: true });
-      await copyFile(join(root, ".pi/sandbox.json"), join(dir, ".pi/sandbox.json"));
-      const policy = JSON.parse(await readFile(join(dir, ".pi/sandbox.json"), "utf8"));
-      policy.filesystem.denyRead.push(forbidden);
-      await writeFile(join(dir, ".pi/sandbox.json"), JSON.stringify(policy));
-      await writeFile(join(dir, "probe.txt"), "completed-read");
-      const privatePath = join(forbidden, "private.txt");
-      await writeFile(privatePath, "private-data-must-stay-hidden");
-      await writeFile(
-        join(dir, "settings.json"),
-        JSON.stringify({ retry: { enabled: false }, compaction: { enabled: false } }),
-      );
-      const approvals: unknown[] = [];
-      const deniedCommand =
-        'node -e \'require("node:fs").writeFileSync("denied.txt","must-not-run")\'';
-      const callsPath = join(dir, "calls.jsonl");
-      const providerPath = join(dir, "providers.ts");
-      const classifierPath = join(dir, "classifier.jsonl");
-      await writeFile(
-        providerPath,
-        `import {appendFileSync} from "node:fs";
+  it.each([
+    ["quota", "worker-auto-v1"],
+    ["exhausted", "worker-auto-v1"],
+    ["quota", "glm-flash-fallback-v1"],
+  ])("preserves process, sandbox and terminal status for %s with %s", async (scenario, profile) => {
+    const dir = await directory();
+    const forbidden = await directory();
+    await mkdir(join(dir, ".pi"), { recursive: true });
+    await copyFile(join(root, ".pi/sandbox.json"), join(dir, ".pi/sandbox.json"));
+    const policy = JSON.parse(await readFile(join(dir, ".pi/sandbox.json"), "utf8"));
+    policy.filesystem.denyRead.push(forbidden);
+    await writeFile(join(dir, ".pi/sandbox.json"), JSON.stringify(policy));
+    await writeFile(join(dir, "probe.txt"), "completed-read");
+    const privatePath = join(forbidden, "private.txt");
+    await writeFile(privatePath, "private-data-must-stay-hidden");
+    await writeFile(
+      join(dir, "settings.json"),
+      JSON.stringify({ retry: { enabled: false }, compaction: { enabled: false } }),
+    );
+    const approvals: unknown[] = [];
+    const deniedCommand =
+      'node -e \'require("node:fs").writeFileSync("denied.txt","must-not-run")\'';
+    const callsPath = join(dir, "calls.jsonl");
+    const providerPath = join(dir, "providers.ts");
+    const classifierPath = join(dir, "classifier.jsonl");
+    await writeFile(
+      providerPath,
+      `import {appendFileSync} from "node:fs";
 import {createProvider,fauxProvider,fauxAssistantMessage,fauxToolCall} from ${JSON.stringify(import.meta.resolve("@earendil-works/pi-ai"))};
 export default async function(pi){
  const offlineApis=new Set();
  pi.registerProvider(createProvider({id:"typesafe",auth:{apiKey:{name:"Offline classifier",resolve:async()=>({auth:{}})}},models:[{type:"classifier",provider:"typesafe",id:"jev-latest",name:"Offline approval classifier",api:"typesafe-system-one",input:["text"]}],classifiers:{"typesafe-system-one":{classify:async(model,context)=>{appendFileSync(${JSON.stringify(classifierPath)},JSON.stringify({provider:model.provider,questions:Object.keys(context.questions).sort()})+"\\n");if(context.questions.route){const keys=Object.keys(context.questions.route.criteria);const choice=keys.includes("glm")?"glm":keys.includes("deepseek")?"deepseek":"sol";return{provider:"typesafe",model:model.id,api:"typesafe-system-one",timestamp:Date.now(),stopReason:"stop",answers:{route:{type:"choice",choice,confidence:1,probabilities:Object.fromEntries(keys.map(key=>[key,key===choice?1:0]))}}};}return{provider:"typesafe",model:model.id,api:"typesafe-system-one",timestamp:Date.now(),stopReason:"stop",answers:{harm:{type:"bool",probability:1},secrets:{type:"bool",probability:0},externalChange:{type:"bool",probability:0}}};}}}}));
- for(const [provider,id] of ${JSON.stringify(pool)}){
+ for(const [provider,id] of ${JSON.stringify(pool.map(([provider, id]) => (provider === "opencode-go" && profile !== "worker-auto-v1" ? [provider, "glm-5.3-flash"] : [provider, id])))}){
   const faux=fauxProvider({provider,models:[{id,reasoning:false,contextWindow:500000}],tokensPerSecond:1000000});
   const note=(context)=>appendFileSync(${JSON.stringify(callsPath)},JSON.stringify({provider,pid:process.pid,userMessages:context.messages.filter(m=>m.role==="user").length,toolResults:context.messages.filter(m=>m.role==="toolResult").length,failedAssistant:context.messages.some(m=>m.role==="assistant"&&m.stopReason==="error")})+"\\n");
   const quota=(context)=>{note(context);return fauxAssistantMessage("",{stopReason:"error",errorMessage:"weekly usage limit reached"});};
@@ -376,125 +378,131 @@ export default async function(pi){
  const placeholder=fauxProvider({provider:"synthetic",models:[{id:"offline-unroutable",reasoning:false,contextWindow:500000}],tokensPerSecond:1000000});offlineApis.add(placeholder.api);pi.registerProvider(placeholder.provider);
  pi.on("before_agent_start",(_event,ctx)=>{const providers=new Set(["zai","opencode-go","synthetic","openai-codex"]);const unsafe=ctx.modelRegistry.getAll().some(model=>providers.has(model.provider)&&!offlineApis.has(model.api));if(unsafe){ctx.abort();throw Error("Offline fixture refused a real chat provider");}});
 }`,
-      );
-      execFileSync(process.execPath, ["--check", providerPath]);
-      vi.stubEnv("PI_CODING_AGENT_DIR", dir);
-      vi.stubEnv("PI_OFFLINE", "1");
-      const config = join(dir, "worker-extensions.json");
-      await writeFile(config, JSON.stringify([...DEFAULT_WORKER_EXTENSIONS, "virtual-models"]));
-      vi.stubEnv("PI_WORKER_EXTENSIONS_CONFIG", config);
-      vi.stubEnv("PI_WORKER_EXTENSIONS", "");
-      const extensions = resolveWorkerExtensions(undefined, {
-        extensionsRoot: join(root, "extensions"),
-      });
-      expect(extensions.at(-1)?.name).toBe("worker-sandbox");
-      expect(extensions.map((entry) => entry.name)).toEqual(
-        expect.arrayContaining(["messenger", "worker-blocker", "approval-mode", "virtual-models"]),
-      );
-      expect(extensions.some((entry) => entry.name === "workers")).toBe(false);
-      const id = `w-recovery-${scenario}`;
-      const worker = await startWorker({
-        cwd: dir,
-        task: "Find configuration. Read probe.txt once. Return WORKER_RESULT=done.",
-        model: "virtual-models/worker-auto-v1",
-        thinkingLevel: "high",
-        name: "worker-recovery",
-        workerId: id,
-        timeoutMs: 20000,
-        readOnly: true,
-        sandbox: true,
-        extensionPaths: [
-          ...extensions.slice(0, -1).map((entry) => entry.path),
-          providerPath,
-          ...extensions.slice(-1).map((entry) => entry.path),
-        ],
-        events: {
-          wake: () => {},
-          notify: () => {},
-          onChange: () => {},
-          onActivity: () => {},
-          requestApproval: async (_worker, request) => {
-            approvals.push(request);
-            return request.kind === "mode" ? { enabled: true } : { approved: false };
-          },
+    );
+    execFileSync(process.execPath, ["--check", providerPath]);
+    vi.stubEnv("PI_CODING_AGENT_DIR", dir);
+    vi.stubEnv("PI_OFFLINE", "1");
+    const config = join(dir, "worker-extensions.json");
+    await writeFile(config, JSON.stringify([...DEFAULT_WORKER_EXTENSIONS, "virtual-models"]));
+    vi.stubEnv("PI_WORKER_EXTENSIONS_CONFIG", config);
+    vi.stubEnv("PI_WORKER_EXTENSIONS", "");
+    const extensions = resolveWorkerExtensions(undefined, {
+      extensionsRoot: join(root, "extensions"),
+    });
+    expect(extensions.at(-1)?.name).toBe("worker-sandbox");
+    expect(extensions.map((entry) => entry.name)).toEqual(
+      expect.arrayContaining(["messenger", "worker-blocker", "approval-mode", "virtual-models"]),
+    );
+    expect(extensions.some((entry) => entry.name === "workers")).toBe(false);
+    const id = `w-recovery-${scenario}`;
+    const worker = await startWorker({
+      cwd: dir,
+      task: "Find configuration. Read probe.txt once. Return WORKER_RESULT=done.",
+      model: `virtual-models/${profile}`,
+      thinkingLevel: "high",
+      name: "worker-recovery",
+      workerId: id,
+      timeoutMs: 20000,
+      readOnly: true,
+      sandbox: true,
+      extensionPaths: [
+        ...extensions.slice(0, -1).map((entry) => entry.path),
+        providerPath,
+        ...extensions.slice(-1).map((entry) => entry.path),
+      ],
+      events: {
+        wake: () => {},
+        notify: () => {},
+        onChange: () => {},
+        onActivity: () => {},
+        requestApproval: async (_worker, request) => {
+          approvals.push(request);
+          return request.kind === "mode" ? { enabled: true } : { approved: false };
         },
-        onRecord: async () => {},
-      });
-      cleanups.push(() => worker.cancel());
-      const record = await worker.done;
-      const calls = (await readFile(callsPath, "utf8"))
+      },
+      onRecord: async () => {},
+    });
+    cleanups.push(() => worker.cancel());
+    const record = await worker.done;
+    const calls = (await readFile(callsPath, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    expect(new Set(calls.map((call) => call.pid)).size).toBe(1);
+    expect(calls.every((call) => call.userMessages === 1 && !call.failedAssistant)).toBe(true);
+    const events = (await readFile(streamPath(dir, id), "utf8"))
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    const assistants = events.filter(
+      (event) => event.type === "message_end" && event.message.role === "assistant",
+    );
+    expect(assistants.every((event) => event.message.api !== "pi-virtual")).toBe(true);
+    if (scenario === "exhausted") {
+      expect(record.status).toBe("failed");
+      expect(record.error).toContain("weekly usage limit");
+      expect(calls.map((call) => call.provider)).toEqual(["zai", "opencode-go", "openai-codex"]);
+    } else {
+      expect(record.status, record.error).toBe("completed");
+      expect(record.error).toBeUndefined();
+      expect(record.outputText).toBe("WORKER_RESULT=done");
+      expect(calls.map((call) => call.provider)).toEqual([
+        "zai",
+        "zai",
+        "opencode-go",
+        "opencode-go",
+        "opencode-go",
+      ]);
+      expect(calls[2].toolResults).toBe(1);
+      const completed = events.filter(
+        (event) =>
+          event.type === "tool_execution_start" &&
+          event.toolName === "read" &&
+          event.args.path === "probe.txt",
+      );
+      expect(completed).toHaveLength(1);
+      const results = events.filter(
+        (event) => event.type === "message_end" && event.message.role === "toolResult",
+      );
+      expect(results[0].message.isError).toBe(false);
+      expect(JSON.stringify(results[0].message.content)).toContain("completed-read");
+      expect(results[1].message.isError).toBe(true);
+      expect(JSON.stringify(results[1].message.content)).not.toContain(
+        "private-data-must-stay-hidden",
+      );
+      expect(approvals).toContainEqual({ kind: "mode" });
+      expect(approvals).toContainEqual(
+        expect.objectContaining({ kind: "approval", command: deniedCommand, decision: "reject" }),
+      );
+      const classifiers = (await readFile(classifierPath, "utf8"))
         .trim()
         .split("\n")
         .map((line) => JSON.parse(line));
-      expect(new Set(calls.map((call) => call.pid)).size).toBe(1);
-      expect(calls.every((call) => call.userMessages === 1 && !call.failedAssistant)).toBe(true);
-      const events = (await readFile(streamPath(dir, id), "utf8"))
-        .split("\n")
-        .filter(Boolean)
-        .map((line) => JSON.parse(line));
-      const assistants = events.filter(
-        (event) => event.type === "message_end" && event.message.role === "assistant",
-      );
-      expect(assistants.every((event) => event.message.api !== "pi-virtual")).toBe(true);
-      if (scenario === "exhausted") {
-        expect(record.status).toBe("failed");
-        expect(record.error).toContain("weekly usage limit");
-        expect(calls.map((call) => call.provider)).toEqual(["zai", "opencode-go", "openai-codex"]);
-      } else {
-        expect(record.status, record.error).toBe("completed");
-        expect(record.error).toBeUndefined();
-        expect(record.outputText).toBe("WORKER_RESULT=done");
-        expect(calls.map((call) => call.provider)).toEqual([
-          "zai",
-          "zai",
-          "opencode-go",
-          "opencode-go",
-          "opencode-go",
-        ]);
-        expect(calls[2].toolResults).toBe(1);
-        const completed = events.filter(
-          (event) =>
-            event.type === "tool_execution_start" &&
-            event.toolName === "read" &&
-            event.args.path === "probe.txt",
-        );
-        expect(completed).toHaveLength(1);
-        const results = events.filter(
-          (event) => event.type === "message_end" && event.message.role === "toolResult",
-        );
-        expect(results[0].message.isError).toBe(false);
-        expect(JSON.stringify(results[0].message.content)).toContain("completed-read");
-        expect(results[1].message.isError).toBe(true);
-        expect(JSON.stringify(results[1].message.content)).not.toContain(
-          "private-data-must-stay-hidden",
-        );
-        expect(approvals).toContainEqual({ kind: "mode" });
-        expect(approvals).toContainEqual(
-          expect.objectContaining({ kind: "approval", command: deniedCommand, decision: "reject" }),
-        );
-        const classifiers = (await readFile(classifierPath, "utf8"))
-          .trim()
-          .split("\n")
-          .map((line) => JSON.parse(line));
-        expect(classifiers).toEqual([
-          { provider: "typesafe", questions: ["route"] },
-          { provider: "typesafe", questions: ["route"] },
-          { provider: "typesafe", questions: ["externalChange", "harm", "secrets"] },
-        ]);
-        expect(results[2].message.toolName).toBe("bash");
-        expect(results[2].message.isError).toBe(true);
-        expect(JSON.stringify(results[2].message.content)).toContain("Approval Mode blocked");
-        await expect(readFile(join(dir, "denied.txt"), "utf8")).rejects.toMatchObject({
-          code: "ENOENT",
-        });
-      }
-      expect(
-        events.some(
-          (event) =>
-            event.type === "entry_appended" &&
-            event.entry.customType === "virtual-models-worker-recovery",
-        ),
-      ).toBe(true);
-    },
-  );
+      expect(classifiers).toEqual([
+        ...(profile === "worker-auto-v1"
+          ? [
+              { provider: "typesafe", questions: ["route"] },
+              { provider: "typesafe", questions: ["route"] },
+            ]
+          : []),
+        { provider: "typesafe", questions: ["externalChange", "harm", "secrets"] },
+      ]);
+      expect(results[2].message.toolName).toBe("bash");
+      expect(results[2].message.isError).toBe(true);
+      expect(JSON.stringify(results[2].message.content)).toContain("Approval Mode blocked");
+      await expect(readFile(join(dir, "denied.txt"), "utf8")).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    }
+    expect(
+      events.some(
+        (event) =>
+          event.type === "entry_appended" &&
+          event.entry.customType ===
+            (profile === "worker-auto-v1"
+              ? "virtual-models-worker-recovery"
+              : "virtual-models-provider-recovery"),
+      ),
+    ).toBe(true);
+  });
 });

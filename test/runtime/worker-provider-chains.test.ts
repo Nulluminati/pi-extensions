@@ -39,25 +39,32 @@ afterEach(async () => {
 });
 
 describe("actual worker provider priorities and physical-model visibility (offline)", () => {
-  it.each(["deepseek", "deepseek-first", "glm", "codex-quota", "codex-temporary"])(
-    "enforces %s behavior in one worker process",
-    async (scenario) => {
-      const dir = await mkdtemp(join(tmpdir(), "pi-worker-providers-"));
-      cleanups.push(() => rm(dir, { recursive: true, force: true }));
-      await mkdir(join(dir, ".pi"), { recursive: true });
-      await copyFile(join(root, ".pi/sandbox.json"), join(dir, ".pi/sandbox.json"));
-      await writeFile(join(dir, "probe.txt"), "one completed read");
-      await writeFile(
-        join(dir, "settings.json"),
-        JSON.stringify({ retry: { enabled: false }, compaction: { enabled: false } }),
-      );
-      const releasePath = join(dir, "release");
-      const callsPath = join(dir, "calls.jsonl");
-      const choicesPath = join(dir, "choices.jsonl");
-      const providerPath = join(dir, "offline-providers.ts");
-      await writeFile(
-        providerPath,
-        `import {appendFileSync,existsSync,watch} from "node:fs";
+  it.each([
+    ["deepseek", "worker-auto-v1"],
+    ["deepseek-first", "worker-auto-v1"],
+    ["glm", "worker-auto-v1"],
+    ["codex-quota", "worker-auto-v1"],
+    ["codex-temporary", "worker-auto-v1"],
+    ["deepseek", "deepseek-flash-fallback-v1"],
+    ["deepseek-first", "deepseek-flash-fallback-v1"],
+    ["glm", "glm-flash-fallback-v1"],
+  ])("enforces %s behavior with %s in one worker process", async (scenario, profile) => {
+    const dir = await mkdtemp(join(tmpdir(), "pi-worker-providers-"));
+    cleanups.push(() => rm(dir, { recursive: true, force: true }));
+    await mkdir(join(dir, ".pi"), { recursive: true });
+    await copyFile(join(root, ".pi/sandbox.json"), join(dir, ".pi/sandbox.json"));
+    await writeFile(join(dir, "probe.txt"), "one completed read");
+    await writeFile(
+      join(dir, "settings.json"),
+      JSON.stringify({ retry: { enabled: false }, compaction: { enabled: false } }),
+    );
+    const releasePath = join(dir, "release");
+    const callsPath = join(dir, "calls.jsonl");
+    const choicesPath = join(dir, "choices.jsonl");
+    const providerPath = join(dir, "offline-providers.ts");
+    await writeFile(
+      providerPath,
+      `import {appendFileSync,existsSync,watch} from "node:fs";
 import {createProvider,fauxProvider,fauxAssistantMessage,fauxToolCall} from ${JSON.stringify(import.meta.resolve("@earendil-works/pi-ai"))};
 const scenario=${JSON.stringify(scenario)};
 const family=scenario.startsWith("deepseek")?"deepseek":scenario;
@@ -88,108 +95,112 @@ export default async function(pi){
  }
  pi.on("before_agent_start",(_event,ctx)=>{const unsafe=ctx.modelRegistry.getAll().some(model=>endpoints.some(([provider,id])=>model.provider===provider&&model.id===id)&&!offlineApis.has(model.api));if(unsafe){ctx.abort();throw Error("Offline fixture refused a real chat provider");}});
 }`,
-      );
-      execFileSync(process.execPath, ["--check", providerPath]);
-      vi.stubEnv("PI_CODING_AGENT_DIR", dir);
-      const config = join(dir, "worker-extensions.json");
-      await writeFile(config, JSON.stringify([...DEFAULT_WORKER_EXTENSIONS, "virtual-models"]));
-      vi.stubEnv("PI_WORKER_EXTENSIONS_CONFIG", config);
-      vi.stubEnv("PI_WORKER_EXTENSIONS", "");
-      const extensions = resolveWorkerExtensions(undefined, {
-        extensionsRoot: join(root, "extensions"),
-      });
-      expect(extensions.at(-1)?.name).toBe("worker-sandbox");
-      expect(extensions.some((entry) => entry.name === "workers")).toBe(false);
-      const expected = scenario.startsWith("deepseek")
-        ? "opencode-go/deepseek-v4.1-flash"
-        : "opencode-go/glm-5.3-flash";
-      let running: Awaited<ReturnType<typeof startWorker>> | undefined;
-      let liveDisplay = false;
-      const worker = await startWorker({
-        cwd: dir,
-        task: "Find configuration. Read probe.txt once. Return PROVIDER_RESULT=done.",
-        model: "virtual-models/worker-auto-v1",
-        thinkingLevel: "high",
-        name: "provider-priority",
-        workerId: `w-providers-${scenario}`,
-        timeoutMs: 20000,
-        readOnly: true,
-        sandbox: true,
-        extensionPaths: [
-          ...extensions.slice(0, -1).map((entry) => entry.path),
-          providerPath,
-          ...extensions.slice(-1).map((entry) => entry.path),
-        ],
-        events: {
-          wake: () => {},
-          notify: () => {},
-          onChange: () => {},
-          onActivity: () => {
-            if (running?.record.physicalModel === expected && running.record.status === "running") {
-              liveDisplay = true;
-              writeFileSync(releasePath, "displayed");
-            }
-          },
+    );
+    execFileSync(process.execPath, ["--check", providerPath]);
+    vi.stubEnv("PI_CODING_AGENT_DIR", dir);
+    const config = join(dir, "worker-extensions.json");
+    await writeFile(config, JSON.stringify([...DEFAULT_WORKER_EXTENSIONS, "virtual-models"]));
+    vi.stubEnv("PI_WORKER_EXTENSIONS_CONFIG", config);
+    vi.stubEnv("PI_WORKER_EXTENSIONS", "");
+    const extensions = resolveWorkerExtensions(undefined, {
+      extensionsRoot: join(root, "extensions"),
+    });
+    expect(extensions.at(-1)?.name).toBe("worker-sandbox");
+    expect(extensions.some((entry) => entry.name === "workers")).toBe(false);
+    const expected = scenario.startsWith("deepseek")
+      ? "opencode-go/deepseek-v4.1-flash"
+      : "opencode-go/glm-5.3-flash";
+    let running: Awaited<ReturnType<typeof startWorker>> | undefined;
+    let liveDisplay = false;
+    const worker = await startWorker({
+      cwd: dir,
+      task: "Find configuration. Read probe.txt once. Return PROVIDER_RESULT=done.",
+      model: `virtual-models/${profile}`,
+      thinkingLevel: "high",
+      name: "provider-priority",
+      workerId: `w-providers-${scenario}`,
+      timeoutMs: 20000,
+      readOnly: true,
+      sandbox: true,
+      extensionPaths: [
+        ...extensions.slice(0, -1).map((entry) => entry.path),
+        providerPath,
+        ...extensions.slice(-1).map((entry) => entry.path),
+      ],
+      events: {
+        wake: () => {},
+        notify: () => {},
+        onChange: () => {},
+        onActivity: () => {
+          if (running?.record.physicalModel === expected && running.record.status === "running") {
+            liveDisplay = true;
+            writeFileSync(releasePath, "displayed");
+          }
         },
-        onRecord: async () => {},
-      });
-      running = worker;
-      cleanups.push(() => worker.cancel());
-      const record = await worker.done;
-      const calls = (await readFile(callsPath, "utf8"))
-        .trim()
-        .split("\n")
-        .map((line) => JSON.parse(line));
-      const choices = (await readFile(choicesPath, "utf8"))
-        .trim()
-        .split("\n")
-        .map((line) => JSON.parse(line));
-      expect(new Set(calls.map((call) => call.pid)).size).toBe(1);
-      expect(calls.every((call) => call.userCount === 1)).toBe(true);
-      expect(choices).toHaveLength(1);
+      },
+      onRecord: async () => {},
+    });
+    running = worker;
+    cleanups.push(() => worker.cancel());
+    const record = await worker.done;
+    const calls = (await readFile(callsPath, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    const choiceText = await readFile(choicesPath, "utf8").catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return "";
+      throw error;
+    });
+    const choices = choiceText
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    expect(new Set(calls.map((call) => call.pid)).size).toBe(1);
+    expect(calls.every((call) => call.userCount === 1)).toBe(true);
+    expect(choices).toHaveLength(profile === "worker-auto-v1" ? 1 : 0);
+    if (profile === "worker-auto-v1")
       expect(choices[0].keys.sort()).toEqual(["deepseek", "glm", "sol"]);
-      expect(record.model).toBe("virtual-models/worker-auto-v1");
-      if (scenario.startsWith("codex")) {
-        expect(record.status).toBe("failed");
-        expect(record.physicalModel).toBe("openai-codex/gpt-6.1-sol");
-        expect(calls).toHaveLength(scenario === "codex-quota" ? 1 : 2);
-        expect(calls.every((call) => call.provider === "openai-codex")).toBe(true);
-        expect(formatWorkerStatus(record)).toContain("Physical model: openai-codex/gpt-6.1-sol");
-      } else {
-        expect(record.status, record.error).toBe("completed");
-        expect(record.outputText).toBe("PROVIDER_RESULT=done");
-        expect(record.physicalModel).toBe(expected);
-        expect(record.physicalThinkingLevel).toBe("off");
-        expect(liveDisplay).toBe(true);
-        expect(formatWorkerLine(record)).toContain("opencode-go");
-        expect(formatWorkerStatus(record)).toContain(`Physical model: ${expected}`);
-        expect(calls.map((call) => `${call.provider}/${call.model}`)).toEqual(
-          scenario === "deepseek-first"
-            ? ["synthetic/hf:deepseek-ai/DeepSeek-V4.1-Flash-1017", expected]
-            : scenario === "deepseek"
-              ? [
-                  "synthetic/hf:deepseek-ai/DeepSeek-V4.1-Flash-1017",
-                  "synthetic/hf:deepseek-ai/DeepSeek-V4.1-Flash-1017",
-                  expected,
-                ]
-              : [
-                  "zai/glm-5.3-flash",
-                  "zai/glm-5.3-flash",
-                  "synthetic/hf:zai-org/GLM-5.3-Flash",
-                  expected,
-                ],
-        );
-        expect(calls.at(-1)?.toolResults).toBe(scenario === "deepseek-first" ? 0 : 1);
-        const events = (await readFile(streamPath(dir, record.id), "utf8"))
-          .split("\n")
-          .filter(Boolean)
-          .map((line) => JSON.parse(line));
-        expect(
-          events.filter(
-            (event) => event.type === "tool_execution_start" && event.toolName === "read",
-          ),
-        ).toHaveLength(scenario === "deepseek-first" ? 0 : 1);
-      }
-    },
-  );
+    expect(record.model).toBe(`virtual-models/${profile}`);
+    if (scenario.startsWith("codex")) {
+      expect(record.status).toBe("failed");
+      expect(record.physicalModel).toBe("openai-codex/gpt-6.1-sol");
+      expect(calls).toHaveLength(scenario === "codex-quota" ? 1 : 2);
+      expect(calls.every((call) => call.provider === "openai-codex")).toBe(true);
+      expect(formatWorkerStatus(record)).toContain("Physical model: openai-codex/gpt-6.1-sol");
+    } else {
+      expect(record.status, record.error).toBe("completed");
+      expect(record.outputText).toBe("PROVIDER_RESULT=done");
+      expect(record.physicalModel).toBe(expected);
+      expect(record.physicalThinkingLevel).toBe("off");
+      expect(liveDisplay).toBe(true);
+      expect(formatWorkerLine(record)).toContain("opencode-go");
+      expect(formatWorkerStatus(record)).toContain(`Physical model: ${expected}`);
+      expect(calls.map((call) => `${call.provider}/${call.model}`)).toEqual(
+        scenario === "deepseek-first"
+          ? ["synthetic/hf:deepseek-ai/DeepSeek-V4.1-Flash-1017", expected]
+          : scenario === "deepseek"
+            ? [
+                "synthetic/hf:deepseek-ai/DeepSeek-V4.1-Flash-1017",
+                "synthetic/hf:deepseek-ai/DeepSeek-V4.1-Flash-1017",
+                expected,
+              ]
+            : [
+                "zai/glm-5.3-flash",
+                "zai/glm-5.3-flash",
+                "synthetic/hf:zai-org/GLM-5.3-Flash",
+                expected,
+              ],
+      );
+      expect(calls.at(-1)?.toolResults).toBe(scenario === "deepseek-first" ? 0 : 1);
+      const events = (await readFile(streamPath(dir, record.id), "utf8"))
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line));
+      expect(
+        events.filter(
+          (event) => event.type === "tool_execution_start" && event.toolName === "read",
+        ),
+      ).toHaveLength(scenario === "deepseek-first" ? 0 : 1);
+    }
+  });
 });

@@ -46,7 +46,7 @@ pi -e extensions/goal/goal.ts
 | Extension | Description |
 |-----------|-------------|
 | `todos/` | Persistent todo list the agent manages with the `todo` tool (add/check/uncheck/list/clear), rendered as a ☐/☑ widget above the editor. Shared state lives in `lib/todos.ts`. |
-| [`virtual-models/`](extensions/virtual-models/README.md) | Opt-in worker routing: Jev chooses model families, ordered providers handle recovery, and Codex failures stop. Widgets show physical targets. Defaults remain unchanged. |
+| [`virtual-models/`](extensions/virtual-models/README.md) | GLM and DeepSeek provider-fallback models support main sessions and workers. Worker-auto adds Jev family selection. Widgets show physical targets. Defaults remain unchanged. |
 | [`jev/`](extensions/jev/README.md) | Ask Jev for batched choices, rubric scores, and yes/no probabilities about supplied evidence. Returns typed answers and reported usage through Pi's classifier registry. Judgments remain advisory; the tool never executes actions. |
 | [`approval-mode/`](extensions/approval-mode/README.md) | Gates agent Bash, background, and monitor commands. Hard denies run first; a small reviewed command set runs without Jev. TypeSafe Jev checks the rest. Rejected or uncertain calls ask for one-time approval in the parent session; unavailable decisions block. `/approval-mode off` skips Jev for the parent and its workers, but keeps hard denies and sandbox limits. Workers cannot change the mode themselves. |
 | `handoff/` | Summarize the current session with the global small model and start a new focused session. `/handoff [goal]` builds a compact continuation prompt, lets you review it, then opens a new session with the summary pre-filled. |
