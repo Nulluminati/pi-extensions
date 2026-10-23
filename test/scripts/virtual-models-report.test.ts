@@ -124,6 +124,17 @@ async function report(source: string, output: string, extras: string[] = []) {
 }
 
 describe("offline versioned pilot report", () => {
+  it("keeps the historical 48-case plan independent of current launch options", async () => {
+    const path = await root(),
+      source = join(path, "source");
+    await fixture(source);
+    const result = await report(source, join(path, "out"));
+    expect(result.planned).toBe(48);
+    expect(result.pending).toHaveLength(47);
+    expect(result.pending).toContain("main-boundaries-rules-r1");
+    expect(result.pending).toContain("worker-schedule-rules-r1");
+  });
+
   it("retains completed failures and records invalidated positive results without selecting them", async () => {
     const path = await root(),
       source = join(path, "source");

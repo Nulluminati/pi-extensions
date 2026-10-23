@@ -2,7 +2,7 @@
 import { appendFile } from "node:fs/promises";
 import type { ExtensionAPI } from "pi";
 import { extractProviderUsage, installClassifierMeasurement } from "./src/measurement.ts";
-import { createRouter } from "./src/router.ts";
+import { createJevRouter } from "./src/router.ts";
 import { WORKER_POLICY_VERSION } from "./src/worker-policy.ts";
 import { createWorkerRouter, recoverWorkerRequest } from "./src/worker-router.ts";
 
@@ -56,20 +56,18 @@ export default async function (pi: ExtensionAPI) {
         .sort((a, b) => a.name.localeCompare(b.name)),
     });
   });
-  for (const kind of ["rules", "jev"] as const) {
-    pi.registerVirtualModel({
-      provider: "virtual-models",
-      id: `${kind}-v1`,
-      name: `Experimental ${kind === "rules" ? "rules" : "Jev"} router v1`,
-      thinkingLevels: ["low", "medium", "high", "xhigh", "max"],
-      contextWindow: 500000,
-      maxTokens: 128000,
-      input: ["text"],
-      route: createRouter(kind, role, async (entry) => {
-        await record("route", entry);
-      }),
-    });
-  }
+  pi.registerVirtualModel({
+    provider: "virtual-models",
+    id: "jev-v1",
+    name: "Experimental Jev router v1",
+    thinkingLevels: ["low", "medium", "high", "xhigh", "max"],
+    contextWindow: 500000,
+    maxTokens: 128000,
+    input: ["text"],
+    route: createJevRouter(role, async (entry) => {
+      await record("route", entry);
+    }),
+  });
   pi.on("agent_before_settle", (event, ctx) => recoverWorkerRequest(event, ctx, role));
   pi.registerVirtualModel({
     provider: "virtual-models",

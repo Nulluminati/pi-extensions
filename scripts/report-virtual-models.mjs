@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { EventLedger, normalizeUsage, sumUsage } from "./virtual-models-eval/ledger.ts";
-import { parseOptions, planCases } from "./virtual-models-eval/plan.ts";
 
 const args = process.argv.slice(2);
 if (args.includes("--help")) {
@@ -272,7 +271,12 @@ const expense = (a) => ({
   invalidation: a.invalidation,
   rawEventsRetained: a.rawEventsRetained,
 });
-const planned = planCases(parseOptions(["--phase", "scored"]));
+// Historical coverage is independent of the currently available router launch options.
+const planned = groups.flatMap(({ role, arm }) =>
+  ["boundaries", "diagnosis", "fix", "rename", "review", "schedule"].map((task) => ({
+    id: `${role}-${task}-${arm}-r1`,
+  })),
+);
 const report = {
   capturedAt: new Date().toISOString(),
   sources,

@@ -1,10 +1,12 @@
 # Virtual models
 
-Registers three opt-in selections. None changes saved main or worker defaults.
+Registers two opt-in selections. None changes saved main or worker defaults.
 
 - `virtual-models/worker-auto-v1` uses Jev to select worker models and recover recognized availability failures. Rules are a classifier fallback only.
-- `virtual-models/rules-v1` uses observable request features for the frozen `teop` pilot.
-- `virtual-models/jev-v1` asks authenticated `typesafe/jev-latest` to choose from the same physical pool for that pilot.
+- `virtual-models/jev-v1` asks authenticated `typesafe/jev-latest` to choose from the original three-model pilot pool.
+
+`rules-v1` and its dedicated router tests are removed. Historical pilot evidence retains its results.
+The internal rule fallback in `worker-auto-v1` remains available when Jev classification fails.
 
 See [the evaluation](../../docs/virtual-models-evaluation.md) for pilot evidence and limitations.
 
@@ -45,6 +47,8 @@ The fallback keyword rules come from `src/policy.ts`. They do not override a val
 Routing is a heuristic, not a quality guarantee.
 The router skips endpoints without available credentials and never chooses outside the six approved endpoints above.
 Registry availability is a cached authentication snapshot, not a quota or service-health probe.
+The router does not read remaining subscription allowances or usage percentages.
+It does not convert recorded token counts or catalog prices into subscription usage.
 Healthy continuations retain their physical endpoint, even if a preferred provider becomes available again.
 Worker thinking follows the requested setting, clamped to physical support.
 
@@ -141,11 +145,10 @@ Pi's built-in footer and `/model` expose physical dispatch. The custom status-ba
 ## Try one session
 
 ```sh
-pi -e extensions/virtual-models/virtual-models.ts --model virtual-models/rules-v1
+pi -e extensions/virtual-models/virtual-models.ts --model virtual-models/jev-v1
 ```
 
-Choose the Jev selection with `--model virtual-models/jev-v1`.
-Both selections require authenticated physical models:
+The Jev pilot router requires authenticated physical models:
 
 ```text
 openai-codex/gpt-6.1-sol
@@ -153,12 +156,10 @@ opencode-go/deepseek-v4.1-flash
 zai/glm-5.3-flash
 ```
 
-## Pilot routing policy
+## Jev pilot routing policy
 
 Policy `teop-policy-v1` chooses at user-task boundaries.
-The rule policy sends safety reviews and optimality or architecture requests to Sol.
-It sends ordinary diagnosis, tested fixes, implementation, and renames to DeepSeek.
-Other bounded requests go to GLM. The source defines the exact observable matches.
+Its criteria favor GLM for bounded investigation, DeepSeek for implementation and diagnosis, and Sol for difficult reasoning and safety review.
 
 Jev receives the role and at most 12,000 characters from the latest user message.
 It does not receive fixture labels or checking rules. It does not classify tool continuations.
@@ -177,12 +178,14 @@ Classifier failure and chat subscription exhaustion are different conditions.
 The extension has no saved configuration file.
 Workers receive their role from `PI_WORKER=1`.
 
-For temporary pilot worker selection, set `PI_WORKER_MODEL=virtual-models/rules-v1` or `virtual-models/jev-v1`.
+For temporary pilot worker selection, set `PI_WORKER_MODEL=virtual-models/jev-v1`.
 A temporary `PI_WORKER_EXTENSIONS_CONFIG` file must retain the default worker list and add `virtual-models`.
 The worker resolver retains mandatory coordination, approval, and sandbox extensions. It still rejects nested delegation.
 
 The frozen pilot predates `worker-auto-v1`. Its evidence remains unchanged; use its recorded source versions for reproduction.
 Current source fingerprints do not authorize resuming historical pilot manifests.
+The current evaluator rejects `--arms rules`. Its default smoke run contains two Jev cases; its scored plan contains 36 cases.
+These launch options do not change the recorded 48-case pilot. The offline pilot report retains its historical 48-case plan.
 
 The evaluator sets `PI_VIRTUAL_MODEL_TRACE` to a private output prefix.
 This enables per-process route, effective-tool, and classifier-call records.

@@ -20,13 +20,15 @@ async function directory() {
 }
 
 describe("virtual-model runner plan and checkpoints", () => {
-  it("defaults to four unscored smoke cases and plans exactly 48 unique scored cases", () => {
-    expect(planCases(parseOptions([]))).toHaveLength(4);
+  it("excludes the removed rules arm from smoke and scored cases", () => {
+    expect(() => parseOptions(["--arms", "rules"])).toThrow("Invalid --arms");
+    expect(planCases(parseOptions([]))).toHaveLength(2);
     const cases = planCases(parseOptions(["--phase", "scored"]));
-    expect(cases).toHaveLength(48);
-    expect(new Set(cases.map((entry) => entry.id)).size).toBe(48);
-    expect(cases.filter((entry) => entry.role === "worker")).toHaveLength(18);
-    expect(cases.filter((entry) => entry.role === "main")).toHaveLength(30);
+    expect(cases).toHaveLength(36);
+    expect(new Set(cases.map((entry) => entry.id)).size).toBe(36);
+    expect(cases.filter((entry) => entry.role === "worker")).toHaveLength(12);
+    expect(cases.filter((entry) => entry.role === "main")).toHaveLength(24);
+    expect(cases.map((entry) => entry.arm)).not.toContain("rules");
     expect(
       new Set(cases.filter((entry) => entry.role === "worker").map((entry) => entry.parentModel)),
     ).toEqual(new Set(["openai-codex/gpt-6.1-sol"]));
@@ -43,7 +45,7 @@ describe("virtual-model runner plan and checkpoints", () => {
       "--tasks",
       "fix,rename",
       "--arms",
-      "glm,rules",
+      "glm,jev",
       "--roles",
       "worker",
       "--repetitions",
@@ -52,7 +54,7 @@ describe("virtual-model runner plan and checkpoints", () => {
       "/tmp/output",
     ]);
     const cases = planCases(options);
-    expect(cases.map((entry) => entry.arm)).toEqual(["glm", "rules", "rules", "glm"]);
+    expect(cases.map((entry) => entry.arm)).toEqual(["glm", "jev", "jev", "glm"]);
     expect(options.outputDir).toBe("/tmp/output");
     expect(cases.every((entry) => entry.parentModel === "openai-codex/gpt-6.1-sol")).toBe(true);
     expect(() => parseOptions(["--roles", "unknown"])).toThrow();
@@ -62,7 +64,7 @@ describe("virtual-model runner plan and checkpoints", () => {
   });
   it("preserves the exact worker assignment and requires isolated writable workers", () => {
     const cases = planCases(
-      parseOptions(["--phase", "scored", "--roles", "worker", "--tasks", "fix", "--arms", "rules"]),
+      parseOptions(["--phase", "scored", "--roles", "worker", "--tasks", "fix", "--arms", "jev"]),
     );
     const item = cases[0];
     if (!item) throw new Error("Missing case");

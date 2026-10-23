@@ -2,13 +2,7 @@ import { clampThinkingLevel } from "@earendil-works/pi-ai";
 import type { ClassifierResult, ExtensionContext, Model, ModelRoute, ModelRouteRequest } from "pi";
 import { createTimeoutController } from "../../../lib/fetch-timeout.ts";
 import { extractText } from "../../../lib/session-utils.ts";
-import {
-  MODEL_POOL,
-  type ModelChoice,
-  POLICY_VERSION,
-  ruleChoice,
-  subscriptionExhausted,
-} from "./policy.ts";
+import { MODEL_POOL, type ModelChoice, POLICY_VERSION, subscriptionExhausted } from "./policy.ts";
 
 interface RoutingState {
   policyVersion: string;
@@ -169,8 +163,7 @@ async function classify(
   }
 }
 
-export function createRouter(
-  kind: "rules" | "jev",
+export function createJevRouter(
   role: "main" | "worker",
   record: (value: RouteRecord) => Promise<void>,
 ) {
@@ -182,7 +175,7 @@ export function createRouter(
       selected: spec(request.model),
       requestReason: request.reason,
       requestedThinking: request.thinkingLevel,
-      reason: "rule-choice",
+      reason: "classifier-choice",
       status: "routed",
       latencyMs: 0,
     };
@@ -217,15 +210,11 @@ export function createRouter(
         thinking = sticky?.thinkingLevel ?? request.thinkingLevel;
         entry.reason = "sticky";
       } else {
-        let choice: ModelChoice;
-        if (kind === "jev") {
-          const classified = await classify(request, ctx, role);
-          choice = classified.choice;
-          entry.classifier = classified.record;
-          entry.reason =
-            classified.record.status === "ok" ? "classifier-choice" : "classifier-fallback";
-        } else choice = ruleChoice(lastUserText(request));
-        destination = MODEL_POOL[choice];
+        const classified = await classify(request, ctx, role);
+        entry.classifier = classified.record;
+        entry.reason =
+          classified.record.status === "ok" ? "classifier-choice" : "classifier-fallback";
+        destination = MODEL_POOL[classified.choice];
         nextState = {
           policyVersion: POLICY_VERSION,
           modelSpec: destination,

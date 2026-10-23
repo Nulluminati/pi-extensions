@@ -47,7 +47,7 @@ function failedMessage(errorMessage: string) {
     },
   };
 }
-const virtual = model("virtual-models/rules-v1", "pi-virtual");
+const virtual = model("virtual-models/jev-v1", "pi-virtual");
 function request(overrides: Partial<ModelRouteRequest> = {}): ModelRouteRequest {
   return {
     model: virtual,
@@ -100,7 +100,7 @@ async function boot() {
     if (!definition) throw new Error("Missing router");
     return definition;
   };
-  return { pi, ctx, pool, rules: get("rules-v1"), jev: get("jev-v1") };
+  return { pi, ctx, pool, jev: get("jev-v1") };
 }
 beforeEach(() => {
   vi.resetAllMocks();
@@ -115,15 +115,13 @@ afterEach(() => {
 
 describe("opt-in virtual model routers", () => {
   it("registers separate virtual selections without changing the selected model or defaults", async () => {
-    const { pi, rules, jev } = await boot();
-    expect(rules).toMatchObject({
+    const { pi, jev } = await boot();
+    expect(jev).toMatchObject({
       provider: "virtual-models",
-      id: "rules-v1",
+      id: "jev-v1",
       thinkingLevels: ["low", "medium", "high", "xhigh", "max"],
     });
-    expect(jev.id).toBe("jev-v1");
     expect(pi.registerVirtualModel.mock.calls.map(([definition]) => definition.id)).toEqual([
-      "rules-v1",
       "jev-v1",
       "worker-auto-v1",
     ]);
@@ -164,30 +162,25 @@ describe("opt-in virtual model routers", () => {
     );
   });
 
-  it.each([
-    ["Find configuration", 2],
-    ["Diagnose the failing test", 1],
-    ["Find an optimal schedule under memory constraints", 0],
-  ])("routes observable user requests: %s", async (text, index) => {
-    const { rules, ctx, pool, pi } = await boot();
-    const routed = await rules.route(
-      request({ messages: [{ role: "user", content: text, timestamp: 1 }] }),
-      ctx,
-    );
-    expect(routed.model).toEqual(pool[index]);
+  it("records Jev dispatch and clamps thinking to physical support", async () => {
+    const { jev, ctx, pool, pi } = await boot();
+    const routed = await jev.route(request(), ctx);
+    expect(routed.model).toEqual(pool[1]);
     expect(routed.thinkingLevel).toBe("high");
     expect(pi.appendEntry).toHaveBeenCalledWith(
       "virtual-models-route",
       expect.objectContaining({
-        selected: "virtual-models/rules-v1",
-        dispatched: specs[index],
+        selected: "virtual-models/jev-v1",
+        dispatched: specs[1],
         requestedThinking: "medium",
         effectiveThinking: "high",
         role: "main",
         policyVersion: "teop-policy-v1",
+        reason: "classifier-choice",
       }),
     );
   });
+
   it("keeps tool continuations and retries on their physical model without classifying", async () => {
     const { jev, ctx, pool } = await boot();
     const previous = { model: pool[2], thinkingLevel: "low" as const };
@@ -245,17 +238,20 @@ describe("opt-in virtual model routers", () => {
     );
   });
   it("uses branch-local state when a continuation has no previous response", async () => {
-    const { rules, ctx } = await boot();
-    const branchA = await rules.route(
+    const { jev, ctx } = await boot();
+    ctx.modelRegistry.classify
+      .mockResolvedValueOnce(result("sol"))
+      .mockResolvedValueOnce(result("glm"));
+    const branchA = await jev.route(
       request({ messages: [{ role: "user", content: "Find an optimal schedule", timestamp: 1 }] }),
       ctx,
     );
-    const branchB = await rules.route(request(), ctx);
-    const restoredA = await rules.route(
+    const branchB = await jev.route(request(), ctx);
+    const restoredA = await jev.route(
       request({ reason: "continuation", state: branchA.state }),
       ctx,
     );
-    const restoredB = await rules.route(
+    const restoredB = await jev.route(
       request({ reason: "continuation", state: branchB.state }),
       ctx,
     );
@@ -271,14 +267,14 @@ describe("opt-in virtual model routers", () => {
     expect(ctx.modelRegistry.classify).not.toHaveBeenCalled();
   });
   it("rejects missing, unauthenticated, and virtual destinations", async () => {
-    const { rules, ctx } = await boot();
+    const { jev, ctx } = await boot();
     ctx.modelRegistry.find.mockReturnValue(undefined);
-    await expect(rules.route(request(), ctx)).rejects.toThrow("not in the catalog");
-    ctx.modelRegistry.find.mockReturnValue(model(specs[2], "pi-virtual"));
-    await expect(rules.route(request(), ctx)).rejects.toThrow("physical");
-    ctx.modelRegistry.find.mockReturnValue(model(specs[2]));
+    await expect(jev.route(request(), ctx)).rejects.toThrow("not in the catalog");
+    ctx.modelRegistry.find.mockReturnValue(model(specs[1], "pi-virtual"));
+    await expect(jev.route(request(), ctx)).rejects.toThrow("physical");
+    ctx.modelRegistry.find.mockReturnValue(model(specs[1]));
     ctx.modelRegistry.getAvailable.mockReturnValue([]);
-    await expect(rules.route(request(), ctx)).rejects.toThrow("credentials");
+    await expect(jev.route(request(), ctx)).rejects.toThrow("credentials");
   });
   it("bounds classifier evidence, supplies worker role, and captures classifier usage once", async () => {
     vi.stubEnv("PI_WORKER", "1");
