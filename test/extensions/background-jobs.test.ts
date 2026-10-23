@@ -336,6 +336,28 @@ describe("background-jobs-extension", () => {
       });
     });
 
+    it("spools a label with path separators to a file in the spool directory", async () => {
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await backgroundJobsExtension(mockPi);
+      const { child } = await startBackgroundJob(mockPi, mockCtx, {
+        command: "npm test",
+        label: "test src/foo and test/bar",
+      });
+
+      child.stdout.emit("data", Buffer.from("spooled line\n"));
+      child.emit("exit", 0);
+
+      const fileName = `job-1-p${process.pid}-test src-foo and test-bar.log`;
+      await vi.waitFor(async () => {
+        const text = await readFile(join(spoolRoot, "background-jobs", fileName), "utf8");
+        expect(text).toContain("spooled line");
+      });
+      expect(errorSpy).not.toHaveBeenCalled();
+      errorSpy.mockRestore();
+    });
+
     it("tolerates a stale pi handle when persisting after session end", async () => {
       const mockPi = createMockPi();
       const mockCtx = createMockCommandContext();

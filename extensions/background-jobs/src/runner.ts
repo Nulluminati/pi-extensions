@@ -118,9 +118,11 @@ export async function startBackgroundJob(options: StartBackgroundOptions): Promi
   // The label is lowercased in the filename (display keeps its case): the
   // owning pid already disambiguates across sessions, so this only stops
   // case-variant labels from reading as the same log on a folding volume.
+  // Path separators become dashes so a free-form label like "test src/foo"
+  // stays one file in the spool directory instead of a missing subdirectory.
   const spoolPath = join(
     options.spoolDir,
-    `job-${job.id}-p${process.pid}-${label.toLowerCase()}.log`,
+    `job-${job.id}-p${process.pid}-${label.toLowerCase().replace(/[/\\\0]/g, "-")}.log`,
   );
   job.spoolPath = spoolPath;
   job.wakeOnPattern = options.wakeOnPattern;

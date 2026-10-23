@@ -101,7 +101,8 @@ live under the agent state directory:
 <agentDir>/background-jobs/job-<id>-p<pid>-<label>.log
 ```
 
-`<agentDir>` follows `PI_CODING_AGENT_DIR` (default `~/.pi/agent`).
+`<agentDir>` follows `PI_CODING_AGENT_DIR` (default `~/.pi/agent`). The
+label is lowercased in the filename, and path separators in it become `-`.
 
 ### Retention
 
