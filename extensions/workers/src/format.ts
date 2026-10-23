@@ -4,6 +4,7 @@ import type { Theme } from "@earendil-works/pi-coding-agent";
 import { createFramedWidget, type FramedWidgetFactory } from "../../../lib/framed-widget.ts";
 import { formatStatusLine } from "../../../lib/ui-format.ts";
 import { BLOCKER_MARKER_TYPE } from "../../../lib/worker-blocker.ts";
+import { physicalWorkerLabel } from "./physical-model.ts";
 import { assistantTextFromContent, summarizeStreamValue } from "./stream-values.ts";
 import type { WorkerRecord } from "./types.ts";
 
@@ -38,7 +39,12 @@ export function formatWorkerLine(worker: WorkerRecord, tag?: "orphan" | "other s
   // A reported blocker is visible at list level so a stuck worker is
   // spottable without opening status.
   const blocked = worker.blocker !== undefined ? " · ⚠ blocker" : "";
-  const base = `${prefix}${icon} ${worker.id} "${worker.name}" ${worker.status} · ${worker.model}${isolated}`;
+  const physical = physicalWorkerLabel(worker.physicalModel);
+  const model =
+    physical && worker.physicalModel !== worker.model
+      ? `${worker.model} → ${physical}`
+      : worker.model;
+  const base = `${prefix}${icon} ${worker.id} "${worker.name}" ${worker.status} · ${model}${isolated}`;
   if (worker.activity === undefined) return `${base}${blocked}`;
   // Live activity: what the worker is doing right now (last started tool).
   const detail = worker.activity.detail !== undefined ? ` ${worker.activity.detail}` : "";
@@ -47,6 +53,11 @@ export function formatWorkerLine(worker: WorkerRecord, tag?: "orphan" | "other s
 
 export function formatWorkerStatus(worker: WorkerRecord): string {
   const lines = [formatWorkerLine(worker), `Task: ${worker.task}`, `cwd: ${worker.cwd}`];
+  if (physicalWorkerLabel(worker.physicalModel)) {
+    lines.push(`Physical model: ${worker.physicalModel}`);
+    if (worker.physicalThinkingLevel !== undefined)
+      lines.push(`Physical thinking: ${worker.physicalThinkingLevel}`);
+  }
   if (worker.provision !== undefined) {
     const detail = worker.provision.detail !== undefined ? ` — ${worker.provision.detail}` : "";
     lines.push(`Provision: ${worker.provision.state}${detail}`);
@@ -75,8 +86,24 @@ export function createWorkersWidget(getWorkers: () => WorkerRecord[]): FramedWid
   return createFramedWidget({
     title: "Workers",
     titleRight: () => `${getWorkers().length} running`,
-    getBodyLines: () => getWorkers().map((w) => formatWorkerLine(w)),
-    maxBodyLines: MAX_WIDGET_WORKERS,
+    getBodyLines: (theme) => {
+      const workers = getWorkers();
+      const lines = workers.slice(0, MAX_WIDGET_WORKERS).flatMap((worker) => {
+        const physical = physicalWorkerLabel(worker.physicalModel);
+        const rows = [formatWorkerLine(worker)];
+        if (physical && worker.physicalModel !== worker.model) {
+          const router = worker.model.slice(worker.model.lastIndexOf("/") + 1);
+          rows.push(
+            `  ${router} → ${physical}${worker.physicalThinkingLevel ? ` · ${worker.physicalThinkingLevel}` : ""}`,
+          );
+        }
+        return rows;
+      });
+      if (workers.length > MAX_WIDGET_WORKERS)
+        lines.push(theme.fg("dim", `↓ ${workers.length - MAX_WIDGET_WORKERS} more`));
+      return lines;
+    },
+    maxBodyLines: MAX_WIDGET_WORKERS * 2 + 1,
   });
 }
 

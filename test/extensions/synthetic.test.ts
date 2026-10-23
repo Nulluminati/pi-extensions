@@ -81,6 +81,30 @@ describe("synthetic-extension", () => {
     }
   });
 
+  it("registers the verified DeepSeek 1017 snapshot with its own identity and thinking map", () => {
+    const snapshot = STATIC_MODELS.find(
+      (entry) => entry.id === "hf:deepseek-ai/DeepSeek-V4.1-Flash-1017",
+    );
+    expect(snapshot).toMatchObject({
+      name: "DeepSeek-V4.1-Flash-1017",
+      api: "openai-completions",
+      reasoning: true,
+      input: ["text", "image"],
+      cost: { input: 0.6, output: 1.2, cacheRead: 0.03, cacheWrite: 0 },
+      contextWindow: 524288,
+      maxTokens: 65536,
+      thinkingLevelMap: {
+        off: "none",
+        minimal: "minimal",
+        low: "low",
+        medium: "medium",
+        high: "high",
+        xhigh: "xhigh",
+      },
+      compat: { supportsReasoningEffort: true },
+    });
+  });
+
   it("registers the provider synchronously with the full static model list", async () => {
     const mockPi = createMockPi();
     await syntheticExtension(mockPi);

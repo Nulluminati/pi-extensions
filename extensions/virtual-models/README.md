@@ -11,9 +11,20 @@ See [the evaluation](../../docs/virtual-models-evaluation.md) for pilot evidence
 ## Worker selection and recovery
 
 `worker-auto-v1` requires Pi 1.3.0 and a worker session. It rejects main-session dispatch.
-Authenticated `typesafe/jev-latest` chooses the initial physical model and any replacement after an availability failure.
-It chooses only among currently eligible members of the approved pool. Code enforces credentials, quota exclusions, and retry limits before classification.
-It does not switch from planning to implementation models.
+Authenticated `typesafe/jev-latest` chooses a model family. Code selects its first eligible provider in this order:
+
+| Model family | Ordered physical endpoints |
+|---|---|
+| DeepSeek V4.1 Flash | `synthetic/hf:deepseek-ai/DeepSeek-V4.1-Flash-1017` → `opencode-go/deepseek-v4.1-flash` |
+| GLM 5.3 Flash | `zai/glm-5.3-flash` → `synthetic/hf:zai-org/GLM-5.3-Flash` → `opencode-go/glm-5.3-flash` |
+| GPT-6.1 Sol | `openai-codex/gpt-6.1-sol` only |
+
+Provider order is an explicit preference, not a rule-based model choice. Code enforces credentials, quota exclusions, and retry limits before classification.
+Jev sees one eligible endpoint per family and cannot override provider order.
+The router does not switch from planning to implementation models.
+
+The Synthetic `1017` snapshot uses the already-probed catalog definition from main commit `b9ce257`.
+The OpenCode Go DeepSeek identifier does not promise the same dated snapshot.
 
 Jev receives the worker assignment, capped at 12,000 characters, eligible model metadata, and a sanitized failure category when relevant.
 It does not receive tool results or raw provider error text. One ten-second deadline covers classifier availability and inference.
@@ -21,8 +32,8 @@ Classifier requests use no retries. The router validates the returned choice, pr
 It does not treat low distribution concentration as proof that a preference is wrong.
 
 Rules choose only when Jev is unavailable, fails, times out, or returns an invalid choice.
-Cancellation stops routing instead of triggering rule fallback. A single eligible destination needs no semantic choice or rule ranking.
-Healthy continuations and the first same-model temporary retry do not call Jev again.
+Cancellation stops routing instead of triggering rule fallback. A single eligible family needs no semantic choice or rule ranking.
+Healthy continuations, the first same-model temporary retry, and same-family provider changes do not call Jev again.
 
 | Assignment | Rule fallback order |
 |---|---|
@@ -32,19 +43,25 @@ Healthy continuations and the first same-model temporary retry do not call Jev a
 
 The fallback keyword rules come from `src/policy.ts`. They do not override a valid Jev choice.
 Routing is a heuristic, not a quality guarantee.
-The router skips models without available credentials and never chooses outside the physical pool below.
-Healthy continuations retain their physical model. Worker thinking follows the requested setting, clamped to physical support.
+The router skips endpoints without available credentials and never chooses outside the six approved endpoints above.
+Registry availability is a cached authentication snapshot, not a quota or service-health probe.
+Healthy continuations retain their physical endpoint, even if a preferred provider becomes available again.
+Worker thinking follows the requested setting, clamped to physical support.
 
 Recognized subscription exhaustion excludes that provider from subsequent requests in the worker branch.
-A first temporary failure permits one retry on the same model. A second consecutive temporary failure excludes that model.
-Jev then chooses among the remaining eligible models, with rules only as a classifier fallback.
+A first temporary failure permits one retry on the same endpoint. A second consecutive temporary failure excludes that endpoint.
+The router tries remaining providers in the current family before another family choice.
+After DeepSeek or GLM exhausts its provider chain, Jev chooses another eligible family. Rules remain a classifier fallback only.
+Sol has no replacement: Codex quota exhaustion or its second consecutive temporary failure stops the worker, even when other families remain available.
 Pi controls its configured automatic retry delays.
 The recovery boundary also works when Pi's automatic retries are disabled or exhausted; it adds no delay itself.
-This explicit policy does not change saved retry settings.
+This policy does not change saved retry settings.
 
-For an uninterrupted failure sequence, each physical model receives at most two failed agent requests.
-Three exhausted providers produce at most three failed requests. The worker stops when no eligible destination remains.
-The existing worker timeout still applies. The policy does not bound provider response time independently.
+For an uninterrupted failure sequence, each physical endpoint receives at most two failed agent requests.
+Six endpoints permit at most twelve such requests; selecting Codex can stop the sequence earlier.
+A sequence containing only quota failures stops after at most four failed requests, one per provider.
+The worker stops when no eligible destination remains. The existing worker timeout still applies.
+The policy does not bound provider response time or internal transport retries independently.
 
 Availability knowledge comes from raw assistant entries on the current worker branch, including failures omitted from provider context.
 A successful provider response clears that provider's quota exclusion and that model's temporary-failure count and exclusion.
@@ -58,15 +75,35 @@ Mandatory coordination, sandbox controls, parent approvals, and the nested-deleg
 Cancellation, authentication failures, permission failures, unknown errors, context overflow, and tool errors do not trigger this fallback.
 A failed task check does not trigger a model change.
 
-### Limits and audit records
+### Limits
 
 Recovery covers provider errors in the agent request loop. Direct requests, including compaction and summaries, do not use this recovery boundary.
 They can still fail on quota exhaustion. The offline integration test verifies this limitation.
-A model change can lose prompt-cache reuse. The pilot did not measure this recovery policy or its long-session cache costs.
+
+### Prompt-cache reuse
+
+The router keeps a healthy endpoint selected. It does not return to a preferred provider automatically.
+Provider changes do not transfer prompt caches. Expect a cold replay at the replacement provider, even within the same model family.
+Subsequent requests may reuse that provider's cache, subject to its cache rules and retention period.
+Different context limits, thinking formats, or compaction can also change cache reuse.
+Jev classification does not populate the worker chat cache. Route audit entries add no model-facing prompt text.
+The pilot did not measure this recovery policy or its long-session cache costs.
+Catalog token prices do not establish subscription allowance or invoice charges.
+
+### Worker display
+
+Each worker keeps its configured router label. Its widget also shows the latest physical model and provider on a separate row.
+The separate row keeps the physical target visible in narrow panes. Model or effective-thinking changes trigger a live refresh.
+Worker status includes the full physical identifier and effective thinking level when reported.
+Routing records or native assistant metadata supply these fields. Finalization restores them from the stream after parent loss.
+The main-session model label remains unchanged.
+
+### Audit records
 
 Normal worker event streams include `virtual-models-route` and `virtual-models-worker-recovery` custom entries.
 They record selections, classifier outcomes and usage when reported, retry decisions, and pool exhaustion without copying raw error text.
 A recovery entry with `decision: "select"` lists eligible candidates; the following route entry records the actual destination.
+`decision: "provider-fallback"` records a same-family provider change. `decision: "stopped"` with `reason: "codex-no-fallback"` records terminal Codex recovery.
 `reason: "classifier-choice"` identifies a Jev decision. `reason: "classifier-fallback"` identifies degraded rule selection.
 Assistant messages retain physical model identities and provider error details. No experiment trace flag is required for these records.
 

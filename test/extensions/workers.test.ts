@@ -25,6 +25,8 @@ import {
 import {
   createWorkersWidget,
   formatRawStreamEntries,
+  formatWorkerLine,
+  formatWorkerStatus,
   formatWorkersStatus,
 } from "../../extensions/workers/src/format.ts";
 import {
@@ -2967,6 +2969,172 @@ describe("workers-units", () => {
       (extension) => extension.name === "messenger",
     );
     expect(messenger?.path).toContain(join("extensions", "messenger", "messenger.ts"));
+  });
+
+  it("shows the selected router and live physical model without changing the configured selection", () => {
+    const record = makeWorkerRecord({ model: "virtual-models/worker-auto-v1" });
+    ingestStreamEvent(
+      JSON.stringify({
+        type: "entry_appended",
+        entry: {
+          type: "custom",
+          customType: "virtual-models-route",
+          data: {
+            role: "worker",
+            status: "routed",
+            dispatched: "synthetic/hf:deepseek-ai/DeepSeek-V4.1-Flash-1017",
+            effectiveThinking: "high",
+          },
+        },
+      }),
+      record,
+    );
+    expect(record.model).toBe("virtual-models/worker-auto-v1");
+    expect(record.physicalModel).toBe("synthetic/hf:deepseek-ai/DeepSeek-V4.1-Flash-1017");
+    expect(record.physicalThinkingLevel).toBe("high");
+    expect(formatWorkerLine(record)).toContain(
+      "virtual-models/worker-auto-v1 → DeepSeek-V4.1-Flash-1017 (synthetic)",
+    );
+    expect(formatWorkerStatus(record)).toContain(
+      "Physical model: synthetic/hf:deepseek-ai/DeepSeek-V4.1-Flash-1017",
+    );
+    expect(formatWorkerStatus(record)).toContain("Physical thinking: high");
+  });
+
+  it("keeps the actual model visible in a narrow widget even with a long worker name", () => {
+    const record = makeWorkerRecord({
+      name: "a long descriptive worker name that consumes the first row",
+      model: "virtual-models/worker-auto-v1",
+      physicalModel: "synthetic/hf:deepseek-ai/DeepSeek-V4.1-Flash-1017",
+      physicalThinkingLevel: "high",
+    });
+    const factory = createWorkersWidget(() => [record]);
+    const text = factory(undefined, { fg: (_color: string, value: string) => value })
+      .render(80)
+      .join("\n");
+    expect(text).toContain("worker-auto-v1 → DeepSeek-V4.1-Flash-1017 (synthetic)");
+  });
+
+  it("updates physical metadata from native assistant events without duplicating token usage", () => {
+    const record = makeWorkerRecord({ model: "virtual-models/worker-auto-v1" });
+    ingestStreamEvent(
+      JSON.stringify({
+        type: "message_start",
+        message: {
+          role: "assistant",
+          api: "openai-completions",
+          provider: "zai",
+          model: "glm-5.3-flash",
+          thinkingLevel: "high",
+        },
+      }),
+      record,
+    );
+    expect(record.physicalModel).toBe("zai/glm-5.3-flash");
+    expect(record.usage).toBeUndefined();
+    ingestStreamEvent(
+      JSON.stringify({
+        type: "message_end",
+        message: {
+          role: "assistant",
+          api: "openai-completions",
+          provider: "synthetic",
+          model: "hf:zai-org/GLM-5.3-Flash",
+          usage: { input: 2, output: 1 },
+        },
+      }),
+      record,
+    );
+    expect(record.physicalModel).toBe("synthetic/hf:zai-org/GLM-5.3-Flash");
+    expect(record.physicalThinkingLevel).toBeUndefined();
+    expect(record.usage?.inputTokens).toBe(2);
+    expect(record.model).toBe("virtual-models/worker-auto-v1");
+  });
+
+  it("ignores invalid, virtual, main-session and failed-route model labels", () => {
+    const record = makeWorkerRecord({ model: "virtual-models/worker-auto-v1" });
+    for (const data of [
+      { role: "main", status: "routed", dispatched: "zai/glm-5.3-flash" },
+      { role: "worker", status: "error", dispatched: "zai/glm-5.3-flash" },
+      { role: "worker", status: "routed", dispatched: "virtual-models/worker-auto-v1" },
+      { role: "worker", status: "routed", dispatched: "zai/model\u001b[31m" },
+      { role: "worker", status: "routed", dispatched: `zai/${"x".repeat(600)}` },
+    ])
+      ingestStreamEvent(
+        JSON.stringify({
+          type: "entry_appended",
+          entry: { type: "custom", customType: "virtual-models-route", data },
+        }),
+        record,
+      );
+    ingestStreamEvent(
+      JSON.stringify({
+        type: "message_end",
+        message: {
+          role: "assistant",
+          api: "pi-virtual",
+          provider: "virtual-models",
+          model: "worker-auto-v1",
+        },
+      }),
+      record,
+    );
+    expect(() =>
+      ingestStreamEvent(
+        JSON.stringify({ type: { toString: "invalid" }, message: { role: "assistant" } }),
+        record,
+      ),
+    ).not.toThrow();
+    expect(record.physicalModel).toBeUndefined();
+  });
+
+  it("recovers final physical model metadata when an adopter only reads the spool", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "workers-physical-"));
+    try {
+      const record = makeWorkerRecord({
+        id: "w-physical",
+        model: "virtual-models/worker-auto-v1",
+        streamFormat: "raw",
+      });
+      await mkdir(join(dir, CONFIG_DIR_NAME, "workers", "streams"), { recursive: true });
+      await writeFile(
+        streamPath(dir, record.id),
+        [
+          JSON.stringify({
+            type: "entry_appended",
+            entry: {
+              type: "custom",
+              customType: "virtual-models-route",
+              data: {
+                role: "worker",
+                status: "routed",
+                dispatched: "opencode-go/glm-5.3-flash",
+                effectiveThinking: "high",
+              },
+            },
+          }),
+          JSON.stringify({
+            type: "message_end",
+            message: {
+              role: "assistant",
+              api: "openai-completions",
+              provider: "opencode-go",
+              model: "glm-5.3-flash",
+              stopReason: "stop",
+              content: [{ type: "text", text: "done" }],
+            },
+          }),
+          "",
+        ].join("\n"),
+      );
+      await finalizeWorker({ cwd: dir, record, exitCode: 0 });
+      expect(record.status).toBe("completed");
+      expect(record.physicalModel).toBe("opencode-go/glm-5.3-flash");
+      expect(record.physicalThinkingLevel).toBe("high");
+      expect(formatWorkerStatus(record)).toContain("Physical model: opencode-go/glm-5.3-flash");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("ingestStreamEvent records blocker markers on the record", () => {

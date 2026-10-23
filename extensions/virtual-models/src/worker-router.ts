@@ -9,6 +9,7 @@ import type {
 } from "pi";
 import { extractText } from "../../../lib/session-utils.ts";
 import type { RouteRecord } from "./router.ts";
+import { WORKER_TARGETS, workerFamily } from "./worker-catalog.ts";
 import { classifyWorkerModel } from "./worker-classifier.ts";
 import {
   approvedWorkerModel,
@@ -36,6 +37,15 @@ function eligibleModels(ctx: ExtensionContext, history: WorkerHistory): Map<stri
       available.set(modelSpec, model);
   }
   return available;
+}
+function familyCandidates(available: Map<string, Model>): Map<string, Model> {
+  const families = new Map<string, Model>();
+  for (const targets of Object.values(WORKER_TARGETS)) {
+    const target = targets.find((modelSpec) => available.has(modelSpec));
+    const model = target ? available.get(target) : undefined;
+    if (target && model) families.set(target, model);
+  }
+  return families;
 }
 function restoredModel(state: unknown): string | undefined {
   if (!state || typeof state !== "object") return undefined;
@@ -78,17 +88,29 @@ export function createWorkerRouter(
       }
       const user = request.messages.filter((message) => message.role === "user").at(-1);
       const prompt = history.prompt || (user ? extractText(user.content).slice(0, 12000) : "");
+      // Raw history identifies the continuing assignment when Pi omits a response and exposes the original user message again.
+      const continuingAssignment = history.latest !== undefined;
       const preferred =
-        request.reason === "user"
+        request.reason === "user" && !continuingAssignment
           ? undefined
           : request.failed
             ? spec(request.failed.model)
             : (restoredModel(request.state) ??
               (request.previous ? spec(request.previous.model) : history.latest?.modelSpec));
-      const candidates = eligibleModels(ctx, history);
-      let model = preferred ? candidates.get(preferred) : undefined;
+      const available = eligibleModels(ctx, history);
+      const family = preferred ? workerFamily(preferred) : undefined;
+      let model = preferred ? available.get(preferred) : undefined;
+      if (preferred && family === "sol" && !model)
+        throw new Error("GPT-6.1 Sol unavailable: Codex has no fallback; worker stops");
+      const nextProvider = family
+        ? WORKER_TARGETS[family].find((modelSpec) => available.has(modelSpec))
+        : undefined;
+      const candidates = familyCandidates(available);
       if (model) entry.reason = "sticky";
-      else if (candidates.size === 1) {
+      else if (nextProvider) {
+        model = available.get(nextProvider);
+        entry.reason = "provider-fallback";
+      } else if (candidates.size === 1) {
         model = candidates.values().next().value;
         entry.reason = "only-eligible";
       } else if (candidates.size > 1) {
@@ -150,7 +172,13 @@ export function recoverWorkerRequest(
   if (!failureKind) return undefined;
   const candidates = eligibleModels(ctx, history);
   const retry = candidates.get(failed.modelSpec);
-  const nextSpec = retry ? spec(retry) : null;
+  const family = workerFamily(failed.modelSpec);
+  const stopped = family === "sol" && !retry;
+  const nextProvider =
+    !retry && family && !stopped
+      ? WORKER_TARGETS[family].find((modelSpec) => candidates.has(modelSpec))
+      : undefined;
+  const nextSpec = retry ? spec(retry) : (nextProvider ?? null);
   const audit = {
     type: "custom" as const,
     customType: "virtual-models-worker-recovery",
@@ -160,13 +188,22 @@ export function recoverWorkerRequest(
       failureKind,
       from: failed.modelSpec,
       to: nextSpec,
-      decision: candidates.size === 0 ? "exhausted" : retry ? "retry" : "select",
+      decision: stopped
+        ? "stopped"
+        : candidates.size === 0
+          ? "exhausted"
+          : retry
+            ? "retry"
+            : nextProvider
+              ? "provider-fallback"
+              : "select",
+      ...(stopped ? { reason: "codex-no-fallback" } : {}),
       candidates: [...candidates.keys()].sort(),
       blockedProviders: [...history.blockedProviders].sort(),
       blockedModels: [...history.blockedModels].sort(),
     },
   };
-  if (candidates.size === 0) return { entries: [audit], continue: false };
+  if (stopped || candidates.size === 0) return { entries: [audit], continue: false };
   // Omit only the failed response. Raw history and completed tool results remain intact.
   return {
     entries: [{ type: "context_edit", targetId: failed.id, replacement: null }, audit],

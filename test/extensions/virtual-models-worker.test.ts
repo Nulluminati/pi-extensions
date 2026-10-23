@@ -132,6 +132,195 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
+describe("worker model families and provider priorities", () => {
+  const syntheticDeepSeek = "synthetic/hf:deepseek-ai/DeepSeek-V4.1-Flash-1017";
+  const syntheticGlm = "synthetic/hf:zai-org/GLM-5.3-Flash";
+  const goGlm = "opencode-go/glm-5.3-flash";
+  function providers(
+    ctx: ReturnType<typeof createMockContext>,
+    specs = [...Object.values(MODEL_POOL), syntheticDeepSeek, syntheticGlm, goGlm],
+  ) {
+    const pool = specs.map((value) => model(value));
+    ctx.modelRegistry.getAvailable.mockReturnValue(pool);
+    ctx.modelRegistry.find.mockImplementation((provider, id) =>
+      pool.find((value) => value.provider === provider && value.id === id),
+    );
+  }
+  const state = (modelSpec: string) => ({ policyVersion: "worker-auto-v1", modelSpec });
+
+  it.each([
+    ["deepseek", syntheticDeepSeek],
+    ["glm", MODEL_POOL.glm],
+    ["sol", MODEL_POOL.sol],
+  ])("resolves Jev family %s through its preferred provider", async (choice, expected) => {
+    const { ctx, router } = await boot();
+    providers(ctx);
+    enableJev(ctx, classification(choice));
+    const route = await router.route(request(), ctx);
+    expect(`${route.model.provider}/${route.model.id}`).toBe(expected);
+    const context = ctx.modelRegistry.classify.mock.calls[0]?.[1];
+    expect(Object.keys(context?.questions.route?.criteria ?? {}).sort()).toEqual([
+      "deepseek",
+      "glm",
+      "sol",
+    ]);
+    expect(context?.state).toMatchObject({
+      candidates: expect.arrayContaining([
+        expect.objectContaining({ model: syntheticDeepSeek }),
+        expect.objectContaining({ model: MODEL_POOL.glm }),
+      ]),
+    });
+  });
+
+  it.each([
+    [syntheticGlm, [syntheticGlm, goGlm]],
+    [goGlm, [goGlm]],
+  ])("skips unavailable GLM providers and selects %s", async (expected, eligible) => {
+    const { ctx, router } = await boot();
+    providers(ctx, eligible);
+    expect((await router.route(request(), ctx)).model.id).toBe(model(expected).id);
+    expect(ctx.modelRegistry.classify).not.toHaveBeenCalled();
+  });
+
+  it("uses the next DeepSeek provider before another Jev decision", async () => {
+    const { ctx, pi, router } = await boot([
+      assignment,
+      assistant("quota", syntheticDeepSeek, "weekly usage limit reached"),
+    ]);
+    providers(ctx);
+    enableJev(ctx);
+    const route = await router.route(
+      request({ reason: "continuation", state: state(syntheticDeepSeek) }),
+      ctx,
+    );
+    expect(`${route.model.provider}/${route.model.id}`).toBe(MODEL_POOL.deepseek);
+    expect(ctx.modelRegistry.classify).not.toHaveBeenCalled();
+    expect(pi.appendEntry).toHaveBeenCalledWith(
+      "virtual-models-route",
+      expect.objectContaining({ reason: "provider-fallback" }),
+    );
+  });
+
+  it.each([
+    [MODEL_POOL.glm, [MODEL_POOL.glm], syntheticGlm],
+    [syntheticGlm, [MODEL_POOL.glm, syntheticGlm], goGlm],
+  ])("continues GLM on its next provider after %s fails", async (previous, failures, expected) => {
+    const entries = failures.map((spec, index) =>
+      assistant(`quota-${index}`, spec, "weekly usage limit reached"),
+    );
+    const { ctx, router } = await boot(entries);
+    providers(ctx);
+    enableJev(ctx);
+    const route = await router.route(
+      request({ reason: "continuation", state: state(previous) }),
+      ctx,
+    );
+    expect(`${route.model.provider}/${route.model.id}`).toBe(expected);
+    expect(ctx.modelRegistry.classify).not.toHaveBeenCalled();
+  });
+
+  it("retains the current family when Pi labels a first-request recovery as user", async () => {
+    const { ctx, router } = await boot([
+      assignment,
+      assistant("first-quota", syntheticDeepSeek, "weekly usage limit reached"),
+    ]);
+    providers(ctx);
+    enableJev(ctx);
+    const route = await router.route(
+      request({ reason: "user", state: state(syntheticDeepSeek) }),
+      ctx,
+    );
+    expect(`${route.model.provider}/${route.model.id}`).toBe(MODEL_POOL.deepseek);
+    expect(ctx.modelRegistry.classify).not.toHaveBeenCalled();
+  });
+
+  it("classifies a genuinely new assignment instead of retaining the prior model", async () => {
+    const { ctx, router } = await boot([assistant("old", MODEL_POOL.sol), assignment]);
+    providers(ctx);
+    enableJev(ctx, classification("glm"));
+    const route = await router.route(
+      request({ reason: "user", state: state(MODEL_POOL.sol) }),
+      ctx,
+    );
+    expect(`${route.model.provider}/${route.model.id}`).toBe(MODEL_POOL.glm);
+    expect(ctx.modelRegistry.classify).toHaveBeenCalledTimes(1);
+  });
+
+  it("tries an alternate provider after two temporary endpoint failures", async () => {
+    const entries = [
+      assistant("first", syntheticDeepSeek, "503 service unavailable"),
+      assistant("second", syntheticDeepSeek, "503 service unavailable"),
+    ];
+    const { ctx, router } = await boot(entries);
+    providers(ctx);
+    enableJev(ctx);
+    expect(
+      (
+        await router.route(
+          request({ reason: "continuation", state: state(syntheticDeepSeek) }),
+          ctx,
+        )
+      ).model.provider,
+    ).toBe("opencode-go");
+    expect(ctx.modelRegistry.classify).not.toHaveBeenCalled();
+  });
+
+  it("retains a healthy alternate provider when the preferred provider is available again", async () => {
+    const { ctx, router } = await boot([assistant("success", MODEL_POOL.deepseek)]);
+    providers(ctx);
+    enableJev(ctx);
+    const route = await router.route(
+      request({ reason: "continuation", state: state(MODEL_POOL.deepseek) }),
+      ctx,
+    );
+    expect(route.model.provider).toBe("opencode-go");
+    expect(ctx.modelRegistry.classify).not.toHaveBeenCalled();
+  });
+
+  it("asks Jev about another family only after the current provider chain is exhausted", async () => {
+    const { ctx, router } = await boot([
+      assistant("synthetic", syntheticDeepSeek, "weekly usage limit reached"),
+      assistant("go", MODEL_POOL.deepseek, "weekly usage limit reached"),
+    ]);
+    providers(ctx);
+    enableJev(ctx, classification("glm", ["glm", "sol"]));
+    const route = await router.route(
+      request({ reason: "continuation", state: state(MODEL_POOL.deepseek) }),
+      ctx,
+    );
+    expect(`${route.model.provider}/${route.model.id}`).toBe(MODEL_POOL.glm);
+    expect(ctx.modelRegistry.classify).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["quota", "temporary"])(
+    "stops instead of replacing GPT-6.1 Sol after %s exhaustion",
+    async (kind) => {
+      const entries =
+        kind === "quota"
+          ? [assistant("quota", MODEL_POOL.sol, "weekly usage limit reached")]
+          : [
+              assistant("first", MODEL_POOL.sol, "503 service unavailable"),
+              assistant("second", MODEL_POOL.sol, "503 service unavailable"),
+            ];
+      const { ctx, router, recover } = await boot(entries);
+      providers(ctx);
+      enableJev(ctx);
+      expect(await recover(boundary(), ctx)).toMatchObject({
+        continue: false,
+        entries: [
+          expect.objectContaining({
+            data: expect.objectContaining({ decision: "stopped", reason: "codex-no-fallback" }),
+          }),
+        ],
+      });
+      await expect(
+        router.route(request({ reason: "continuation", state: state(MODEL_POOL.sol) }), ctx),
+      ).rejects.toThrow(/Codex|no fallback|stop/i);
+      expect(ctx.modelRegistry.classify).not.toHaveBeenCalled();
+    },
+  );
+});
+
 describe("Jev-primary worker model routing", () => {
   it("honors Jev over a different rule preference and records classifier usage", async () => {
     const { ctx, pi, router } = await boot();

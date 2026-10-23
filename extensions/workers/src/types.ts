@@ -18,6 +18,10 @@ export interface WorkerRecord {
   name: string;
   task: string;
   model: string;
+  /** Latest physical target observed in routing or native assistant events. */
+  physicalModel?: string;
+  /** Effective physical thinking level when the event reports one. */
+  physicalThinkingLevel?: ThinkingLevel;
   /** Optional for compatibility with worker records created before thinking was configurable. */
   thinkingLevel?: ThinkingLevel;
   pid?: number;

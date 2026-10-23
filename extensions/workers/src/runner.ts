@@ -33,6 +33,7 @@ import {
   WORKER_STREAM_ENV_VAR,
   type WorkerBlocker,
 } from "../../../lib/worker-blocker.ts";
+import { updateWorkerPhysicalModel, type WorkerPhysicalModel } from "./physical-model.ts";
 import { abortReason, SetupHookCancelled } from "./provision/hook.ts";
 import type { ProvisionStatus } from "./provision/types.ts";
 import { stderrLogPath, streamPath, patchPath as workerPatchPath } from "./store.ts";
@@ -116,7 +117,7 @@ async function readTailLines(
 
 /**
  * Ingest one raw pi JSON event line from the spool: track live activity on
- * the record (last tool + running tool count) and roll up token/cost usage.
+ * the record (last tool + running tool count), physical model, and token/cost usage.
  * The final assistant text is NOT tracked here — it is extracted from the
  * spool at finalization, so it works identically for adopted workers whose
  * parent never saw the output.
@@ -133,6 +134,8 @@ export function ingestStreamEvent(jsonLine: string, record: WorkerRecord): "bloc
   } catch {
     return undefined;
   }
+
+  updateWorkerPhysicalModel(event, record);
 
   // Blocker marker from the worker's report_blocker tool: recorded on the
   // live record; the caller wakes the parent (once). The reason stays here
@@ -310,7 +313,9 @@ async function scanSpool(
   endMark: { status?: string; error?: string };
   runAborted: boolean;
   blocker?: WorkerBlocker;
+  physical: WorkerPhysicalModel;
 }> {
+  const physical: WorkerPhysicalModel = {};
   let ownText = "";
   let report = "";
   let settlement: { stopReason: string; errorMessage?: string } | undefined;
@@ -344,6 +349,7 @@ async function scanSpool(
         error?: unknown;
         aborted?: unknown;
       };
+      if (streamFormat === "raw") updateWorkerPhysicalModel(event, physical);
       if (event.type === "workers_end") {
         // The end marker is terminal: the last one wins.
         endMark = {
@@ -363,6 +369,7 @@ async function scanSpool(
     ...(settlement !== undefined ? { settlement } : {}),
     endMark,
     runAborted,
+    physical,
     ...(blocker !== undefined ? { blocker } : {}),
   };
 }
@@ -446,6 +453,12 @@ export async function finalizeWorker(options: FinalizeOptions): Promise<WorkerRe
   const outputTruncated = scan.outputTruncated;
   const settlement = scan.settlement;
   const endMark = scan.endMark;
+  if (scan.physical.physicalModel !== undefined) {
+    record.physicalModel = scan.physical.physicalModel;
+    if (scan.physical.physicalThinkingLevel !== undefined)
+      record.physicalThinkingLevel = scan.physical.physicalThinkingLevel;
+    else delete record.physicalThinkingLevel;
+  }
 
   // A blocker reported while nobody was watching (adoption, janitor sweep)
   // lives in the spool; recover it so the terminal record keeps the why.
@@ -850,6 +863,8 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
   let ingestOffset = 0;
   let ingestBuffer = "";
   let lastActivityToolCount = 0;
+  let lastActivityModel = record.physicalModel;
+  let lastActivityThinking = record.physicalThinkingLevel;
   // A blocker wakes the parent exactly once, however many reports arrive.
   let blockerWakeSent = false;
   const ingestTimer = setInterval(() => {
@@ -870,10 +885,16 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
           );
         }
       }
-      // The widget refreshes on activity changes (throttled by the root).
+      // The widget refreshes on activity or physical target changes (throttled by the root).
       const toolCount = record.activity?.toolCount ?? 0;
-      if (toolCount !== lastActivityToolCount) {
+      if (
+        toolCount !== lastActivityToolCount ||
+        record.physicalModel !== lastActivityModel ||
+        record.physicalThinkingLevel !== lastActivityThinking
+      ) {
         lastActivityToolCount = toolCount;
+        lastActivityModel = record.physicalModel;
+        lastActivityThinking = record.physicalThinkingLevel;
         events.onActivity();
       }
     });

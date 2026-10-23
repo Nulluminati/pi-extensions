@@ -1,11 +1,12 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { isContextOverflow, isRetryableAssistantError } from "@earendil-works/pi-ai";
 import { extractText } from "../../../lib/session-utils.ts";
-import { MODEL_POOL, ruleChoice, subscriptionExhausted } from "./policy.ts";
+import { ruleChoice, subscriptionExhausted } from "./policy.ts";
+import { WORKER_PHYSICAL_MODELS, WORKER_TARGETS } from "./worker-catalog.ts";
 
 export const WORKER_POLICY_VERSION = "worker-auto-v1";
 const MAX_CONSECUTIVE_FAILURES = 2;
-const APPROVED_MODELS = new Set<string>(Object.values(MODEL_POOL));
+const APPROVED_MODELS = new Set<string>(WORKER_PHYSICAL_MODELS);
 export type WorkerFailureKind = "quota" | "transient";
 interface AssistantEntry {
   id: string;
@@ -43,9 +44,11 @@ export function workerFailure(message: AssistantMessage): WorkerFailureKind | un
 
 export function workerOrder(prompt: string): string[] {
   const choice = ruleChoice(prompt);
-  if (choice === "sol") return [MODEL_POOL.sol, MODEL_POOL.deepseek, MODEL_POOL.glm];
-  if (choice === "deepseek") return [MODEL_POOL.deepseek, MODEL_POOL.glm, MODEL_POOL.sol];
-  return [MODEL_POOL.glm, MODEL_POOL.deepseek, MODEL_POOL.sol];
+  if (choice === "sol")
+    return [...WORKER_TARGETS.sol, ...WORKER_TARGETS.deepseek, ...WORKER_TARGETS.glm];
+  if (choice === "deepseek")
+    return [...WORKER_TARGETS.deepseek, ...WORKER_TARGETS.glm, ...WORKER_TARGETS.sol];
+  return [...WORKER_TARGETS.glm, ...WORKER_TARGETS.deepseek, ...WORKER_TARGETS.sol];
 }
 
 /** Raw branch entries retain failed attempts even when Pi omits them from provider context. */
@@ -68,7 +71,10 @@ export function workerHistory(entries: readonly unknown[]): WorkerHistory {
     };
     if (entry.type !== "message" || !entry.message || typeof entry.message !== "object") continue;
     const message = entry.message;
-    if (message.role === "user") history.prompt = extractText(message.content).slice(0, 12000);
+    if (message.role === "user") {
+      history.prompt = extractText(message.content).slice(0, 12000);
+      delete history.latest;
+    }
     if (message.role !== "assistant") continue;
     // An unsupported latest assistant must not expose an older physical failure as recoverable.
     delete history.latest;

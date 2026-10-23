@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -22,7 +23,14 @@ const pool = [
 ] as const;
 const cleanups: Array<() => Promise<void> | void> = [];
 beforeEach(() => {
-  vi.stubEnv("TYPESAFE_API_KEY", "");
+  for (const name of [
+    "TYPESAFE_API_KEY",
+    "SYNTHETIC_API_KEY",
+    "ZAI_API_KEY",
+    "OPENCODE_API_KEY",
+    "OPENAI_API_KEY",
+  ])
+    vi.stubEnv(name, "");
   vi.stubEnv("PI_WORKER", "1");
   vi.stubEnv("PI_VIRTUAL_MODEL_TRACE", "");
 });
@@ -176,7 +184,7 @@ describe("real SDK worker recovery with offline providers", () => {
               const question = context.questions.route;
               if (question?.type !== "choice") throw new Error("Missing routing choice");
               const keys = Object.keys(question.criteria);
-              const choice = keys.includes("sol") ? "sol" : "deepseek";
+              const choice = keys.includes("glm") ? "glm" : "sol";
               return {
                 api: "typesafe-system-one",
                 provider: "typesafe",
@@ -201,22 +209,22 @@ describe("real SDK worker recovery with offline providers", () => {
       }),
     );
     await runtime.refresh({ allowNetwork: false });
-    providers[2].setResponses([
+    providers[0].setResponses([
       ai.fauxAssistantMessage(ai.fauxToolCall("complete_once", {})),
       ai.fauxAssistantMessage("", {
         stopReason: "error",
         errorMessage: "weekly usage limit reached",
       }),
     ]);
-    providers[1].setResponses([ai.fauxAssistantMessage("Jev recovered")]);
-    await session.prompt("Find configuration. Complete the operation once, then finish.");
+    providers[2].setResponses([ai.fauxAssistantMessage("Jev recovered")]);
+    await session.prompt("Implement a regression test. Complete the operation once, then finish.");
     expect(session.getLastAssistantText()).toBe("Jev recovered");
-    expect(providers.map((provider) => provider.state.callCount)).toEqual([0, 1, 2]);
+    expect(providers.map((provider) => provider.state.callCount)).toEqual([2, 0, 1]);
     expect(executions()).toBe(1);
     expect(calls).toHaveLength(2);
     const replacement = calls[1]?.questions.route;
     if (replacement?.type !== "choice") throw new Error("Missing replacement question");
-    expect(Object.keys(replacement.criteria).sort()).toEqual(["deepseek", "glm"]);
+    expect(Object.keys(replacement.criteria).sort()).toEqual(["deepseek", "sol"]);
   });
 
   it("keeps one transient retry on the same model before selecting an alternative", async () => {
@@ -353,6 +361,7 @@ describe("actual worker process recovery with mandatory safety extensions", () =
         `import {appendFileSync} from "node:fs";
 import {createProvider,fauxProvider,fauxAssistantMessage,fauxToolCall} from ${JSON.stringify(import.meta.resolve("@earendil-works/pi-ai"))};
 export default async function(pi){
+ const offlineApis=new Set();
  pi.registerProvider(createProvider({id:"typesafe",auth:{apiKey:{name:"Offline classifier",resolve:async()=>({auth:{}})}},models:[{type:"classifier",provider:"typesafe",id:"jev-latest",name:"Offline approval classifier",api:"typesafe-system-one",input:["text"]}],classifiers:{"typesafe-system-one":{classify:async(model,context)=>{appendFileSync(${JSON.stringify(classifierPath)},JSON.stringify({provider:model.provider,questions:Object.keys(context.questions).sort()})+"\\n");if(context.questions.route){const keys=Object.keys(context.questions.route.criteria);const choice=keys.includes("glm")?"glm":keys.includes("deepseek")?"deepseek":"sol";return{provider:"typesafe",model:model.id,api:"typesafe-system-one",timestamp:Date.now(),stopReason:"stop",answers:{route:{type:"choice",choice,confidence:1,probabilities:Object.fromEntries(keys.map(key=>[key,key===choice?1:0]))}}};}return{provider:"typesafe",model:model.id,api:"typesafe-system-one",timestamp:Date.now(),stopReason:"stop",answers:{harm:{type:"bool",probability:1},secrets:{type:"bool",probability:0},externalChange:{type:"bool",probability:0}}};}}}}));
  for(const [provider,id] of ${JSON.stringify(pool)}){
   const faux=fauxProvider({provider,models:[{id,reasoning:false,contextWindow:500000}],tokensPerSecond:1000000});
@@ -362,10 +371,13 @@ export default async function(pi){
   else if(provider==="zai")faux.setResponses([(context)=>{note(context);return fauxAssistantMessage(fauxToolCall("read",{path:"probe.txt"}));},quota]);
   else if(provider==="opencode-go")faux.setResponses([(context)=>{note(context);return fauxAssistantMessage(fauxToolCall("read",{path:${JSON.stringify(privatePath)}}));},(context)=>{note(context);return fauxAssistantMessage(fauxToolCall("bash",{command:${JSON.stringify(deniedCommand)}}));},(context)=>{note(context);return fauxAssistantMessage("WORKER_RESULT=done");}]);
   else faux.setResponses([quota]);
-  pi.registerProvider(faux.provider);
+  offlineApis.add(faux.api);pi.registerProvider(faux.provider);
  }
+ const placeholder=fauxProvider({provider:"synthetic",models:[{id:"offline-unroutable",reasoning:false,contextWindow:500000}],tokensPerSecond:1000000});offlineApis.add(placeholder.api);pi.registerProvider(placeholder.provider);
+ pi.on("before_agent_start",(_event,ctx)=>{const providers=new Set(["zai","opencode-go","synthetic","openai-codex"]);const unsafe=ctx.modelRegistry.getAll().some(model=>providers.has(model.provider)&&!offlineApis.has(model.api));if(unsafe){ctx.abort();throw Error("Offline fixture refused a real chat provider");}});
 }`,
       );
+      execFileSync(process.execPath, ["--check", providerPath]);
       vi.stubEnv("PI_CODING_AGENT_DIR", dir);
       vi.stubEnv("PI_OFFLINE", "1");
       const config = join(dir, "worker-extensions.json");
@@ -391,7 +403,11 @@ export default async function(pi){
         timeoutMs: 20000,
         readOnly: true,
         sandbox: true,
-        extensionPaths: [providerPath, ...extensions.map((entry) => entry.path)],
+        extensionPaths: [
+          ...extensions.slice(0, -1).map((entry) => entry.path),
+          providerPath,
+          ...extensions.slice(-1).map((entry) => entry.path),
+        ],
         events: {
           wake: () => {},
           notify: () => {},
