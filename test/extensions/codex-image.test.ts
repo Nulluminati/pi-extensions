@@ -4,7 +4,7 @@ import { getCodexCredentials } from "../../extensions/codex-image/src/auth.ts";
 import { getCodexResponseModel } from "../../extensions/codex-image/src/config.ts";
 import { generateHostedImage } from "../../extensions/codex-image/src/hosted.ts";
 import { loadInputImages, saveImage } from "../../extensions/codex-image/src/output.ts";
-import { createMockCommandContext } from "../mocks/context-mocks.ts";
+import { createMockCommandContext, createMockModel } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
 
 vi.mock("../../extensions/codex-image/src/auth.ts", () => ({ getCodexCredentials: vi.fn() }));
@@ -159,12 +159,78 @@ describe("codex-image extension", () => {
     );
     expect(generateHostedImage).toHaveBeenNthCalledWith(
       2,
-      expect.objectContaining({ responseModel: "gpt-5.5" }),
+      expect.objectContaining({ responseModel: "gpt-6.1-sol" }),
       expect.any(Object),
       expect.any(AbortSignal),
       expect.any(Function),
     );
     expect(result.details).toEqual({ path: "/project/.pi/images/sunrise-abc.png" });
+  });
+
+  it("uses Pi's current openai-codex model before the Codex config model", async () => {
+    const tool = registeredTool();
+    const ctx = createMockCommandContext();
+    ctx.model = createMockModel({ provider: "openai-codex", id: "gpt-6.1-sol" });
+    await tool.execute("pi-model", { prompt: "sky" }, undefined, undefined, ctx);
+    expect(generateHostedImage).toHaveBeenCalledTimes(1);
+    expect(generateHostedImage).toHaveBeenCalledWith(
+      expect.objectContaining({ responseModel: "gpt-6.1-sol" }),
+      expect.any(Object),
+      expect.any(AbortSignal),
+      expect.any(Function),
+    );
+  });
+
+  it("ignores Pi's current model when it belongs to another provider", async () => {
+    const tool = registeredTool();
+    const ctx = createMockCommandContext();
+    ctx.model = createMockModel({ provider: "anthropic", id: "claude-opus-5-5" });
+    await tool.execute("other-provider", { prompt: "sky" }, undefined, undefined, ctx);
+    expect(generateHostedImage).toHaveBeenCalledWith(
+      expect.objectContaining({ responseModel: "gpt-5.2-codex" }),
+      expect.any(Object),
+      expect.any(AbortSignal),
+      expect.any(Function),
+    );
+  });
+
+  it("tries each distinct response model once while Codex rejects them", async () => {
+    const tool = registeredTool();
+    const ctx = createMockCommandContext();
+    ctx.model = createMockModel({ provider: "openai-codex", id: "gpt-6-sol" });
+    const unsupported = (model: string) =>
+      new Error(
+        `ChatGPT image generation request failed (HTTP 400): The '${model}' model is not supported when using Codex with a ChatGPT account.`,
+      );
+    vi.mocked(generateHostedImage)
+      .mockRejectedValueOnce(unsupported("gpt-6-sol"))
+      .mockRejectedValueOnce(unsupported("gpt-5.2-codex"))
+      .mockRejectedValueOnce(unsupported("gpt-6.1-sol"));
+
+    await expect(
+      tool.execute("all-rejected", { prompt: "sky" }, undefined, undefined, ctx),
+    ).rejects.toThrow("'gpt-6.1-sol' model is not supported");
+    expect(
+      vi.mocked(generateHostedImage).mock.calls.map(([request]) => request.responseModel),
+    ).toEqual(["gpt-6-sol", "gpt-5.2-codex", "gpt-6.1-sol"]);
+    expect(saveImage).not.toHaveBeenCalled();
+  });
+
+  it("does not retry the same model when Pi and Codex config agree", async () => {
+    const tool = registeredTool();
+    const ctx = createMockCommandContext();
+    ctx.model = createMockModel({ provider: "openai-codex", id: "gpt-5.2-codex" });
+    vi.mocked(generateHostedImage)
+      .mockRejectedValueOnce(
+        new Error(
+          "The 'gpt-5.2-codex' model is not supported when using Codex with a ChatGPT account.",
+        ),
+      )
+      .mockResolvedValueOnce("cG5n");
+    await tool.execute("dedupe", { prompt: "sky" }, undefined, undefined, ctx);
+    expect(
+      vi.mocked(generateHostedImage).mock.calls.map(([request]) => request.responseModel),
+    ).toEqual(["gpt-5.2-codex", "gpt-6.1-sol"]);
   });
 
   it("propagates auth and transport failures instead of returning success", async () => {

@@ -4,7 +4,7 @@ The `generate_image` tool creates and edits PNG images through Codex's hosted im
 
 ## Configuration
 
-Run `codex login` first. The extension reads `auth.json` and `config.toml` from `$CODEX_HOME` or `~/.codex`. It uses the configured Codex chat model for the request and `gpt-image-2` for the image tool. If no chat model is configured, it uses `gpt-5.5`. If Codex rejects the configured model for ChatGPT accounts, the tool retries once with `gpt-5.5`. Expired tokens are refreshed in the Codex auth file.
+Run `codex login` first. The extension reads `auth.json` and `config.toml` from `$CODEX_HOME` or `~/.codex`. It uses `gpt-image-2` for the image tool. For the Codex chat model of the request, it uses Pi's current model when that model's provider is `openai-codex`. Otherwise it uses the `model` from `config.toml`, or `gpt-6.1-sol` if no model is configured. If Codex rejects a chat model for ChatGPT accounts, the tool tries the next model in that order, then `gpt-6.1-sol`. It tries each model one time. Expired tokens are refreshed in the Codex auth file.
 
 The extension saves PNG files in the current project's Pi configuration directory, under `images/` (normally `./.pi/images/`). It adds that directory to the repository's local Git exclude file when applicable. It does not change the tracked `.gitignore`.
 

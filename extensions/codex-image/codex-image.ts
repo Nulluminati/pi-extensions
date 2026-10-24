@@ -8,7 +8,8 @@ import { loadInputImages, MAX_INPUT_IMAGES, saveImage } from "./src/output.ts";
 
 // --- Constants ---
 
-const FALLBACK_RESPONSE_MODEL = "gpt-5.5";
+const CODEX_PROVIDER = "openai-codex";
+const FALLBACK_RESPONSE_MODEL = "gpt-6.1-sol";
 const UNSUPPORTED_CODEX_MODEL = "model is not supported when using Codex with a ChatGPT account";
 
 // --- Extension ---
@@ -52,10 +53,18 @@ export default async function codexImageExtension(pi: ExtensionAPI) {
         ? await loadInputImages(params.inputImages, ctx.cwd)
         : undefined;
       const credentials = await getCodexCredentials(requestSignal);
-      const responseModel = await getCodexResponseModel();
+      // Prefer Pi's current Codex model: Pi already uses it with this account,
+      // and Codex can reject the config.toml model for ChatGPT accounts.
+      const piModel = ctx.model?.provider === CODEX_PROVIDER ? ctx.model.id : undefined;
+      const responseModels = [
+        ...new Set([
+          ...(piModel ? [piModel] : []),
+          await getCodexResponseModel(),
+          FALLBACK_RESPONSE_MODEL,
+        ]),
+      ];
       const request = {
         prompt,
-        responseModel,
         ...(inputImages ? { inputImages } : {}),
         ...(params.size ? { size: params.size } : {}),
         ...(params.quality ? { quality: params.quality } : {}),
@@ -66,24 +75,27 @@ export default async function codexImageExtension(pi: ExtensionAPI) {
           details: undefined,
         });
       };
-      let image: string;
-      try {
-        image = await generateHostedImage(request, credentials, requestSignal, onPartial);
-      } catch (error) {
-        if (
-          responseModel === FALLBACK_RESPONSE_MODEL ||
-          !(error instanceof Error) ||
-          !error.message.includes(UNSUPPORTED_CODEX_MODEL)
-        ) {
-          throw error;
+      let image: string | undefined;
+      for (const [index, responseModel] of responseModels.entries()) {
+        try {
+          image = await generateHostedImage(
+            { ...request, responseModel },
+            credentials,
+            requestSignal,
+            onPartial,
+          );
+          break;
+        } catch (error) {
+          if (
+            index === responseModels.length - 1 ||
+            !(error instanceof Error) ||
+            !error.message.includes(UNSUPPORTED_CODEX_MODEL)
+          ) {
+            throw error;
+          }
         }
-        image = await generateHostedImage(
-          { ...request, responseModel: FALLBACK_RESPONSE_MODEL },
-          credentials,
-          requestSignal,
-          onPartial,
-        );
       }
+      if (image === undefined) throw new Error("Codex returned no image.");
       const path = await saveImage(image, ctx.cwd, prompt);
       return {
         content: [

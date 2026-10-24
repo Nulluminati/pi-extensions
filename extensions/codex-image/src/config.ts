@@ -16,7 +16,7 @@ import { isNodeError } from "../../../lib/errors.ts";
 
 // --- Constants ---
 
-const DEFAULT_CODEX_MODEL = "gpt-5.5";
+const DEFAULT_CODEX_MODEL = "gpt-6.1-sol";
 
 // --- Paths ---
 

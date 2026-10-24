@@ -305,7 +305,7 @@ describe("getCodexCredentials", () => {
 
 describe("getCodexResponseModel", () => {
   it("returns the default when config.toml is missing", async () => {
-    expect(await getCodexResponseModel()).toBe("gpt-5.5");
+    expect(await getCodexResponseModel()).toBe("gpt-6.1-sol");
   });
 
   it("returns the top-level model", async () => {
@@ -324,7 +324,7 @@ describe("getCodexResponseModel", () => {
 
   it("ignores model keys that appear after any table header", async () => {
     await writeFile(configPath(), '[profiles.work]\nmodel = "table-model"\n', "utf8");
-    expect(await getCodexResponseModel()).toBe("gpt-5.5");
+    expect(await getCodexResponseModel()).toBe("gpt-6.1-sol");
   });
 
   it("ignores unrelated config content", async () => {
@@ -333,7 +333,7 @@ describe("getCodexResponseModel", () => {
       'preferred_auth_method = "chatgpt"\n\n[model_providers.custom]\nbase_url = "https://example.com"\n',
       "utf8",
     );
-    expect(await getCodexResponseModel()).toBe("gpt-5.5");
+    expect(await getCodexResponseModel()).toBe("gpt-6.1-sol");
   });
 
   it("falls back to ~/.codex when CODEX_HOME is unset", async () => {
