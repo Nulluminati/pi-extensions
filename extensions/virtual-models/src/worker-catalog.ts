@@ -11,10 +11,10 @@ export const WORKER_TARGETS = {
 } as const satisfies Record<ModelChoice, readonly string[]>;
 
 export const FAMILY_FALLBACKS = [
-  { id: "glm-flash-fallback-v1", name: "GLM Flash provider fallback v1", family: "glm" },
+  { id: "glm-flash-fallback", name: "GLM Flash provider fallback", family: "glm" },
   {
-    id: "deepseek-flash-fallback-v1",
-    name: "DeepSeek Flash provider fallback v1",
+    id: "deepseek-flash-fallback",
+    name: "DeepSeek Flash provider fallback",
     family: "deepseek",
   },
 ] as const;

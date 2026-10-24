@@ -158,7 +158,7 @@ async function offlineSession(
   });
   cleanups.push(() => session.dispose());
   await session.bindExtensions({});
-  const id = `${family}-flash-fallback-v1`;
+  const id = `${family}-flash-fallback`;
   const selected = runtime.getModel("virtual-models", id);
   expect(selected, "Fixed-family profile must register in the actual SDK").toBeDefined();
   await session.setModel(selected);

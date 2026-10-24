@@ -526,8 +526,8 @@ describe("opt-in automatic worker model policy", () => {
     const { pi, router } = await boot();
     expect(router).toMatchObject({ provider: "virtual-models", id: "worker-auto-v1" });
     expect(pi.registerVirtualModel.mock.calls.map(([definition]) => definition.id)).toEqual([
-      "glm-flash-fallback-v1",
-      "deepseek-flash-fallback-v1",
+      "glm-flash-fallback",
+      "deepseek-flash-fallback",
       "worker-auto-v1",
     ]);
     expect(pi.setModel).not.toHaveBeenCalled();

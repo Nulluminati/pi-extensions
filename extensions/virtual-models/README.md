@@ -2,8 +2,8 @@
 
 Registers three opt-in selections. None changes saved main or worker defaults.
 
-- `virtual-models/glm-flash-fallback-v1` keeps GLM Flash selected and changes providers when necessary. It supports main sessions and workers.
-- `virtual-models/deepseek-flash-fallback-v1` keeps DeepSeek Flash selected and changes providers when necessary. It supports main sessions and workers.
+- `virtual-models/glm-flash-fallback` keeps GLM Flash selected and changes providers when necessary. It supports main sessions and workers.
+- `virtual-models/deepseek-flash-fallback` keeps DeepSeek Flash selected and changes providers when necessary. It supports main sessions and workers.
 - `virtual-models/worker-auto-v1` uses Jev to select worker model families and recover recognized availability failures. Rules are a classifier fallback only.
 
 `rules-v1`, `jev-v1`, and their dedicated router implementations and tests are removed. Historical pilot evidence retains their results.
@@ -165,13 +165,13 @@ Pi's built-in footer and `/model` expose physical dispatch. The custom status-ba
 Choose GLM Flash:
 
 ```sh
-pi -e extensions/virtual-models/virtual-models.ts --model virtual-models/glm-flash-fallback-v1
+pi -e extensions/virtual-models/virtual-models.ts --model virtual-models/glm-flash-fallback
 ```
 
 Choose DeepSeek Flash:
 
 ```sh
-pi -e extensions/virtual-models/virtual-models.ts --model virtual-models/deepseek-flash-fallback-v1
+pi -e extensions/virtual-models/virtual-models.ts --model virtual-models/deepseek-flash-fallback
 ```
 
 Both commands require credentials for at least one provider in the selected family.
@@ -181,7 +181,7 @@ Both commands require credentials for at least one provider in the selected fami
 The extension has no saved configuration file.
 Workers receive their role from `PI_WORKER=1`.
 
-For fixed-family workers, replace the temporary command's `PI_WORKER_MODEL` value with `virtual-models/glm-flash-fallback-v1` or `virtual-models/deepseek-flash-fallback-v1`.
+For fixed-family workers, replace the temporary command's `PI_WORKER_MODEL` value with `virtual-models/glm-flash-fallback` or `virtual-models/deepseek-flash-fallback`.
 A temporary `PI_WORKER_EXTENSIONS_CONFIG` file must retain the default worker list and add `virtual-models`.
 The worker resolver retains mandatory coordination, approval, and sandbox extensions. It still rejects nested delegation.
 

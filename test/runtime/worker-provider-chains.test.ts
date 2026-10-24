@@ -45,9 +45,9 @@ describe("actual worker provider priorities and physical-model visibility (offli
     ["glm", "worker-auto-v1"],
     ["codex-quota", "worker-auto-v1"],
     ["codex-temporary", "worker-auto-v1"],
-    ["deepseek", "deepseek-flash-fallback-v1"],
-    ["deepseek-first", "deepseek-flash-fallback-v1"],
-    ["glm", "glm-flash-fallback-v1"],
+    ["deepseek", "deepseek-flash-fallback"],
+    ["deepseek-first", "deepseek-flash-fallback"],
+    ["glm", "glm-flash-fallback"],
   ])("enforces %s behavior with %s in one worker process", async (scenario, profile) => {
     const dir = await mkdtemp(join(tmpdir(), "pi-worker-providers-"));
     cleanups.push(() => rm(dir, { recursive: true, force: true }));

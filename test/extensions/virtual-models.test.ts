@@ -6,12 +6,12 @@ import { createMockContext } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
 
 const targets = {
-  "glm-flash-fallback-v1": [
+  "glm-flash-fallback": [
     "zai/glm-5.3-flash",
     "synthetic/hf:zai-org/GLM-5.3-Flash",
     "opencode-go/glm-5.3-flash",
   ],
-  "deepseek-flash-fallback-v1": [
+  "deepseek-flash-fallback": [
     "synthetic/hf:deepseek-ai/DeepSeek-V4.1-Flash-1017",
     "opencode-go/deepseek-v4.1-flash",
   ],
@@ -71,7 +71,7 @@ function boundary(outcome: "error" | "aborted" | "completed" = "error") {
   };
 }
 async function boot(
-  profile: Profile = "glm-flash-fallback-v1",
+  profile: Profile = "glm-flash-fallback",
   worker = false,
   entries: unknown[] = [],
 ) {
@@ -123,10 +123,13 @@ describe("fixed-family fallback virtual models", () => {
   it("registers both families and worker-auto without retaining pilot routers or changing defaults", async () => {
     const { pi } = await boot();
     expect(pi.registerVirtualModel.mock.calls.map(([definition]) => definition.id)).toEqual([
-      "glm-flash-fallback-v1",
-      "deepseek-flash-fallback-v1",
+      "glm-flash-fallback",
+      "deepseek-flash-fallback",
       "worker-auto-v1",
     ]);
+    expect(
+      pi.registerVirtualModel.mock.calls.slice(0, 2).map(([definition]) => definition.name),
+    ).toEqual(["GLM Flash provider fallback", "DeepSeek Flash provider fallback"]);
     expect(pi.setModel).not.toHaveBeenCalled();
     expect(pi.setThinkingLevel).not.toHaveBeenCalled();
     expect(pi.setActiveTools).not.toHaveBeenCalled();

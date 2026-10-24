@@ -336,7 +336,7 @@ describe("actual worker process recovery with mandatory safety extensions", () =
   it.each([
     ["quota", "worker-auto-v1"],
     ["exhausted", "worker-auto-v1"],
-    ["quota", "glm-flash-fallback-v1"],
+    ["quota", "glm-flash-fallback"],
   ])("preserves process, sandbox and terminal status for %s with %s", async (scenario, profile) => {
     const dir = await directory();
     const forbidden = await directory();
