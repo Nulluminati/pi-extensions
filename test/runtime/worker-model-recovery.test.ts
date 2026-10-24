@@ -463,7 +463,7 @@ export default async function(pi){
       const results = events.filter(
         (event) => event.type === "message_end" && event.message.role === "toolResult",
       );
-      expect(results[0].message.isError).toBe(false);
+      expect(results[0].message.isError, JSON.stringify(results[0].message.content)).toBe(false);
       expect(JSON.stringify(results[0].message.content)).toContain("completed-read");
       expect(results[1].message.isError).toBe(true);
       expect(JSON.stringify(results[1].message.content)).not.toContain(
