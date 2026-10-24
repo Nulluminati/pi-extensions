@@ -1,4 +1,4 @@
-import type { ThinkingLevel } from "pi";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { WorkerRecord } from "./types.ts";
 
 export type WorkerPhysicalModel = Pick<WorkerRecord, "physicalModel" | "physicalThinkingLevel">;

@@ -1,9 +1,10 @@
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
-import type { ExtensionVirtualModel, Model, ModelRouteRequest } from "pi";
+import type { ExtensionVirtualModel, ModelRouteRequest } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import extension from "../../extensions/virtual-models/virtual-models.ts";
-import { createMockContext } from "../mocks/context-mocks.ts";
+import { createMockContext, createMockModel } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
+import { sessionEntries } from "../mocks/test-helpers.ts";
 
 const targets = {
   "glm-flash-fallback": [
@@ -19,9 +20,9 @@ const targets = {
 type Profile = keyof typeof targets;
 const profiles = Object.keys(targets) as Profile[];
 const specs = [...Object.values(targets).flat(), "openai-codex/gpt-6.1-sol"];
-function model(spec: string, api = "openai-completions"): Model {
+function model(spec: string, api = "openai-completions") {
   const slash = spec.indexOf("/");
-  return {
+  return createMockModel({
     provider: spec.slice(0, slash),
     id: spec.slice(slash + 1),
     name: spec,
@@ -39,7 +40,7 @@ function model(spec: string, api = "openai-completions"): Model {
       xhigh: null,
       max: null,
     },
-  };
+  });
 }
 function assistant(id: string, spec: string, error?: string) {
   const physical = model(spec);
@@ -88,7 +89,7 @@ async function boot(
   ctx.modelRegistry.classify.mockRejectedValue(
     new Error("Fixed-family profiles must not call Jev"),
   );
-  ctx.sessionManager.getBranch.mockReturnValue(entries);
+  ctx.sessionManager.getBranch.mockReturnValue(sessionEntries(entries));
   await extension(pi);
   const router = pi.registerVirtualModel.mock.calls
     .map(([definition]) => definition)
@@ -226,10 +227,9 @@ describe("fixed-family fallback virtual models", () => {
       expect((await route({ reason: "continuation", state: state(primary) })).model).toMatchObject(
         model(primary),
       );
-      ctx.sessionManager.getBranch.mockReturnValue([
-        first,
-        assistant("second", primary, "503 service unavailable"),
-      ]);
+      ctx.sessionManager.getBranch.mockReturnValue(
+        sessionEntries([first, assistant("second", primary, "503 service unavailable")]),
+      );
       expect(await recover(boundary(), ctx)).toMatchObject({ continue: true });
       const result = await route({ reason: "continuation", state: state(primary) });
       expect(`${result.model.provider}/${result.model.id}`).toBe(alternate);

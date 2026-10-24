@@ -1,6 +1,6 @@
 /** Opt-in virtual-model routers. Never changes saved selections. */
 import { appendFile } from "node:fs/promises";
-import type { ExtensionAPI } from "pi";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { extractProviderUsage, installClassifierMeasurement } from "./src/measurement.ts";
 import {
   createFamilyRouter,

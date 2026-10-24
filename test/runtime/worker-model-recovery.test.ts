@@ -3,8 +3,7 @@ import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promi
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import type { Message } from "@earendil-works/pi-ai";
-import type { ClassifierContext } from "pi";
+import type { ClassifierContext, Message } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startWorker } from "../../extensions/workers/src/runner.ts";

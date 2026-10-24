@@ -1,12 +1,11 @@
-import { clampThinkingLevel } from "@earendil-works/pi-ai";
+import { type Api, clampThinkingLevel, type Model } from "@earendil-works/pi-ai";
 import type {
   AgentBeforeSettleEvent,
   BoundaryResult,
   ExtensionContext,
-  Model,
   ModelRoute,
   ModelRouteRequest,
-} from "pi";
+} from "@earendil-works/pi-coding-agent";
 import { extractText } from "../../../lib/session-utils.ts";
 import type { RouteRecord } from "./types.ts";
 import { FAMILY_FALLBACKS, WORKER_TARGETS, workerFamily } from "./worker-catalog.ts";
@@ -25,7 +24,7 @@ interface RoutingPolicy {
   family?: "glm" | "deepseek";
 }
 
-function spec(model: Model): string {
+function spec(model: Model<Api>): string {
   return `${model.provider}/${model.id}`;
 }
 function routingPolicy(id: string): RoutingPolicy | undefined {
@@ -37,8 +36,8 @@ function eligibleModels(
   ctx: ExtensionContext,
   history: WorkerHistory,
   family?: RoutingPolicy["family"],
-): Map<string, Model> {
-  const available = new Map<string, Model>();
+): Map<string, Model<Api>> {
+  const available = new Map<string, Model<Api>>();
   for (const model of ctx.modelRegistry.getAvailable()) {
     if (typeof model.provider !== "string") continue;
     const modelSpec = spec(model);
@@ -53,8 +52,8 @@ function eligibleModels(
   }
   return available;
 }
-function familyCandidates(available: Map<string, Model>): Map<string, Model> {
-  const families = new Map<string, Model>();
+function familyCandidates(available: Map<string, Model<Api>>): Map<string, Model<Api>> {
+  const families = new Map<string, Model<Api>>();
   for (const targets of Object.values(WORKER_TARGETS)) {
     const target = targets.find((modelSpec) => available.has(modelSpec));
     const model = target ? available.get(target) : undefined;

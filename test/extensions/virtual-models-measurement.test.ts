@@ -1,4 +1,9 @@
-import type { ClassifierResult } from "pi";
+import {
+  type ClassifierApi,
+  type ClassifierModel,
+  type ClassifierResult,
+  fauxAssistantMessage,
+} from "@earendil-works/pi-ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   extractProviderUsage,
@@ -42,22 +47,23 @@ describe("opt-in classifier measurement", () => {
       timestamp: 1,
       stopReason: "stop",
       answers: {},
-      usage: { input: 5, output: 1, totalTokens: 6 },
+      usage: { ...fauxAssistantMessage("").usage, input: 5, output: 1, totalTokens: 6 },
     };
     const original = registry.classify.mockResolvedValue(result);
     const record = vi.fn(async () => "call-1");
     const installed = new WeakSet<object>();
     installClassifierMeasurement(registry, installed, record);
     installClassifierMeasurement(registry, installed, record);
-    const model = {
+    const model: ClassifierModel<ClassifierApi> = {
+      type: "classifier",
+      baseUrl: "https://test.invalid",
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       id: "jev-latest",
       provider: "typesafe",
       name: "Jev",
       api: "typesafe-system-one",
-      reasoning: false,
       input: ["text" as const],
       contextWindow: 64000,
-      maxTokens: 1,
     };
     const context = { state: {}, questions: {} };
     const options = { maxRetries: 0 };

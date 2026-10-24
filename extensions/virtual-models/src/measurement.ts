@@ -1,5 +1,5 @@
 /** Evaluator-only observation of registry classifiers, including approval checks outside the router. */
-import type { ModelRegistry } from "pi";
+import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 
 function recordValue(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)

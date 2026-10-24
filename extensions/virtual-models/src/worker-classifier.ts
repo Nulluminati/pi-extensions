@@ -1,4 +1,5 @@
-import type { ExtensionContext, Model, ModelRouteRequest } from "pi";
+import type { Api, Model } from "@earendil-works/pi-ai";
+import type { ExtensionContext, ModelRouteRequest } from "@earendil-works/pi-coding-agent";
 import { createTimeoutController } from "../../../lib/fetch-timeout.ts";
 import type { ModelChoice } from "./policy.ts";
 import type { RouteRecord } from "./types.ts";
@@ -15,7 +16,7 @@ const DESCRIPTIONS: Record<ModelChoice, string> = {
 
 /** Semantic preferences never override the caller's physical eligibility constraints. */
 export async function classifyWorkerModel(
-  candidates: readonly Model[],
+  candidates: readonly Model<Api>[],
   assignment: string,
   reason: ModelRouteRequest["reason"],
   history: WorkerHistory,

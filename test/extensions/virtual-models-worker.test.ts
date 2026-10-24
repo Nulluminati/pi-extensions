@@ -1,15 +1,20 @@
-import { fauxAssistantMessage } from "@earendil-works/pi-ai";
-import type { ClassifierResult, ExtensionVirtualModel, Model, ModelRouteRequest } from "pi";
+import {
+  type ClassifierResult,
+  fauxAssistantMessage,
+  type StopReason,
+} from "@earendil-works/pi-ai";
+import type { ExtensionVirtualModel, ModelRouteRequest } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MODEL_POOL } from "../../extensions/virtual-models/src/policy.ts";
 import extension from "../../extensions/virtual-models/virtual-models.ts";
-import { createMockContext } from "../mocks/context-mocks.ts";
+import { createMockContext, createMockModel } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
+import { sessionEntries } from "../mocks/test-helpers.ts";
 
 const selection = "virtual-models/worker-auto-v1";
-function model(spec: string, api = "openai-completions"): Model {
+function model(spec: string, api = "openai-completions") {
   const slash = spec.indexOf("/");
-  return {
+  return createMockModel({
     provider: spec.slice(0, slash),
     id: spec.slice(slash + 1),
     name: spec,
@@ -27,14 +32,14 @@ function model(spec: string, api = "openai-completions"): Model {
       xhigh: null,
       max: null,
     },
-  };
+  });
 }
 const virtual = model(selection, "pi-virtual");
 function assistant(
   id: string,
   spec: string,
   error?: string,
-  stopReason = error ? "error" : "stop",
+  stopReason: StopReason = error ? "error" : "stop",
 ) {
   const physical = model(spec);
   return {
@@ -88,7 +93,7 @@ async function boot(entries: unknown[] = [], worker = true) {
   ctx.modelRegistry.find.mockImplementation((provider, id) =>
     pool.find((entry) => entry.provider === provider && entry.id === id),
   );
-  ctx.sessionManager.getBranch.mockReturnValue(entries);
+  ctx.sessionManager.getBranch.mockReturnValue(sessionEntries(entries));
   await extension(pi);
   const router = pi.registerVirtualModel.mock.calls
     .map(([definition]) => definition)
@@ -105,7 +110,7 @@ function classification(choice = "sol", keys = ["sol", "deepseek", "glm"]): Clas
     model: "jev-latest",
     timestamp: 1,
     stopReason: "stop",
-    usage: { input: 20, output: 3, totalTokens: 23 },
+    usage: { ...fauxAssistantMessage("").usage, input: 20, output: 3, totalTokens: 23 },
     answers: {
       route: {
         type: "choice",
@@ -117,7 +122,11 @@ function classification(choice = "sol", keys = ["sol", "deepseek", "glm"]): Clas
   };
 }
 function enableJev(ctx: ReturnType<typeof createMockContext>, result = classification()) {
-  const classifier = model("typesafe/jev-latest", "typesafe-system-one");
+  const classifier = {
+    ...model("typesafe/jev-latest"),
+    type: "classifier" as const,
+    api: "typesafe-system-one" as const,
+  };
   ctx.modelRegistry.findOfType.mockReturnValue(classifier);
   ctx.modelRegistry.getAvailableOfType.mockResolvedValue([classifier]);
   ctx.modelRegistry.classify.mockResolvedValue(result);
@@ -342,7 +351,7 @@ describe("Jev-primary worker model routing", () => {
         classifier: expect.objectContaining({
           attempted: true,
           status: "ok",
-          usage: { input: 20, output: 3, totalTokens: 23 },
+          usage: classification().usage,
         }),
       }),
     );
@@ -383,7 +392,7 @@ describe("Jev-primary worker model routing", () => {
     expect(next.model.id).toBe("gpt-6.1-sol");
     expect(ctx.modelRegistry.classify).not.toHaveBeenCalled();
     const error = assistant("temporary", MODEL_POOL.sol, "503 service unavailable");
-    ctx.sessionManager.getBranch.mockReturnValue([error]);
+    ctx.sessionManager.getBranch.mockReturnValue(sessionEntries([error]));
     const retry = await router.route(
       request({
         reason: "retry",
@@ -659,12 +668,14 @@ describe("opt-in automatic worker model policy", () => {
       { type: "context_edit", targetId: "quota", replacement: null },
     ]);
     expect((await router.route(request(), ctx)).model.id).toBe("deepseek-v4.1-flash");
-    ctx.sessionManager.getBranch.mockReturnValue([assignment]);
+    ctx.sessionManager.getBranch.mockReturnValue(sessionEntries([assignment]));
     expect((await router.route(request(), ctx)).model.id).toBe("glm-5.3-flash");
-    ctx.sessionManager.getBranch.mockReturnValue([
-      assistant("quota", MODEL_POOL.glm, "weekly usage limit reached"),
-      assistant("proof", MODEL_POOL.glm),
-    ]);
+    ctx.sessionManager.getBranch.mockReturnValue(
+      sessionEntries([
+        assistant("quota", MODEL_POOL.glm, "weekly usage limit reached"),
+        assistant("proof", MODEL_POOL.glm),
+      ]),
+    );
     expect((await router.route(request(), ctx)).model.id).toBe("glm-5.3-flash");
   });
 
@@ -740,7 +751,8 @@ describe("worker failure continuation boundary", () => {
     const { pi, ctx, recover } = await boot(entries);
     const result = await recover(boundary(), ctx);
     expect(result).toMatchObject({ continue: true });
-    expect(result.entries).toEqual(
+    expect(result).toHaveProperty(
+      "entries",
       expect.arrayContaining([
         { type: "context_edit", targetId: "quota", replacement: null },
         expect.objectContaining({

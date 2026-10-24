@@ -1,4 +1,5 @@
-import type { ClassifierResult, ModelRouteRequest } from "pi";
+import type { ClassifierResult } from "@earendil-works/pi-ai";
+import type { ModelRouteRequest } from "@earendil-works/pi-coding-agent";
 
 interface ClassifierRecord {
   attempted: boolean;
