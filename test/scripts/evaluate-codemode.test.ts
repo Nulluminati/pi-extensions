@@ -3,7 +3,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { runGit } from "../../lib/git.ts";
 import { aggregateRuns, JsonlMetrics } from "../../scripts/codemode-evaluation/metrics.ts";
 import {
@@ -37,12 +37,16 @@ afterEach(async () => {
   vi.unstubAllEnvs();
 });
 
-describe("codemode evaluation workspace", () => {
-  it("accepts the known dependency link but rejects other untracked files and link targets", async () => {
-    const root = await mkdtemp(join(tmpdir(), "codemode-rename-test-"));
-    cleanups.push(() => rm(root, { recursive: true, force: true }));
-    const dependencies = resolve(import.meta.dirname, "../../node_modules");
-    const original = "export function isNodeError() { return true; }\n";
+// Each rename check runs one TypeScript check through npx. One test per check
+// keeps every check inside its own timeout when the full suite runs in parallel.
+describe("codemode evaluation rename check", () => {
+  const dependencies = resolve(import.meta.dirname, "../../node_modules");
+  const original = "export function isNodeError() { return true; }\n";
+  const renamed = original.replace("isNodeError", "hasNodeErrorCode");
+  let root = "";
+
+  beforeAll(async () => {
+    root = await mkdtemp(join(tmpdir(), "codemode-rename-test-"));
     await symlink(dependencies, join(root, "node_modules"));
     await writeFile(join(root, ".gitignore"), "node_modules/\n");
     await writeFile(join(root, "helper.ts"), original);
@@ -66,31 +70,49 @@ describe("codemode evaluation workspace", () => {
       "-m",
       "test: add rename fixture",
     ]);
-    await writeFile(join(root, "helper.ts"), original.replace("isNodeError", "hasNodeErrorCode"));
+    await mkdir(join(root, "other-dependencies"));
+  });
+
+  afterAll(async () => {
+    if (root) await rm(root, { recursive: true, force: true });
+  });
+
+  beforeEach(async () => {
+    await writeFile(join(root, "helper.ts"), renamed);
+    await rm(join(root, "extra.ts"), { force: true });
+  });
+
+  it("accepts an exact rename with the known dependency link", async () => {
     expect(await checkRename(root, { "helper.ts": original }, dependencies)).toMatchObject({
       renameExact: true,
       typecheckPassed: true,
     });
+  });
+
+  it("rejects other untracked files", async () => {
     await writeFile(join(root, "extra.ts"), "export const extra = true;\n");
     expect(await checkRename(root, { "helper.ts": original }, dependencies)).toMatchObject({
       renameExact: false,
       typecheckPassed: true,
     });
-    await rm(join(root, "extra.ts"));
-    await mkdir(join(root, "other-dependencies"));
+  });
+
+  it("rejects a dependency link to another target", async () => {
     expect(
       await checkRename(root, { "helper.ts": original }, join(root, "other-dependencies")),
     ).toMatchObject({ renameExact: false, typecheckPassed: true });
-    await writeFile(
-      join(root, "helper.ts"),
-      `${original.replace("isNodeError", "hasNodeErrorCode")}const invalid: boolean = 1;\n`,
-    );
+  });
+
+  it("reports a failing typecheck", async () => {
+    await writeFile(join(root, "helper.ts"), `${renamed}const invalid: boolean = 1;\n`);
     expect(await checkRename(root, { "helper.ts": original }, dependencies)).toMatchObject({
       renameExact: false,
       typecheckPassed: false,
     });
   });
+});
 
+describe("codemode evaluation workspace", () => {
   it("distinguishes a task timeout from a setup failure", async () => {
     const root = await mkdtemp(join(tmpdir(), "codemode-timeout-test-"));
     cleanups.push(() => rm(root, { recursive: true, force: true }));
