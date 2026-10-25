@@ -54,6 +54,7 @@ import { renderModalFrame } from "../../../lib/tui-frame.ts";
 | Apply a fetch timeout and chain a caller abort signal | `createTimeoutController` | `lib/fetch-timeout.ts` |
 | Format a provider's static model list | `formatProviderModelList` | `lib/provider-models.ts` |
 | Share live presence (who is online) between concurrent sessions | `writeShard`, `loadShards`, `removeShard`, `readShard` | `lib/presence-shards.ts` |
+| Parse shell command rules or share the effective parent list with workers | `parseAllowList`, `checkCommand`, `BASH_ALLOW_REQUEST_EVENT`, `BashAllowRequest` | `lib/bash-allow.ts` |
 | Connect worker command approvals to the parent UI | `connectWorkerApprovalChannel`, `attachParentApprovalChannel`, `dispatchWorkerApproval` | `lib/worker-approval.ts` |
 
 ---
@@ -399,6 +400,14 @@ Live presence shared by concurrent sessions. One shard file per agent: heartbeat
 - `loadShards(dir, { legacyPath? })` → `Record<name, record>` after pruning dead pids.
 - Records must have `name: string` and `pid: number` plus whatever extra fields you need.
 - Never write presence as a single shared JSON file — heartbeats are read-modify-write and concurrent settles clobber each other.
+
+## `lib/bash-allow.ts` — shell command rules and worker inheritance
+
+`parseAllowList`, `splitCommand`, and `checkCommand` implement the static command gate without loading Pi.
+`BASH_ALLOW_REQUEST_EVENT` and `BashAllowRequest` define a synchronous parent-list snapshot request.
+The parent `bash-allow` extension replies with its effective raw list, including empty or malformed values.
+The worker launcher passes that value through `--bash-allow=<list>`; it uses `PI_BASH_ALLOW` only when no parent listener replies.
+Do not read another extension's flag with `pi.getFlag`: Pi exposes only flags registered by the calling extension.
 
 ## `lib/worker-approval.ts` — worker approval channel
 

@@ -16,8 +16,9 @@ Shared `lib/` helpers that hold no state (UI frames, file locks, path helpers) a
 | Extension | Needs | Without it |
 |-----------|-------|------------|
 | `workers` | `worker-sandbox` files on disk | `workers` does not load. It imports `worker-sandbox/src/client.ts`. |
-| `workers` | `messenger`, `worker-blocker`, `approval-mode`, `worker-sandbox` in the worker process | Always loaded into workers. They cannot be removed. |
+| `workers` | `messenger`, `worker-blocker`, `bash-allow`, `approval-mode`, `worker-sandbox` in the worker process | Always loaded into workers. They cannot be removed. |
 | `workers` | `approval-mode` in the parent session | Worker commands that need review are blocked. |
+| `workers` | Optional: `bash-allow` in the parent session | The launcher uses `PI_BASH_ALLOW` instead of a parent flag snapshot. |
 | `workers` | A worker model (`lib/worker-model.ts` config) | `spawn_worker` fails with a configuration error. `worker-model` is only the picker. |
 | `handoff`, `btw`, `goal`, `session-name`, `session-recap`, `voice` | A small model (`lib/small-model.ts` config) | Each feature that calls the small model fails or skips. `small-model` is only the picker. |
 | `approval-mode` | A Jev classifier model in the model registry | Commands that need review are blocked. |
@@ -30,6 +31,7 @@ flowchart LR
   workers -- imports --> worker-sandbox
   workers -. loads in worker .-> messenger
   workers -. loads in worker .-> worker-blocker
+  workers -. loads in worker .-> bash-allow
   workers -. loads in worker .-> approval-mode
   workers -. loads in worker .-> worker-sandbox
   workers -- approval requests --> approval-mode
@@ -59,7 +61,7 @@ Each worker runs as a separate `pi` process with `--no-extensions` and an explic
 
 | Set | Extensions | Rule |
 |-----|------------|------|
-| Required | `messenger`, `worker-blocker`, `approval-mode`, `worker-sandbox` | Always added. `worker-sandbox` loads last so its built-in tool overrides win. |
+| Required | `messenger`, `worker-blocker`, `bash-allow`, `approval-mode`, `worker-sandbox` | Always added. `bash-allow` precedes `approval-mode`; `worker-sandbox` loads last so its built-in tool overrides win. |
 | Default | `messenger`, `code-search`, `context7`, `web-search`, `synthetic`, `neuralwatt`, `approval-mode`, `worker-sandbox` | Used when the call, `PI_WORKER_EXTENSIONS`, and the config file give no list. |
 | Forbidden | `workers`, `missions`, `autoresearch`, `goal` | Rejected even when requested. |
 
@@ -67,6 +69,7 @@ The required extensions each carry one part of the parent-worker protocol:
 
 - `messenger` gives the worker a mesh identity through `PI_MESSENGER_NAME`. The parent and the worker exchange mail through it.
 - `worker-blocker` adds the `report_blocker` tool. It writes a marker to the spool file in `PI_WORKER_STREAM`. The parent `workers` runner reads the marker. Both sides share the format in `lib/worker-blocker.ts`.
+- `bash-allow` enforces the parent's effective static command list. The launcher requests it through `bash-allow:request` and passes `--bash-allow=<list>` at startup. Without a parent listener, the launcher uses `PI_BASH_ALLOW`. Missing extension files prevent startup. Empty and malformed lists remain blocking.
 - `approval-mode` gates `bash`, `background`, and `monitor` commands in the worker. It asks the parent over file descriptor 3 (`PI_WORKER_APPROVAL_FD`). It also enforces read-only workers.
 - `worker-sandbox` replaces the built-in tools with sandboxed versions. It fails closed when the project has no `.pi/sandbox.json`.
 
@@ -84,7 +87,9 @@ If the worker model or the small model points at a `synthetic` or `neuralwatt` m
 
 ## 3. Event contracts
 
-Receivers copy the event name as a string literal. They do not import it from the sender, so each receiver loads alone. When you rename an event, change both sides.
+Most receivers copy the event name as a string literal instead of importing from the sender.
+Shared contracts such as `bash-allow:request` use a `lib/` module so both extensions still load independently.
+When you rename an event, change both sides.
 
 | Event | Sender | Receivers |
 |-------|--------|-----------|
@@ -95,6 +100,7 @@ Receivers copy the event name as a string literal. They do not import it from th
 | `neuralwatt:flex-change` | `neuralwatt` | `status-bar` (flex badge) |
 | `missions:state` | `missions` | `herdr` (pane token) |
 | `todos:changed` | `lib/todos.ts` (used by `todos`) | `todos` (widget refresh), `herdr` (pane token) |
+| `bash-allow:request` | `workers` (`lib/bash-allow.ts` contract) | `bash-allow` returns its effective list through a synchronous reply callback |
 | `approval-mode:worker-request` | `workers` (`lib/worker-approval.ts`) | `approval-mode` (parent session) |
 | `herdr:blocked` | `ask-user`, `approval-mode` | Official Herdr Pi integration, outside this repository. See [herdr-integration.md](herdr-integration.md#blocked-dialogs-complete). |
 | `autoresearch:state` | `autoresearch` | None in this repository |

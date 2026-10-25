@@ -708,6 +708,8 @@ export interface StartWorkerOptions {
    *  route through worker-sandbox (loaded via extensionPaths); nothing here
    *  names a runtime. */
   extensionPaths: string[];
+  /** Effective parent command list, passed as a flag so missing enforcement fails startup. */
+  bashAllow?: string;
   /** Route the worker's built-in tools through the worker sandbox. */
   sandbox?: boolean;
   /** Investigation-only worker: read-only tools and filesystem. */
@@ -747,6 +749,8 @@ export async function startWorker(options: StartWorkerOptions): Promise<RunningW
   if (options.model) args.push("--model", options.model);
   args.push("--thinking", options.thinkingLevel);
   for (const ext of options.extensionPaths) args.push("-e", ext);
+  // The equals form preserves empty values and values starting with - or @.
+  if (options.bashAllow !== undefined) args.push(`--bash-allow=${options.bashAllow}`);
   if (options.readOnly) args.push("--worker-readonly");
 
   const spoolFile = streamPath(options.cwd, options.workerId);

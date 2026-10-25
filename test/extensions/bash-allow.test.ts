@@ -16,6 +16,7 @@ describe("bash-allow", () => {
   async function setup(flag?: string, settings = {}) {
     const pi = createMockPi();
     pi.getSettings.mockReturnValue(settings);
+    pi.events.on.mockReturnValue(vi.fn());
     const ctx = createMockContext();
     await bashAllowExtension(pi);
     // Pi assigns CLI flags after factories run.
@@ -35,6 +36,35 @@ describe("bash-allow", () => {
     return { pi, ctx, start, call };
   }
 
+  it("publishes the effective list for workers and resets it on session_start", async () => {
+    vi.stubEnv("PI_BASH_ALLOW", "ls:*");
+    const { pi, start } = await setup("pwd:*");
+    const listener = pi.events.on.mock.calls.find(([name]) => name === "bash-allow:request")?.[1];
+    if (!listener) throw new Error("bash-allow request listener not registered");
+    const reply = vi.fn();
+    listener({ reply });
+    expect(reply).toHaveBeenLastCalledWith("pwd:*");
+    pi.getFlag.mockReturnValue("");
+    await start();
+    listener({ reply });
+    expect(reply).toHaveBeenLastCalledWith("");
+    vi.stubEnv("PI_BASH_ALLOW", undefined);
+    pi.getFlag.mockReturnValue(undefined);
+    await start();
+    listener({ reply });
+    expect(reply).toHaveBeenLastCalledWith(undefined);
+    expect(() => listener(null)).not.toThrow();
+    expect(() => listener({ reply: "not a function" })).not.toThrow();
+  });
+  it("removes the worker policy listener on shutdown", async () => {
+    const { pi, ctx } = await setup();
+    const stopListening = pi.events.on.mock.results[0].value;
+    await getEventHandler(pi, "session_shutdown")(
+      { type: "session_shutdown", reason: "quit" },
+      ctx,
+    );
+    expect(stopListening).toHaveBeenCalledTimes(1);
+  });
   it("registers the string flag", async () => {
     const { pi } = await setup();
     expect(pi.registerFlag).toHaveBeenCalledWith("bash-allow", {

@@ -1,5 +1,10 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { type AllowRule, checkCommand, parseAllowList } from "../../lib/bash-allow.ts";
+import {
+  type AllowRule,
+  BASH_ALLOW_REQUEST_EVENT,
+  checkCommand,
+  parseAllowList,
+} from "../../lib/bash-allow.ts";
 
 // --- Constants ---
 
@@ -20,19 +25,38 @@ function shellRefusal(pi: ExtensionAPI): string | undefined {
 // --- Extension ---
 
 export default async function bashAllowExtension(pi: ExtensionAPI): Promise<void> {
+  let configuredList: string | undefined;
   let rules: AllowRule[] | undefined;
   let listError: string | undefined;
   let startupShellError: string | undefined;
+  let stopListening: (() => void) | undefined;
 
   pi.registerFlag("bash-allow", {
     type: "string",
     description: "Comma-separated bash command allow list; every other shell call is blocked",
   });
 
+  pi.on("session_shutdown", () => {
+    stopListening?.();
+    stopListening = undefined;
+  });
+
   pi.on("session_start", (_event, ctx) => {
+    stopListening?.();
+    stopListening = pi.events.on(BASH_ALLOW_REQUEST_EVENT, (request) => {
+      if (
+        request &&
+        typeof request === "object" &&
+        "reply" in request &&
+        typeof request.reply === "function"
+      ) {
+        request.reply(configuredList);
+      }
+    });
     // Pi applies CLI flag values after extension factories run.
     const flag = pi.getFlag("bash-allow");
     const value = typeof flag === "string" ? flag : process.env.PI_BASH_ALLOW;
+    configuredList = value;
     rules = undefined;
     listError = undefined;
     startupShellError = undefined;

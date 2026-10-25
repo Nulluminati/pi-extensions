@@ -43,6 +43,22 @@ describe("worker-extensions", () => {
     await rm(root, { recursive: true, force: true });
   });
 
+  it("forces bash-allow before approval-mode even with an empty or reordered selection", () => {
+    for (const explicit of [[], ["approval-mode", "bash-allow", "bash-allow"]]) {
+      const names = resolveWorkerExtensions(explicit, { extensionsRoot: root, configPath }).map(
+        (extension) => extension.name,
+      );
+      expect(names.filter((name) => name === "bash-allow")).toHaveLength(1);
+      expect(names.indexOf("bash-allow")).toBeLessThan(names.indexOf("approval-mode"));
+      expect(names.at(-1)).toBe("worker-sandbox");
+    }
+  });
+  it("fails closed when the mandatory bash-allow extension is missing", async () => {
+    await rm(join(root, "bash-allow"), { recursive: true, force: true });
+    expect(() => resolveWorkerExtensions([], { extensionsRoot: root, configPath })).toThrow(
+      /bash-allow/,
+    );
+  });
   it("defaults to the default set plus mandatory extensions, resolved to paths", () => {
     const resolved = resolveWorkerExtensions(undefined, {
       extensionsRoot: root,
@@ -89,6 +105,7 @@ describe("worker-extensions", () => {
     expect(resolved.map((r) => r.name)).toEqual([
       "messenger",
       "worker-blocker",
+      "bash-allow",
       "approval-mode",
       "context7",
       "worker-sandbox",
@@ -106,6 +123,7 @@ describe("worker-extensions", () => {
     expect(resolved.map((r) => r.name)).toEqual([
       "messenger",
       "worker-blocker",
+      "bash-allow",
       "approval-mode",
       "web-search",
       "worker-sandbox",
@@ -123,6 +141,7 @@ describe("worker-extensions", () => {
     expect(resolved.map((r) => r.name)).toEqual([
       "messenger",
       "worker-blocker",
+      "bash-allow",
       "approval-mode",
       "web-search",
       "worker-sandbox",
@@ -138,6 +157,7 @@ describe("worker-extensions", () => {
     expect(resolved.map((r) => r.name)).toEqual([
       "messenger",
       "worker-blocker",
+      "bash-allow",
       "approval-mode",
       "worker-sandbox",
     ]);
@@ -230,6 +250,7 @@ describe("worker-extensions", () => {
     expect(resolved.map((r) => r.name)).toEqual([
       "messenger",
       "worker-blocker",
+      "bash-allow",
       "approval-mode",
       "web-search",
       "worker-sandbox",

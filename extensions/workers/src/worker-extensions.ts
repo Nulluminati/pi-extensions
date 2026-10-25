@@ -9,9 +9,10 @@
  *
  * Resolution order: the delegate call's explicit list, then
  * PI_WORKER_EXTENSIONS (comma-separated names), then the config file, then
- * the default set. `messenger`, `worker-blocker`, `approval-mode`, and
- * `worker-sandbox` are always included: the first two coordinate with the
- * parent, approval-mode gates commands, and worker-sandbox isolates tools.
+ * the default set. `messenger`, `worker-blocker`, `bash-allow`, `approval-mode`,
+ * and `worker-sandbox` are always included: the first two coordinate with the
+ * parent, bash-allow inherits its static command list, approval-mode reviews
+ * commands, and worker-sandbox isolates tools.
  * A hard denylist rejects workflow extensions that would break the one-level
  * delegation model, even when explicitly requested.
  */
@@ -46,12 +47,13 @@ export const DEFAULT_WORKER_EXTENSIONS = [
  */
 export const FORBIDDEN_WORKER_EXTENSIONS = ["workers", "missions", "autoresearch", "goal"] as const;
 
-/** Coordination, blocker reporting, and sandbox extensions loaded by every
+/** Coordination, command gates, and sandbox extensions loaded by every
  *  worker. worker-sandbox pins last so its built-in tool overrides cannot be
  *  shadowed by an extension loaded afterward. */
 export const REQUIRED_WORKER_EXTENSIONS = [
   "messenger",
   "worker-blocker",
+  "bash-allow",
   "approval-mode",
   "worker-sandbox",
 ] as const;

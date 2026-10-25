@@ -27,6 +27,7 @@ import type {
   ExtensionContext,
   ExtensionUIContext,
 } from "@earendil-works/pi-coding-agent";
+import { BASH_ALLOW_REQUEST_EVENT, type BashAllowRequest } from "../../lib/bash-allow.ts";
 import { excludeFromGit } from "../../lib/git.ts";
 import { projectStateRelative } from "../../lib/paths.ts";
 import { isProcessAlive } from "../../lib/presence-shards.ts";
@@ -368,12 +369,22 @@ export default async function workersExtension(pi: ExtensionAPI) {
       refreshFromBranch(ctx);
       if (signal?.aborted) throw new SetupHookCancelled("caller aborted the delegate");
       const plan = await planDelegate(params as DelegateParams, ctx);
+      // getFlag only exposes flags owned by this extension. Ask the gate for
+      // its effective list so a parent CLI flag overrides the inherited env.
+      let bashAllow = process.env.PI_BASH_ALLOW;
+      const request: BashAllowRequest = {
+        reply: (value) => {
+          bashAllow = value;
+        },
+      };
+      pi.events.emit(BASH_ALLOW_REQUEST_EVENT, request);
       const { runningWorker, worktree } = await startDelegatedWorker({
         cwd: ctx.cwd,
         plan,
         state,
         events: makeEvents(ctx),
         persist: persistRecord,
+        ...(bashAllow !== undefined ? { bashAllow } : {}),
         ...(signal !== undefined ? { signal } : {}),
       });
 

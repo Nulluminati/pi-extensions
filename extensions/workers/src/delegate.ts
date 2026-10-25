@@ -306,9 +306,9 @@ export async function planDelegate(
       ? requestedName
       : workerId;
   // Worker extension allowlist: spawn_worker extensions param -> PI_WORKER_EXTENSIONS ->
-  // worker-extensions.json -> default set. Messenger, worker-blocker, and
-  // worker-sandbox are mandatory; denylisted workflow extensions are
-  // rejected outright.
+  // worker-extensions.json -> default set. Messenger, worker-blocker,
+  // bash-allow, approval-mode, and worker-sandbox are mandatory. Denylisted
+  // workflow extensions are rejected outright.
   const requestedExtensions = Array.isArray(params.extensions)
     ? params.extensions.map(String)
     : undefined;
@@ -364,6 +364,8 @@ export interface StartDelegatedWorkerOptions {
   /** Persist a state transition (transcript entry + artifact record file).
    *  Returns false when a stale running snapshot lost to a terminal state. */
   persist(record: WorkerRecord): Promise<boolean>;
+  /** Effective parent command list; empty and malformed values remain blocking. */
+  bashAllow?: string;
   /** Tool cancellation stops setup before a worker child starts. */
   signal?: AbortSignal;
 }
@@ -513,6 +515,7 @@ export async function startDelegatedWorker(
       timeoutMs,
       workerId,
       extensionPaths,
+      ...(options.bashAllow !== undefined ? { bashAllow: options.bashAllow } : {}),
       sandbox,
       readOnly,
       ...(signal !== undefined ? { signal } : {}),

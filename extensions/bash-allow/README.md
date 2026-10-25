@@ -105,7 +105,15 @@ Herdboard integration belongs to card `t6wd`; this extension does not change its
 
 This extension handles `tool_call` events only. User commands entered with `!` stay unrestricted.
 It gates `background` and `monitor` only when those tools exist.
-It does not change worker extension lists. Workers keep their existing approval and sandbox controls.
+Workers always load `bash-allow` before `approval-mode`, even with an empty or custom worker extension list.
+The parent passes its effective list to each new worker through `--bash-allow=<list>`.
+A parent flag takes priority over `PI_BASH_ALLOW` in workers too.
+Empty and malformed lists remain blocking; a missing worker extension fails startup or extension resolution.
+Without a parent list, workers keep unrestricted shell access under their existing approval and sandbox controls.
+
+Workers cannot change the inherited list through `spawn_worker` parameters.
+Each worker keeps its startup list for its lifetime; a later parent configuration change applies to future workers.
+Worker approval checks remain independent and can still reject an allow-listed command.
 
 This is a text matcher, not a complete shell parser or an operating-system sandbox.
 Unsupported forms can be refused even when they would be safe.

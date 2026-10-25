@@ -1,4 +1,13 @@
+// --- Constants ---
+
+export const BASH_ALLOW_REQUEST_EVENT = "bash-allow:request";
+
 // --- Types ---
+
+/** Synchronous snapshot request shared by the parent gate and worker launcher. */
+export interface BashAllowRequest {
+  reply(value: string | undefined): void;
+}
 
 export interface AllowRule {
   pattern: string;
