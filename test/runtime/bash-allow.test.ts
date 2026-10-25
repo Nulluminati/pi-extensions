@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { createBashToolDefinition, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { afterEach, expect, it, vi } from "vitest";
+import backgroundJobsExtension from "../../extensions/background-jobs/background-jobs.ts";
 import bashAllowExtension from "../../extensions/bash-allow/bash-allow.ts";
 import { createPiSession, type PiSession } from "../harness/pi-session.ts";
 
@@ -11,8 +12,16 @@ async function registerRealBash(pi: ExtensionAPI): Promise<void> {
   // but resolve its working directory from the executing session.
   pi.registerTool({
     ...createBashToolDefinition(process.cwd()),
-    execute: (id, params, signal, onUpdate, ctx) =>
-      createBashToolDefinition(ctx.cwd).execute(id, params, signal, onUpdate, ctx),
+    execute: (id, params, signal, onUpdate, ctx) => {
+      const shellPath = pi.getSettings().shellPath;
+      return createBashToolDefinition(ctx.cwd, shellPath ? { shellPath } : {}).execute(
+        id,
+        params,
+        signal,
+        onUpdate,
+        ctx,
+      );
+    },
   });
 }
 
@@ -49,6 +58,61 @@ it("blocks an unlisted real bash call and executes a listed call", async () => {
     ],
   );
   expect(existsSync(join(harness.cwd, "denied"))).toBe(false);
+});
+
+it.each([{ env: { GH_BROWSER: "printf injected" } }, { cwd: "/outside" }])(
+  "blocks real background calls with overrides: %j",
+  async (extra) => {
+    vi.stubEnv("PI_BASH_ALLOW", "printf:*");
+    harness = await createPiSession({
+      extensions: [bashAllowExtension, backgroundJobsExtension],
+      responses: [
+        fauxAssistantMessage(fauxToolCall("background", { command: "printf allowed", ...extra }), {
+          stopReason: "toolUse",
+        }),
+        fauxAssistantMessage("done"),
+      ],
+    });
+    await harness.session.prompt("run the background command");
+    expect(
+      harness.session.messages.filter((message) => message.role === "toolResult"),
+    ).toMatchObject([
+      {
+        toolName: "background",
+        isError: true,
+        content: [{ type: "text", text: expect.stringContaining("bash-allow blocks background") }],
+      },
+    ]);
+  },
+);
+
+it("blocks Bash-quoted input before an unsupported shell can interpret it", async () => {
+  vi.stubEnv("PI_BASH_ALLOW", "echo:*");
+  harness = await createPiSession({
+    extensions: [bashAllowExtension, registerRealBash],
+    settings: { shellPath: "/usr/bin/fish" },
+    responses: [
+      fauxAssistantMessage(
+        fauxToolCall("bash", {
+          command: String.raw`echo 'a\'' ; printf marker ; echo \'`,
+        }),
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage("done"),
+    ],
+  });
+  await harness.session.prompt("run the command");
+  expect(harness.session.messages.filter((message) => message.role === "toolResult")).toMatchObject(
+    [
+      {
+        toolName: "bash",
+        isError: true,
+        content: [
+          { type: "text", text: expect.stringContaining("Unsupported shellPath: /usr/bin/fish") },
+        ],
+      },
+    ],
+  );
 });
 
 it("leaves user ! commands unrestricted in a gated session", async () => {

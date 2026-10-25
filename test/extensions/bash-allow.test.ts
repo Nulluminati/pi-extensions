@@ -13,21 +13,22 @@ describe("bash-allow", () => {
     vi.unstubAllEnvs();
   });
 
-  async function setup(flag?: string) {
+  async function setup(flag?: string, settings = {}) {
     const pi = createMockPi();
+    pi.getSettings.mockReturnValue(settings);
     const ctx = createMockContext();
     await bashAllowExtension(pi);
     // Pi assigns CLI flags after factories run.
     pi.getFlag.mockReturnValue(flag);
     const start = () => getEventHandler(pi, "session_start")({ type: "session_start" }, ctx);
     await start();
-    const call = (command: unknown, toolName = "bash") =>
+    const call = (command: unknown, toolName = "bash", extra: Record<string, unknown> = {}) =>
       getEventHandler(pi, "tool_call")(
         {
           type: "tool_call",
           toolCallId: "call-1",
           toolName,
-          input: { command },
+          input: { command, ...extra },
         },
         ctx,
       );
@@ -72,6 +73,99 @@ describe("bash-allow", () => {
   it.each(["", "  ", undefined, 42])("blocks empty or invalid commands: %j", async (command) => {
     const { call } = await setup("pwd:*");
     expect(await call(command)).toEqual({ block: true, reason: "Command is empty." });
+  });
+  it.each([
+    { GH_BROWSER: "touch /tmp/pwned" },
+    { PATH: "/untrusted/bin" },
+    { LD_PRELOAD: "/untrusted/library.so" },
+  ])("blocks background environment overrides: %j", async (env) => {
+    const { call } = await setup("gh pr view:*");
+    expect(await call("gh pr view 7 --web", "background", { env })).toEqual({
+      block: true,
+      reason: expect.stringContaining("environment overrides"),
+    });
+  });
+  it.each(["/outside", ".", ""])("blocks background directory overrides: %j", async (cwd) => {
+    const { call } = await setup("pwd:*");
+    expect(await call("pwd", "background", { cwd })).toEqual({
+      block: true,
+      reason: expect.stringContaining("working directory overrides"),
+    });
+  });
+  it("allows an empty background environment without a directory override", async () => {
+    const { call } = await setup("pwd:*");
+    expect(await call("pwd", "background", { env: {} })).toBeUndefined();
+  });
+  it("does not restrict background overrides without a list", async () => {
+    const { call } = await setup();
+    expect(
+      await call("pwd", "background", { env: { PATH: "/custom" }, cwd: "/outside" }),
+    ).toBeUndefined();
+  });
+  it.each(["/usr/bin/fish", "/bin/zsh", "/bin/pwsh"])(
+    "fails closed for unsupported shell %s",
+    async (shellPath) => {
+      const { ctx, call } = await setup("echo:*", { shellPath });
+      for (const tool of ["bash", "background", "monitor"]) {
+        expect(await call("echo allowed", tool)).toEqual({
+          block: true,
+          reason: expect.stringContaining(`Unsupported shellPath: ${shellPath}`),
+        });
+      }
+      expect(ctx.ui.notify).toHaveBeenCalledWith(
+        expect.stringContaining("Unsupported shellPath:"),
+        "error",
+      );
+    },
+  );
+  it.each([undefined, "", "/bin/bash", "/bin/sh", "bash", "C:\\Program Files\\Git\\bin\\bash.exe"])(
+    "allows a supported shell setting %j",
+    async (shellPath) => {
+      const { call } = await setup("pwd:*", shellPath === undefined ? {} : { shellPath });
+      expect(await call("pwd")).toBeUndefined();
+    },
+  );
+  it("does not restrict an unsupported shell without a list", async () => {
+    const { ctx, call } = await setup(undefined, { shellPath: "/usr/bin/fish" });
+    expect(await call("echo anything")).toBeUndefined();
+    expect(ctx.ui.notify).not.toHaveBeenCalled();
+  });
+  it("keeps an unsupported startup shell blocked until session_start resets it", async () => {
+    const { pi, start, call } = await setup("pwd:*", { shellPath: "/usr/bin/fish" });
+    pi.getSettings.mockReturnValue({ shellPath: "/bin/bash" });
+    expect(await call("pwd")).toEqual({
+      block: true,
+      reason: expect.stringContaining("Unsupported shellPath:"),
+    });
+    await start();
+    expect(await call("pwd")).toBeUndefined();
+  });
+  it("clears an unsupported shell error when the list is removed", async () => {
+    const { pi, start, call } = await setup("pwd:*", { shellPath: "/usr/bin/fish" });
+    pi.getFlag.mockReturnValue(undefined);
+    await start();
+    expect(await call("anything")).toBeUndefined();
+  });
+  it("checks shell settings again before execution", async () => {
+    const { pi, call } = await setup("pwd:*");
+    pi.getSettings.mockReturnValue({ shellPath: "/usr/bin/fish" });
+    expect(await call("pwd")).toEqual({
+      block: true,
+      reason: expect.stringContaining("Unsupported shellPath:"),
+    });
+    pi.getSettings.mockReturnValue({ shellPath: "/bin/bash" });
+    expect(await call("pwd")).toBeUndefined();
+  });
+  it("does not notify without UI for an unsupported shell", async () => {
+    const { pi, ctx, start, call } = await setup("pwd:*");
+    ctx.hasUI = false;
+    pi.getSettings.mockReturnValue({ shellPath: "/usr/bin/fish" });
+    await start();
+    expect(await call("pwd")).toEqual({
+      block: true,
+      reason: expect.stringContaining("Unsupported shellPath:"),
+    });
+    expect(ctx.ui.notify).not.toHaveBeenCalled();
   });
   it("ignores other tools", async () => {
     const { call } = await setup("pwd:*");

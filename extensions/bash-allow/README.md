@@ -21,6 +21,18 @@ An unset list leaves all commands unrestricted.
 An explicitly empty list or malformed list blocks every shell call.
 An interactive session also shows an error notification for a malformed list.
 
+## Shell requirements
+
+With an allow list, Pi must use its default shell or a `shellPath` named `bash` or `sh`.
+Windows names `bash.exe` and `sh.exe` also work.
+The configured path must point to a trusted, genuine Bash or compatible sh interpreter, not a wrapper or another shell.
+The scanner does not support fish or zsh quoting rules.
+
+An unsupported `shellPath` blocks all three shell tools and produces an error notification when a user interface is available.
+The extension checks settings at session start and before each shell call.
+After a startup shell error, configure a supported shell and restart Pi.
+Without an allow list, the extension leaves shell selection unrestricted.
+
 ## Patterns
 
 Both forms work:
@@ -61,6 +73,21 @@ Operators inside quotes do not act as shell operators.
 The interface accepts Claude Code's `Bash(prefix:*)` pattern form, but not its complete permission language.
 There is no approval path, similar to the intended unattended use of Claude Code's `--permission-mode dontAsk`.
 This extension refuses all redirection, including input redirection and output to `/dev/null`.
+
+## Background inputs
+
+With an allow list, `background` must use the inherited environment and the session working directory.
+The extension blocks every non-empty `env` override and every explicit `cwd` override, including `cwd: "."`.
+An empty `env: {}` is allowed because it changes no environment variables.
+These checks run before command matching.
+
+Environment overrides can change executable lookup or make an allowed command launch another program.
+For example, `GH_BROWSER` can make `gh pr view --web` execute an unlisted program.
+Directory overrides can change executable lookup and command configuration.
+Without an allow list, these inputs stay unrestricted.
+
+The launcher must provide a trusted inherited environment and working directory.
+The extension does not remove inherited variables or validate installed executables and command configuration.
 
 ## Herdboard reviewer example
 
