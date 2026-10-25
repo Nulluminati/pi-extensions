@@ -1,7 +1,11 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
-import { createBashToolDefinition, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+  createBashToolDefinition,
+  type ExtensionAPI,
+  initTheme,
+} from "@earendil-works/pi-coding-agent";
 import { afterEach, expect, it, vi } from "vitest";
 import backgroundJobsExtension from "../../extensions/background-jobs/background-jobs.ts";
 import bashAllowExtension from "../../extensions/bash-allow/bash-allow.ts";
@@ -85,6 +89,66 @@ it.each([{ env: { GH_BROWSER: "printf injected" } }, { cwd: "/outside" }])(
     ]);
   },
 );
+
+it("blocks an unlisted real monitor and executes a listed monitor", async () => {
+  initTheme("dark", false);
+  vi.stubEnv("PI_BASH_ALLOW", "touch:*");
+  harness = await createPiSession({
+    extensions: [bashAllowExtension, backgroundJobsExtension],
+    responses: [
+      fauxAssistantMessage(
+        fauxToolCall("monitor", {
+          command: "mkdir denied-monitor",
+          satisfy_on: "exit_zero",
+        }),
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage(
+        fauxToolCall("monitor", {
+          command: "touch allowed-monitor",
+          satisfy_on: "exit_zero",
+          interval_seconds: 1,
+          timeout_seconds: 10,
+        }),
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage("started"),
+      fauxAssistantMessage("monitor completed"),
+    ],
+  });
+  await harness.session.prompt("run both monitors");
+  await expect
+    .poll(() =>
+      harness?.sessionManager
+        .getEntries()
+        .filter((entry) => entry.type === "custom" && entry.customType === "background-jobs")
+        .at(-1),
+    )
+    .toMatchObject({ data: { jobs: [{ kind: "monitor", status: "satisfied" }] } });
+  await harness.session.waitForIdle();
+  expect(harness.session.messages.filter((message) => message.role === "toolResult")).toMatchObject(
+    [
+      {
+        toolName: "monitor",
+        isError: true,
+        content: [{ type: "text", text: expect.stringContaining("Allowed: touch:*") }],
+      },
+      {
+        toolName: "monitor",
+        isError: false,
+        content: [{ type: "text", text: expect.stringContaining("Started monitor #") }],
+        details: { satisfyOn: "exit_zero", intervalSeconds: 1, timeoutSeconds: 10 },
+      },
+    ],
+  );
+  expect(existsSync(join(harness.cwd, "denied-monitor"))).toBe(false);
+  expect(existsSync(join(harness.cwd, "allowed-monitor"))).toBe(true);
+  expect(
+    harness.session.messages.filter(
+      (message) => message.role === "assistant" && message.stopReason === "error",
+    ),
+  ).toEqual([]);
+});
 
 it("blocks Bash-quoted input before an unsupported shell can interpret it", async () => {
   vi.stubEnv("PI_BASH_ALLOW", "echo:*");

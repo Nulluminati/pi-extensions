@@ -28,10 +28,18 @@ Windows names `bash.exe` and `sh.exe` also work.
 The configured path must point to a trusted, genuine Bash or compatible sh interpreter, not a wrapper or another shell.
 The scanner does not support fish or zsh quoting rules.
 
+Pi's `bash` tool prepends `shellCommandPrefix` after this extension checks the command text.
+Treat that setting as trusted code: it can define functions or aliases that change an allowed command's behavior.
+Use an empty prefix for the most direct correspondence between checked text and execution.
+
 An unsupported `shellPath` blocks all three shell tools and produces an error notification when a user interface is available.
 The extension checks settings at session start and before each shell call.
 After a startup shell error, configure a supported shell and restart Pi.
 Without an allow list, the extension leaves shell selection unrestricted.
+
+`background` and `monitor` always execute through `/bin/sh`, not through `shellPath`.
+The unsupported-`shellPath` refusal is a conservative session policy that disables all three tools.
+It does not validate `/bin/sh`; the launcher must trust that interpreter and its compatible shell behavior.
 
 ## Patterns
 
@@ -62,6 +70,7 @@ Before matching, the extension refuses these forms:
 - Subshells and command groups: `( … )` and `{ …; }`.
 - Background execution: `&`.
 - Command substitution: `$( … )` and backticks.
+- Unquoted glob characters: `*`, `?`, and `[`. The shell must not expand checkout filenames into unchecked arguments or options.
 - Unquoted or double-quoted `$` expansion, including `$VAR` and `${VAR}`.
 - All redirection: `>`, `>>`, `<`, `<<`, `<<<`, `2>`, `&>`, and related forms.
 - Shell comments (`#` at an unquoted token boundary), which can hide quotes and change newline interpretation.
@@ -69,6 +78,9 @@ Before matching, the extension refuses these forms:
 
 Single quotes protect literal expansion characters. Escapes can also protect literal characters.
 Operators inside quotes do not act as shell operators.
+Quote or escape glob characters when an argument must contain them literally.
+For example, `gh pr diff 7 *` is refused, while `echo "*"` can match `echo:*`.
+The trailing wildcard in an allow pattern remains rule syntax, not a shell glob.
 
 The interface accepts Claude Code's `Bash(prefix:*)` pattern form, but not its complete permission language.
 There is no approval path, similar to the intended unattended use of Claude Code's `--permission-mode dontAsk`.
@@ -124,7 +136,11 @@ Only allow commands whose arguments you trust.
 The allow list limits command names and argument prefixes, not command capabilities.
 For example, `gh pr view` can access private repositories with the session's credentials.
 This extension does not limit files, network access, other tool names, or code executed directly by another extension.
-Use `--tools` to limit exposed tools and `worker-sandbox` for filesystem and network isolation.
+The `mission` tool runs verification commands through `runExec` outside this gate.
+The `autoresearch` tool also uses `runExec` for checks and measurements.
+Do not expose those tools to an agent that must obey this command list.
+Use an explicit `--tools` list that excludes them, such as `--tools read,grep,bash`.
+Use `worker-sandbox` for filesystem and network isolation.
 
 `approval-mode` remains independent. A call that passes this list can still reach its model check or approval dialog.
 Handler load order does not guarantee that this extension runs first.

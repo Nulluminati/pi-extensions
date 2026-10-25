@@ -100,6 +100,11 @@ function scanCommand(command: string): ScannedCommand {
     if (char === "#" && !inToken) {
       return refuse("This command uses a shell comment (#). Run commands without comments.");
     }
+    if (char === "*" || char === "?" || char === "[") {
+      return refuse(
+        `This command uses an unquoted glob (${char}). Quote or escape literal arguments.`,
+      );
+    }
     if (char === "(" || char === ")" || char === "{" || char === "}") {
       return refuse(`This command uses a shell group (${char}). Run one command per call.`);
     }

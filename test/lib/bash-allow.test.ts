@@ -33,6 +33,8 @@ describe("parseAllowList", () => {
     "Bash(a",
     "echo 'a",
     "a && b",
+    "tool?:*",
+    "tool[ab]:*",
   ])("rejects malformed list %j", (value) => {
     expect(parseAllowList(value)).toEqual({ rules: [], error: expect.any(String) });
   });
@@ -71,9 +73,19 @@ describe("splitCommand", () => {
     ["echo 'unfinished", "quote"],
     ["echo \\", "escape"],
     ["echo\0x", "NUL"],
+    ["gh pr diff 7 *", "glob (*)"],
+    ["echo file?", "glob (?)"],
+    ["echo [ab]", "glob ([)"],
+    ["echo [", "glob ([)"],
   ])("refuses %j with an operator reason", (command, reason) => {
     expect(splitCommand(command).refusal).toContain(reason);
   });
+  it.each([`echo '*' '?' '['`, 'echo "*" "?" "["', String.raw`echo \* \? \[`])(
+    "allows literal glob characters in %j",
+    (command) => {
+      expect(checkCommand(command, parseAllowList("echo:*").rules)).toEqual({ allowed: true });
+    },
+  );
   it("allows literal operators inside quotes or after escapes", () => {
     expect(splitCommand(`echo '$VAR $(a) > & {}' "a > b" \\$VAR`).refusal).toBeUndefined();
   });
@@ -118,6 +130,28 @@ describe("checkCommand", () => {
     expect(checkCommand("ls", rules)).toEqual({
       allowed: false,
       reason: expect.stringMatching(/ls.*Allowed: hunk session:\*/s),
+    });
+  });
+  it("refuses glob expansion before any segment matches", () => {
+    expect(checkCommand("unlisted && gh pr view *", rules)).toEqual({
+      allowed: false,
+      reason: expect.stringContaining("glob (*)"),
+    });
+  });
+  it("checks the documented reviewer list and pipeline examples", () => {
+    const reviewer = parseAllowList(
+      "Bash(hunk session:*),Bash(hunk skill path:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr checks:*)",
+    );
+    expect(reviewer.error).toBeUndefined();
+    expect(reviewer.rules).toHaveLength(5);
+    expect(checkCommand("gh pr diff 7 | gh pr view 7", reviewer.rules)).toEqual({ allowed: true });
+    expect(checkCommand("gh pr diff 7 | cat", reviewer.rules)).toEqual({
+      allowed: false,
+      reason: expect.stringContaining("cat"),
+    });
+    expect(checkCommand("gh pr diff 7 *", reviewer.rules)).toEqual({
+      allowed: false,
+      reason: expect.stringContaining("glob (*)"),
     });
   });
   it("refuses syntax before matching any segments", () => {
