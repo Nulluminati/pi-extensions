@@ -242,28 +242,34 @@ describe("worker sandbox extension", () => {
     ).rejects.toThrow(/socat not installed/);
   });
 
-  it("routes user-bash output and exit status through the sandbox", async () => {
-    vi.stubEnv("PI_WORKER", "1");
-    const client = mockClient();
-    vi.mocked(startWorkerSandbox).mockResolvedValue(client);
-    const pi = createMockPi();
-    const ctx = createMockCommandContext();
-    await workerSandboxExtension(pi);
-    await getEventHandler(pi, "session_start")({ type: "session_start", reason: "startup" }, ctx);
-    const userBash = getEventHandler(pi, "user_bash");
-    const operation = (await userBash(
-      { type: "user_bash", command: "echo safe" },
-      ctx,
-    )) as UserBashResponse;
-    const onData = vi.fn();
-    expect(await operation.operations.exec("echo safe", ctx.cwd, { onData, timeout: 3 })).toEqual({
-      exitCode: 0,
-    });
-    expect(client.runShell).toHaveBeenCalledWith(
-      "echo safe",
-      expect.objectContaining({ cwd: ctx.cwd, onData, timeout: 3 }),
-    );
-  });
+  it.each(["worker", "main"])(
+    "routes %s user-bash output and exit status through the sandbox",
+    async (mode) => {
+      vi.stubEnv("PI_WORKER", mode === "worker" ? "1" : "");
+      const client = mockClient();
+      vi.mocked(startWorkerSandbox).mockResolvedValue(client);
+      const pi = createMockPi();
+      if (mode === "main") pi.getFlag.mockReturnValue("inline policy");
+      const ctx = createMockCommandContext();
+      await workerSandboxExtension(pi);
+      await getEventHandler(pi, "session_start")({ type: "session_start", reason: "startup" }, ctx);
+      const userBash = getEventHandler(pi, "user_bash");
+      const operation = (await userBash(
+        { type: "user_bash", command: "echo safe" },
+        ctx,
+      )) as UserBashResponse;
+      const onData = vi.fn();
+      expect(await operation.operations.exec("echo safe", ctx.cwd, { onData, timeout: 3 })).toEqual(
+        {
+          exitCode: 0,
+        },
+      );
+      expect(client.runShell).toHaveBeenCalledWith(
+        "echo safe",
+        expect.objectContaining({ cwd: ctx.cwd, onData, timeout: 3 }),
+      );
+    },
+  );
 
   it("closes the sandbox on session shutdown and refuses later calls", async () => {
     vi.stubEnv("PI_WORKER", "1");

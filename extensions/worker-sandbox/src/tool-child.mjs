@@ -23,12 +23,12 @@ function send(value) {
   process.stdout.write(`${JSON.stringify(value)}\n`);
 }
 
-/** Keys the sandbox owns: HOME, TMPDIR, and the cache root point at the
- *  sandbox scratch directory, so a request environment may not redirect them. */
+/** The broker owns HOME (scratch for workers, host home for main sessions),
+ *  TMPDIR, and the cache root. A request environment may not redirect them. */
 const SANDBOX_OWNED_ENV = new Set(["HOME", "TMPDIR", "XDG_CACHE_HOME"]);
 
-/** The command's environment: the sandbox's own environment (PATH, scratch
- *  home, locale) with the caller's shell environment layered on top. */
+/** The command's environment: the broker's PATH, home, and locale with the
+ *  caller's shell environment layered on top. */
 function commandEnvironment(requestEnv) {
   if (!requestEnv || typeof requestEnv !== "object") return undefined;
   const env = { ...process.env };

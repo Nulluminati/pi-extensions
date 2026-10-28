@@ -39,9 +39,12 @@ Trusted extension lifecycle handlers and Pi itself still run on the host. Load o
 ### Excluded commands
 
 `excludedCommands` accepts an exact executable name or path, optionally followed by ` *`.
-The wildcard permits plain arguments. It does not match a different executable or an executable through another path.
-Only standalone commands with plain, unquoted arguments bypass the sandbox.
-Quotes, shell expansions, redirections, pipes, command chains, and line breaks keep the whole command sandboxed.
+The wildcard permits literal arguments. It does not match a different executable or an executable through another path.
+Standalone commands can use plain arguments, single-quoted arguments, or double-quoted arguments.
+Single quotes make their contents literal. Double-quoted arguments cannot contain `$`, backticks, backslashes, or `!`.
+For example, `terminal-browser action -- click "button.primary"` and `terminal-browser open 'https://github.com/o/r/pull/1?diff=split&tab=files'` bypass the sandbox.
+Shell expansions, redirections, pipes, and command chains outside quotes keep the whole command sandboxed.
+Unclosed quotes and line breaks also keep the whole command sandboxed.
 The exclusion applies to `bash` and `!` commands. Excluded commands run with host permissions and the host environment.
 Never exclude a general-purpose shell, interpreter, or command runner.
 Workers cannot use exclusions or replace their project policy with `--sandbox`.
@@ -55,6 +58,10 @@ Start Hunk on the host first so its daemon and authentication files exist. The s
 Main sessions send local HTTP requests through the filtered proxy instead of bypassing it through `NO_PROXY`.
 The same domain and port rules apply. This does not grant arbitrary direct Transmission Control Protocol (TCP) access.
 Clients must support the proxy environment variables. Local listening sockets and host Unix sockets remain blocked.
+
+Bun `fetch` uses the proxy environment variables, but Bun's default `WebSocket` client ignores them.
+Pass an explicit `proxy` option to Bun `WebSocket` for access through the filtered proxy.
+Unmodified WebSocket clients remain blocked. Hunk's live WebSocket connection needs proxy-aware client configuration; its list and comment commands use HTTP.
 
 ## Worker policy
 
@@ -100,6 +107,8 @@ This import is the repository's single documented exception to keeping extension
 
 - Linux: `bwrap` (bubblewrap), `socat`, and `rg` on `PATH`.
 - macOS: `sandbox-exec` (ships with the OS).
+
+Runtime tests also require `curl` and Bun 1.4.2. Continuous Integration (CI) installs that Bun version.
 
 ## Pi APIs Used
 

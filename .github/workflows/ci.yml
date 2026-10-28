@@ -37,6 +37,11 @@ jobs:
           node-version: "lts/*"
           cache: "npm"
 
+      - name: Setup Bun for sandbox client tests
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+
       # The worker sandbox runs tools under bubblewrap, which needs socat and
       # ripgrep too. Ubuntu's AppArmor blocks the unprivileged user namespaces
       # that bubblewrap creates, so the runner lifts that restriction.
