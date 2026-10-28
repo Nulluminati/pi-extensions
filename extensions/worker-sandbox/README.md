@@ -33,7 +33,8 @@ The broker also grants a temporary scratch folder. Main-session tools retain the
 
 The extension blocks other extension tools, including `background`, `monitor`, workers, and Model Context Protocol (MCP) tools.
 These tools could otherwise bypass the sandbox. Use sandboxed `bash` instead.
-`web_fetch` and `web_search` remain outside the sandbox.
+`web_fetch`, `web_search`, `code_search`, and the Context7 tools (`context7_resolve_library_id`, `context7_get_library_docs`, `context7_get_cached_doc_raw`) remain outside the sandbox.
+These tools only read remote documentation and search results.
 Trusted extension lifecycle handlers and Pi itself still run on the host. Load only trusted extensions.
 
 ### Excluded commands

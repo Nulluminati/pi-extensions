@@ -131,6 +131,17 @@ describe("worker sandbox extension", () => {
         ctx,
       ),
     ).toBeUndefined();
+    for (const toolName of [
+      "web_search",
+      "context7_resolve_library_id",
+      "context7_get_library_docs",
+      "context7_get_cached_doc_raw",
+      "code_search",
+    ]) {
+      expect(
+        await gate({ type: "tool_call", toolCallId: toolName, toolName, input: {} }, ctx),
+      ).toBeUndefined();
+    }
   });
 
   it("reads CLI flags at session start after Pi parses extension options", async () => {

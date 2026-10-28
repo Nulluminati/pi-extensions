@@ -111,7 +111,16 @@ export default async function workerSandboxExtension(pi: ExtensionAPI) {
   if (!worker) {
     // Other extension tools can execute on the host. Deny them even when
     // invoked indirectly; only the explicit web-tool exceptions stay outside.
-    const allowed = new Set([...tools.map((tool) => tool.name), "web_fetch", "web_search"]);
+    // The documentation and code search tools only read remote results.
+    const allowed = new Set([
+      ...tools.map((tool) => tool.name),
+      "web_fetch",
+      "web_search",
+      "context7_resolve_library_id",
+      "context7_get_library_docs",
+      "context7_get_cached_doc_raw",
+      "code_search",
+    ]);
     pi.on("tool_call", (event) => {
       if (sandboxActive && !allowed.has(event.toolName)) {
         return {
