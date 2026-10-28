@@ -6,7 +6,16 @@ The gate checks hard denies first. Exact `pwd`, limited `ls`, and plain `git sta
 
 Hard denies include raw-device writes and formatting, broad recursive deletion of system or workspace roots, forced Git cleanup and hard reset, force updates to protected branches, privilege escalation, and clear transfers of credential files. These checks recognize clear forms, not every possible shell program. Jev evaluates other forms. When review is on, commands with recognized executable helper options require confirmation even when Jev reports low risk. An oversized command or a command with a recognized credential blocks before the Jev call.
 
-Use `/approval-mode off` to skip Jev review for this session and its workers. Changes affect running workers before their next reviewed command. Hard denies, read-only restrictions, and filesystem sandbox limits remain active. The input bar shows **Approval Mode off** while Jev review is disabled. `/approval-mode on` restores review for the parent and workers. New sessions start with review on. Workers cannot change the mode themselves.
+Use `/approval-mode off` to skip Jev review for this session and its workers. Changes affect running workers before their next reviewed command. Hard denies, read-only restrictions, and filesystem sandbox limits remain active. The input bar shows **Approval Mode off** while Jev review is disabled. `/approval-mode on` restores review for the parent and workers. Workers cannot change the mode themselves.
+
+## Command line
+
+Use `--approval-mode off` to start a main session without Jev review or approval dialogs.
+Use `--approval-mode on` to enable review. The default is `on`.
+Invalid values keep review on and produce an error with the accepted values.
+Workers ignore their own flag value and follow the parent session's live mode.
+When review starts off, the extension skips the classifier availability check.
+Hard denies, read-only restrictions, and sandbox limits remain active.
 
 ## Worker approvals
 
@@ -26,7 +35,7 @@ The worker runner passes `--worker-readonly` to Pi for read-only workers. Approv
 
 ## Configuration
 
-The judge runs a Jev classifier through Pi's model registry. Set `TYPESAFE_API_KEY` in the environment that launches Pi, or use an inherited Jev entry on another provider (`OPENROUTER_API_KEY`, `CLOUDFLARE_API_KEY` with `CLOUDFLARE_ACCOUNT_ID`, `AI_GATEWAY_API_KEY`, or `OPENCODE_API_KEY`). Pi picks the first classifier with working credentials: hosted Jev first, in a fixed provider order, then any other available classifier. If no classifier is available, Pi warns at session startup and commands that need review block; the warning does not disable the gate. Approval Mode sends the complete command and current directory to the classifier, but it does not send conversation text. It detects common credentials and limits request size. Detection cannot identify every secret. Commands containing a recognized credential block rather than being sent with missing text. Each classifier attempt uses a four-second request limit with two retries. This extension adds no package dependency.
+The judge runs a Jev classifier through Pi's model registry. Set `TYPESAFE_API_KEY` in the environment that launches Pi, or use an inherited Jev entry on another provider (`OPENROUTER_API_KEY`, `CLOUDFLARE_API_KEY` with `CLOUDFLARE_ACCOUNT_ID`, `AI_GATEWAY_API_KEY`, or `OPENCODE_API_KEY`). Pi picks the first classifier with working credentials: hosted Jev first, in a fixed provider order, then any other available classifier. If no classifier is available while review is on, Pi warns at session startup and commands that need review block; the warning does not disable the gate. Approval Mode sends the complete command and current directory to the classifier, but it does not send conversation text. It detects common credentials and limits request size. Detection cannot identify every secret. Commands containing a recognized credential block rather than being sent with missing text. Each classifier attempt uses a four-second request limit with two retries. This extension adds no package dependency.
 
 ## Live calibration
 

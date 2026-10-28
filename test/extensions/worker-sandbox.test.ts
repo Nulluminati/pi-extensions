@@ -71,7 +71,108 @@ describe("worker sandbox extension", () => {
     vi.stubEnv("PI_WORKER", "");
     const pi = createMockPi();
     await workerSandboxExtension(pi);
+    const ctx = createMockCommandContext();
+    await getEventHandler(pi, "session_start")({ type: "session_start", reason: "startup" }, ctx);
     expect(pi.registerTool).not.toHaveBeenCalled();
+    expect(startWorkerSandbox).not.toHaveBeenCalled();
+    expect(
+      await getEventHandler(pi, "user_bash")({ type: "user_bash", command: "pwd" }, ctx),
+    ).toBeUndefined();
+    expect(
+      await getEventHandler(pi, "tool_call")(
+        { type: "tool_call", toolCallId: "bg", toolName: "background", input: { command: "pwd" } },
+        ctx,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("registers a main-session policy flag and routes tools when supplied", async () => {
+    vi.stubEnv("PI_WORKER", "");
+    const pi = createMockPi();
+    const raw = JSON.stringify({ network: { allowedDomains: [] }, filesystem: { allowWrite: [] } });
+    pi.getFlag.mockImplementation((name) => (name === "sandbox" ? raw : undefined));
+    const client = mockClient();
+    vi.mocked(startWorkerSandbox).mockResolvedValue(client);
+    const ctx = createMockCommandContext();
+    await workerSandboxExtension(pi);
+    expect(pi.registerFlag).toHaveBeenCalledWith(
+      "sandbox",
+      expect.objectContaining({ type: "string" }),
+    );
+    await getEventHandler(pi, "session_start")({ type: "session_start", reason: "startup" }, ctx);
+    expect(startWorkerSandbox).toHaveBeenCalledWith(ctx.cwd, raw);
+    const tool = pi.registerTool.mock.calls.find(([tool]) => tool.name === "write")?.[0];
+    expect(
+      await tool?.execute("write-1", { path: "/review/result" }, undefined, undefined, ctx),
+    ).toEqual({
+      content: [{ type: "text", text: "sandbox result" }],
+      details: undefined,
+    });
+    const gate = getEventHandler(pi, "tool_call");
+    expect(
+      await gate(
+        {
+          type: "tool_call",
+          toolCallId: "bg",
+          toolName: "background",
+          input: { command: "touch /outside" },
+        },
+        ctx,
+      ),
+    ).toMatchObject({ block: true });
+    expect(
+      await gate(
+        {
+          type: "tool_call",
+          toolCallId: "web",
+          toolName: "web_fetch",
+          input: { url: "https://example.com" },
+        },
+        ctx,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("reads CLI flags at session start after Pi parses extension options", async () => {
+    vi.stubEnv("PI_WORKER", "");
+    const pi = createMockPi();
+    const client = mockClient();
+    vi.mocked(startWorkerSandbox).mockResolvedValue(client);
+    await workerSandboxExtension(pi);
+    pi.getFlag.mockReturnValue("late inline policy");
+    const ctx = createMockCommandContext();
+    await getEventHandler(pi, "session_start")({ type: "session_start", reason: "startup" }, ctx);
+    expect(startWorkerSandbox).toHaveBeenCalledWith(ctx.cwd, "late inline policy");
+    expect(pi.registerTool.mock.calls.map(([tool]) => tool.name)).toContain("write");
+  });
+
+  it("keeps main-session tools blocked after an invalid inline policy fails", async () => {
+    vi.stubEnv("PI_WORKER", "");
+    const pi = createMockPi();
+    pi.getFlag.mockReturnValue("invalid JSON");
+    vi.mocked(startWorkerSandbox).mockRejectedValue(new Error("Invalid --sandbox JSON"));
+    const ctx = createMockCommandContext();
+    await workerSandboxExtension(pi);
+    await expect(
+      getEventHandler(pi, "session_start")({ type: "session_start", reason: "startup" }, ctx),
+    ).rejects.toThrow("Invalid --sandbox JSON");
+    for (const [tool] of pi.registerTool.mock.calls) {
+      await expect(tool.execute("blocked", {}, undefined, undefined, ctx)).rejects.toThrow(
+        "Invalid --sandbox JSON",
+      );
+    }
+  });
+
+  it("does not let a worker replace its project policy with the main-session flag", async () => {
+    vi.stubEnv("PI_WORKER", "1");
+    const pi = createMockPi();
+    pi.getFlag.mockReturnValue("weaker main policy");
+    const client = mockClient();
+    vi.mocked(startWorkerSandbox).mockResolvedValue(client);
+    const ctx = createMockCommandContext();
+    await workerSandboxExtension(pi);
+    await getEventHandler(pi, "session_start")({ type: "session_start", reason: "startup" }, ctx);
+    expect(startWorkerSandbox).toHaveBeenCalledWith(ctx.cwd);
   });
 
   it("registers all built-in tools and sends their calls to the sandbox", async () => {

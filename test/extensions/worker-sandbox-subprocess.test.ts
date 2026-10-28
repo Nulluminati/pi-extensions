@@ -41,12 +41,15 @@ describe.skipIf(process.platform !== "linux" && process.platform !== "darwin")(
       await rm(cwd, { recursive: true, force: true });
     });
 
-    async function start(policy = POLICY): Promise<Broker> {
+    async function start(
+      policy: typeof POLICY & { excludedCommands?: string[] } = POLICY,
+      mainSession = false,
+    ): Promise<Broker> {
       const broker = launchBroker(cwd);
       brokers.push(broker);
       const scratch = join(cwd, "scratch");
       await mkdir(scratch);
-      broker.send({ type: "init", cwd, scratch, policy });
+      broker.send({ type: "init", cwd, scratch, policy, mainSession });
       const ready = await broker.next((reply) => reply.type === "ready" || reply.type === "fatal");
       expect(ready).toEqual({ type: "ready" });
       return broker;
@@ -85,6 +88,33 @@ describe.skipIf(process.platform !== "linux" && process.platform !== "darwin")(
         id: 4,
         error: "Unknown worker sandbox tool",
       });
+    });
+
+    it("runs only standalone excluded commands outside the sandbox in main sessions", async () => {
+      const broker = await start({ ...POLICY, excludedCommands: ["printf *"] }, true);
+      broker.send({ type: "shell", id: 40, command: "printf excluded" });
+      const data = await broker.next((reply) => reply.id === 40 && reply.type === "data");
+      expect(Buffer.from(data.base64 as string, "base64").toString()).toBe("excluded");
+      expect(
+        await broker.next((reply) => reply.id === 40 && reply.type === "result"),
+      ).toMatchObject({ value: { exitCode: 0 } });
+      broker.send({ type: "shell", id: 41, command: "printf excluded; printf chained" });
+      // The sandbox manager stub returns a child with the tool stub loaded.
+      expect(
+        await broker.next((reply) => reply.id === 41 && reply.type === "result"),
+      ).toMatchObject({ value: { stdout: "stub" } });
+      broker.send({ type: "tool", id: 42, name: "bash", params: { command: "printf builtin" } });
+      expect(
+        await broker.next((reply) => reply.id === 42 && reply.type === "result"),
+      ).toMatchObject({ value: { content: [{ type: "text", text: "builtin" }] } });
+    });
+
+    it("does not honor command exclusions in workers", async () => {
+      const broker = await start({ ...POLICY, excludedCommands: ["printf *"] });
+      broker.send({ type: "shell", id: 43, command: "printf excluded" });
+      expect(
+        await broker.next((reply) => reply.id === 43 && reply.type === "result"),
+      ).toMatchObject({ value: { stdout: "stub" } });
     });
 
     it("kills a timed-out tool subprocess and accepts another request", async () => {

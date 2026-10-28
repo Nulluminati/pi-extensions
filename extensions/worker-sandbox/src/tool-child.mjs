@@ -43,6 +43,12 @@ try {
   let input = "";
   for await (const chunk of process.stdin) input += chunk;
   const request = JSON.parse(input);
+  if (request.mainSession) {
+    // srt bypasses the proxy for loopback by default. Main sessions send
+    // loopback HTTP through the same explicit domain/port filter as the web.
+    process.env.NO_PROXY = "";
+    process.env.no_proxy = "";
+  }
   if (request.type === "shell") {
     const operations = createLocalBashOperations();
     const env = commandEnvironment(request.env);

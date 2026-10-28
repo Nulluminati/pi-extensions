@@ -1,12 +1,62 @@
 # Worker Sandbox Extension
 
-OS-level sandbox for delegated worker sessions. Every built-in file and shell tool (`read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, and `!` commands) executes inside a sandboxed child process via `@anthropic-ai/sandbox-runtime` — bubblewrap on Linux, `sandbox-exec` on macOS. A missing policy or a failed broker never falls back to host execution.
+Operating-system (OS) sandbox for delegated workers and explicitly restricted main sessions. Every built-in file and shell tool (`read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, and `!` commands) executes inside a sandboxed child process via `@anthropic-ai/sandbox-runtime` — bubblewrap on Linux, `sandbox-exec` on macOS. A missing policy or a failed broker never falls back to host execution.
 
 ## What It Does
 
-Loaded only in worker sessions (`PI_WORKER=1`). On `session_start` the extension starts a per-session broker process and overrides every built-in tool with a fail-closed wrapper. Each tool call is forwarded to the broker, which spawns the call inside the sandbox under the project's policy. If the broker dies, pending and future calls reject instead of running unsandboxed.
+Active in worker sessions (`PI_WORKER=1`) and main sessions with `--sandbox '<JSON>'`. Without either, it leaves tools unchanged. On `session_start` the extension starts a per-session broker process and overrides every built-in tool with a fail-closed wrapper. Each tool call is forwarded to the broker, which spawns the call inside the sandbox under the project's policy. If the broker dies, pending and future calls reject instead of running unsandboxed.
 
-## Policy
+## Main-session command line
+
+Load this extension and `approval-mode` before passing their flags:
+
+```bash
+pi -e extensions/worker-sandbox/worker-sandbox.ts \
+  -e extensions/approval-mode/approval-mode.ts \
+  --approval-mode off \
+  --sandbox '{
+    "filesystem": {
+      "allowWrite": ["/home/me/.local/state/herdboard/reviews/todb"],
+      "denyWrite": ["."]
+    },
+    "network": {
+      "allowedDomains": ["github.com", "*.github.com", "*.githubusercontent.com", "127.0.0.1:47657"]
+    },
+    "excludedCommands": ["terminal-browser *"]
+  }'
+```
+
+Replace the review folder with an absolute path. Relative paths resolve against the session directory.
+The inline policy replaces the project policy for this main session only. It does not change `.pi/sandbox.json`.
+Main-session policies can grant write access outside the worktree. Empty read rules permit reads throughout the host filesystem.
+The broker also grants a temporary scratch folder. Main-session tools retain the host home path for read-only configuration access.
+
+The extension blocks other extension tools, including `background`, `monitor`, workers, and Model Context Protocol (MCP) tools.
+These tools could otherwise bypass the sandbox. Use sandboxed `bash` instead.
+`web_fetch` and `web_search` remain outside the sandbox.
+Trusted extension lifecycle handlers and Pi itself still run on the host. Load only trusted extensions.
+
+### Excluded commands
+
+`excludedCommands` accepts an exact executable name or path, optionally followed by ` *`.
+The wildcard permits plain arguments. It does not match a different executable or an executable through another path.
+Only standalone commands with plain, unquoted arguments bypass the sandbox.
+Quotes, shell expansions, redirections, pipes, command chains, and line breaks keep the whole command sandboxed.
+The exclusion applies to `bash` and `!` commands. Excluded commands run with host permissions and the host environment.
+Never exclude a general-purpose shell, interpreter, or command runner.
+Workers cannot use exclusions or replace their project policy with `--sandbox`.
+
+### Local HTTP daemons
+
+Allow local Hypertext Transfer Protocol (HTTP) daemons explicitly in `network.allowedDomains`.
+Hunk uses `127.0.0.1:47657` by default. Allow that address and port for `hunk session list` and `hunk session comment add`.
+The broker preserves `HUNK_MCP_HOST` and `HUNK_MCP_PORT` in main sessions. Update the policy when these change.
+Start Hunk on the host first so its daemon and authentication files exist. The sandbox cannot create files outside its write rules.
+Main sessions send local HTTP requests through the filtered proxy instead of bypassing it through `NO_PROXY`.
+The same domain and port rules apply. This does not grant arbitrary direct Transmission Control Protocol (TCP) access.
+Clients must support the proxy environment variables. Local listening sockets and host Unix sockets remain blocked.
+
+## Worker policy
 
 Rules come from the project's `.pi/sandbox.json` (srt schema: filesystem read/write rules plus `network.allowedDomains`). A read or write rule is a path, or `{ "path": "...", "literal": true }` when the name holds glob characters such as `[`, `]`, `*`, or `?`. Relative rules resolve against the worktree. The extension refuses to start when:
 
@@ -31,9 +81,10 @@ A missing required runtime package prevents sandbox startup.
 
 ## Architecture
 
-- `worker-sandbox.ts` — entrypoint: worker-session gate, tool overrides, `user_bash` routing.
+- `worker-sandbox.ts` — entrypoint: session flag, worker gate, tool overrides, `user_bash` routing.
 - `src/client.ts` — request framing and lifecycle for the per-session broker connection.
-- `src/policy.ts` — loads and validates `.pi/sandbox.json`, refuses weakening configurations.
+- `src/policy.ts` — validates project and inline policies, refuses weakening configurations.
+- `src/exclusions.mjs` — accepts standalone plain commands for explicit main-session exclusions.
 - `src/broker.mjs` — the broker process: spawns sandboxed children, tracks running calls, honors cancellation.
 - `src/tool-child.mjs` — the sandboxed child: executes one tool or shell request and reports the result.
 - `src/git-metadata.mjs` — read-only git metadata helpers for the sandboxed environment.

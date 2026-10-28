@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { SandboxManager } from "@anthropic-ai/sandbox-runtime";
+import { isExcludedCommand } from "./exclusions.mjs";
 import { worktreeGitCommonDir } from "./git-metadata.mjs";
 import { runtimePackageReadPaths } from "./runtime-paths.mjs";
 
@@ -18,6 +19,7 @@ let ready = false;
 let cwd;
 let policy;
 let scratch;
+let mainSession = false;
 
 function send(value) {
   process.stdout.write(`${JSON.stringify(value)}\n`);
@@ -39,11 +41,13 @@ function shellQuote(value) {
 function safeEnvironment() {
   const env = {
     PATH: process.env.PATH ?? "/usr/bin:/bin",
-    HOME: scratch,
+    HOME: mainSession ? process.env.HOME ?? scratch : scratch,
     TMPDIR: scratch,
     XDG_CACHE_HOME: join(scratch, "cache"),
   };
-  for (const key of ["LANG", "LC_ALL", "TERM", "TZ", "NO_COLOR", "CI"]) {
+  const keys = ["LANG", "LC_ALL", "TERM", "TZ", "NO_COLOR", "CI"];
+  if (mainSession) keys.push("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "HUNK_MCP_HOST", "HUNK_MCP_PORT");
+  for (const key of keys) {
     if (process.env[key]) env[key] = process.env[key];
   }
   return env;
@@ -56,6 +60,7 @@ async function initialize(request) {
   }
   cwd = request.cwd;
   scratch = request.scratch;
+  mainSession = request.mainSession === true;
   mkdirSync(join(scratch, "cache"), { recursive: true });
   // The broker itself is outside the worktree. Runtime code and the host
   // toolchain are read-only exceptions to the project's home read-deny.
@@ -96,11 +101,14 @@ async function execute(request) {
     return;
   }
   let child;
+  let excluded = false;
   try {
     const proxyPaths = process.platform === "linux"
       ? [SandboxManager.getLinuxHttpSocketPath(), SandboxManager.getLinuxSocksSocketPath()].filter(Boolean)
       : [];
-    const wrapped = await SandboxManager.wrapWithSandboxArgv(
+    const command = request.type === "shell" ? request.command : request.name === "bash" ? request.params?.command : undefined;
+    excluded = mainSession && typeof command === "string" && isExcludedCommand(command, policy.excludedCommands);
+    const wrapped = excluded ? { argv: [process.execPath, helper] } : await SandboxManager.wrapWithSandboxArgv(
       `${shellQuote(process.execPath)} ${shellQuote(helper)}`,
       undefined,
       {
@@ -118,7 +126,7 @@ async function execute(request) {
     // (which may contain model credentials) into the sandboxed process.
     child = spawn(wrapped.argv[0], wrapped.argv.slice(1), {
       cwd,
-      env: safeEnvironment(),
+      env: excluded ? process.env : safeEnvironment(),
       detached: true,
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -180,7 +188,7 @@ async function execute(request) {
     finish({ type: "error", error: "Operation cancelled" });
     return;
   }
-  child.stdin?.end(JSON.stringify({ ...request, cwd }));
+  child.stdin?.end(JSON.stringify({ ...request, cwd, mainSession: mainSession && !excluded }));
 }
 
 async function shutdown() {

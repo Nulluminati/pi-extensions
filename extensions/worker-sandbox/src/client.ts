@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import type { AgentToolResult, AgentToolUpdateCallback } from "@earendil-works/pi-coding-agent";
-import { loadWorkerSandboxPolicy } from "./policy.ts";
+import { loadSessionSandboxPolicy, loadWorkerSandboxPolicy } from "./policy.ts";
 
 const START_TIMEOUT_MS = 30_000;
 const CLOSE_TIMEOUT_MS = 2_000;
@@ -197,8 +197,14 @@ class BrokerClient implements WorkerSandboxClient {
 }
 
 /** Start the broker outside the worktree so srt's synthetic paths stay out of tool scans. */
-export async function startWorkerSandbox(cwd: string): Promise<WorkerSandboxClient> {
-  const policy = loadWorkerSandboxPolicy(cwd, process.env.PI_WORKER_READONLY === "1");
+export async function startWorkerSandbox(
+  cwd: string,
+  sessionPolicy?: string,
+): Promise<WorkerSandboxClient> {
+  const policy =
+    sessionPolicy === undefined
+      ? loadWorkerSandboxPolicy(cwd, process.env.PI_WORKER_READONLY === "1")
+      : loadSessionSandboxPolicy(cwd, sessionPolicy);
   const temp = mkdtempSync(join(tmpdir(), "pi-worker-sandbox-"));
   const scratch = join(temp, "tmp");
   mkdirSync(scratch);
@@ -272,6 +278,8 @@ export async function startWorkerSandbox(cwd: string): Promise<WorkerSandboxClie
         client.receive(reply);
       }
     });
-    child.stdin?.write(`${JSON.stringify({ type: "init", cwd, policy, scratch })}\n`);
+    child.stdin?.write(
+      `${JSON.stringify({ type: "init", cwd, policy, scratch, mainSession: sessionPolicy !== undefined })}\n`,
+    );
   });
 }

@@ -963,6 +963,100 @@ describe("approval-mode Herdr blocked events", () => {
   );
 });
 
+describe("approval-mode --approval-mode flag", () => {
+  it("starts a main session with review off when the flag is off", async () => {
+    const { pi, handler, ctx, classify } = await setup({ flag: "off" });
+    expect(
+      await handler({ toolName: "bash", input: { command: "npm test" } }, ctx),
+    ).toBeUndefined();
+    expect(classify).not.toHaveBeenCalled();
+    expect(ctx.ui.select).not.toHaveBeenCalled();
+    expect(ctx.ui.setStatus).toHaveBeenCalledWith("approval-mode", "Approval Mode off");
+    expect(await parentRequest(pi, { kind: "mode" })).toEqual({ enabled: false });
+  });
+
+  it("keeps hard denies when the flag is off", async () => {
+    const { handler, ctx } = await setup({ flag: "off" });
+    expect(await handler({ toolName: "bash", input: { command: "rm -rf /" } }, ctx)).toMatchObject({
+      block: true,
+    });
+  });
+
+  it("skips the classifier warning when the flag is off", async () => {
+    const { ctx } = await setup({ classifiers: [], flag: "off" });
+    expect(ctx.ui.notify).not.toHaveBeenCalled();
+  });
+
+  it("keeps the classifier warning when the flag is on", async () => {
+    const { ctx } = await setup({ classifiers: [], flag: "on" });
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("no Jev classifier is available"),
+      "warning",
+    );
+  });
+
+  it.each(["maybe", ""])(
+    "fails closed on invalid value %j and names the valid values",
+    async (flag) => {
+      const { handler, ctx } = await setup({ classifiers: [], flag });
+      expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining(flag), "error");
+      expect(ctx.ui.notify).toHaveBeenCalledWith(
+        expect.stringContaining("--approval-mode"),
+        "error",
+      );
+      expect(
+        await handler({ toolName: "bash", input: { command: "npm test" } }, ctx),
+      ).toMatchObject({
+        block: true,
+      });
+    },
+  );
+
+  it("fails closed when the flag arrives without a value", async () => {
+    const { handler, ctx } = await setup({ classifiers: [], flag: true });
+    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("--approval-mode"), "error");
+    expect(await handler({ toolName: "bash", input: { command: "npm test" } }, ctx)).toMatchObject({
+      block: true,
+    });
+  });
+
+  it("reports invalid flags outside interactive mode", async () => {
+    await expect(setup({ flag: "invalid" }, false)).rejects.toThrow(/--approval-mode.*on or off/);
+  });
+
+  it("re-reads the flag when the session restarts", async () => {
+    const { pi, ctx } = await setup({ flag: "on" });
+    pi.getFlag.mockImplementation((name: string) => (name === "approval-mode" ? "off" : undefined));
+    const start = pi.on.mock.calls.find((call) => call[0] === "session_start")?.[1];
+    await start?.({ type: "session_start" }, ctx);
+    expect(await parentRequest(pi, { kind: "mode" })).toEqual({ enabled: false });
+  });
+
+  it("lets the slash command turn review back on after an off start", async () => {
+    const { pi, ctx, handler, classify } = await setup({ flag: "off" });
+    const command = pi.registerCommand.mock.calls.find((call) => call[0] === "approval-mode")?.[1]
+      .handler;
+    await command?.("on", ctx);
+    expect(await parentRequest(pi, { kind: "mode" })).toEqual({ enabled: true });
+    expect(
+      await handler({ toolName: "bash", input: { command: "npm test" } }, ctx),
+    ).toBeUndefined();
+    expect(classify).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps workers on the parent mode and ignores their own flag", async () => {
+    vi.stubEnv("PI_WORKER", "1");
+    vi.stubEnv("PI_WORKER_APPROVAL_FD", "3");
+    const { handler, ctx, classify } = await setup({ classifiers: [], flag: "off" }, false);
+    workerChannel.request.mockResolvedValueOnce({ enabled: true });
+    expect(await handler({ toolName: "bash", input: { command: "npm test" } }, ctx)).toMatchObject({
+      block: true,
+    });
+    expect(workerChannel.request).toHaveBeenCalledWith({ kind: "mode" }, undefined);
+    expect(classify).not.toHaveBeenCalled();
+  });
+});
+
 // --- Helpers ---
 
 function deferred<T>() {
@@ -1078,10 +1172,16 @@ async function setup(
     classifiers?: ReturnType<typeof jevModel>[];
     probabilities?: { harm: number; secrets: number; externalChange?: number };
     classify?: ClassifyMock;
+    flag?: string | boolean;
   } = {},
   hasUI = true,
 ) {
   const pi = createMockPi();
+  if (options.flag !== undefined) {
+    pi.getFlag.mockImplementation((name: string) =>
+      name === "approval-mode" ? options.flag : undefined,
+    );
+  }
   const unsubscribe = vi.fn();
   pi.events.on.mockReturnValue(unsubscribe);
   const ctx = createMockCommandContext();

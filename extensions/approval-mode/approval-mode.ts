@@ -2,7 +2,9 @@
  * Approval Mode
  *
  * Hard denies remain active when main-session Jev review is disabled.
- * Workers follow their parent's live Jev mode and request approval through its UI.
+ * Main sessions take their initial review state from the --approval-mode on|off
+ * flag; an unusable value keeps review on. Workers follow their parent's live
+ * Jev mode and request approval through its UI.
  * Read-only workers also need a read-only OS sandbox.
  */
 
@@ -36,6 +38,21 @@ const READONLY_TOOLS = new Set([
   "web_search",
   "web_fetch",
 ]);
+
+// --- Helpers ---
+
+/**
+ * Map the --approval-mode flag value to review on (true) or off (false).
+ * A missing value keeps the default; anything that is not on or off is invalid.
+ */
+function parseApprovalFlag(value: string | boolean | undefined): boolean | "invalid" {
+  if (value === undefined) return true;
+  if (typeof value !== "string") return "invalid";
+  const text = value.trim();
+  if (text === "on") return true;
+  if (text === "off") return false;
+  return "invalid";
+}
 
 // --- Extension ---
 
@@ -115,6 +132,12 @@ export default async function approvalMode(pi: ExtensionAPI) {
       .catch(() => event.respond({ approved: false }));
   }
 
+  pi.registerFlag("approval-mode", {
+    description: "Start Jev command review off or on in a main session (default on)",
+    type: "string",
+    default: "on",
+  });
+
   pi.registerFlag("worker-readonly", {
     description: "Enforce investigation-only tools in a read-only worker",
     type: "boolean",
@@ -144,8 +167,20 @@ export default async function approvalMode(pi: ExtensionAPI) {
       worker && (process.env.PI_WORKER_READONLY === "1" || pi.getFlag("worker-readonly") === true);
     enabled = true;
     if (readOnly) pi.setActiveTools(pi.getActiveTools().filter((name) => READONLY_TOOLS.has(name)));
+    if (!worker) {
+      const requested = pi.getFlag("approval-mode");
+      const parsed = parseApprovalFlag(requested);
+      if (parsed === "invalid") {
+        // Fail closed: an unusable value keeps review on instead of disabling it.
+        const message = `Approval Mode: unknown --approval-mode value "${String(requested)}". Use on or off. Jev review stays on.`;
+        if (!ctx.hasUI) throw new Error(message);
+        ctx.ui.notify(message, "error");
+      } else {
+        enabled = parsed;
+      }
+    }
     publish(ctx);
-    if (!worker && ctx.hasUI) {
+    if (!worker && enabled && ctx.hasUI) {
       const available = await ctx.modelRegistry.getAvailableOfType("classifier").catch(() => []);
       if (available.length === 0) {
         ctx.ui.notify(

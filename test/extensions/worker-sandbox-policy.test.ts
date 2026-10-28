@@ -3,7 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadWorkerSandboxPolicy } from "../../extensions/worker-sandbox/src/policy.ts";
+import {
+  loadSessionSandboxPolicy,
+  loadWorkerSandboxPolicy,
+} from "../../extensions/worker-sandbox/src/policy.ts";
 
 const roots: string[] = [];
 
@@ -21,6 +24,50 @@ function savePolicy(root: string, policy: unknown): void {
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+describe("session sandbox policy", () => {
+  it("accepts explicit outside write folders without reading project policy", () => {
+    const root = project();
+    const outside = project();
+    const policy = loadSessionSandboxPolicy(
+      root,
+      JSON.stringify({
+        network: { allowedDomains: ["github.com", "*.github.com"] },
+        filesystem: { allowWrite: [outside], denyWrite: ["."] },
+        excludedCommands: ["terminal-browser *"],
+      }),
+    );
+    expect(policy.filesystem.allowWrite).toEqual([outside]);
+    expect(policy.filesystem.denyWrite).toEqual([root]);
+    expect(policy.filesystem.denyRead).toEqual([]);
+    expect(policy.excludedCommands).toEqual(["terminal-browser *"]);
+  });
+
+  it("rejects malformed, incomplete, and weaker inline policies", () => {
+    const root = project();
+    expect(() => loadSessionSandboxPolicy(root, "{")).toThrow(/sandbox/i);
+    expect(() => loadSessionSandboxPolicy(root, "{}")).toThrow(/allowedDomains/);
+    expect(() =>
+      loadSessionSandboxPolicy(
+        root,
+        JSON.stringify({
+          network: { allowedDomains: [], allowAllUnixSockets: true },
+          filesystem: { allowWrite: [] },
+        }),
+      ),
+    ).toThrow(/Unix sockets/);
+    expect(() =>
+      loadSessionSandboxPolicy(
+        root,
+        JSON.stringify({
+          network: { allowedDomains: [] },
+          filesystem: {},
+          excludedCommands: ["*"],
+        }),
+      ),
+    ).toThrow(/excludedCommands/);
+  });
 });
 
 describe("worker sandbox policy", () => {
@@ -44,6 +91,32 @@ describe("worker sandbox policy", () => {
       filesystem: { denyRead: ["~"], allowWrite: ["."] },
     });
     expect(() => loadWorkerSandboxPolicy(root)).toThrow(/allowedDomains/);
+  });
+
+  it("rejects excluded commands in a project-owned worker policy", () => {
+    const root = project();
+    savePolicy(root, {
+      network: { allowedDomains: [] },
+      filesystem: {},
+      excludedCommands: ["terminal-browser *"],
+    });
+    expect(() => loadWorkerSandboxPolicy(root)).toThrow(/must not exclude commands/);
+  });
+
+  it("rejects non-object filesystem rules and external unfiltered proxies", () => {
+    const root = project();
+    expect(() =>
+      loadSessionSandboxPolicy(
+        root,
+        JSON.stringify({ network: { allowedDomains: [] }, filesystem: null }),
+      ),
+    ).toThrow(/filesystem/);
+    expect(() =>
+      loadSessionSandboxPolicy(
+        root,
+        JSON.stringify({ network: { allowedDomains: [], httpProxyPort: 8888 }, filesystem: {} }),
+      ),
+    ).toThrow(/external proxy/);
   });
 
   it("resolves project paths against the worker directory and preserves home paths", () => {

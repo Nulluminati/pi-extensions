@@ -8,6 +8,7 @@ import {
 import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 
 export type WorkerSandboxPolicy = SandboxRuntimeConfig & {
+  excludedCommands?: string[];
   network: SandboxRuntimeConfig["network"] & { allowedDomains: string[] };
   filesystem: SandboxRuntimeConfig["filesystem"] & {
     denyRead: FilesystemPathEntry[];
@@ -67,6 +68,27 @@ export function loadWorkerSandboxPolicy(cwd: string, readOnly = false): WorkerSa
   } catch (error) {
     throw new Error(`Cannot load worker sandbox policy ${file}: ${String(error)}`);
   }
+  return parseSandboxPolicy(cwd, raw, file, readOnly, true);
+}
+
+/** An explicit launcher policy may grant write paths outside the project. */
+export function loadSessionSandboxPolicy(cwd: string, json: string): WorkerSandboxPolicy {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(json);
+  } catch (error) {
+    throw new Error(`Invalid --sandbox JSON: ${String(error)}`);
+  }
+  return parseSandboxPolicy(cwd, raw, "--sandbox", false, false);
+}
+
+function parseSandboxPolicy(
+  cwd: string,
+  raw: unknown,
+  file: string,
+  readOnly: boolean,
+  worker: boolean,
+): WorkerSandboxPolicy {
   if (
     !raw ||
     typeof raw !== "object" ||
@@ -74,18 +96,28 @@ export function loadWorkerSandboxPolicy(cwd: string, readOnly = false): WorkerSa
     !raw.network ||
     typeof raw.network !== "object" ||
     !("allowedDomains" in raw.network) ||
-    !("filesystem" in raw)
+    !("filesystem" in raw) ||
+    !raw.filesystem ||
+    typeof raw.filesystem !== "object" ||
+    Array.isArray(raw.filesystem)
   ) {
     throw new Error(`Worker sandbox policy ${file} requires network.allowedDomains and filesystem`);
   }
   let parsed: SandboxRuntimeConfig;
   try {
-    parsed = SandboxRuntimeConfigSchema.parse(raw);
+    parsed = SandboxRuntimeConfigSchema.parse({
+      ...raw,
+      network: { deniedDomains: [], ...raw.network },
+      filesystem: { denyRead: [], allowWrite: [], denyWrite: [], ...raw.filesystem },
+    });
   } catch (error) {
     throw new Error(`Invalid worker sandbox policy ${file}: ${String(error)}`);
   }
   if (parsed.network.allowAllUnixSockets || parsed.network.allowUnixSockets?.length) {
     throw new Error(`Worker sandbox policy ${file} must not permit host Unix sockets`);
+  }
+  if (parsed.network.httpProxyPort || parsed.network.socksProxyPort) {
+    throw new Error(`Sandbox policy ${file} must not use an external proxy`);
   }
   if (parsed.network.allowLocalBinding) {
     throw new Error(`Worker sandbox policy ${file} must not permit local binding`);
@@ -100,8 +132,22 @@ export function loadWorkerSandboxPolicy(cwd: string, readOnly = false): WorkerSa
   ) {
     throw new Error(`Worker sandbox policy ${file} must not weaken isolation`);
   }
+  const excludedCommands = "excludedCommands" in raw ? raw.excludedCommands : [];
+  if (
+    !Array.isArray(excludedCommands) ||
+    excludedCommands.some(
+      (rule) => typeof rule !== "string" || !/^[a-zA-Z0-9_./-]+(?: \*)?$/.test(rule),
+    )
+  ) {
+    throw new Error(
+      `Sandbox policy ${file} requires excludedCommands to name a command, optionally followed by ' *'`,
+    );
+  }
+  if (worker && excludedCommands.length) {
+    throw new Error(`Worker sandbox policy ${file} must not exclude commands`);
+  }
   const worktree = resolve(cwd);
-  for (const entry of parsed.filesystem.allowWrite ?? []) {
+  for (const entry of worker ? (parsed.filesystem.allowWrite ?? []) : []) {
     const rule = entryPath(entry);
     if (!withinWorkspace(worktree, rule)) {
       throw new Error(`Worker sandbox write rule ${rule} is outside the worktree`);
@@ -111,7 +157,12 @@ export function loadWorkerSandboxPolicy(cwd: string, readOnly = false): WorkerSa
     (paths ?? []).map((entry) => workspaceEntry(worktree, entry));
   return {
     ...parsed,
-    network: { ...parsed.network, allowedDomains: parsed.network.allowedDomains ?? [] },
+    ...(worker ? {} : { excludedCommands }),
+    network: {
+      ...parsed.network,
+      allowedDomains: parsed.network.allowedDomains ?? [],
+      strictAllowlist: true,
+    },
     filesystem: {
       ...parsed.filesystem,
       denyRead: mapPaths(parsed.filesystem.denyRead),

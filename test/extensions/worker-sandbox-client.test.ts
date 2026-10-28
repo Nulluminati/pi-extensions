@@ -5,11 +5,15 @@ import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { startWorkerSandbox } from "../../extensions/worker-sandbox/src/client.ts";
-import { loadWorkerSandboxPolicy } from "../../extensions/worker-sandbox/src/policy.ts";
+import {
+  loadSessionSandboxPolicy,
+  loadWorkerSandboxPolicy,
+} from "../../extensions/worker-sandbox/src/policy.ts";
 
 vi.mock("node:child_process", () => ({ spawn: vi.fn() }));
 vi.mock("../../extensions/worker-sandbox/src/policy.ts", () => ({
   loadWorkerSandboxPolicy: vi.fn(),
+  loadSessionSandboxPolicy: vi.fn(),
 }));
 
 import { spawn } from "node:child_process";
@@ -25,6 +29,26 @@ describe("worker sandbox broker client", () => {
       network: { allowedDomains: [], deniedDomains: [] },
       filesystem: { denyRead: [], allowRead: [], allowWrite: [], denyWrite: [] },
     });
+  });
+
+  it("uses the inline policy rather than the project policy for main sessions", async () => {
+    const policy = {
+      network: { allowedDomains: [], deniedDomains: [] },
+      filesystem: {
+        denyRead: [],
+        allowRead: [],
+        allowWrite: ["/reviews"],
+        denyWrite: ["/worktree"],
+      },
+    };
+    vi.mocked(loadSessionSandboxPolicy).mockReturnValue(policy);
+    const child = fakeChild((request) => (request.type === "init" ? { type: "ready" } : undefined));
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const client = await startWorkerSandbox("/worktree", "inline policy");
+    expect(loadSessionSandboxPolicy).toHaveBeenCalledWith("/worktree", "inline policy");
+    expect(loadWorkerSandboxPolicy).not.toHaveBeenCalled();
+    expect(child.requests[0]).toMatchObject({ type: "init", policy, mainSession: true });
+    await client.close();
   });
 
   it("forwards tool updates and results without local execution", async () => {
