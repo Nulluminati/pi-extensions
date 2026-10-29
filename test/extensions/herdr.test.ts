@@ -379,7 +379,7 @@ describe("Herdr status adapter", () => {
       pi_session_name: null,
       pi_mission: "Fix auth",
       pi_mission_status: "active",
-      pi_workers: "2",
+      pi_workers: "Workers: 2",
       pi_worker_cost: "$0.1250",
       pi_worker_tokens: "1200",
       pi_cost: "$0.125",
@@ -430,7 +430,7 @@ describe("Herdr status adapter", () => {
     await flushUpdates();
     expect(latestRequest().params.tokens.pi_mission).toBe(`Auth ${"x".repeat(75)}`);
     expect(latestRequest().params.tokens).toMatchObject({
-      pi_workers: "1",
+      pi_workers: "Workers: 1",
       pi_worker_cost: null,
       pi_worker_tokens: null,
       pi_todos: null,
@@ -633,7 +633,7 @@ describe("Herdr status adapter", () => {
     acknowledge(slowSocket, slowRequest);
     await vi.advanceTimersByTimeAsync(0);
     expect(requests).toHaveLength(3);
-    expect(latestRequest().params.tokens.pi_workers).toBe("3");
+    expect(latestRequest().params.tokens.pi_workers).toBe("Workers: 3");
     expect(latestRequest().params.seq).toBeGreaterThan(slowRequest.params.seq);
   });
 
@@ -1003,7 +1003,7 @@ describe("Herdr pane name sync", () => {
       { pane_id: "w1:p1", label: "Named session" },
     ]);
     expect(paneRequests("pane.report_metadata").at(-1)?.params.tokens).toMatchObject({
-      pi_workers: "1",
+      pi_workers: "Workers: 1",
       pi_cost: "$0.125",
       pi_worker_tokens: "300",
       pi_session_name: "Named session",
@@ -1012,7 +1012,7 @@ describe("Herdr pane name sync", () => {
     await flushUpdates();
     await vi.advanceTimersByTimeAsync(20_000);
     expect(paneRequests("pane.report_metadata").at(-1)?.params.tokens).toMatchObject({
-      pi_workers: "2",
+      pi_workers: "Workers: 2",
       pi_cost: "$0.250",
     });
     await fixture.stop();

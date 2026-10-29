@@ -81,7 +81,7 @@ export function eventTokens(event: MetadataEvent, data: unknown): MetadataTokens
       if (!count(data.running)) return undefined;
       const cost = readWorkerCost(data);
       return {
-        pi_workers: String(data.running),
+        pi_workers: `Workers: ${data.running}`,
         pi_worker_cost: cost !== undefined ? `$${cost.toFixed(4)}` : null,
         pi_worker_tokens: count(data.workerTokens) ? String(data.workerTokens) : null,
       };
