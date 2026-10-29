@@ -20,7 +20,7 @@ type Reply = Record<string, unknown>;
 interface Broker {
   child: ChildProcessWithoutNullStreams;
   send(request: Reply): void;
-  next(predicate: (reply: Reply) => boolean): Promise<Reply>;
+  next(predicate: (reply: Reply) => boolean, timeoutMs?: number): Promise<Reply>;
   close(): Promise<void>;
 }
 
@@ -90,10 +90,14 @@ describe.skipIf(process.platform !== "linux" && process.platform !== "darwin")(
       });
     });
 
-    it("runs only standalone excluded commands outside the sandbox in main sessions", async () => {
+    it("runs only standalone excluded commands outside the sandbox in main sessions", {
+      timeout: 40_000,
+    }, async () => {
       const broker = await start({ ...POLICY, excludedCommands: ["printf *"] }, true);
       broker.send({ type: "shell", id: 40, command: "printf excluded" });
-      const data = await broker.next((reply) => reply.id === 40 && reply.type === "data");
+      // Excluded commands skip the test loader, so each excluded child imports
+      // the real pi-coding-agent package. That import is slow under full-suite load.
+      const data = await broker.next((reply) => reply.id === 40 && reply.type === "data", 15_000);
       expect(Buffer.from(data.base64 as string, "base64").toString()).toBe("excluded");
       expect(
         await broker.next((reply) => reply.id === 40 && reply.type === "result"),
@@ -105,7 +109,7 @@ describe.skipIf(process.platform !== "linux" && process.platform !== "darwin")(
       ).toMatchObject({ value: { stdout: "stub" } });
       broker.send({ type: "tool", id: 42, name: "bash", params: { command: "printf builtin" } });
       expect(
-        await broker.next((reply) => reply.id === 42 && reply.type === "result"),
+        await broker.next((reply) => reply.id === 42 && reply.type === "result", 15_000),
       ).toMatchObject({ value: { content: [{ type: "text", text: "builtin" }] } });
     });
 
@@ -272,7 +276,7 @@ function launchBroker(cwd: string): Broker {
     send(request) {
       child.stdin.write(`${JSON.stringify(request)}\n`);
     },
-    next(predicate) {
+    next(predicate, timeoutMs = 3_000) {
       const index = replies.findIndex(predicate);
       if (index >= 0) return Promise.resolve(replies.splice(index, 1)[0]);
       return new Promise((resolve, reject) => {
@@ -280,7 +284,7 @@ function launchBroker(cwd: string): Broker {
           const index = waiting.findIndex((waiter) => waiter.timer === timer);
           if (index >= 0) waiting.splice(index, 1);
           reject(new Error(`broker reply timed out: ${stderr}`));
-        }, 3_000);
+        }, timeoutMs);
         waiting.push({ predicate, resolve, reject, timer });
       });
     },
