@@ -3,6 +3,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { runGit } from "../../lib/git.ts";
 import { aggregateRuns, JsonlMetrics } from "../../scripts/codemode-evaluation/metrics.ts";
@@ -201,7 +202,7 @@ describe("codemode evaluation workspace", () => {
       "test: add evaluation fixture",
     ]);
     const commit = (await runGit(repository, ["rev-parse", "HEAD"])).trim();
-    vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
+    vi.mocked(getAgentDir).mockReturnValueOnce(agentDir);
     const workspace = await createWorkspace(repository, commit);
     cleanups.push(() => workspace.dispose());
     for (const arm of ["only", "off", "on"]) {

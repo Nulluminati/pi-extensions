@@ -7,6 +7,7 @@
  * - `<agentDir>/<name>/` — global runtime state (logs, spools, locks)
  * - `${XDG_CACHE_HOME:-~/.cache}/pi-<name>/` — regenerable cache and models
  * - `<cwd>/<CONFIG_DIR_NAME>/<name>/` — project-local state
+ * - `<cwd>/<CONFIG_DIR_NAME>/<file>` — project-local config file
  *
  * `<agentDir>` comes from `getAgentDir()` and honors PI_CODING_AGENT_DIR;
  * project paths use `CONFIG_DIR_NAME` so rebranded distributions resolve to
@@ -54,6 +55,11 @@ export function cacheDir(
 }
 
 // --- Project ---
+
+/** Project-local config file, e.g. `<cwd>/.pi/sandbox.json`. */
+export function projectConfigPath(cwd: string, file: string): string {
+  return join(cwd, CONFIG_DIR_NAME, file);
+}
 
 /** Project-local state directory, e.g. `<cwd>/.pi/missions`. */
 export function projectStateDir(cwd: string, name: string): string {

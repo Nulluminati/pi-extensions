@@ -1,11 +1,11 @@
 import { readFileSync, realpathSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import {
   type FilesystemPathEntry,
   type SandboxRuntimeConfig,
   SandboxRuntimeConfigSchema,
 } from "@anthropic-ai/sandbox-runtime";
-import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
+import { projectConfigPath } from "../../../lib/paths.ts";
 
 export type WorkerSandboxPolicy = SandboxRuntimeConfig & {
   excludedCommands?: string[];
@@ -61,7 +61,7 @@ function withinWorkspace(cwd: string, value: string): boolean {
 
 /** Load a project-owned srt policy. Missing or weaker policies refuse worker startup. */
 export function loadWorkerSandboxPolicy(cwd: string, readOnly = false): WorkerSandboxPolicy {
-  const file = join(cwd, CONFIG_DIR_NAME, "sandbox.json");
+  const file = projectConfigPath(cwd, "sandbox.json");
   let raw: unknown;
   try {
     raw = JSON.parse(readFileSync(file, "utf8"));

@@ -14,11 +14,13 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { finished } from "node:stream/promises";
 import { promisify } from "node:util";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { cleanGitEnv, runGit } from "../../lib/git.ts";
 import { writeJsonAtomic } from "../../lib/json-atomic.ts";
+import { projectConfigPath, projectStateDir } from "../../lib/paths.ts";
 import { JsonlMetrics } from "./metrics.ts";
 import {
   FAILURE_FIXTURE,
@@ -54,7 +56,7 @@ async function prepareAgentDir(
   repository: string,
   worktree: string,
 ): Promise<string> {
-  const source = process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent");
+  const source = getAgentDir();
   const target = join(root, "agent");
   await mkdir(target, { mode: 0o700 });
   const settings = object(JSON.parse(await readFile(join(source, "settings.json"), "utf8")));
@@ -132,14 +134,15 @@ export async function createWorkspace(repository: string, commit: string) {
         await runGit(cwd, ["reset", "--hard", commit]);
         await runGit(cwd, ["clean", "-fd"]);
         // Ignored session state must not retain another run's file reservations.
-        await rm(join(cwd, ".pi", "messenger"), { recursive: true, force: true });
+        await rm(projectStateDir(cwd, "messenger"), { recursive: true, force: true });
         // Directory-only ignore patterns do not protect a node_modules symlink from git clean.
         await rm(join(cwd, "node_modules"), { recursive: true, force: true });
         await symlink(join(repository, "node_modules"), join(cwd, "node_modules"));
-        await rm(join(cwd, ".pi", "settings.json"), { force: true });
+        const projectSettings = projectConfigPath(cwd, "settings.json");
+        await rm(projectSettings, { force: true });
         if (arm === "only") {
-          await mkdir(join(cwd, ".pi"), { recursive: true });
-          await writeJsonAtomic(join(cwd, ".pi", "settings.json"), { codemode: { mode: "only" } });
+          await mkdir(dirname(projectSettings), { recursive: true });
+          await writeJsonAtomic(projectSettings, { codemode: { mode: "only" } });
         }
         if (task === "failure") await writeFile(join(cwd, FAILURE_FIXTURE_PATH), FAILURE_FIXTURE);
       },

@@ -66,6 +66,21 @@ describe("approval-mode command policy", () => {
     }
   });
 
+  it("hard-denies recursive deletion of the resolved agent directory", () => {
+    for (const command of [
+      "rm -rf /custom/agent",
+      "rm -rf /custom/agent/",
+      "rm -rf /custom/agent/sessions",
+      'rm -rf "/custom/agent"',
+    ])
+      expect(classifyCommand(command, "/workspace", "/custom/agent")).toBe("hard-deny");
+    expect(classifyCommand("rm -rf /custom/agent-other", "/workspace", "/custom/agent")).toBe(
+      "needs-jev",
+    );
+    // The default home tree stays protected when the agent dir lives elsewhere.
+    expect(classifyCommand("rm -rf ~/.pi", "/workspace", "/custom/agent")).toBe("hard-deny");
+  });
+
   it("hard-denies only macOS privilege escalation, not every osascript call", () => {
     expect(
       classifyCommand(

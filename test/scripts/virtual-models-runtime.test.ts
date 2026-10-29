@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createWorktree, removeWorktree } from "../../extensions/workers/src/worktree.ts";
 import { runGit } from "../../lib/git.ts";
@@ -51,7 +52,7 @@ describe("isolated virtual-model evaluation runtime", () => {
     await writeFile(join(agentDir, "settings.json"), settings);
     await writeFile(join(agentDir, "auth.json"), "{}");
     await writeFile(join(repository, "tracked.txt"), "unrelated user change");
-    vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
+    vi.mocked(getAgentDir).mockReturnValueOnce(agentDir);
     const workspace = await createEvaluationWorkspace(repository, commit);
     const cwd = workspace.cwd;
     let recovered = false;

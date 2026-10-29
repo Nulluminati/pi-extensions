@@ -42,7 +42,7 @@ import { renderModalFrame } from "../../../lib/tui-frame.ts";
 | Run a one-shot shell command with bounded output and a timeout | `runExec` | `lib/exec.ts` |
 | Write config/state JSON or JSONL without risking a torn file on crash | `writeJsonAtomic`, `writeTextAtomic` | `lib/json-atomic.ts` |
 | Mutate shared state files across sessions without clobbering | `withFileLock` | `lib/file-lock.ts` |
-| Resolve where an extension stores config, state, cache, or project files | `agentConfigPath`, `agentStateDir`, `cacheDir`, `projectStateDir`, `projectStateRelative` | `lib/paths.ts` |
+| Resolve where an extension stores config, state, cache, or project files | `agentConfigPath`, `agentStateDir`, `cacheDir`, `projectConfigPath`, `projectStateDir`, `projectStateRelative` | `lib/paths.ts` |
 | Point a user-facing message at Pi's auth file | `authPath` | `lib/paths.ts` |
 | Keep project-local state out of `git status` | `excludeFromGit` | `lib/git.ts` |
 | Format token counts with display-specific precision | `formatTokenCount` | `lib/token-count.ts` |
@@ -322,6 +322,7 @@ Every filesystem location an extension owns resolves through this module. Never 
 | `agentConfigPath(name)` | `<agentDir>/<name>.json` | Global config, sibling of Pi's `settings.json` |
 | `agentStateDir(name)` | `<agentDir>/<name>/` | Global runtime state: logs, spools, locks |
 | `cacheDir(name)` | `$XDG_CACHE_HOME/pi-<name>/` (default `~/.cache/pi-<name>/`) | Regenerable cache and downloaded models |
+| `projectConfigPath(cwd, file)` | `<cwd>/<CONFIG_DIR_NAME>/<file>` | Project-owned config file, e.g. `sandbox.json` |
 | `projectStateDir(cwd, name)` | `<cwd>/<CONFIG_DIR_NAME>/<name>/` | Project-scoped state |
 | `projectStateRelative(name)` | `<CONFIG_DIR_NAME>/<name>` | Git-exclude patterns |
 
@@ -347,8 +348,9 @@ worktrees where `.git` is a file.
 `<agentDir>` comes from `getAgentDir()` and honors `PI_CODING_AGENT_DIR`; project paths use
 `CONFIG_DIR_NAME`, so rebranded distributions resolve to their own config directory. Both are
 exported by `@earendil-works/pi-coding-agent`. `test/conventions.test.ts` fails the suite on a
-`homedir()` call or literal `.pi` path segment under `extensions/` or `lib/`, allowlisting only
-this module and `tool-style` (which reads pywal's cache, not its own state).
+`homedir()` call, a direct `CONFIG_DIR_NAME` reference, or a literal `.pi` path segment under
+`extensions/`, `lib/`, or `scripts/`. Its allowlist holds this module and a few files that read
+paths this repo does not own, such as pywal's cache in `tool-style`, each with a reason.
 
 Ephemeral spills with no retention go in `os.tmpdir()` with a `pi-<name>-` prefix instead.
 

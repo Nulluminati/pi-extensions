@@ -9,12 +9,13 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { appendFile, mkdir, readFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { runGit } from "../lib/git.ts";
 import { writeJsonAtomic } from "../lib/json-atomic.ts";
+import { projectStateDir } from "../lib/paths.ts";
 import { aggregateRuns, type ScoredRun } from "./codemode-evaluation/metrics.ts";
 import {
   captureRun,
@@ -124,12 +125,9 @@ async function main() {
   const commit = (await runGit(repository, ["rev-parse", `${options.commit}^{commit}`])).trim();
   const { stdout: version } = await execute("pi", ["--version"]);
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const outputDir = join(repository, ".pi", "codemode-eval", timestamp);
+  const outputDir = join(projectStateDir(repository, "codemode-eval"), timestamp);
   await mkdir(outputDir, { recursive: true, mode: 0o700 });
-  const settingsPath = join(
-    process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent"),
-    "settings.json",
-  );
+  const settingsPath = join(getAgentDir(), "settings.json");
   const settingsHash = async () =>
     createHash("sha256")
       .update(await readFile(settingsPath))

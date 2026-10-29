@@ -1,5 +1,7 @@
 /** Deterministic command checks. Hard denies precede every approval path. */
 
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
+
 // --- Constants ---
 
 // --- Hard denies ---
@@ -43,13 +45,15 @@ const ROOT_TARGETS = new Set([
 
 export type CommandClass = "hard-deny" | "known-safe" | "needs-jev";
 
-function isRootDeletion(command: string, cwd: string): boolean {
+function isRootDeletion(command: string, cwd: string, agentDir: string): boolean {
   const target = RECURSIVE_DELETE.exec(command)?.[1]?.replace(/^["']|["']$/g, "");
   if (!target) return false;
   const bareTarget = target.replace(/\/+$/, "");
   return (
     ROOT_TARGETS.has(target) ||
     bareTarget === cwd ||
+    bareTarget === agentDir ||
+    bareTarget.startsWith(`${agentDir}/`) ||
     /^(?:\/home|\/root|\/etc|\/usr|\/var|\/tmp|\/opt|\/dev|\/sys|\/proc)$/.test(bareTarget) ||
     /^(?:\/Users|\/Applications|\/Library|\/System|\/Volumes|\/private)$/.test(bareTarget) ||
     /^~\/(?:\.ssh|\.gnupg|\.pi)(?:\/|$)/.test(target) ||
@@ -94,10 +98,14 @@ function isProtectedForcePush(command: string): boolean {
   );
 }
 
-export function classifyCommand(command: string, cwd: string): CommandClass {
+export function classifyCommand(
+  command: string,
+  cwd: string,
+  agentDir = getAgentDir(),
+): CommandClass {
   const trimmed = command.trim();
   if (
-    isRootDeletion(trimmed, cwd) ||
+    isRootDeletion(trimmed, cwd, agentDir) ||
     isProtectedForcePush(trimmed) ||
     HARD_DENIES.some((pattern) => pattern.test(trimmed))
   ) {

@@ -7,6 +7,7 @@ import {
   authPath,
   cacheDir,
   isProjectStatePath,
+  projectConfigPath,
   projectStateDir,
   projectStateRelative,
 } from "../../lib/paths.ts";
@@ -55,6 +56,14 @@ describe("paths", () => {
     it("ignores a blank XDG_CACHE_HOME", () => {
       expect(cacheDir("context7", { XDG_CACHE_HOME: "  " }, "/home/test")).toBe(
         "/home/test/.cache/pi-context7",
+      );
+    });
+  });
+
+  describe("projectConfigPath", () => {
+    it("places a project config file directly under CONFIG_DIR_NAME", () => {
+      expect(projectConfigPath("/repo", "sandbox.json")).toBe(
+        join("/repo", CONFIG_DIR_NAME, "sandbox.json"),
       );
     });
   });
