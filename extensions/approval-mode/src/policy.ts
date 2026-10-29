@@ -49,11 +49,12 @@ function isRootDeletion(command: string, cwd: string, agentDir: string): boolean
   const target = RECURSIVE_DELETE.exec(command)?.[1]?.replace(/^["']|["']$/g, "");
   if (!target) return false;
   const bareTarget = target.replace(/\/+$/, "");
+  const bareAgentDir = agentDir.replace(/\/+$/, "");
   return (
     ROOT_TARGETS.has(target) ||
     bareTarget === cwd ||
-    bareTarget === agentDir ||
-    bareTarget.startsWith(`${agentDir}/`) ||
+    bareTarget === bareAgentDir ||
+    bareTarget.startsWith(`${bareAgentDir}/`) ||
     /^(?:\/home|\/root|\/etc|\/usr|\/var|\/tmp|\/opt|\/dev|\/sys|\/proc)$/.test(bareTarget) ||
     /^(?:\/Users|\/Applications|\/Library|\/System|\/Volumes|\/private)$/.test(bareTarget) ||
     /^~\/(?:\.ssh|\.gnupg|\.pi)(?:\/|$)/.test(target) ||

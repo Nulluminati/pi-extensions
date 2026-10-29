@@ -77,6 +77,9 @@ describe("approval-mode command policy", () => {
     expect(classifyCommand("rm -rf /custom/agent-other", "/workspace", "/custom/agent")).toBe(
       "needs-jev",
     );
+    // PI_CODING_AGENT_DIR may carry a trailing slash; getAgentDir() keeps it.
+    for (const command of ["rm -rf /custom/agent", "rm -rf /custom/agent/sessions"])
+      expect(classifyCommand(command, "/workspace", "/custom/agent/")).toBe("hard-deny");
     // The default home tree stays protected when the agent dir lives elsewhere.
     expect(classifyCommand("rm -rf ~/.pi", "/workspace", "/custom/agent")).toBe("hard-deny");
   });
