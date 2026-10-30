@@ -10,6 +10,8 @@ TODO.md
 # Pi extension runtime state (per-project, never committed)
 .pi/autoresearch/
 .pi/codemode-eval/
+.pi/virtual-models-eval/
+.pi/virtual-models-task/
 .pi/messenger/
 .pi/missions/
 .pi/workers/
@@ -35,8 +37,9 @@ __pycache__/
 
 # Environment files
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+!.env.*.example
 
 # Logs
 *.log

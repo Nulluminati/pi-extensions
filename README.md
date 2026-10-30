@@ -4,6 +4,9 @@ A collection of extensions for [Pi](https://pi.dev), the AI coding agent for the
 
 ## Installation
 
+Extensions execute local code with your Pi process permissions. Review an extension before you enable it.
+Provider and research extensions can send supplied data to external services. Check their configuration before use.
+
 Install the entire collection:
 
 ```bash
@@ -149,9 +152,16 @@ A [gitleaks](https://github.com/gitleaks/gitleaks) config lives at `.gitleaks.to
 - The husky pre-commit hook runs `gitleaks protect --staged` so secrets are caught before they leave the machine. The hook skips silently if gitleaks isn't installed locally; install it for early feedback:
   - Fedora: `sudo dnf install gitleaks`
   - macOS: `brew install gitleaks`
-- The CI workflow runs gitleaks on every push and pull request as a required check, so commits without a local install still get blocked at the server.
+- The CI workflow runs gitleaks on pushes and pull requests targeting `main`. Branch protection must require this check to block merges.
 
-The config extends gitleaks' default ruleset (~150 detectors for common token formats) and allowlists documentation placeholders like `syn_...` and `ctx7sk-...`.
+The config extends Gitleaks' default ruleset. Its exceptions match complete placeholder values and one synthetic commit identifier, not entire files.
+Run `npm run test:secrets` with Gitleaks installed to test the exceptions and local-state ignore rules.
+The secret-scan job also runs these regression tests.
+
+### Public repository review
+
+[docs/publication-review.md](docs/publication-review.md) records the publication audit, dependency findings, and required GitHub settings.
+Repository visibility remains unchanged. Complete the publication procedure before you make the repository public.
 
 ### Testing
 

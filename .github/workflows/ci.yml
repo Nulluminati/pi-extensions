@@ -76,3 +76,15 @@ jobs:
           # The action fails the job on any leak by default. GITHUB_TOKEN
           # is required for the action to post annotations on the PR.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Fork pull requests have read-only tokens. Report findings in the
+          # job without attempting to write review comments.
+          GITLEAKS_ENABLE_COMMENTS: "false"
+
+      - name: Setup Node.js for secret scan regression tests
+        uses: actions/setup-node@v7
+        with:
+          node-version: "lts/*"
+
+      # gitleaks-action adds its installed scanner to PATH.
+      - name: Test secret scan exceptions
+        run: npm run test:secrets

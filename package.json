@@ -31,6 +31,7 @@
     "create": "tsx scripts/create-extension.ts",
     "test": "vitest run && npm run test:runtime",
     "test:runtime": "vitest run --config vitest.runtime.config.ts",
+    "test:secrets": "node test/scripts/secret-scanning.mjs",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest"
   },

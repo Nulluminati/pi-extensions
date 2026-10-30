@@ -11,28 +11,24 @@ useDefault = true
 # Repository title shown in gitleaks output.
 title = "pi-extensions"
 
-# Allow the README docs in each extension to mention example API key
-# placeholders like `syn_...` and `ctx7sk-...` without tripping the scan.
-# These are documentation strings, not real secrets.
+# Match only complete placeholder values. Path exceptions can skip entire
+# README files and workflow directories, including real credentials.
 [[allowlists]]
 description = "Documentation placeholders"
-paths = [
-  '''(.*/)?README\.md$''',
-  '''(.*/)?\.github/.*$''',
-]
+regexTarget = "secret"
 regexes = [
-  '''syn_\.\.\.''',
-  '''ctx7sk-\.\.\.''',
-  '''sk-\.\.\.''',
-  '''PLACEHOLDER''',
-  '''<your[_-]?key[_-]?here>''',
+  '''^syn_\.\.\.$''',
+  '''^ctx7sk-\.\.\.$''',
+  '''^sk-\.\.\.$''',
+  '''^PLACEHOLDER$''',
+  '''^<your[_-]?key[_-]?here>$''',
 ]
 
-# Sourcegraph access tokens are bare 40-char hex strings, which also matches
-# the fake git commit SHAs in test fixtures (e.g. code-search.test.ts).
+# Sourcegraph access tokens are bare 40-char hex strings. Match only the
+# synthetic SHA in the code-search fixture, not other secrets on its line.
 [[allowlists]]
-description = "Fake commit SHAs in test fixtures"
-regexTarget = "line"
+description = "Fake commit SHA in code-search fixture"
+regexTarget = "secret"
 regexes = [
-  '''commit: "[0-9a-f]{40}"''',
+  '''^48c6663a66b7eacbd9c7c411863ab5d18dbeea88$''',
 ]
