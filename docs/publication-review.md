@@ -78,14 +78,15 @@ This branch documents dependency actions instead of introducing untested overrid
 The secret-scan regression test first failed against the original configuration. It passes with the corrected exceptions.
 The ignore regression test uses a temporary Git repository without this checkout's local exclusions.
 
-`npm run check` passed formatting, lint, both type checks, and validation of all 32 extensions.
-The unit suite passed 2,480 tests and failed one test on both full runs.
-The failing test is `stops the detached Pi child when the runner receives a termination signal` in `test/scripts/evaluate-codemode.test.ts`.
-Its child command exceeds the seven-second timeout. The isolated test also fails.
-This branch changes neither that test nor `scripts/codemode-evaluation/runtime.ts`.
-The full check does not pass. Diagnose this failure before publication; do not disable the test.
+The successful commit hook ran `npm run check` without bypasses.
+Formatting, lint, both type checks, and validation of all 32 extensions passed.
+All 2,481 unit tests and all 103 runtime tests passed.
 
-The separate runtime suite passed 97 tests and failed six tests across three files:
+Earlier runs had intermittent failures. Two full unit runs and one isolated run failed the codemode signal-termination test.
+The child command exceeded its seven-second timeout.
+This branch changes neither that test nor `scripts/codemode-evaluation/runtime.ts`.
+
+An earlier separate runtime run passed 97 tests and failed six tests across three files:
 
 | Test file | Failures | Observed result |
 | --- | --- | --- |
@@ -94,7 +95,8 @@ The separate runtime suite passed 97 tests and failed six tests across three fil
 | `test/runtime/worker-provider-chains.test.ts` | 2 | One worker exceeds 20 seconds; another does not produce `calls.jsonl`. |
 
 This branch does not change runtime implementation or runtime tests.
-The causes remain unconfirmed. Resolve these failures in the intended development environment before publication.
+These failures did not recur in the successful full check. Their causes remain unconfirmed.
+Re-run the full checks before publication. Investigate any repeated timeout failures instead of disabling tests.
 The publication file snapshot also passed Gitleaks with the corrected configuration.
 
 ## GitHub settings
