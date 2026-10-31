@@ -483,6 +483,16 @@ describe("missions-extension", () => {
     expect(stored.decisions[0].text).toBe("Use sqlite for storage");
   });
 
+  it("create rejects negative budget values with the set_budget messages", async () => {
+    await expect(
+      executeTool({ action: "create", title: "t", objective: "o", maxIterations: -1 }),
+    ).rejects.toThrow(/maxIterations must be >= 0/);
+    await expect(
+      executeTool({ action: "create", title: "t", objective: "o", maxTokens: -5 }),
+    ).rejects.toThrow(/maxTokens must be >= 0/);
+    expect(lastActiveEntryId()).toBeUndefined();
+  });
+
   it("set_budget stores budgets and rejects negative values", async () => {
     await executeTool({ action: "create", title: "t", objective: "o" });
 

@@ -46,12 +46,24 @@ function findTask(mission: Mission, taskId: string): MissionTask {
 
 // --- Creation ---
 
+/** Validate budget caps before storing them. Throws the same message for
+ * create and set_budget so the two paths cannot diverge. */
+function validateBudget(budget: MissionBudget): void {
+  if (budget.maxIterations !== undefined && budget.maxIterations < 0) {
+    throw new Error("maxIterations must be >= 0.");
+  }
+  if (budget.maxTokens !== undefined && budget.maxTokens < 0) {
+    throw new Error("maxTokens must be >= 0.");
+  }
+}
+
 export function createMission(
   id: string,
   title: string,
   objective: string,
   budget?: MissionBudget,
 ): Mission {
+  if (budget) validateBudget(budget);
   const now = Date.now();
   return {
     id,
@@ -216,12 +228,7 @@ export function addDecision(mission: Mission, text: string): void {
 
 export function setBudget(mission: Mission, budget: MissionBudget): MissionBudget {
   requireOpen(mission);
-  if (budget.maxIterations !== undefined && budget.maxIterations < 0) {
-    throw new Error("maxIterations must be >= 0.");
-  }
-  if (budget.maxTokens !== undefined && budget.maxTokens < 0) {
-    throw new Error("maxTokens must be >= 0.");
-  }
+  validateBudget(budget);
   mission.budget = {
     ...(budget.maxIterations !== undefined ? { maxIterations: budget.maxIterations } : {}),
     ...(budget.maxTokens !== undefined ? { maxTokens: budget.maxTokens } : {}),
