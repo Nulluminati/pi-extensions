@@ -64,6 +64,7 @@ export function runExec(command: string, options: ExecOptions): Promise<ExecOutc
     let settled = false;
     let timedOut = false;
     let failure: string | undefined;
+    let deadlineTimer: NodeJS.Timeout | undefined;
     let graceTimer: NodeJS.Timeout | undefined;
     const captured = { stdout: new Capture(maxBuffer), stderr: new Capture(maxBuffer) };
 
@@ -119,7 +120,7 @@ export function runExec(command: string, options: ExecOptions): Promise<ExecOutc
 
     for (const name of ["stdout", "stderr"] as const) {
       child[name]?.on("data", (chunk: Buffer) => {
-        if (captured[name].push(chunk) || failure) return;
+        if (captured[name].push(chunk) || failure || timedOut) return;
         failure = `${name} maxBuffer length exceeded`;
         terminate();
       });
@@ -128,10 +129,11 @@ export function runExec(command: string, options: ExecOptions): Promise<ExecOutc
     child.on("error", (err) => settle({ ok: false, error: err.message }));
 
     child.on("close", (code, sig) => {
-      if (timedOut) {
-        settle({ ok: false, error: `Command timed out after ${options.timeoutMs} ms: ${command}` });
-      } else if (failure) {
+      // The first cause wins: an overflow kill can finish after the deadline.
+      if (failure) {
         settle({ ok: false, error: failure });
+      } else if (timedOut) {
+        settle({ ok: false, error: `Command timed out after ${options.timeoutMs} ms: ${command}` });
       } else if (code === 0) {
         settle({ ok: true });
       } else {
@@ -141,7 +143,7 @@ export function runExec(command: string, options: ExecOptions): Promise<ExecOutc
       }
     });
 
-    const deadlineTimer = setTimeout(() => {
+    deadlineTimer = setTimeout(() => {
       timedOut = true;
       terminate();
     }, options.timeoutMs);

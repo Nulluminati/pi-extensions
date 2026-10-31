@@ -171,4 +171,25 @@ describe("runExec", () => {
     expect(out.ok).toBe(false);
     expect(out.error).toBeTruthy();
   });
+
+  it("surfaces a command that spawn rejects synchronously instead of throwing", async () => {
+    const out = await runExec("echo a\0b", { cwd: process.cwd(), timeoutMs: 10_000 });
+
+    expect(out.ok).toBe(false);
+    expect(out.error).toContain("null bytes");
+  });
+
+  it("reports a buffer overflow even when the kill finishes after the deadline", async () => {
+    // The overflow at ~100 ms sends SIGTERM, which the shell ignores; the
+    // deadline at 300 ms passes before the SIGKILL at ~1.1 s.
+    const out = await runExec("trap '' TERM; sleep 0.1; printf abcdefghij; sleep 30", {
+      cwd: process.cwd(),
+      timeoutMs: 300,
+      maxBuffer: 4,
+    });
+
+    expect(out.ok).toBe(false);
+    expect(out.stdout).toBe("abcd");
+    expect(out.error).toContain("stdout maxBuffer length exceeded");
+  });
 });
