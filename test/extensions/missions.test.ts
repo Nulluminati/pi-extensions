@@ -295,6 +295,37 @@ describe("missions-extension", () => {
     expect(contentText(status)).toContain("⚠");
   });
 
+  it.each(["complete", "aborted"])(
+    "reconcile refuses a closed (%s) mission and leaves its tasks unchanged",
+    async (closedStatus) => {
+      const created = await executeTool({ action: "create", title: "t", objective: "o" });
+      const missionId = created.details.missionId as string;
+      const task = await executeTool({
+        action: "task_add",
+        taskTitle: "A",
+        verification: { command: "false" },
+      });
+      await executeTool({
+        action: "task_update",
+        taskId: task.details.taskId as string,
+        status: "done",
+        summary: "did",
+      });
+      await executeTool({ action: "set_status", missionStatus: closedStatus });
+      await executeTool({ action: "switch", id: missionId });
+      const before = await loadMission(cwd, missionId);
+
+      await expect(executeTool({ action: "reconcile" })).rejects.toThrow(
+        `Mission ${missionId} is ${closedStatus}; it can no longer be modified.`,
+      );
+
+      const after = await loadMission(cwd, missionId);
+      expect(after?.status).toBe(closedStatus);
+      expect(after?.tasks[0]?.status).toBe("done");
+      expect(after?.updatedAt).toBe(before?.updatedAt);
+    },
+  );
+
   it("switch selects another mission by id", async () => {
     await executeTool({ action: "create", title: "first", objective: "o" });
     // Manually create a second mission file (create is blocked while active).
@@ -769,6 +800,36 @@ describe("missions-extension", () => {
     mockCtx.ui.notify.mockClear();
     await handler("", mockCtx);
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Reconciled"), "info");
+  });
+
+  it("/mission:reconcile reports a closed mission and leaves its tasks unchanged", async () => {
+    const handler = getCommand("mission:reconcile").handler;
+    const created = await executeTool({ action: "create", title: "closed", objective: "o" });
+    const missionId = created.details.missionId as string;
+    const task = await executeTool({
+      action: "task_add",
+      taskTitle: "Done task",
+      verification: { command: "false" },
+    });
+    await executeTool({
+      action: "task_update",
+      taskId: task.details.taskId as string,
+      status: "done",
+      summary: "delivered",
+    });
+    await executeTool({ action: "set_status", missionStatus: "complete" });
+    await executeTool({ action: "switch", id: missionId });
+    mockCtx.ui.notify.mockClear();
+
+    await handler("", mockCtx);
+
+    expect(mockCtx.ui.notify).toHaveBeenCalledTimes(1);
+    expect(mockCtx.ui.notify).toHaveBeenCalledWith(
+      `Mission ${missionId} is complete; it can no longer be modified.`,
+      "error",
+    );
+    const after = await loadMission(cwd, missionId);
+    expect(after?.tasks[0]?.status).toBe("done");
   });
 
   // --- Id validation: ids from tool calls reach the filesystem, so anything

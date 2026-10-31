@@ -40,7 +40,7 @@ import {
   MISSION_STATUS_KEY,
   MISSION_WIDGET_KEY,
 } from "./src/format.ts";
-import { reconcileMission } from "./src/ops.ts";
+import { reconcileMission, requireOpen } from "./src/ops.ts";
 import { MISSION_PARAMETERS } from "./src/schemas.ts";
 import { listMissionSummaries, saveMission } from "./src/storage.ts";
 import type { Mission } from "./src/types.ts";
@@ -157,6 +157,12 @@ export default async function missionsExtension(pi: ExtensionAPI) {
       const mission = await reloadActive(ctx);
       if (!mission) {
         ctx.ui.notify("No active mission to reconcile.", "info");
+        return;
+      }
+      try {
+        requireOpen(mission);
+      } catch (error) {
+        ctx.ui.notify((error as Error).message, "error");
         return;
       }
       ctx.ui.notify("Reconciling mission (running verification commands)…", "info");

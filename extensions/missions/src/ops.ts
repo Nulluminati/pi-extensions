@@ -284,13 +284,16 @@ const RECONCILE_OUTPUT_CHARS = 800;
 /**
  * Re-run every done task's verification command and flag regressions. Tasks
  * without verification are counted as skipped. Regressed tasks move to
- * status "regressed" so the record matches reality.
+ * status "regressed" so the record matches reality. Throws on a complete or
+ * aborted mission: every task there is closed, and a regression would
+ * contradict the mission's status.
  */
 export async function reconcileMission(
   mission: Mission,
   cwd: string,
   runner: VerificationRunner,
 ): Promise<ReconcileReport> {
+  requireOpen(mission);
   const report: ReconcileReport = {
     missionId: mission.id,
     checked: 0,
