@@ -79,9 +79,42 @@ describe("runExec", () => {
     const out = await runExec("sleep 30", { cwd: process.cwd(), timeoutMs: 200 });
 
     expect(out.ok).toBe(false);
-    expect(out.error).toContain("Command failed");
+    expect(out.error).toContain("timed out after 200 ms");
     // The kill fires at the timeout, not at the child's natural end.
     expect(out.durationMs).toBeLessThan(5_000);
+  });
+
+  it("fails at the timeout when the shell ignores SIGTERM", async () => {
+    const out = await runExec("printf before; trap '' TERM; sleep 30", {
+      cwd: process.cwd(),
+      timeoutMs: 200,
+    });
+
+    expect(out.ok).toBe(false);
+    expect(out.stdout).toBe("before");
+    expect(out.error).toContain("timed out after 200 ms");
+    expect(out.durationMs).toBeLessThan(5_000);
+  });
+
+  it("fails at the timeout when the child ignores SIGTERM and exits 0 later", async () => {
+    const out = await runExec(
+      `node -e 'process.on("SIGTERM", () => {}); setTimeout(() => {}, 30000)'`,
+      { cwd: process.cwd(), timeoutMs: 200 },
+    );
+
+    expect(out.ok).toBe(false);
+    expect(out.error).toContain("timed out after 200 ms");
+    expect(out.durationMs).toBeLessThan(5_000);
+  });
+
+  it("fails when the command exits 0 on SIGTERM after the timeout", async () => {
+    const out = await runExec("trap 'exit 0' TERM; sleep 30 & wait", {
+      cwd: process.cwd(),
+      timeoutMs: 200,
+    });
+
+    expect(out.ok).toBe(false);
+    expect(out.error).toContain("timed out after 200 ms");
   });
 
   it("fails with truncated output when maxBuffer is exceeded", async () => {
