@@ -1,14 +1,15 @@
-/** Shared exec-with-timeout runner: promisified `child_process.exec` with a
- *  cwd, a hard timeout, and a bounded capture buffer. Resolves (never
+/** Shared exec-with-timeout runner: a `/bin/sh` command with a cwd, a hard
+ *  timeout that kills the command's process group, and a bounded capture
+ *  buffer. Resolves (never
  *  throws) with the raw stdout/stderr parts plus the failure message, so
  *  each consumer composes its own user-facing output string.
  *
  *  Scope: pipe-captured one-shot commands. Process runners that stream
- *  output to files, kill a detached process group, or finalize from disk
- *  artifacts (workers/src/runner.ts) have different semantics and do not
- *  share this mechanism. */
+ *  output to files, outlive the caller, or finalize from disk artifacts
+ *  (workers/src/runner.ts) have different semantics and do not share this
+ *  mechanism. */
 
-import { type ChildProcess, type ExecException, exec as execCb } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 
 // --- Types ---
 
@@ -32,7 +33,7 @@ export interface ExecOutcome {
 // --- Exec ---
 
 /** One-line platform note for shell-command failure output, or "" when the
- *  platform needs no note. `child_process.exec` runs commands under /bin/sh,
+ *  platform needs no note. `runExec` runs commands under /bin/sh,
  *  which is bash 3.2 on macOS — commands authored with bash-4 or GNU-only
  *  tool flags fail there and can otherwise be misread as a genuine fault. */
 export function execPlatformHint(): string {
@@ -43,64 +44,129 @@ export function execPlatformHint(): string {
 /** How long a timed-out command gets to exit after SIGTERM before SIGKILL. */
 const KILL_GRACE_MS = 1_000;
 
+/** Capture cap per stream when the caller sets none (matches Node's exec). */
+const DEFAULT_MAX_BUFFER = 1024 * 1024;
+
 /** Run one shell command with a timeout and a bounded capture buffer.
- *  At the timeout the child gets SIGTERM, then SIGKILL after a short grace
- *  period. A command that outlives the timeout always fails, even when it
- *  later exits 0, and the call settles at most one grace period past the
- *  deadline even when a grandchild keeps the output pipes open. Whatever
- *  the command produced before the kill or the buffer overflow is still
- *  returned. */
+ *  The command runs under /bin/sh in its own process group. At the
+ *  timeout the whole group gets SIGTERM, then SIGKILL after a short grace
+ *  period, so descendants do not outlive the call. A command that outlives
+ *  the timeout always fails, even when it later exits 0, and the call
+ *  settles at most one grace period past the deadline even when a process
+ *  outside the group keeps the output pipes open. Whatever the command
+ *  produced before the kill or the buffer overflow is still returned. */
 export function runExec(command: string, options: ExecOptions): Promise<ExecOutcome> {
   const started = Date.now();
+  const maxBuffer = options.maxBuffer ?? DEFAULT_MAX_BUFFER;
+  // Windows has no process groups; there the kill reaches the shell only.
+  const ownGroup = process.platform !== "win32";
   return new Promise((resolve) => {
+    let settled = false;
     let timedOut = false;
+    let failure: string | undefined;
     let graceTimer: NodeJS.Timeout | undefined;
+    const captured = { stdout: new Capture(maxBuffer), stderr: new Capture(maxBuffer) };
 
-    const finish = (err: ExecException | null, stdout: string, stderr: string): void => {
+    const settle = (outcome: Omit<ExecOutcome, "stdout" | "stderr" | "durationMs">): void => {
+      if (settled) return;
+      settled = true;
       clearTimeout(deadlineTimer);
       clearTimeout(graceTimer);
-      const durationMs = Date.now() - started;
-      if (timedOut) {
-        const error = `Command timed out after ${options.timeoutMs} ms: ${command}`;
-        resolve({ ok: false, stdout, stderr, error, durationMs });
-      } else if (err) {
-        resolve({ ok: false, stdout, stderr, error: err.message, durationMs });
-      } else {
-        resolve({ ok: true, stdout, stderr, durationMs });
-      }
+      resolve({
+        ...outcome,
+        stdout: captured.stdout.text(),
+        stderr: captured.stderr.text(),
+        durationMs: Date.now() - started,
+      });
     };
 
     let child: ChildProcess;
     try {
-      child = execCb(
-        command,
-        {
-          cwd: options.cwd,
-          ...(options.maxBuffer !== undefined ? { maxBuffer: options.maxBuffer } : {}),
-        },
-        finish,
-      );
-    } catch (err) {
-      resolve({
-        ok: false,
-        stdout: "",
-        stderr: "",
-        error: err instanceof Error ? err.message : String(err),
-        durationMs: Date.now() - started,
+      child = spawn(command, {
+        cwd: options.cwd,
+        shell: true,
+        detached: ownGroup,
+        stdio: ["ignore", "pipe", "pipe"],
       });
+    } catch (err) {
+      settle({ ok: false, error: err instanceof Error ? err.message : String(err) });
       return;
     }
 
-    const deadlineTimer = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGTERM");
+    const signal = (sig: NodeJS.Signals): void => {
+      const pid = child.pid;
+      if (pid === undefined) return;
+      try {
+        process.kill(ownGroup ? -pid : pid, sig);
+      } catch {
+        // The group is already gone.
+      }
+    };
+
+    /** SIGTERM the group now; SIGKILL it and release the pipes after the
+     *  grace period. Safe to call twice. */
+    const terminate = (): void => {
+      if (graceTimer) return;
+      signal("SIGTERM");
       graceTimer = setTimeout(() => {
-        child.kill("SIGKILL");
-        // A grandchild that inherited the pipes can hold them open after
-        // the shell dies; closing our ends lets exec report now.
+        signal("SIGKILL");
+        // A process that left the group can still hold the pipes open;
+        // closing our ends lets "close" fire now.
         child.stdout?.destroy();
         child.stderr?.destroy();
       }, KILL_GRACE_MS);
+    };
+
+    for (const name of ["stdout", "stderr"] as const) {
+      child[name]?.on("data", (chunk: Buffer) => {
+        if (captured[name].push(chunk) || failure) return;
+        failure = `${name} maxBuffer length exceeded`;
+        terminate();
+      });
+    }
+
+    child.on("error", (err) => settle({ ok: false, error: err.message }));
+
+    child.on("close", (code, sig) => {
+      if (timedOut) {
+        settle({ ok: false, error: `Command timed out after ${options.timeoutMs} ms: ${command}` });
+      } else if (failure) {
+        settle({ ok: false, error: failure });
+      } else if (code === 0) {
+        settle({ ok: true });
+      } else {
+        const stderr = captured.stderr.text();
+        const cause = sig ? ` (killed by ${sig})` : "";
+        settle({ ok: false, error: `Command failed${cause}: ${command}\n${stderr}`.trimEnd() });
+      }
+    });
+
+    const deadlineTimer = setTimeout(() => {
+      timedOut = true;
+      terminate();
     }, options.timeoutMs);
   });
+}
+
+/** Byte-capped capture of one output stream. */
+class Capture {
+  private chunks: Buffer[] = [];
+  private bytes = 0;
+
+  constructor(private readonly limit: number) {}
+
+  /** Append a chunk, truncated at the limit. False once the limit is passed. */
+  push(chunk: Buffer): boolean {
+    const room = this.limit - this.bytes;
+    if (room > 0) {
+      const kept = chunk.length > room ? chunk.subarray(0, room) : chunk;
+      this.chunks.push(kept);
+      this.bytes += kept.length;
+    }
+    return chunk.length <= room;
+  }
+
+  text(): string {
+    return Buffer.concat(this.chunks).toString("utf8");
+  }
 }

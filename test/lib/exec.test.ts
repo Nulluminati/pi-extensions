@@ -40,6 +40,24 @@ afterEach(async () => {
   tempDirs.length = 0;
 });
 
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitUntil(check: () => boolean, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (check()) return true;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return check();
+}
+
 describe("runExec", () => {
   it("captures stdout and stderr from a successful command", async () => {
     const out = await runExec("printf stdout-text; printf stderr-text >&2", {
@@ -106,6 +124,24 @@ describe("runExec", () => {
     expect(out.error).toContain("timed out after 200 ms");
     expect(out.durationMs).toBeLessThan(5_000);
   });
+
+  it.skipIf(process.platform === "win32")(
+    "kills descendants that ignore SIGTERM at the timeout",
+    async () => {
+      const out = await runExec("trap '' TERM; sleep 30 & echo $!; wait", {
+        cwd: process.cwd(),
+        timeoutMs: 200,
+      });
+
+      expect(out.ok).toBe(false);
+      expect(out.error).toContain("timed out after 200 ms");
+      const descendantPid = Number(out.stdout.trim());
+      expect(Number.isInteger(descendantPid) && descendantPid > 0).toBe(true);
+      // The killed descendant is reparented and reaped asynchronously.
+      const gone = await waitUntil(() => !isAlive(descendantPid), 2_000);
+      expect(gone).toBe(true);
+    },
+  );
 
   it("fails when the command exits 0 on SIGTERM after the timeout", async () => {
     const out = await runExec("trap 'exit 0' TERM; sleep 30 & wait", {
