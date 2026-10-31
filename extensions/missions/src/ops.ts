@@ -275,8 +275,9 @@ export function setStatus(mission: Mission, status: MissionStatus): void {
 // --- Reconciliation ---
 
 export interface VerificationRunner {
-  /** Runs a verification command, resolving to pass/fail plus bounded output. */
-  run(command: string, cwd: string): Promise<{ ok: boolean; output: string }>;
+  /** Runs a verification command, resolving to pass/fail plus bounded output.
+   * `blocked` means the command was refused and did not run. */
+  run(command: string, cwd: string): Promise<{ ok: boolean; output: string; blocked?: boolean }>;
 }
 
 const RECONCILE_OUTPUT_CHARS = 800;
@@ -284,9 +285,10 @@ const RECONCILE_OUTPUT_CHARS = 800;
 /**
  * Re-run every done task's verification command and flag regressions. Tasks
  * without verification are counted as skipped. Regressed tasks move to
- * status "regressed" so the record matches reality. Throws on a complete or
- * aborted mission: every task there is closed, and a regression would
- * contradict the mission's status.
+ * status "regressed" so the record matches reality. Tasks whose command the
+ * runner refuses are reported as blocked and keep their status. Throws on a
+ * complete or aborted mission: every task there is closed, and a regression
+ * would contradict the mission's status.
  */
 export async function reconcileMission(
   mission: Mission,
@@ -299,6 +301,7 @@ export async function reconcileMission(
     checked: 0,
     passed: 0,
     regressed: [],
+    blocked: [],
     skippedNoVerification: 0,
   };
 
@@ -309,12 +312,16 @@ export async function reconcileMission(
       report.skippedNoVerification += 1;
       continue;
     }
-    report.checked += 1;
-    const { ok, output } = await runner.run(command, cwd);
+    const { ok, output, blocked } = await runner.run(command, cwd);
     const bounded =
       output.length > RECONCILE_OUTPUT_CHARS
         ? `${output.slice(0, RECONCILE_OUTPUT_CHARS)}…[truncated]`
         : output;
+    if (blocked) {
+      report.blocked.push({ taskId: task.id, title: task.title, output: bounded });
+      continue;
+    }
+    report.checked += 1;
     task.lastVerification = { ok, output: bounded, at: Date.now() };
     task.lastVerifiedAt = task.lastVerification.at;
     if (ok) {

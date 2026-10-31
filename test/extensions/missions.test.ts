@@ -326,6 +326,108 @@ describe("missions-extension", () => {
     },
   );
 
+  /** Create a mission with one done task whose verification is `command`. */
+  const doneTaskWith = async (command: string) => {
+    await executeTool({ action: "create", title: "t", objective: "o" });
+    const task = await executeTool({
+      action: "task_add",
+      taskTitle: "Guarded task",
+      verification: { command },
+    });
+    await executeTool({
+      action: "task_update",
+      taskId: task.details.taskId as string,
+      status: "done",
+      summary: "done",
+    });
+    return task.details.taskId as string;
+  };
+
+  const markerExists = async () =>
+    stat(join(cwd, "ran.txt")).then(
+      () => true,
+      () => false,
+    );
+
+  it("reconcile refuses hard-deny verification commands when no reviewer is loaded", async () => {
+    const taskId = await doneTaskWith("git reset --hard; touch ran.txt");
+
+    const res = await executeTool({ action: "reconcile" });
+
+    expect(await markerExists()).toBe(false);
+    expect(res.details.report.blocked).toEqual([
+      expect.objectContaining({ taskId, output: expect.stringMatching(/hard deny/i) }),
+    ]);
+    expect(res.details.report.regressed).toHaveLength(0);
+    expect(contentText(res)).toContain(
+      "1 task(s) were not verified because their command was blocked",
+    );
+    const mission = await loadMission(cwd, res.details.report.missionId as string);
+    expect(mission).toBeDefined();
+    expect(mission?.tasks[0]?.status).toBe("done");
+    expect(mission?.tasks[0]?.lastVerification).toBeUndefined();
+  });
+
+  it("reconcile asks the command reviewer before running a verification command", async () => {
+    const reviews: Array<Record<string, unknown>> = [];
+    mockPi.events.emit.mockImplementation((event: string, data: unknown) => {
+      if (event !== "approval-mode:command-review") return;
+      const request = data as Record<string, unknown> & {
+        claim(): void;
+        respond(reply: { approved: boolean; reason?: string }): void;
+      };
+      reviews.push(request);
+      request.claim();
+      request.respond({ approved: false, reason: "Approval Mode blocked: user said no." });
+    });
+    const taskId = await doneTaskWith("touch ran.txt");
+
+    const res = await executeTool({ action: "reconcile" });
+
+    expect(await markerExists()).toBe(false);
+    expect(reviews).toEqual([
+      expect.objectContaining({
+        command: "touch ran.txt",
+        cwd,
+        ctx: mockCtx,
+        source: expect.stringContaining("Mission reconcile"),
+      }),
+    ]);
+    expect(res.details.report.blocked).toEqual([
+      expect.objectContaining({ taskId, output: "Approval Mode blocked: user said no." }),
+    ]);
+  });
+
+  it("reconcile runs approved verification commands in an active sandbox", async () => {
+    const execs: Array<Record<string, unknown>> = [];
+    mockPi.events.emit.mockImplementation((event: string, data: unknown) => {
+      if (event !== "worker-sandbox:exec-request") return;
+      const request = data as Record<string, unknown> & {
+        claim(): void;
+        respond(outcome: { ok: boolean; output: string }): void;
+      };
+      execs.push(request);
+      request.claim();
+      request.respond({ ok: false, output: "sandbox denied write\nexit code 1" });
+    });
+    const taskId = await doneTaskWith("touch ran.txt");
+
+    const res = await executeTool({ action: "reconcile" });
+
+    expect(await markerExists()).toBe(false);
+    expect(execs).toEqual([
+      expect.objectContaining({
+        command: "touch ran.txt",
+        cwd,
+        timeoutMs: 120_000,
+        maxOutputBytes: 1024 * 1024,
+      }),
+    ]);
+    expect(res.details.report.regressed).toEqual([
+      expect.objectContaining({ taskId, output: "sandbox denied write\nexit code 1" }),
+    ]);
+  });
+
   it("switch selects another mission by id", async () => {
     await executeTool({ action: "create", title: "first", objective: "o" });
     // Manually create a second mission file (create is blocked while active).

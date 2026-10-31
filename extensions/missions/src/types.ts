@@ -83,5 +83,7 @@ export interface ReconcileReport {
   checked: number;
   passed: number;
   regressed: Array<{ taskId: string; title: string; output: string }>;
+  /** Done tasks whose verification command was refused before it ran. */
+  blocked: Array<{ taskId: string; title: string; output: string }>;
   skippedNoVerification: number;
 }

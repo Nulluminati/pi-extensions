@@ -36,6 +36,7 @@ These tools could otherwise bypass the sandbox. Use sandboxed `bash` instead.
 `web_fetch`, `web_search`, `code_search`, and the Context7 tools (`context7_resolve_library_id`, `context7_get_library_docs`, `context7_get_cached_doc_raw`) remain outside the sandbox.
 These tools only read remote documentation and search results.
 Trusted extension lifecycle handlers and Pi itself still run on the host. Load only trusted extensions.
+Extensions that run shell commands themselves can ask the sandbox to run them through `lib/sandbox-exec.ts`. Missions uses this for reconcile verification commands. A failed broker returns a failure; the command never falls back to the host.
 
 ### Excluded commands
 
@@ -117,6 +118,7 @@ Runtime tests also require `curl` and Bun 1.4.2. Continuous Integration (CI) ins
 |-----|---------|
 | `pi.registerTool(...)` tool overrides | Routes every built-in tool through the sandbox |
 | `pi.on("user_bash")` | Routes `!` commands through the sandbox |
+| `pi.events.on("worker-sandbox:exec-request")` | Runs other extensions' shell commands through the sandbox |
 
 ## Related
 

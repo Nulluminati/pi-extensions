@@ -1,7 +1,7 @@
 /** A bounded System One judgment through the model registry. Only complete, validated answers grant approval. */
 
 import type { ClassifierAnswer, ClassifierContext, ClassifierResult } from "@earendil-works/pi-ai";
-import { hasExecutionHook } from "./policy.ts";
+import { hasExecutionHook } from "../../../lib/command-policy.ts";
 
 // --- Constants ---
 

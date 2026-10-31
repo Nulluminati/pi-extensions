@@ -23,7 +23,7 @@ import { projectStateRelative } from "../../lib/paths.ts";
 import { setStripWidget, WIDGET_PRIORITY_MISSIONS } from "../../lib/widget-strip.ts";
 import {
   type ActiveMissionRef,
-  createExecVerificationRunner,
+  createGatedVerificationRunner,
   executeMissionAction,
   loadSessionActiveMission,
   MISSION_ACTIVE_ENTRY_TYPE,
@@ -50,8 +50,6 @@ import type { Mission } from "./src/types.ts";
 export default async function missionsExtension(pi: ExtensionAPI) {
   /** Cached active mission; kept in sync with disk on every tool call. */
   let active: Mission | undefined;
-
-  const runner = createExecVerificationRunner();
 
   // --- Active-mission pointer ---
 
@@ -101,7 +99,7 @@ export default async function missionsExtension(pi: ExtensionAPI) {
     publish,
     persist,
     reload: reloadActive,
-    runner,
+    runnerFor: (ctx) => createGatedVerificationRunner(pi.events, ctx),
   };
 
   // --- Tool ---
@@ -166,7 +164,11 @@ export default async function missionsExtension(pi: ExtensionAPI) {
         return;
       }
       ctx.ui.notify("Reconciling mission (running verification commands)…", "info");
-      const report = await reconcileMission(mission, ctx.cwd, runner);
+      const report = await reconcileMission(
+        mission,
+        ctx.cwd,
+        createGatedVerificationRunner(pi.events, ctx),
+      );
       await persist(ctx, mission);
       ctx.ui.notify(
         formatReconcileReport(report),

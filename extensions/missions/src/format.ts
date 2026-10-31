@@ -165,6 +165,15 @@ export function formatReconcileReport(report: ReconcileReport): string {
       `${report.skippedNoVerification} done task(s) have no verification command and were skipped.`,
     );
   }
+  if (report.blocked.length > 0) {
+    lines.push(
+      `${report.blocked.length} task(s) were not verified because their command was blocked:`,
+    );
+    for (const b of report.blocked) {
+      lines.push(`  ⊘ ${b.taskId} ${b.title}`);
+      lines.push(`      ${b.output.split("\n").join("\n      ")}`);
+    }
+  }
   if (report.regressed.length === 0) {
     lines.push("No regressions.");
   } else {

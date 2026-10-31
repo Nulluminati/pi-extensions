@@ -18,6 +18,7 @@ import {
   createReadToolDefinition,
   createWriteToolDefinition,
 } from "@earendil-works/pi-coding-agent";
+import { SANDBOX_EXEC_EVENT, type SandboxExecRequest } from "../../lib/sandbox-exec.ts";
 import { startWorkerSandbox, type WorkerSandboxClient } from "./src/client.ts";
 
 // --- Extension ---
@@ -34,6 +35,7 @@ export default async function workerSandboxExtension(pi: ExtensionAPI) {
   let client: WorkerSandboxClient | undefined;
   let starting: Promise<WorkerSandboxClient> | undefined;
   let startError: Error | undefined;
+  let stopExecListening: (() => void) | undefined;
 
   async function activeClient(): Promise<WorkerSandboxClient> {
     if (startError) throw startError;
@@ -42,12 +44,58 @@ export default async function workerSandboxExtension(pi: ExtensionAPI) {
     throw new Error("Worker sandbox not ready; refusing host execution");
   }
 
+  /** Run another extension's shell command in the sandbox. Output is capped
+   * at the request's byte limit; failures never fall back to the host. */
+  function receiveExecRequest(data: unknown): void {
+    if (!sandboxActive) return;
+    const request = data as SandboxExecRequest;
+    request.claim();
+    let output = "";
+    let truncated = false;
+    const onData = (chunk: Buffer) => {
+      const room = request.maxOutputBytes - Buffer.byteLength(output);
+      if (room <= 0) {
+        truncated = true;
+        return;
+      }
+      const text = chunk.toString("utf8");
+      if (Buffer.byteLength(text) > room) truncated = true;
+      output += Buffer.from(text).subarray(0, room).toString("utf8");
+    };
+    const captured = () => (truncated ? `${output}…[truncated]` : output);
+    void activeClient()
+      .then((sandbox) =>
+        sandbox.runShell(request.command, {
+          cwd: request.cwd,
+          onData,
+          timeout: Math.ceil(request.timeoutMs / 1000),
+          ...(request.signal ? { signal: request.signal } : {}),
+        }),
+      )
+      .then(({ exitCode }) => {
+        if (exitCode === 0) {
+          request.respond({ ok: true, output: "" });
+          return;
+        }
+        request.respond({ ok: false, output: `${captured()}\nexit code ${exitCode}`.trim() });
+      })
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        request.respond({
+          ok: false,
+          output: `${captured()}\nSandboxed command failed: ${message}`.trim(),
+        });
+      });
+  }
+
   pi.on("session_start", async (_event, ctx) => {
     // Pi parses extension flag values after the factory has registered them.
     const sessionPolicy = pi.getFlag("sandbox");
     sandboxActive = worker || sessionPolicy !== undefined;
     if (!sandboxActive) return;
     registerSandboxTools();
+    if (!stopExecListening)
+      stopExecListening = pi.events.on(SANDBOX_EXEC_EVENT, receiveExecRequest);
     if (starting || client) return;
     startError = undefined;
     starting = worker
@@ -66,6 +114,8 @@ export default async function workerSandboxExtension(pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", async () => {
+    stopExecListening?.();
+    stopExecListening = undefined;
     const running = client;
     client = undefined;
     starting = undefined;

@@ -10,7 +10,9 @@
 
 // --- Imports ---
 import type { AgentToolResult, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { requestCommandReview } from "../../../lib/command-review.ts";
 import { execPlatformHint, runExec } from "../../../lib/exec.ts";
+import { requestSandboxExec } from "../../../lib/sandbox-exec.ts";
 import { findNewestCustomEntry } from "../../../lib/session-utils.ts";
 import {
   formatMissionStatus,
@@ -79,24 +81,72 @@ export interface MissionActionDeps {
   persist(ctx: ExtensionContext, mission: Mission): Promise<void>;
   /** Re-read the session's active mission from the transcript and disk. */
   reload(ctx: ExtensionContext): Promise<Mission | undefined>;
-  /** Runs verification commands for reconcile. */
-  runner: VerificationRunner;
+  /** Verification runner for one reconcile in this context. */
+  runnerFor(ctx: ExtensionContext): VerificationRunner;
 }
 
 // --- Verification runner ---
+
+const VERIFICATION_TIMEOUT_MS = 120_000;
+const VERIFICATION_MAX_OUTPUT = 1024 * 1024;
 
 /** Exec-backed verification runner, bounded to two minutes and 1 MiB of
  * output per verification command. */
 export function createExecVerificationRunner(): VerificationRunner {
   return {
     async run(command, cwd) {
-      const result = await runExec(command, { cwd, timeoutMs: 120_000, maxBuffer: 1024 * 1024 });
+      const result = await runExec(command, {
+        cwd,
+        timeoutMs: VERIFICATION_TIMEOUT_MS,
+        maxBuffer: VERIFICATION_MAX_OUTPUT,
+      });
       if (result.ok) return { ok: true, output: "verification command passed" };
       const output = [result.stdout, result.stderr, result.error, execPlatformHint()]
         .filter(Boolean)
         .join("\n")
         .trim();
       return { ok: false, output: output || "verification command failed" };
+    },
+  };
+}
+
+/**
+ * Verification runner that treats stored commands like `bash` calls. Each
+ * command goes to the command reviewer (Approval Mode) first; a refused
+ * command does not run. An approved command runs in the active sandbox, or
+ * through `host` when no sandbox claims it. Stored commands can come from
+ * hand-edited mission files or untrusted text, so none run unreviewed.
+ */
+export function createGatedVerificationRunner(
+  events: { emit(event: string, data: unknown): void },
+  ctx: ExtensionContext,
+  host: VerificationRunner = createExecVerificationRunner(),
+): VerificationRunner {
+  return {
+    async run(command, cwd) {
+      const review = await requestCommandReview(events, {
+        ctx,
+        command,
+        cwd,
+        source: "Mission reconcile: stored verification command",
+      });
+      if (!review.approved) {
+        return {
+          ok: false,
+          blocked: true,
+          output: review.reason ?? "verification command blocked",
+        };
+      }
+      const sandboxed = await requestSandboxExec(events, {
+        command,
+        cwd,
+        timeoutMs: VERIFICATION_TIMEOUT_MS,
+        maxOutputBytes: VERIFICATION_MAX_OUTPUT,
+        ...(ctx.signal ? { signal: ctx.signal } : {}),
+      });
+      if (!sandboxed) return host.run(command, cwd);
+      if (sandboxed.ok) return { ok: true, output: "verification command passed" };
+      return { ok: false, output: sandboxed.output || "verification command failed" };
     },
   };
 }
@@ -404,7 +454,7 @@ export async function executeMissionAction(
       };
     }
     case "reconcile": {
-      const report = await reconcileMission(mission, ctx.cwd, deps.runner);
+      const report = await reconcileMission(mission, ctx.cwd, deps.runnerFor(ctx));
       await deps.persist(ctx, mission);
       return {
         content: [{ type: "text", text: formatReconcileReport(report) }],

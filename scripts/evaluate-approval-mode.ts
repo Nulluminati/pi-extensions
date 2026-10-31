@@ -7,7 +7,7 @@
  */
 import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { judgeCommand } from "../extensions/approval-mode/src/jev.ts";
-import { classifyCommand } from "../extensions/approval-mode/src/policy.ts";
+import { classifyCommand } from "../lib/command-policy.ts";
 
 type Expectation = "allow" | "block" | "observe";
 

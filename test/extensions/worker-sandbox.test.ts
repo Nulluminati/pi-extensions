@@ -298,4 +298,89 @@ describe("worker sandbox extension", () => {
       tool?.execute("call-1", { path: "file.txt" }, undefined, undefined, ctx),
     ).rejects.toThrow(/sandbox not ready/);
   });
+
+  it("runs claimed exec requests in the session sandbox with bounded output", async () => {
+    vi.stubEnv("PI_WORKER", "");
+    const pi = createMockPi();
+    pi.getFlag.mockImplementation((name) => (name === "sandbox" ? "{}" : undefined));
+    const client = mockClient();
+    client.runShell.mockImplementation(async (_command, options) => {
+      (options as { onData(chunk: Buffer): void }).onData(Buffer.from("0123456789"));
+      return { exitCode: 3 };
+    });
+    vi.mocked(startWorkerSandbox).mockResolvedValue(client);
+    const ctx = createMockCommandContext();
+    await workerSandboxExtension(pi);
+    await getEventHandler(pi, "session_start")({ type: "session_start", reason: "startup" }, ctx);
+
+    const outcome = await execRequest(pi, { maxOutputBytes: 4 });
+    expect(client.runShell).toHaveBeenCalledWith(
+      "npm test",
+      expect.objectContaining({ cwd: "/workspace", timeout: 2 }),
+    );
+    expect(outcome).toEqual({ ok: false, output: "0123…[truncated]\nexit code 3" });
+
+    client.runShell.mockResolvedValueOnce({ exitCode: 0 });
+    expect(await execRequest(pi)).toEqual({ ok: true, output: "" });
+  });
+
+  it("reports a sandbox failure instead of running the command on the host", async () => {
+    vi.stubEnv("PI_WORKER", "");
+    const pi = createMockPi();
+    pi.getFlag.mockImplementation((name) => (name === "sandbox" ? "{}" : undefined));
+    vi.mocked(startWorkerSandbox).mockRejectedValue(new Error("broker failed"));
+    const ctx = createMockCommandContext();
+    await workerSandboxExtension(pi);
+    await expect(
+      getEventHandler(pi, "session_start")({ type: "session_start", reason: "startup" }, ctx),
+    ).rejects.toThrow("broker failed");
+    const outcome = await execRequest(pi);
+    expect(outcome?.ok).toBe(false);
+    expect(outcome?.output).toContain("broker failed");
+  });
+
+  it("leaves exec requests unclaimed without a sandbox and after shutdown", async () => {
+    vi.stubEnv("PI_WORKER", "");
+    const pi = createMockPi();
+    const unsubscribe = vi.fn();
+    pi.events.on.mockReturnValue(unsubscribe);
+    const ctx = createMockCommandContext();
+    await workerSandboxExtension(pi);
+    await getEventHandler(pi, "session_start")({ type: "session_start", reason: "startup" }, ctx);
+    expect(execListener(pi)).toBeUndefined();
+
+    pi.getFlag.mockImplementation((name) => (name === "sandbox" ? "{}" : undefined));
+    vi.mocked(startWorkerSandbox).mockResolvedValue(mockClient());
+    await getEventHandler(pi, "session_start")({ type: "session_start", reason: "startup" }, ctx);
+    expect(execListener(pi)).toBeDefined();
+    await getEventHandler(pi, "session_shutdown")({ type: "session_shutdown" }, ctx);
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
 });
+
+function execListener(pi: ReturnType<typeof createMockPi>) {
+  return pi.events.on.mock.calls.find((call) => call[0] === "worker-sandbox:exec-request")?.[1];
+}
+
+function execRequest(
+  pi: ReturnType<typeof createMockPi>,
+  overrides: { maxOutputBytes?: number } = {},
+): Promise<{ ok: boolean; output: string } | undefined> {
+  const listener = execListener(pi);
+  if (!listener) throw new Error("exec listener missing");
+  return new Promise((respond) => {
+    let claimed = false;
+    listener({
+      command: "npm test",
+      cwd: "/workspace",
+      timeoutMs: 1_500,
+      maxOutputBytes: 1024,
+      ...overrides,
+      claim: () => {
+        claimed = true;
+      },
+      respond,
+    });
+    if (!claimed) respond(undefined);
+  });
+}

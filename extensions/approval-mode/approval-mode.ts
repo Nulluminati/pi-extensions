@@ -10,6 +10,8 @@
 
 import { resolve } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { classifyCommand } from "../../lib/command-policy.ts";
+import { COMMAND_REVIEW_EVENT, type CommandReviewRequest } from "../../lib/command-review.ts";
 import {
   connectWorkerApprovalChannel,
   WORKER_APPROVAL_EVENT,
@@ -18,7 +20,6 @@ import {
 } from "../../lib/worker-approval.ts";
 import { promptApproval } from "./src/dialog.ts";
 import { judgeCommand } from "./src/jev.ts";
-import { classifyCommand } from "./src/policy.ts";
 
 const STATE_EVENT = "approval-mode:state";
 const STATUS_KEY = "approval-mode";
@@ -63,6 +64,7 @@ export default async function approvalMode(pi: ExtensionAPI) {
   let pendingApproval: Promise<void> = Promise.resolve();
   let parentContext: ExtensionContext | undefined;
   let stopListening: (() => void) | undefined;
+  let stopReviewListening: (() => void) | undefined;
   let dialogAbort = new AbortController();
   let channel: ReturnType<typeof connectWorkerApprovalChannel> | undefined;
 
@@ -99,6 +101,86 @@ export default async function approvalMode(pi: ExtensionAPI) {
     } finally {
       release();
     }
+  }
+
+  /**
+   * Apply hard denies, Jev review, and approval to one command. Resolves the
+   * block reason, or undefined when the command may run. `source` labels a
+   * request that did not come from a tool call in the approval dialog.
+   */
+  async function gate(
+    ctx: ExtensionContext,
+    command: string,
+    cwd: string,
+    toolName: string,
+    source?: string,
+  ): Promise<string | undefined> {
+    const classification = classifyCommand(command, cwd);
+    if (classification === "hard-deny") {
+      return "Approval Mode hard deny: this command cannot be approved by Jev.";
+    }
+    if (worker && channel && classification !== "known-safe") {
+      const mode = await channel.request({ kind: "mode" }, ctx.signal);
+      if (!("enabled" in mode) || ctx.signal?.aborted) {
+        return "Approval Mode blocked: parent approval channel unavailable.";
+      }
+      enabled = mode.enabled;
+    }
+    if (!enabled || classification === "known-safe") return undefined;
+    const result = await judgeCommand({
+      command,
+      cwd,
+      modelRegistry: ctx.modelRegistry,
+      ...(ctx.signal ? { signal: ctx.signal } : {}),
+    });
+    if (result.decision === "allow") return undefined;
+    if (result.decision === "unavailable" || ctx.signal?.aborted) {
+      return `Approval Mode blocked: ${result.reason}.`;
+    }
+    if (worker) {
+      const reply = await channel?.request(
+        {
+          kind: "approval",
+          command,
+          cwd,
+          toolName,
+          decision: result.decision,
+          reason: result.reason,
+        },
+        ctx.signal,
+      );
+      if (reply && "approved" in reply && reply.approved && !ctx.signal?.aborted) return undefined;
+      return `Approval Mode blocked: ${result.reason}.`;
+    }
+    if (await approve(ctx, command, result.decision, result.reason, source)) return undefined;
+    return `Approval Mode blocked: ${result.reason}.`;
+  }
+
+  /** Review a command another extension runs outside the command tools. The
+   * worker approval channel carries only tool calls, so workers refuse. */
+  function receiveCommandReview(data: unknown): void {
+    const request = data as CommandReviewRequest;
+    request.claim();
+    if (worker || readOnly) {
+      request.respond({
+        approved: false,
+        reason: "Approval Mode blocked: workers cannot run extension commands.",
+      });
+      return;
+    }
+    void gate(
+      request.ctx,
+      request.command,
+      request.cwd,
+      "bash",
+      `${request.source}\nDirectory: ${request.cwd}`,
+    )
+      .then((reason) =>
+        request.respond(reason === undefined ? { approved: true } : { approved: false, reason }),
+      )
+      .catch(() =>
+        request.respond({ approved: false, reason: "Approval Mode blocked: review failed." }),
+      );
   }
 
   function receiveWorkerRequest(data: unknown): void {
@@ -158,6 +240,9 @@ export default async function approvalMode(pi: ExtensionAPI) {
     parentContext = worker ? undefined : ctx;
     if (!worker && !stopListening) {
       stopListening = pi.events.on(WORKER_APPROVAL_EVENT, receiveWorkerRequest);
+    }
+    if (!stopReviewListening) {
+      stopReviewListening = pi.events.on(COMMAND_REVIEW_EVENT, receiveCommandReview);
     }
     const fd = process.env[WORKER_APPROVAL_FD_ENV_VAR];
     if (worker && fd === "3") {
@@ -231,51 +316,8 @@ export default async function approvalMode(pi: ExtensionAPI) {
       event.toolName === "background" && typeof input?.cwd === "string"
         ? resolve(ctx.cwd, input.cwd)
         : ctx.cwd;
-    const classification = classifyCommand(command, cwd);
-    if (classification === "hard-deny") {
-      return {
-        block: true,
-        reason: "Approval Mode hard deny: this command cannot be approved by Jev.",
-      };
-    }
-    if (worker && channel && classification !== "known-safe") {
-      const mode = await channel.request({ kind: "mode" }, ctx.signal);
-      if (!("enabled" in mode) || ctx.signal?.aborted) {
-        return {
-          block: true,
-          reason: "Approval Mode blocked: parent approval channel unavailable.",
-        };
-      }
-      enabled = mode.enabled;
-    }
-    if (!enabled || classification === "known-safe") return undefined;
-    const result = await judgeCommand({
-      command,
-      cwd,
-      modelRegistry: ctx.modelRegistry,
-      ...(ctx.signal ? { signal: ctx.signal } : {}),
-    });
-    if (result.decision === "allow") return undefined;
-    if (result.decision === "unavailable" || ctx.signal?.aborted) {
-      return { block: true, reason: `Approval Mode blocked: ${result.reason}.` };
-    }
-    if (worker) {
-      const reply = await channel?.request(
-        {
-          kind: "approval",
-          command,
-          cwd,
-          toolName: event.toolName,
-          decision: result.decision,
-          reason: result.reason,
-        },
-        ctx.signal,
-      );
-      if (reply && "approved" in reply && reply.approved && !ctx.signal?.aborted) return undefined;
-      return { block: true, reason: `Approval Mode blocked: ${result.reason}.` };
-    }
-    if (await approve(ctx, command, result.decision, result.reason)) return undefined;
-    return { block: true, reason: `Approval Mode blocked: ${result.reason}.` };
+    const reason = await gate(ctx, command, cwd, event.toolName);
+    return reason === undefined ? undefined : { block: true, reason };
   });
 
   pi.on("session_shutdown", async () => {
@@ -285,5 +327,7 @@ export default async function approvalMode(pi: ExtensionAPI) {
     channel = undefined;
     stopListening?.();
     stopListening = undefined;
+    stopReviewListening?.();
+    stopReviewListening = undefined;
   });
 }
