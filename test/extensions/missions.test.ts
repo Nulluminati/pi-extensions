@@ -398,6 +398,27 @@ describe("missions-extension", () => {
     ]);
   });
 
+  it("reconcile does not run an approved command when the reconcile is cancelled", async () => {
+    const controller = new AbortController();
+    (mockCtx as { signal?: AbortSignal }).signal = controller.signal;
+    mockPi.events.emit.mockImplementation((event: string, data: unknown) => {
+      if (event !== "approval-mode:command-review") return;
+      const request = data as { claim(): void; respond(reply: { approved: boolean }): void };
+      request.claim();
+      request.respond({ approved: true });
+      controller.abort();
+    });
+    const taskId = await doneTaskWith("touch ran.txt");
+
+    const res = await executeTool({ action: "reconcile" });
+
+    expect(await markerExists()).toBe(false);
+    expect(res.details.report.regressed).toHaveLength(0);
+    expect(res.details.report.blocked).toEqual([
+      expect.objectContaining({ taskId, output: expect.stringMatching(/cancelled/i) }),
+    ]);
+  });
+
   it("reconcile runs approved verification commands in an active sandbox", async () => {
     const execs: Array<Record<string, unknown>> = [];
     mockPi.events.emit.mockImplementation((event: string, data: unknown) => {

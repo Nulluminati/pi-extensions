@@ -137,6 +137,13 @@ export function createGatedVerificationRunner(
           output: review.reason ?? "verification command blocked",
         };
       }
+      // A cancelled reconcile runs nothing, even after approval.
+      const cancelled = {
+        ok: false,
+        blocked: true,
+        output: "Reconcile cancelled before the verification command ran.",
+      };
+      if (ctx.signal?.aborted) return cancelled;
       const sandboxed = await requestSandboxExec(events, {
         command,
         cwd,
@@ -144,7 +151,7 @@ export function createGatedVerificationRunner(
         maxOutputBytes: VERIFICATION_MAX_OUTPUT,
         ...(ctx.signal ? { signal: ctx.signal } : {}),
       });
-      if (!sandboxed) return host.run(command, cwd);
+      if (!sandboxed) return ctx.signal?.aborted ? cancelled : host.run(command, cwd);
       if (sandboxed.ok) return { ok: true, output: "verification command passed" };
       return { ok: false, output: sandboxed.output || "verification command failed" };
     },

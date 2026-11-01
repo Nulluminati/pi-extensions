@@ -36,6 +36,15 @@ describe("requestSandboxExec", () => {
     expect(outcome?.output).toContain("broker gone");
   });
 
+  it("refuses an already-cancelled request without emitting it", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const emit = vi.fn();
+    const outcome = await requestSandboxExec({ emit }, { ...options, signal: controller.signal });
+    expect(outcome).toEqual({ ok: false, output: "Sandboxed command cancelled." });
+    expect(emit).not.toHaveBeenCalled();
+  });
+
   it("fails when the caller cancels while the sandbox runs", async () => {
     const controller = new AbortController();
     const result = requestSandboxExec(

@@ -40,6 +40,9 @@ export function requestSandboxExec(
   events: { emit(event: string, data: unknown): void },
   options: SandboxExecOptions,
 ): Promise<SandboxExecOutcome | undefined> {
+  if (options.signal?.aborted) {
+    return Promise.resolve({ ok: false, output: "Sandboxed command cancelled." });
+  }
   return new Promise((resolve) => {
     let settled = false;
     let claimed = false;
