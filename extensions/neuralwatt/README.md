@@ -136,7 +136,7 @@ The probe checks `reasoning_content`, `reasoning`, and `reasoning_text`. Neuralw
 | API | Purpose |
 |-----|---------|
 | `pi.registerProvider("neuralwatt")` | Registers the provider and its models |
-| `pi.registerCommand("neuralwatt:flex")` | Toggles the flex pricing tier for the current model |
+| `pi.registerCommand("neuralwatt:flex")` | Toggles the flex pricing tier for the current model only; each model keeps its own setting for the Pi session |
 | `pi.registerCommand("neuralwatt:models")` | Lists models with capabilities and pricing |
 | `pi.registerCommand("neuralwatt:quota")` | Displays quota and energy usage |
 | `pi.on("session_start")` | Public-catalog staleness check and flex-capable model discovery |

@@ -13,8 +13,8 @@ import {
  * flexCapable }:
  *   - flexCapable: the current model is a Neuralwatt model with a flex sibling
  *     in the catalog (the badge is shown only when this is true).
- *   - flexOn: flex is active for the current model (toggle on AND capable); the
- *     badge reads "on" or "off" based on this.
+ *   - flexOn: flex is active for the current model (enabled for this model id
+ *     AND capable); the badge reads "on" or "off" based on this.
  */
 export const FLEX_EVENT = "neuralwatt:flex-change";
 
@@ -63,23 +63,23 @@ export async function fetchFlexCapableIds(
 /**
  * Compute the flex state to publish for the currently selected model.
  * `flexCapable` is true only for a Neuralwatt model whose id has a flex sibling
- * in `capableIds`. `flexOn` is the effective active state (toggle on AND
- * capable) since flex is meaningless for a non-capable model.
+ * in `capableIds`. `flexOn` is the effective active state (model id in
+ * `enabledIds` AND capable) since flex is meaningless for a non-capable model.
  */
 export function computeFlexState(
   model: { provider?: string; id: string } | undefined,
-  toggleOn: boolean,
+  enabledIds: Set<string>,
   capableIds: Set<string>,
 ): FlexState {
   const flexCapable = !!model && model.provider === "neuralwatt" && capableIds.has(model.id);
-  return { flexOn: flexCapable && toggleOn, flexCapable };
+  return { flexOn: flexCapable && enabledIds.has(model.id), flexCapable };
 }
 
 /**
  * Inject `service_tier: "flex"` into an outgoing provider request body when
- * flex is toggled on, the request goes to Neuralwatt, and the request's model is
- * flex-capable. Returns the modified payload to replace the original, or
- * undefined to leave it unchanged.
+ * the request goes to Neuralwatt and the request's model is both enabled for
+ * flex (in `enabledIds`) and flex-capable. Returns the modified payload to
+ * replace the original, or undefined to leave it unchanged.
  *
  * Uses `service_tier` (not a `-flex` model id) so the model id and prompt cache
  * stay unchanged — Neuralwatt's flex docs recommend this form precisely because
@@ -94,14 +94,14 @@ export function computeFlexState(
 export function injectServiceTier(
   payload: unknown,
   provider: string | undefined,
-  toggleOn: boolean,
+  enabledIds: Set<string>,
   capableIds: Set<string>,
 ): Record<string, unknown> | undefined {
-  if (!toggleOn) return undefined;
   if (provider !== "neuralwatt") return undefined;
   if (!payload || typeof payload !== "object") return undefined;
   const body = payload as Record<string, unknown>;
   const model = body.model;
-  if (typeof model !== "string" || !capableIds.has(model)) return undefined;
+  if (typeof model !== "string") return undefined;
+  if (!enabledIds.has(model) || !capableIds.has(model)) return undefined;
   return { ...body, service_tier: "flex" };
 }

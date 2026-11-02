@@ -1067,53 +1067,64 @@ describe("neuralwatt flex helpers", () => {
   it("computeFlexState reports capable only for a Neuralwatt model in the set", () => {
     const capable = new Set(["glm-5.2"]);
     const model = (id: string, provider = "neuralwatt") => ({ id, provider });
-    expect(computeFlexState(model("glm-5.2"), true, capable)).toEqual({
+    const enabled = new Set(["glm-5.2"]);
+    expect(computeFlexState(model("glm-5.2"), enabled, capable)).toEqual({
       flexOn: true,
       flexCapable: true,
     });
-    expect(computeFlexState(model("glm-5.2"), false, capable)).toEqual({
+    expect(computeFlexState(model("glm-5.2"), new Set(), capable)).toEqual({
       flexOn: false,
       flexCapable: true,
     });
     // Not flex-capable.
-    expect(computeFlexState(model("qwen3.6-35b"), true, capable)).toEqual({
+    expect(computeFlexState(model("qwen3.6-35b"), new Set(["qwen3.6-35b"]), capable)).toEqual({
       flexOn: false,
       flexCapable: false,
     });
     // Non-Neuralwatt provider is never capable even if the id matches.
-    expect(computeFlexState(model("glm-5.2", "openai"), true, capable)).toEqual({
+    expect(computeFlexState(model("glm-5.2", "openai"), enabled, capable)).toEqual({
       flexOn: false,
       flexCapable: false,
     });
     // No model selected.
-    expect(computeFlexState(undefined, true, capable)).toEqual({
+    expect(computeFlexState(undefined, enabled, capable)).toEqual({
       flexOn: false,
       flexCapable: false,
     });
   });
 
-  it("injectServiceTier injects service_tier only when toggled on and model is capable", () => {
-    const capable = new Set(["glm-5.2"]);
-    const out = injectServiceTier({ model: "glm-5.2", messages: [] }, "neuralwatt", true, capable);
+  it("injectServiceTier injects service_tier only when flex is enabled for a capable model", () => {
+    const capable = new Set(["glm-5.2", "kimi-k2.7-code"]);
+    const enabled = new Set(["glm-5.2"]);
+    const out = injectServiceTier(
+      { model: "glm-5.2", messages: [] },
+      "neuralwatt",
+      enabled,
+      capable,
+    );
     expect(out).toEqual({ model: "glm-5.2", messages: [], service_tier: "flex" });
 
-    // Toggle off: no change.
+    // Flex not enabled for any model: no change.
     expect(
-      injectServiceTier({ model: "glm-5.2", messages: [] }, "neuralwatt", false, capable),
+      injectServiceTier({ model: "glm-5.2", messages: [] }, "neuralwatt", new Set(), capable),
     ).toBeUndefined();
-    // Toggled on but model not capable: no change.
+    // Capable model without flex enabled for it: no change.
     expect(
-      injectServiceTier({ model: "qwen3.6-35b" }, "neuralwatt", true, capable),
+      injectServiceTier({ model: "kimi-k2.7-code" }, "neuralwatt", enabled, capable),
+    ).toBeUndefined();
+    // Enabled but no longer capable: no change.
+    expect(
+      injectServiceTier({ model: "qwen3.6-35b" }, "neuralwatt", new Set(["qwen3.6-35b"]), capable),
     ).toBeUndefined();
     // Non-string model: no change.
-    expect(injectServiceTier({ model: 123 }, "neuralwatt", true, capable)).toBeUndefined();
+    expect(injectServiceTier({ model: 123 }, "neuralwatt", enabled, capable)).toBeUndefined();
     // Non-object payload: no change.
-    expect(injectServiceTier(null, "neuralwatt", true, capable)).toBeUndefined();
+    expect(injectServiceTier(null, "neuralwatt", enabled, capable)).toBeUndefined();
     // Existing service_tier is preserved/overridden cleanly via spread.
     const overridden = injectServiceTier(
       { model: "glm-5.2", service_tier: "auto" },
       "neuralwatt",
-      true,
+      enabled,
       capable,
     );
     expect(overridden).toEqual({ model: "glm-5.2", service_tier: "flex" });
@@ -1121,8 +1132,9 @@ describe("neuralwatt flex helpers", () => {
 
   it("injectServiceTier leaves other providers' requests untouched when the model id matches", () => {
     const capable = new Set(["glm-5.2"]);
-    expect(injectServiceTier({ model: "glm-5.2" }, "zai", true, capable)).toBeUndefined();
-    expect(injectServiceTier({ model: "glm-5.2" }, undefined, true, capable)).toBeUndefined();
+    const enabled = new Set(["glm-5.2"]);
+    expect(injectServiceTier({ model: "glm-5.2" }, "zai", enabled, capable)).toBeUndefined();
+    expect(injectServiceTier({ model: "glm-5.2" }, undefined, enabled, capable)).toBeUndefined();
   });
 });
 
@@ -1269,6 +1281,52 @@ describe("neuralwatt flex integration", () => {
       mockCtx,
     );
     expect(result).toBeUndefined();
+  });
+
+  it("flex enabled for one model stays off for another capable model", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await bootWithFlex(mockPi, mockCtx, "glm-5.2", ["glm-5.2", "kimi-k2.7-code"]);
+    await getCommandHandler(mockPi, "neuralwatt:flex")("", mockCtx);
+
+    // Switch to another flex-capable Neuralwatt model.
+    mockPi.events.emit.mockClear();
+    const kimi = makeModel("kimi-k2.7-code");
+    mockCtx.model = kimi;
+    const selectHandler = getEventHandler(mockPi, "model_select");
+    await selectHandler(
+      { type: "model_select", model: kimi, previousModel: undefined, source: "set" },
+      mockCtx,
+    );
+    const kimiEmit = mockPi.events.emit.mock.calls.find((c) => c[0] === FLEX_EVENT);
+    expect(kimiEmit?.[1]).toEqual({ flexOn: false, flexCapable: true });
+
+    const providerHandler = getEventHandler(mockPi, "before_provider_request");
+    const kimiResult = await providerHandler(
+      { type: "before_provider_request", payload: { model: "kimi-k2.7-code", messages: [] } },
+      mockCtx,
+    );
+    expect(kimiResult).toBeUndefined();
+
+    // Enabling flex on kimi does not disable it for glm-5.2, and vice versa.
+    await getCommandHandler(mockPi, "neuralwatt:flex")("", mockCtx);
+    expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Flex enabled"), "info");
+
+    // Switching back keeps the earlier per-model choice.
+    mockPi.events.emit.mockClear();
+    const glm = makeModel("glm-5.2");
+    mockCtx.model = glm;
+    await selectHandler(
+      { type: "model_select", model: glm, previousModel: kimi, source: "set" },
+      mockCtx,
+    );
+    const glmEmit = mockPi.events.emit.mock.calls.find((c) => c[0] === FLEX_EVENT);
+    expect(glmEmit?.[1]).toEqual({ flexOn: true, flexCapable: true });
+    const glmResult = await providerHandler(
+      { type: "before_provider_request", payload: { model: "glm-5.2", messages: [] } },
+      mockCtx,
+    );
+    expect(glmResult).toEqual({ model: "glm-5.2", messages: [], service_tier: "flex" });
   });
 
   it("model_select emits flex state and notifies for Neuralwatt models", async () => {

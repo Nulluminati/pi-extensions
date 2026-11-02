@@ -35,15 +35,16 @@ import { fetchQuota, formatQuotaDisplay } from "./src/quota.ts";
 
 export default async function neuralwattExtension(pi: ExtensionAPI) {
   // Flex state is per-instance (closure-scoped) so it never leaks across Pi
-  // instances or tests. `flexToggleOn` is the user's toggle; `flexCapableIds`
+  // instances or tests. `flexEnabledIds` holds the Neuralwatt model ids the
+  // user toggled flex on for, so the choice stays per model; `flexCapableIds`
   // is the set of Neuralwatt base model ids with a flex sibling, rebuilt from
   // the authenticated catalog on session_start. An empty set (no key or fetch
   // failure) hides the indicator and makes the toggle warn unavailable.
-  let flexToggleOn = false;
+  const flexEnabledIds = new Set<string>();
   let flexCapableIds = new Set<string>();
 
   function emitFlexState(model: { provider?: string; id: string } | undefined): void {
-    const state = computeFlexState(model, flexToggleOn, flexCapableIds);
+    const state = computeFlexState(model, flexEnabledIds, flexCapableIds);
     pi.events.emit(FLEX_EVENT, state);
   }
 
@@ -98,16 +99,16 @@ export default async function neuralwattExtension(pi: ExtensionAPI) {
       .catch(() => {});
   });
 
-  // Inject `service_tier: "flex"` on outgoing requests when the toggle is on,
-  // the active model is a Neuralwatt model, and the request's model is
-  // flex-capable. The event fires for every provider, so the provider check
+  // Inject `service_tier: "flex"` on outgoing requests when the active model is
+  // a Neuralwatt model and the request's model is flex-capable and has flex
+  // enabled. The event fires for every provider, so the provider check
   // keeps flex out of other providers' requests. Returns the modified payload
   // to replace the original; undefined leaves it untouched.
   pi.on("before_provider_request", async (event, ctx) => {
     return injectServiceTier(
       (event as { payload: unknown }).payload,
       ctx.model?.provider,
-      flexToggleOn,
+      flexEnabledIds,
       flexCapableIds,
     );
   });
@@ -143,10 +144,12 @@ export default async function neuralwattExtension(pi: ExtensionAPI) {
         );
         return;
       }
-      flexToggleOn = !flexToggleOn;
+      const enabled = !flexEnabledIds.has(model.id);
+      if (enabled) flexEnabledIds.add(model.id);
+      else flexEnabledIds.delete(model.id);
       emitFlexState(model);
       ctx.ui.notify(
-        `Flex ${flexToggleOn ? "enabled" : "disabled"} for ${model.name || model.id}`,
+        `Flex ${enabled ? "enabled" : "disabled"} for ${model.name || model.id}`,
         "info",
       );
     },
