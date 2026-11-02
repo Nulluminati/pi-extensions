@@ -33,6 +33,39 @@ describe("command policy", () => {
     }
   });
 
+  it.each([
+    "/",
+    "~",
+    "$HOME",
+    "${HOME}",
+    "$PWD",
+    "${PWD}",
+    ".",
+    "..",
+    "*",
+    "./*",
+    ".*",
+    "./.*",
+    ".git",
+    "./.git",
+  ])("hard-denies recursive deletion of %s with trailing slashes", (target) => {
+    for (const suffix of ["/", "//"]) {
+      expect(classifyCommand(`rm -rf ${target}${suffix}`, "/workspace")).toBe("hard-deny");
+    }
+  });
+
+  it.each([
+    "rm -fr $HOME/",
+    "rm --recursive --force $HOME/",
+    "rm -rf -- $HOME/",
+    'rm -rf "$HOME/"',
+    'rm -rf "$HOME"/',
+    'rm -rf "$HOME"//',
+    "rm -rf '/'/",
+  ])("hard-denies trailing-slash targets in %s", (command) => {
+    expect(classifyCommand(command, "/workspace")).toBe("hard-deny");
+  });
+
   it("hard-denies recursive deletion of the resolved agent directory", () => {
     for (const command of [
       "rm -rf /custom/agent",

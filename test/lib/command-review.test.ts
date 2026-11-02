@@ -69,6 +69,18 @@ describe("requestCommandReview", () => {
     expect(result.reason).toMatch(/hard deny/i);
   });
 
+  it.each(["rm -rf $HOME/", "rm -rf ~/", "rm -rf //", "rm -rf */"])(
+    "refuses %s when no reviewer is listening",
+    async (command) => {
+      const result = await requestCommandReview(
+        { emit: vi.fn() },
+        { ctx: ctxWith(), command, cwd: "/workspace", source: "mission reconcile" },
+      );
+      expect(result.approved).toBe(false);
+      expect(result.reason).toMatch(/hard deny/i);
+    },
+  );
+
   it("allows other commands when no reviewer is listening", async () => {
     await expect(
       requestCommandReview(

@@ -46,12 +46,12 @@ const ROOT_TARGETS = new Set([
 export type CommandClass = "hard-deny" | "known-safe" | "needs-jev";
 
 function isRootDeletion(command: string, cwd: string, agentDir: string): boolean {
-  const target = RECURSIVE_DELETE.exec(command)?.[1]?.replace(/^["']|["']$/g, "");
+  const target = RECURSIVE_DELETE.exec(command)?.[1]?.replace(/^["']|["'](?=\/*$)/g, "");
   if (!target) return false;
-  const bareTarget = target.replace(/\/+$/, "");
+  const bareTarget = target.replace(/\/+$/, "") || "/";
   const bareAgentDir = agentDir.replace(/\/+$/, "");
   return (
-    ROOT_TARGETS.has(target) ||
+    ROOT_TARGETS.has(bareTarget) ||
     bareTarget === cwd ||
     bareTarget === bareAgentDir ||
     bareTarget.startsWith(`${bareAgentDir}/`) ||

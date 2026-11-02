@@ -592,9 +592,17 @@ describe("approval-mode extension", () => {
     const command = pi.registerCommand.mock.calls.find((call) => call[0] === "approval-mode")?.[1]
       .handler;
     await command?.("off", ctx);
-    const reply = await reviewRequest(pi, ctx, "git reset --hard");
-    expect(reply.approved).toBe(false);
-    expect(reply.reason).toContain("hard deny");
+    for (const denied of [
+      "git reset --hard",
+      "rm -rf $HOME/",
+      "rm -rf ~/",
+      "rm -rf //",
+      "rm -rf */",
+    ]) {
+      const reply = await reviewRequest(pi, ctx, denied);
+      expect(reply.approved).toBe(false);
+      expect(reply.reason).toContain("hard deny");
+    }
     expect(await reviewRequest(pi, ctx, "npm test")).toEqual({ approved: true });
     expect(classify).not.toHaveBeenCalled();
     expect(ctx.ui.select).not.toHaveBeenCalled();
