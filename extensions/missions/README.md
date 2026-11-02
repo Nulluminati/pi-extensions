@@ -31,9 +31,9 @@ Tool actions: `create`, `status`, `list`, `switch`, `task_add`, `task_update`, `
 
 - **Storage**: one JSON file per mission under `.pi/missions/`. Mission writes are atomic and serialized across processes; an update based on stale data fails with instructions to reload mission status instead of overwriting another session's work. Which mission a session is working is session state, persisted in that session's transcript — missions affect only the session that created or switched to them, and two sessions can each hold their own active mission. Cross-session edits to the same mission are CAS-protected. Mission records stay out of git automatically: `session_start` appends `.pi/missions/` to the repository's local `.git/info/exclude`.
 - **Task graph**: tasks declare `dependsOn` ids; a task cannot be marked done while dependencies are open, and `done` requires a delivery summary.
-- **Verification**: tasks may carry a `verification` command. `reconcile` re-runs every done task's command; failures move the task to `regressed` so the record matches reality instead of optimism.
+- **Verification**: tasks may carry a `verification` command. `reconcile` re-runs every done task's command; failures move the task to `regressed` so the record matches reality instead of optimism. Reconcile refuses a `complete` or `aborted` mission. A cancelled reconcile runs no more commands, even after approval.
 - **Verification safety**: stored commands get the same review as a `bash` call. Approval Mode checks each command first, with its hard denies, Jev judgment, and dialog. A refused command does not run; reconcile reports it as blocked and leaves the task status unchanged. Without Approval Mode, reconcile still refuses hard-deny commands. When a session sandbox is active, approved commands run inside it.
-- **Budget**: `maxIterations`/`maxTokens` with a `spend` action that reports over-budget explicitly.
+- **Budget**: `maxIterations`/`maxTokens` with a `spend` action that reports over-budget explicitly. `create` and `set_budget` reject negative caps.
 - **Cache safety**: missions deliberately does not inject per-turn context (that would break the provider prompt-cache prefix); the tool's guidelines tell the agent to consult mission status when working on mission tasks.
 
 ## Pi APIs Used
