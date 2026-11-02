@@ -80,7 +80,7 @@ The GLM-5.2, Kimi, and Qwen3.6 reasoning models pair with `-fast` non-reasoning 
 
 ### Startup staleness check
 
-On `session_start`, if a Neuralwatt key is configured, the extension fetches the unauthenticated `/v1/models` view. When the live catalog contains selectable models the static list lacks, Pi shows a warning once per session. `-flex` siblings are ignored because the flex toggle already represents them. A network error or non-OK response skips the warning and logs one `console.debug` diagnostic containing the provider and the error or HTTP status; no UI warning is shown for a failed check, and flex-capable discovery still runs. The check never blocks.
+On `session_start`, if a Neuralwatt key is configured, the extension fetches the unauthenticated `/v1/models` view. When the live catalog contains selectable models the static list lacks, Pi shows a warning once per session. `-flex` siblings are ignored because the flex toggle already represents them. A network error or non-OK response skips the warning and logs one `console.debug` diagnostic containing the provider and the error or HTTP status; no UI warning is shown for a failed check, and flex-capable discovery still runs. Both requests run in the background and in parallel, so they do not delay startup; the warning and the flex state arrive when the requests settle.
 
 ### Auth resolution
 

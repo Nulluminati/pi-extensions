@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import neuralwattExtension from "../../extensions/neuralwatt/neuralwatt.ts";
 import { MISSING_MODELS_MESSAGE } from "../../extensions/neuralwatt/src/catalog.ts";
+import { FETCH_TIMEOUT_MS } from "../../extensions/neuralwatt/src/constants.ts";
 import {
   computeFlexState,
   FLEX_EVENT,
@@ -20,6 +21,14 @@ import { getCommandHandler, getEventHandler } from "../mocks/test-helpers.ts";
 
 function mockModelsResponse(models: unknown[]): Response {
   return { ok: true, json: () => Promise.resolve({ data: models }) } as Response;
+}
+
+/**
+ * session_start returns before its network checks finish. Wait one macrotask so
+ * the background checks settle against the resolved fetch mocks.
+ */
+function settleStartupChecks(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 /** Minimal Model shape for overriding mockCtx.model with a specific id/provider. */
@@ -564,6 +573,7 @@ describe("neuralwatt-extension", () => {
 
     const handler = getEventHandler(mockPi, "session_start");
     await handler({ type: "session_start", reason: "new" }, mockCtx);
+    await settleStartupChecks();
 
     expect(mockFetch).toHaveBeenCalledWith(
       "https://api.neuralwatt.com/v1/models",
@@ -583,6 +593,7 @@ describe("neuralwatt-extension", () => {
 
     const handler = getEventHandler(mockPi, "session_start");
     await handler({ type: "session_start", reason: "new" }, mockCtx);
+    await settleStartupChecks();
 
     const headers = mockFetch.mock.calls[0][1].headers as Record<string, string>;
     expect(headers.Authorization).toBeUndefined();
@@ -602,6 +613,7 @@ describe("neuralwatt-extension", () => {
 
     const handler = getEventHandler(mockPi, "session_start");
     await handler({ type: "session_start", reason: "new" }, mockCtx);
+    await settleStartupChecks();
 
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("glm-6.0"), "warning");
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(
@@ -626,6 +638,7 @@ describe("neuralwatt-extension", () => {
 
     const handler = getEventHandler(mockPi, "session_start");
     await handler({ type: "session_start", reason: "new" }, mockCtx);
+    await settleStartupChecks();
 
     const warnings = mockCtx.ui.notify.mock.calls.filter((call) => call[1] === "warning");
     expect(warnings).toEqual([]);
@@ -645,6 +658,7 @@ describe("neuralwatt-extension", () => {
 
     const handler = getEventHandler(mockPi, "session_start");
     await handler({ type: "session_start", reason: "new" }, mockCtx);
+    await settleStartupChecks();
 
     const warnings = mockCtx.ui.notify.mock.calls.filter((c) => c[1] === "warning");
     expect(warnings).toEqual([]);
@@ -657,6 +671,7 @@ describe("neuralwatt-extension", () => {
 
     const handler = getEventHandler(mockPi, "session_start");
     await handler({ type: "session_start", reason: "new" }, mockCtx);
+    await settleStartupChecks();
 
     const warnings = mockCtx.ui.notify.mock.calls.filter((c) => c[1] === "warning");
     expect(warnings).toEqual([]);
@@ -670,6 +685,7 @@ describe("neuralwatt-extension", () => {
 
     const handler = getEventHandler(mockPi, "session_start");
     await handler({ type: "session_start", reason: "new" }, mockCtx);
+    await settleStartupChecks();
 
     expect(mockFetch).not.toHaveBeenCalled();
     expect(debugSpy).not.toHaveBeenCalled();
@@ -686,6 +702,7 @@ describe("neuralwatt-extension", () => {
 
     const handler = getEventHandler(mockPi, "session_start");
     await handler({ type: "session_start", reason: "new" }, mockCtx);
+    await settleStartupChecks();
 
     expect(debugSpy).toHaveBeenCalledTimes(1);
     expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining("neuralwatt"));
@@ -709,6 +726,7 @@ describe("neuralwatt-extension", () => {
 
     const handler = getEventHandler(mockPi, "session_start");
     await handler({ type: "session_start", reason: "new" }, mockCtx);
+    await settleStartupChecks();
 
     expect(debugSpy).toHaveBeenCalledTimes(1);
     expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining("neuralwatt"));
@@ -725,10 +743,73 @@ describe("neuralwatt-extension", () => {
 
     const handler = getEventHandler(mockPi, "session_start");
     await handler({ type: "session_start", reason: "new" }, mockCtx);
+    await settleStartupChecks();
 
     expect(debugSpy).not.toHaveBeenCalled();
     const warnings = mockCtx.ui.notify.mock.calls.filter((c) => c[1] === "warning");
     expect(warnings).toEqual([]);
+  });
+
+  it("startup check returns before the network answers and settles within one timeout window", async () => {
+    vi.useFakeTimers();
+    try {
+      // A server that accepts the connection and never answers: fetch settles
+      // only when its abort signal fires.
+      mockFetch.mockImplementation(
+        (_url: string, init: { signal: AbortSignal }) =>
+          new Promise((_resolve, reject) => {
+            init.signal.addEventListener("abort", () => reject(new Error("aborted")), {
+              once: true,
+            });
+          }),
+      );
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      mockCtx.model = makeModel("glm-5.2");
+      await neuralwattExtension(mockPi);
+
+      const handler = getEventHandler(mockPi, "session_start");
+      let settled = false;
+      void Promise.resolve(handler({ type: "session_start", reason: "new" }, mockCtx)).then(() => {
+        settled = true;
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(settled).toBe(true);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+
+      // Both checks run in parallel, so one timeout window settles them.
+      await vi.advanceTimersByTimeAsync(FETCH_TIMEOUT_MS);
+      const emits = mockPi.events.emit.mock.calls.filter((c) => c[0] === FLEX_EVENT);
+      expect(emits[emits.length - 1]?.[1]).toEqual({ flexOn: false, flexCapable: false });
+      expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining("aborted"));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("startup check ignores a stale ctx when the session is replaced before the checks settle", async () => {
+    const stale = new Error("This extension ctx is stale after session replacement or reload.");
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await neuralwattExtension(mockPi);
+
+    const handler = getEventHandler(mockPi, "session_start");
+    await handler({ type: "session_start", reason: "new" }, mockCtx);
+    // Pi invalidates the captured ctx after the handler returns.
+    Object.defineProperty(mockCtx, "model", {
+      get: () => {
+        throw stale;
+      },
+    });
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+    try {
+      await settleStartupChecks();
+      await settleStartupChecks();
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      process.off("unhandledRejection", unhandled);
+    }
   });
 
   it("exposes a static message id for the missing-models notice", () => {
@@ -1075,6 +1156,7 @@ describe("neuralwatt flex integration", () => {
     mockFetch.mockResolvedValue(flexCatalog(capableIds));
     const handler = getEventHandler(mockPi, "session_start");
     await handler({ type: "session_start", reason: "new" }, mockCtx);
+    await settleStartupChecks();
   }
 
   it("session_start builds the flex-capable set and emits flex state", async () => {

@@ -64,27 +64,38 @@ export default async function neuralwattExtension(pi: ExtensionAPI) {
   // pay a startup fetch; uses the unauthenticated /v1/models view and ignores
   // flex siblings represented by the service-tier toggle. A catalog fetch
   // failure logs a debug diagnostic and skips the warning without UI output;
-  // flex discovery below still runs. Never blocks.
+  // flex discovery below still runs.
+  async function checkCatalog(signal: AbortSignal | undefined, notify: (msg: string) => void) {
+    const catalog = await fetchCatalog(signal);
+    if (!catalog) return;
+    const missing = findMissingModels(catalog);
+    if (missing.length > 0) {
+      notify(`${MISSING_MODELS_MESSAGE}:\n${missing.map((id) => `  • ${id}`).join("\n")}`);
+    }
+  }
+
+  // Build the flex-capable set from the authenticated catalog. Silent on fetch
+  // error so the indicator and toggle just report flex as unavailable.
+  async function loadFlexCapableIds(apiKey: string, signal: AbortSignal | undefined) {
+    flexCapableIds = await fetchFlexCapableIds(apiKey, signal);
+  }
+
+  // Pi awaits session_start before the editor accepts input, so the handler
+  // only resolves the key and returns. Both fetches run in the background and
+  // in parallel; the warning and flex state arrive when they settle, at worst
+  // one fetch timeout after startup. If Pi replaces the session or reloads
+  // before then, the captured ctx is stale and throws; the result is dropped.
   pi.on("session_start", async (_event, ctx) => {
     if (!ctx.hasUI) return;
     const apiKey = await getResolvedApiKey(ctx);
     if (!apiKey) return;
-    const catalog = await fetchCatalog(ctx.signal);
-    if (catalog) {
-      const missing = findMissingModels(catalog);
-      if (missing.length > 0) {
-        ctx.ui.notify(
-          `${MISSING_MODELS_MESSAGE}:\n${missing.map((id) => `  • ${id}`).join("\n")}`,
-          "warning",
-        );
-      }
-    }
-
-    // Build the flex-capable set from the authenticated catalog. Reuses the key
-    // resolved above; silent on fetch error so the indicator and toggle just
-    // report flex as unavailable.
-    flexCapableIds = await fetchFlexCapableIds(apiKey, ctx.signal);
-    emitFlexState(ctx.model);
+    const notify = (msg: string) => ctx.ui.notify(msg, "warning");
+    void Promise.allSettled([
+      checkCatalog(ctx.signal, notify),
+      loadFlexCapableIds(apiKey, ctx.signal),
+    ])
+      .then(() => emitFlexState(ctx.model))
+      .catch(() => {});
   });
 
   // Inject `service_tier: "flex"` on outgoing requests when the toggle is on,
