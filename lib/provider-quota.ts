@@ -29,7 +29,9 @@ export async function fetchProviderQuota<T>(options: ProviderQuotaFetchOptions):
     if (!response.ok) {
       throw new Error(`Failed to fetch quota: ${response.status} ${response.statusText}`);
     }
-    return response.json() as Promise<T>;
+    // Await the body here so `finally` cleanup runs only after it settles;
+    // the timeout and caller signal must stay armed while the body streams.
+    return (await response.json()) as T;
   } finally {
     cleanup();
   }

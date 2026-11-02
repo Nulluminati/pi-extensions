@@ -104,4 +104,49 @@ describe("fetchProviderQuota", () => {
     await assertion;
     expect(vi.getTimerCount()).toBe(0);
   });
+
+  describe("when the body stalls after the headers arrive", () => {
+    beforeEach(() => {
+      mockFetch.mockImplementationOnce((_url: unknown, init?: RequestInit) =>
+        Promise.resolve({
+          ...makeModel(),
+          json: () =>
+            new Promise((_resolve, reject) => {
+              init?.signal?.addEventListener("abort", () => reject(new Error("aborted")), {
+                once: true,
+              });
+            }),
+        }),
+      );
+    });
+
+    it("aborts the body read when the timeout elapses", async () => {
+      const pending = fetchProviderQuota({
+        endpoint: ENDPOINT,
+        apiKey: "k-123",
+        timeoutMs: 15_000,
+      });
+      const assertion = expect(pending).rejects.toThrow("aborted");
+      await vi.advanceTimersByTimeAsync(15_000);
+
+      await assertion;
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("aborts the body read when the caller's signal aborts", async () => {
+      const outer = new AbortController();
+
+      const pending = fetchProviderQuota({
+        endpoint: ENDPOINT,
+        apiKey: "k-123",
+        timeoutMs: 15_000,
+        signal: outer.signal,
+      });
+      const assertion = expect(pending).rejects.toThrow("aborted");
+      await vi.advanceTimersByTimeAsync(0);
+      outer.abort();
+
+      await assertion;
+    });
+  });
 });
