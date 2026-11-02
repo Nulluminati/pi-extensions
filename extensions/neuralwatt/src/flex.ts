@@ -77,21 +77,28 @@ export function computeFlexState(
 
 /**
  * Inject `service_tier: "flex"` into an outgoing provider request body when
- * flex is toggled on and the request's model is flex-capable. Returns the
- * modified payload to replace the original, or undefined to leave it unchanged.
+ * flex is toggled on, the request goes to Neuralwatt, and the request's model is
+ * flex-capable. Returns the modified payload to replace the original, or
+ * undefined to leave it unchanged.
  *
  * Uses `service_tier` (not a `-flex` model id) so the model id and prompt cache
  * stay unchanged — Neuralwatt's flex docs recommend this form precisely because
  * flex and standard share a server-side cache. Checking the payload's own model
  * id (rather than ctx.model) keeps the injection robust even if the active
  * model and request model ever diverge.
+ *
+ * `provider` is the provider of the active model. The payload carries no
+ * provider field, and other providers ship the same model ids (for example
+ * `zai/glm-5.3-flash`), so the provider check keeps flex out of their requests.
  */
 export function injectServiceTier(
   payload: unknown,
+  provider: string | undefined,
   toggleOn: boolean,
   capableIds: Set<string>,
 ): Record<string, unknown> | undefined {
   if (!toggleOn) return undefined;
+  if (provider !== "neuralwatt") return undefined;
   if (!payload || typeof payload !== "object") return undefined;
   const body = payload as Record<string, unknown>;
   const model = body.model;

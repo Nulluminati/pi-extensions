@@ -1013,20 +1013,35 @@ describe("neuralwatt flex helpers", () => {
 
   it("injectServiceTier injects service_tier only when toggled on and model is capable", () => {
     const capable = new Set(["glm-5.2"]);
-    const out = injectServiceTier({ model: "glm-5.2", messages: [] }, true, capable);
+    const out = injectServiceTier({ model: "glm-5.2", messages: [] }, "neuralwatt", true, capable);
     expect(out).toEqual({ model: "glm-5.2", messages: [], service_tier: "flex" });
 
     // Toggle off: no change.
-    expect(injectServiceTier({ model: "glm-5.2", messages: [] }, false, capable)).toBeUndefined();
+    expect(
+      injectServiceTier({ model: "glm-5.2", messages: [] }, "neuralwatt", false, capable),
+    ).toBeUndefined();
     // Toggled on but model not capable: no change.
-    expect(injectServiceTier({ model: "qwen3.6-35b" }, true, capable)).toBeUndefined();
+    expect(
+      injectServiceTier({ model: "qwen3.6-35b" }, "neuralwatt", true, capable),
+    ).toBeUndefined();
     // Non-string model: no change.
-    expect(injectServiceTier({ model: 123 }, true, capable)).toBeUndefined();
+    expect(injectServiceTier({ model: 123 }, "neuralwatt", true, capable)).toBeUndefined();
     // Non-object payload: no change.
-    expect(injectServiceTier(null, true, capable)).toBeUndefined();
+    expect(injectServiceTier(null, "neuralwatt", true, capable)).toBeUndefined();
     // Existing service_tier is preserved/overridden cleanly via spread.
-    const overridden = injectServiceTier({ model: "glm-5.2", service_tier: "auto" }, true, capable);
+    const overridden = injectServiceTier(
+      { model: "glm-5.2", service_tier: "auto" },
+      "neuralwatt",
+      true,
+      capable,
+    );
     expect(overridden).toEqual({ model: "glm-5.2", service_tier: "flex" });
+  });
+
+  it("injectServiceTier leaves other providers' requests untouched when the model id matches", () => {
+    const capable = new Set(["glm-5.2"]);
+    expect(injectServiceTier({ model: "glm-5.2" }, "zai", true, capable)).toBeUndefined();
+    expect(injectServiceTier({ model: "glm-5.2" }, undefined, true, capable)).toBeUndefined();
   });
 });
 
@@ -1153,6 +1168,22 @@ describe("neuralwatt flex integration", () => {
     // Capable toggle on but a non-capable model in the payload: no injection.
     result = await providerHandler(
       { type: "before_provider_request", payload: { model: "qwen3.6-35b" } },
+      mockCtx,
+    );
+    expect(result).toBeUndefined();
+  });
+
+  it("before_provider_request leaves another provider's request untouched with flex on", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await bootWithFlex(mockPi, mockCtx, "glm-5.2", ["glm-5.2"]);
+    await getCommandHandler(mockPi, "neuralwatt:flex")("", mockCtx);
+
+    // Switch to a different provider that ships the same model id.
+    mockCtx.model = makeModel("glm-5.2", "zai");
+    const providerHandler = getEventHandler(mockPi, "before_provider_request");
+    const result = await providerHandler(
+      { type: "before_provider_request", payload: { model: "glm-5.2", messages: [] } },
       mockCtx,
     );
     expect(result).toBeUndefined();

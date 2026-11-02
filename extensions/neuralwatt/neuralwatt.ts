@@ -87,11 +87,18 @@ export default async function neuralwattExtension(pi: ExtensionAPI) {
     emitFlexState(ctx.model);
   });
 
-  // Inject `service_tier: "flex"` on outgoing requests when the toggle is on
-  // and the request's model is flex-capable. Returns the modified payload to
-  // replace the original; undefined leaves it untouched.
-  pi.on("before_provider_request", async (event, _ctx) => {
-    return injectServiceTier((event as { payload: unknown }).payload, flexToggleOn, flexCapableIds);
+  // Inject `service_tier: "flex"` on outgoing requests when the toggle is on,
+  // the active model is a Neuralwatt model, and the request's model is
+  // flex-capable. The event fires for every provider, so the provider check
+  // keeps flex out of other providers' requests. Returns the modified payload
+  // to replace the original; undefined leaves it untouched.
+  pi.on("before_provider_request", async (event, ctx) => {
+    return injectServiceTier(
+      (event as { payload: unknown }).payload,
+      ctx.model?.provider,
+      flexToggleOn,
+      flexCapableIds,
+    );
   });
 
   // Re-publish flex state when the selected model changes so the status bar
