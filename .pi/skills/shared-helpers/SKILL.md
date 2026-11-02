@@ -56,6 +56,9 @@ import { renderModalFrame } from "../../../lib/tui-frame.ts";
 | Share live presence (who is online) between concurrent sessions | `writeShard`, `loadShards`, `removeShard`, `readShard` | `lib/presence-shards.ts` |
 | Parse shell command rules or share the effective parent list with workers | `parseAllowList`, `checkCommand`, `BASH_ALLOW_REQUEST_EVENT`, `BashAllowRequest` | `lib/bash-allow.ts` |
 | Connect worker command approvals to the parent UI | `connectWorkerApprovalChannel`, `attachParentApprovalChannel`, `dispatchWorkerApproval` | `lib/worker-approval.ts` |
+| Classify a shell command as hard-deny, known-safe, or needs-Jev | `classifyCommand`, `hasExecutionHook` | `lib/command-policy.ts` |
+| Ask Approval Mode to review a shell command that an extension runs itself | `requestCommandReview`, `COMMAND_REVIEW_EVENT` | `lib/command-review.ts` |
+| Run an extension's shell command in the active sandbox | `requestSandboxExec`, `SANDBOX_EXEC_EVENT` | `lib/sandbox-exec.ts` |
 
 ---
 
@@ -356,7 +359,7 @@ Ephemeral spills with no retention go in `os.tmpdir()` with a `pi-<name>-` prefi
 
 ## `lib/exec.ts` — bounded one-shot command execution
 
-`runExec(command, { cwd, timeoutMs, maxBuffer? })` captures stdout and stderr and returns `{ ok, stdout, stderr, error?, durationMs }` without throwing. Callers format the result for their own domain. Use it for short, pipe-captured commands such as autoresearch measurement and mission verification. Do not use it for workers: their detached process group and file-backed streaming require separate lifecycle handling.
+`runExec(command, { cwd, timeoutMs, maxBuffer? })` captures stdout and stderr and returns `{ ok, stdout, stderr, error?, durationMs }` without throwing. Callers format the result for their own domain. The command runs under `/bin/sh` in its own process group. At the timeout, the whole group gets SIGTERM, then SIGKILL after 1 s. A command that reaches the timeout always fails, even if it later exits 0. Use it for short, pipe-captured commands such as autoresearch measurement and mission verification. Do not use it for workers: their detached process group and file-backed streaming require separate lifecycle handling.
 
 ## `lib/json-atomic.ts` — atomic JSON writes
 
@@ -418,6 +421,16 @@ The worker runner creates a dedicated duplex pipe at descriptor `3` and sets `PI
 Each command requests live mode. Flagged commands send a separate approval request. The runner supplies trusted worker identity and uses `dispatchWorkerApproval` to emit `approval-mode:worker-request`. Approval Mode handles that event directly through its UI, not through model messages.
 
 Replies apply to one request identifier. Cancellation, disconnection, malformed frames, and timeouts cannot grant approval. Close the channel on shutdown. Do not pass its descriptor to sandboxed command processes. Parent dialogs must use the request's abort signal, not the completed spawn turn's signal.
+
+## `lib/command-policy.ts`, `lib/command-review.ts`, `lib/sandbox-exec.ts` — commands outside the `bash` tool
+
+Use these modules when an extension runs a stored shell command itself, such as a mission verification command.
+
+`classifyCommand(command, cwd)` returns `hard-deny`, `known-safe`, or `needs-jev`. Hard denies include recursive deletion of system roots, the workspace, and the Pi agent directory. Approval Mode and `requestCommandReview` share this policy.
+
+Pass `pi.events` as `events`. `requestCommandReview(events, { ctx, command, cwd, source })` emits `approval-mode:command-review`. Approval Mode claims the request and applies its hard denies, Jev judgment, and dialog. With no claim, the helper refuses hard denies and approves other commands. The promise never rejects. Cancellation and reviewer errors resolve as a refusal.
+
+`requestSandboxExec(events, { command, cwd, timeoutMs, maxOutputBytes, signal? })` emits `worker-sandbox:exec-request`. `worker-sandbox` claims the request while a sandbox is active. The promise resolves `undefined` when no sandbox claims it; the caller then runs the command on the host. A claimed sandbox that fails returns a failure and never falls back to the host. Check the abort signal again before a host run.
 
 ## `lib/validate-extension.ts` — repo tooling, not extension code
 

@@ -102,6 +102,8 @@ When you rename an event, change both sides.
 | `todos:changed` | `lib/todos.ts` (used by `todos`) | `todos` (widget refresh), `herdr` (pane token) |
 | `bash-allow:request` | `workers` (`lib/bash-allow.ts` contract) | `bash-allow` returns its effective list through a synchronous reply callback |
 | `approval-mode:worker-request` | `workers` (`lib/worker-approval.ts`) | `approval-mode` (parent session) |
+| `approval-mode:command-review` | `missions` (`lib/command-review.ts`) | `approval-mode`. Without a listener, the helper refuses hard denies and approves other commands. |
+| `worker-sandbox:exec-request` | `missions` (`lib/sandbox-exec.ts`) | `worker-sandbox` while a sandbox is active. Without a listener, the caller runs the command on the host. |
 | `herdr:blocked` | `ask-user`, `approval-mode` | Official Herdr Pi integration, outside this repository. See [herdr-integration.md](herdr-integration.md#blocked-dialogs-complete). |
 | `autoresearch:state` | `autoresearch` | None in this repository |
 | `recap:changed` | `session-recap` | None in this repository |
