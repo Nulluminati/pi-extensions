@@ -419,6 +419,64 @@ describe("missions-extension", () => {
     ]);
   });
 
+  it("reconcile keeps done tasks unchanged when sandbox verification is cancelled", async () => {
+    const controller = new AbortController();
+    (mockCtx as { signal?: AbortSignal }).signal = controller.signal;
+    const taskId = await doneTaskWith("touch ran.txt");
+    const nextTask = await executeTool({
+      action: "task_add",
+      taskTitle: "Next task",
+      verification: { command: "touch next.txt" },
+    });
+    await executeTool({
+      action: "task_update",
+      taskId: nextTask.details.taskId as string,
+      status: "done",
+      summary: "done",
+    });
+    const before = await loadMission(cwd, lastActiveEntryId() as string);
+    const execs: string[] = [];
+    mockPi.events.emit.mockImplementation((event: string, data: unknown) => {
+      if (event === "approval-mode:command-review") {
+        const request = data as { claim(): void; respond(reply: { approved: boolean }): void };
+        request.claim();
+        request.respond({ approved: true });
+      }
+      if (event === "worker-sandbox:exec-request") {
+        const request = data as { command: string; claim(): void };
+        execs.push(request.command);
+        request.claim();
+        queueMicrotask(() => controller.abort());
+      }
+    });
+
+    const res = await executeTool({ action: "reconcile" });
+
+    expect(execs).toEqual(["touch ran.txt"]);
+    expect(await markerExists()).toBe(false);
+    expect(res.details.report).toEqual({
+      missionId: lastActiveEntryId(),
+      checked: 0,
+      passed: 0,
+      regressed: [],
+      blocked: [
+        { taskId, title: "Guarded task", output: expect.stringMatching(/cancelled/i) },
+        {
+          taskId: nextTask.details.taskId,
+          title: "Next task",
+          output: expect.stringMatching(/cancelled/i),
+        },
+      ],
+      skippedNoVerification: 0,
+    });
+    expect(contentText(res)).toContain(
+      "2 task(s) were not verified because their command was blocked",
+    );
+    expect(res.terminate).toBeUndefined();
+    const after = await loadMission(cwd, res.details.report.missionId as string);
+    expect(after?.tasks).toEqual(before?.tasks);
+  });
+
   it("reconcile runs approved verification commands in an active sandbox", async () => {
     const execs: Array<Record<string, unknown>> = [];
     mockPi.events.emit.mockImplementation((event: string, data: unknown) => {
