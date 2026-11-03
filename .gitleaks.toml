@@ -11,19 +11,6 @@ useDefault = true
 # Repository title shown in gitleaks output.
 title = "pi-extensions"
 
-# Match only complete placeholder values. Path exceptions can skip entire
-# README files and workflow directories, including real credentials.
-[[allowlists]]
-description = "Documentation placeholders"
-regexTarget = "secret"
-regexes = [
-  '''^syn_\.\.\.$''',
-  '''^ctx7sk-\.\.\.$''',
-  '''^sk-\.\.\.$''',
-  '''^PLACEHOLDER$''',
-  '''^<your[_-]?key[_-]?here>$''',
-]
-
 # Sourcegraph access tokens are bare 40-char hex strings. Match only the
 # synthetic SHA in the code-search fixture, not other secrets on its line.
 [[allowlists]]

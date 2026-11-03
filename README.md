@@ -147,15 +147,19 @@ Checks run on every extension:
 
 ### Secret scanning
 
-A [gitleaks](https://github.com/gitleaks/gitleaks) config lives at `.gitleaks.toml` and runs two ways:
+A [gitleaks](https://github.com/gitleaks/gitleaks) config lives at `.gitleaks.toml` and runs two ways.
+Use Gitleaks 8.25.0 or later locally. CI pins Gitleaks 8.30.1 because older versions ignore top-level exception lists.
 
 - The husky pre-commit hook runs `gitleaks protect --staged` so secrets are caught before they leave the machine. The hook skips silently if gitleaks isn't installed locally; install it for early feedback:
   - Fedora: `sudo dnf install gitleaks`
   - macOS: `brew install gitleaks`
 - The CI workflow runs gitleaks on pushes and pull requests targeting `main`. Branch protection must require this check to block merges.
 
-The config extends Gitleaks' default ruleset. Its exceptions match complete placeholder values and one synthetic commit identifier, not entire files.
-Run `npm run test:secrets` with Gitleaks installed to test the exceptions and local-state ignore rules.
+The config extends Gitleaks' default ruleset. Its exception matches one synthetic commit identifier, not entire files.
+Documentation placeholders need no exception because the default rules do not detect them.
+Run `npm run test:secrets` with Gitleaks installed to test the exception and local-state ignore rules.
+A control scan without exceptions first proves that the fixtures activate both credential and commit-identifier detectors.
+The repository-config scan must suppress only the synthetic commit identifier.
 The secret-scan job also runs these regression tests.
 
 ### Testing
