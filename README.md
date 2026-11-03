@@ -158,11 +158,6 @@ The config extends Gitleaks' default ruleset. Its exceptions match complete plac
 Run `npm run test:secrets` with Gitleaks installed to test the exceptions and local-state ignore rules.
 The secret-scan job also runs these regression tests.
 
-### Public repository review
-
-[docs/publication-review.md](docs/publication-review.md) records the publication audit, dependency findings, and required GitHub settings.
-Repository visibility remains unchanged. Complete the publication procedure before you make the repository public.
-
 ### Testing
 
 Shared mock factories live in `test/mocks/`:
