@@ -442,7 +442,13 @@ describe("background-jobs-extension", () => {
       const mockPi = createMockPi();
       const mockCtx = createMockCommandContext();
       await backgroundJobsExtension(mockPi);
-      mockPi.exec.mockResolvedValue({ stdout: "", stderr: "", code: 0, killed: false });
+      mockPi.exec.mockResolvedValue({
+        stdout: "",
+        stderr: "",
+        code: 0,
+        killed: false,
+        truncated: false,
+      });
 
       const result = await startMonitor(mockPi, mockCtx, {
         command: "git merge --no-edit",
@@ -469,8 +475,20 @@ describe("background-jobs-extension", () => {
       const mockCtx = createMockCommandContext();
       await backgroundJobsExtension(mockPi);
       mockPi.exec
-        .mockResolvedValueOnce({ stdout: "pending\n", stderr: "", code: 1, killed: false })
-        .mockResolvedValueOnce({ stdout: "DONE\n", stderr: "", code: 0, killed: false });
+        .mockResolvedValueOnce({
+          stdout: "pending\n",
+          stderr: "",
+          code: 1,
+          killed: false,
+          truncated: false,
+        })
+        .mockResolvedValueOnce({
+          stdout: "DONE\n",
+          stderr: "",
+          code: 0,
+          killed: false,
+          truncated: false,
+        });
 
       await startMonitor(mockPi, mockCtx, {
         command: "check",
@@ -492,7 +510,13 @@ describe("background-jobs-extension", () => {
       const mockPi = createMockPi();
       const mockCtx = createMockCommandContext();
       await backgroundJobsExtension(mockPi);
-      mockPi.exec.mockResolvedValue({ stdout: "pending", stderr: "", code: 1, killed: false });
+      mockPi.exec.mockResolvedValue({
+        stdout: "pending",
+        stderr: "",
+        code: 1,
+        killed: false,
+        truncated: false,
+      });
 
       await startMonitor(mockPi, mockCtx, {
         command: "check",
@@ -520,6 +544,7 @@ describe("background-jobs-extension", () => {
         stderr: "check: command not found",
         code: 127,
         killed: false,
+        truncated: false,
       });
 
       await startMonitor(mockPi, mockCtx, {
@@ -1091,7 +1116,13 @@ describe("background-jobs-extension", () => {
       const mockPi = createMockPi();
       const mockCtx = createMockCommandContext();
       await backgroundJobsExtension(mockPi);
-      mockPi.exec.mockResolvedValue({ stdout: "pending", stderr: "", code: 1, killed: false });
+      mockPi.exec.mockResolvedValue({
+        stdout: "pending",
+        stderr: "",
+        code: 1,
+        killed: false,
+        truncated: false,
+      });
       const monitorTool = getTool(mockPi, "monitor");
       await monitorTool.execute(
         "call-1",

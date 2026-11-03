@@ -53,13 +53,13 @@ afterEach(() => vi.unstubAllEnvs());
 
 describe("unmocked Pi compatibility", () => {
   it.each(["pi-coding-agent", "pi-ai", "pi-tui"])(
-    "uses at least the 1.2.0 %s development package within 1.x",
+    "uses at least the 1.5.0 %s development package within 1.x",
     (name) => {
       const entry = fileURLToPath(import.meta.resolve(`@earendil-works/${name}`));
       const manifest = JSON.parse(readFileSync(resolve(dirname(entry), "../package.json"), "utf8"));
       expect(manifest.version).toMatch(/^1\./);
       const [, minor] = manifest.version.split(".").map(Number);
-      expect(minor).toBeGreaterThanOrEqual(2);
+      expect(minor).toBeGreaterThanOrEqual(5);
     },
   );
 

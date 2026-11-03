@@ -1,4 +1,5 @@
 import {
+  type ClassifierModel,
   type ClassifierResult,
   fauxAssistantMessage,
   type StopReason,
@@ -122,10 +123,19 @@ function classification(choice = "sol", keys = ["sol", "deepseek", "glm"]): Clas
   };
 }
 function enableJev(ctx: ReturnType<typeof createMockContext>, result = classification()) {
-  const classifier = {
-    ...model("typesafe/jev-latest"),
-    type: "classifier" as const,
-    api: "typesafe-system-one" as const,
+  // A classifier carries no chat-only fields (thinkingLevelMap, maxTokens, chat
+  // compat), so build it from the base fields instead of spreading a chat model.
+  const catalog = model("typesafe/jev-latest");
+  const classifier: ClassifierModel<"typesafe-system-one"> = {
+    type: "classifier",
+    api: "typesafe-system-one",
+    provider: catalog.provider,
+    id: catalog.id,
+    name: catalog.name,
+    baseUrl: catalog.baseUrl,
+    input: catalog.input,
+    cost: catalog.cost,
+    contextWindow: catalog.contextWindow,
   };
   ctx.modelRegistry.findOfType.mockReturnValue(classifier);
   ctx.modelRegistry.getAvailableOfType.mockResolvedValue([classifier]);

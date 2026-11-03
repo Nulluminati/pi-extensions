@@ -747,5 +747,7 @@ function createRenderContext(args: unknown): ToolRenderContext<Record<string, ne
     isError: false,
     durationMs: undefined,
     outputPad: 1,
+    keyText: () => "",
+    keyHint: (keybinding: string, description: string) => `${keybinding} ${description}`,
   };
 }

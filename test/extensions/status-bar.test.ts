@@ -118,9 +118,16 @@ function mockGitExec(porcelainStdout: string, opts: { stash?: string; code?: num
         stderr: "",
         code: stash ? 0 : 1,
         killed: false,
+        truncated: false,
       });
     }
-    return Promise.resolve({ stdout: porcelainStdout, stderr: "", code, killed: false });
+    return Promise.resolve({
+      stdout: porcelainStdout,
+      stderr: "",
+      code,
+      killed: false,
+      truncated: false,
+    });
   });
 }
 
@@ -238,7 +245,9 @@ describe("status-bar-extension", () => {
     mockPi.exec = vi.fn(
       () =>
         new Promise((resolve) => {
-          resolvers.push(() => resolve({ stdout: "", stderr: "", code: 0, killed: false }));
+          resolvers.push(() =>
+            resolve({ stdout: "", stderr: "", code: 0, killed: false, truncated: false }),
+          );
         }),
     );
     const mockCtx = createMockCommandContext();
@@ -1036,6 +1045,7 @@ describe("status-bar-extension", () => {
       stderr: "fatal: not a git repository",
       code: 128,
       killed: false,
+      truncated: false,
     });
     await enableBar(mockPi, mockCtx);
 
