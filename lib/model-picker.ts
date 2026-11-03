@@ -190,19 +190,23 @@ export async function selectModelWithSearch(
   activeValue: string | undefined,
   title: string,
 ): Promise<string | undefined> {
-  return ctx.ui.custom<string | undefined>((tui, theme, keybindings, done) =>
-    createSearchableSelectModal({
-      tui,
-      theme,
-      keybindings,
-      items,
-      activeValue,
-      title,
-      maxVisible: 10,
-      noMatchText: "No matching models",
-      searchText: (item) => `${item.value} ${item.description ?? ""}`,
-      onSelect: done,
-      onCancel: () => done(undefined),
-    }),
+  return ctx.ui.custom<string | undefined>(
+    (tui, theme, keybindings, done) =>
+      createSearchableSelectModal({
+        tui,
+        theme,
+        keybindings,
+        items,
+        activeValue,
+        title,
+        maxVisible: 10,
+        noMatchText: "No matching models",
+        searchText: (item) => `${item.value} ${item.description ?? ""}`,
+        onSelect: done,
+        onCancel: () => done(undefined),
+      }),
+    // Report pi as waiting for an answer so terminals with program status
+    // (OSC 7501) show it as blocked while the picker is open.
+    { blocked: { kind: "question", message: title } },
   );
 }

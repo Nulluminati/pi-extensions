@@ -123,6 +123,16 @@ describe("promptText", () => {
     expect(ctx.ui.custom).not.toHaveBeenCalled();
     expect(ctx.ui.input).toHaveBeenCalledWith("Goal", "seed");
   });
+
+  it("reports pi as blocked on the question prompt", async () => {
+    const ctx = createMockPromptContext();
+    ctx.ui.custom = mockFn((_factory: unknown, options: { blocked?: unknown }) => {
+      expect(options.blocked).toEqual({ kind: "question", message: "Goal" });
+      return Promise.resolve("answer");
+    });
+
+    await expect(promptText(ctx, { title: "Goal", placeholder: "goal" })).resolves.toBe("answer");
+  });
 });
 
 describe("createConfirmModal", () => {
@@ -222,6 +232,16 @@ describe("confirmModal", () => {
     });
 
     await expect(confirmModal(ctx, { title: "Confirm", body: "Proceed?" })).resolves.toBe(false);
+  });
+
+  it("reports pi as blocked on the permission prompt", async () => {
+    const ctx = createMockPromptContext();
+    ctx.ui.custom = mockFn((_factory: unknown, options: { blocked?: unknown }) => {
+      expect(options.blocked).toEqual({ kind: "permission", message: "Confirm" });
+      return Promise.resolve(true);
+    });
+
+    await expect(confirmModal(ctx, { title: "Confirm", body: "Proceed?" })).resolves.toBe(true);
   });
 
   it("falls back to ctx.ui.confirm outside TUI mode", async () => {

@@ -43,33 +43,38 @@ async function showQuestionnaire(
   ctx: ExtensionContext,
   signal: AbortSignal | undefined,
 ): Promise<QuestionnaireOutcome> {
-  return ctx.ui.custom<QuestionnaireOutcome>((tui, theme, keybindings, done) => {
-    const handle = createSettleOnce(done, signal, { status: "aborted" });
+  return ctx.ui.custom<QuestionnaireOutcome>(
+    (tui, theme, keybindings, done) => {
+      const handle = createSettleOnce(done, signal, { status: "aborted" });
 
-    const component = new QuestionnaireComponent({
-      questions,
-      tui,
-      theme,
-      keybindings,
-      done: handle.settle,
-    });
+      const component = new QuestionnaireComponent({
+        questions,
+        tui,
+        theme,
+        keybindings,
+        done: handle.settle,
+      });
 
-    return {
-      get focused() {
-        return component.focused;
-      },
-      set focused(value: boolean) {
-        component.focused = value;
-      },
-      render: (width) => component.render(width),
-      invalidate: () => component.invalidate(),
-      handleInput: (data) => component.handleInput(data),
-      dispose: () => {
-        handle.dispose();
-        component.dispose();
-      },
-    };
-  });
+      return {
+        get focused() {
+          return component.focused;
+        },
+        set focused(value: boolean) {
+          component.focused = value;
+        },
+        render: (width) => component.render(width),
+        invalidate: () => component.invalidate(),
+        handleInput: (data) => component.handleInput(data),
+        dispose: () => {
+          handle.dispose();
+          component.dispose();
+        },
+      };
+    },
+    // The questionnaire is inline, so it must announce the wait itself: pi
+    // reports blocked state only for dialogs that request it.
+    { blocked: { kind: "question", message: "Ask User" } },
+  );
 }
 
 // --- Extension ---

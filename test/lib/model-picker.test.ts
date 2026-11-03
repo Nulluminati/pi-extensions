@@ -120,6 +120,18 @@ describe("selectModelWithSearch", () => {
 
     await expect(pending).resolves.toBeUndefined();
   });
+
+  it("reports pi as blocked while the picker waits", async () => {
+    const { ctx, component } = pickerContext();
+    const pending = selectModelWithSearch(ctx, ITEMS, undefined, "Small Model");
+
+    expect(vi.mocked(ctx.ui.custom).mock.calls[0]?.[1]).toEqual({
+      blocked: { kind: "question", message: "Small Model" },
+    });
+
+    component().handleInput("\u001b");
+    await pending;
+  });
 });
 
 describe("createModelConfigFlow", () => {

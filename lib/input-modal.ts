@@ -141,18 +141,22 @@ export async function confirmModal(
     if (!ctx.hasUI) return false;
     return ctx.ui.confirm(options.title, options.body);
   }
-  return ctx.ui.custom<boolean>((tui, theme, keybindings, done) =>
-    createConfirmModal({
-      tui,
-      theme,
-      keybindings,
-      title: options.title,
-      body: options.body,
-      confirmLabel: options.confirmLabel,
-      cancelLabel: options.cancelLabel,
-      onConfirm: () => done(true),
-      onCancel: () => done(false),
-    }),
+  return ctx.ui.custom<boolean>(
+    (tui, theme, keybindings, done) =>
+      createConfirmModal({
+        tui,
+        theme,
+        keybindings,
+        title: options.title,
+        body: options.body,
+        confirmLabel: options.confirmLabel,
+        cancelLabel: options.cancelLabel,
+        onConfirm: () => done(true),
+        onCancel: () => done(false),
+      }),
+    // Report pi as waiting for an answer so terminals with program status
+    // (OSC 7501) show it as blocked while the dialog is open.
+    { blocked: { kind: "permission", message: options.title } },
   );
 }
 
@@ -175,16 +179,20 @@ export async function promptText(
     if (!ctx.hasUI) return undefined;
     return ctx.ui.input(options.title, options.initialValue ?? options.placeholder);
   }
-  return ctx.ui.custom<string | undefined>((tui, theme, keybindings, done) =>
-    createInputModal({
-      tui,
-      theme,
-      keybindings,
-      title: options.title,
-      placeholder: options.placeholder,
-      initialValue: options.initialValue,
-      onSubmit: (value) => done(value),
-      onCancel: () => done(undefined),
-    }),
+  return ctx.ui.custom<string | undefined>(
+    (tui, theme, keybindings, done) =>
+      createInputModal({
+        tui,
+        theme,
+        keybindings,
+        title: options.title,
+        placeholder: options.placeholder,
+        initialValue: options.initialValue,
+        onSubmit: (value) => done(value),
+        onCancel: () => done(undefined),
+      }),
+    // Report pi as waiting for an answer so terminals with program status
+    // (OSC 7501) show it as blocked while the dialog is open.
+    { blocked: { kind: "question", message: options.title } },
   );
 }

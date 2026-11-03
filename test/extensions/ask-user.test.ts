@@ -587,6 +587,18 @@ describe("ask-user Herdr blocked events", () => {
       expect(ctx.ui.custom).not.toHaveBeenCalled();
     },
   );
+
+  it("also reports pi as blocked for terminals with program status", async () => {
+    const pi = createMockPi();
+    const ctx = createMockContext();
+    ctx.ui.custom = mockFn((_factory: unknown, options: { blocked?: unknown }) => {
+      expect(options.blocked).toEqual({ kind: "question", message: "Ask User" });
+      return Promise.resolve({ status: "dismissed" });
+    });
+    await askUserExtension(pi);
+
+    await executeTool(pi, { questions: QUESTIONS }, ctx);
+  });
 });
 
 describe("ask-user schema and state", () => {

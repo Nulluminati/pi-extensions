@@ -73,6 +73,24 @@ Keep the clearing event in a `finally` block. Do not emit an active event for a 
 
 Tests cover normal completion, cancellation, errors, and overlapping dialogs. Adapter tests cover execution outside Herdr and metadata cleanup.
 
+### Program status: complete
+
+Pi 1.5.0 reports blocked state to terminals through the Program Status Protocol (OSC 7501). Herdr does not need this protocol because it uses `herdr:blocked`. Other terminals, such as Rex and iTerm2, do.
+
+The inline dialogs pass `blocked: { kind, message }` to `ctx.ui.custom()`. Without this option Pi reports the session as working while a dialog waits for an answer.
+
+| Dialog | Helper | Kind |
+|--------|--------|------|
+| `ask_user` questionnaire | `showQuestionnaire` | `question` |
+| Confirmation modal | `confirmModal` | `permission` |
+| Text prompt | `promptText` | `question` |
+| Model picker | `selectModelWithSearch` | `question` |
+
+Pi ignores the option for overlays. These panels are overlays, so they keep the Herdr event only:
+
+- The `approval-mode` approval dialog. It is a focused overlay, and fullscreen viewports consume page keys unless an overlay is focused.
+- The `background-jobs`, `context`, `todos`, `btw`, and `voice` panels.
+
 Repository checks and a live Pi terminal test passed. The live test verified metadata, blocked-state reporting, and shutdown cleanup.
 
 ## 3. Show workers without replacing the worker runner
