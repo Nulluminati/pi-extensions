@@ -3,7 +3,7 @@
 import { basename } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { extractText, findNewestCustomEntry } from "../../lib/session-utils.ts";
-import { cleanName, generateTitle } from "./src/title.ts";
+import { cleanName, generateTitle, TitleConfigurationError } from "./src/title.ts";
 
 // --- Constants ---
 
@@ -78,12 +78,14 @@ export default async function sessionNameExtension(pi: ExtensionAPI) {
   let state: NameState | undefined;
   let controller: AbortController | undefined;
   let attempted = false;
+  let configurationErrorReported = false;
 
   function reset(): void {
     controller?.abort();
     controller = undefined;
     state = undefined;
     attempted = false;
+    configurationErrorReported = false;
   }
 
   function eligible(ctx: ExtensionContext): boolean {
@@ -106,7 +108,15 @@ export default async function sessionNameExtension(pi: ExtensionAPI) {
   }
 
   function startTitle(prompt: string | undefined, ctx: ExtensionContext): void {
-    if (!prompt || !eligible(ctx) || !state || state.phase !== "temporary" || attempted) return;
+    if (
+      !prompt ||
+      !eligible(ctx) ||
+      !state ||
+      state.phase !== "temporary" ||
+      attempted ||
+      controller
+    )
+      return;
     if (pi.getSessionName() !== state.name || ctx.sessionManager.getSessionId() !== state.sessionId)
       return;
     attempted = true;
@@ -114,7 +124,7 @@ export default async function sessionNameExtension(pi: ExtensionAPI) {
     const request = new AbortController();
     controller = request;
     // A title request runs beside the main turn and never enters model context.
-    void generateTitle(prompt, ctx, request.signal)
+    void generateTitle(firstPrompt(ctx.sessionManager.getBranch()) ?? prompt, ctx, request.signal)
       .then((name) => {
         if (!current(expected, ctx, request)) return;
         state = { sessionId: expected.sessionId, name, phase: "generated" };
@@ -123,8 +133,15 @@ export default async function sessionNameExtension(pi: ExtensionAPI) {
       })
       .catch((error) => {
         if (!current(expected, ctx, request)) return;
-        state = { ...expected, phase: "failed" };
-        pi.appendEntry(ENTRY, state);
+        if (error instanceof TitleConfigurationError) {
+          // No title request reached the provider; a later user message can try again.
+          attempted = false;
+          if (configurationErrorReported) return;
+          configurationErrorReported = true;
+        } else {
+          state = { ...expected, phase: "failed" };
+          pi.appendEntry(ENTRY, state);
+        }
         ctx.ui.notify(
           `Session naming failed: ${error instanceof Error ? error.message : String(error)}`,
           "error",

@@ -1,7 +1,11 @@
+import { mkdtempSync, rmSync } from "node:fs";
 import { readdir } from "node:fs/promises";
-import { resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import sessionNameExtension from "../../extensions/session-name/session-name.ts";
+import { saveSmallModelConfig } from "../../lib/small-model.ts";
 import { createMockContext, createMockModel } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
 import { fixtureAs, sessionEntries } from "../mocks/test-helpers.ts";
@@ -9,6 +13,7 @@ import { fixtureAs, sessionEntries } from "../mocks/test-helpers.ts";
 const TEMP = "Pi · project · 12345678";
 const ENTRY = "session-name:state";
 const fixtures: Array<{ stop(): Promise<void> }> = [];
+const temporaryDirectories: string[] = [];
 const complete = vi.fn();
 
 beforeEach(() => {
@@ -24,6 +29,8 @@ beforeEach(() => {
 });
 afterEach(async () => {
   for (const fixture of fixtures.splice(0)) await fixture.stop();
+  for (const directory of temporaryDirectories.splice(0))
+    rmSync(directory, { recursive: true, force: true });
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
   vi.useRealTimers();
@@ -380,7 +387,51 @@ describe("automatic Pi session names", () => {
     expect(fixture.pi.setSessionName).toHaveBeenCalledTimes(1);
   });
 
-  it("reports a missing configured model once without falling back or retrying", async () => {
+  it("retries from the first message after a small model is configured mid-session", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "pi-session-name-"));
+    temporaryDirectories.push(directory);
+    vi.mocked(getAgentDir).mockReturnValue(directory);
+    vi.stubEnv("PI_SMALL_MODEL", "");
+    vi.stubEnv("PI_SMALL_MODEL_CONFIG", "");
+    const fixture = await setup();
+    await fixture.start();
+    await fixture.message("Original naming topic");
+    await vi.waitFor(() =>
+      expect(fixture.ctx.ui.notify).toHaveBeenCalledWith(
+        expect.stringContaining("Global small model is not configured"),
+        "error",
+      ),
+    );
+    expect(fixture.pi.appendEntry).toHaveBeenCalledTimes(1);
+    expect(complete).not.toHaveBeenCalled();
+
+    saveSmallModelConfig(
+      { provider: "title-provider", model: "title-model", thinkingLevel: "low" },
+      join(directory, "small-model.json"),
+    );
+    await fixture.message("A different follow-up topic");
+    await generated(fixture);
+    expect(complete).toHaveBeenCalledTimes(1);
+    expect(complete).toHaveBeenCalledWith(
+      fixture.small,
+      expect.objectContaining({
+        messages: [
+          expect.objectContaining({
+            content: [{ type: "text", text: "Original naming topic" }],
+          }),
+        ],
+      }),
+      expect.objectContaining({ apiKey: "title-key" }),
+    );
+    expect(fixture.pi.appendEntry).toHaveBeenCalledWith(ENTRY, {
+      phase: "generated",
+      name: "Fix authentication timeout",
+      sessionId: "12345678-abcdef",
+    });
+    expect(fixture.ctx.ui.notify).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a missing model once and retries after it becomes available", async () => {
     const fixture = await setup();
     fixture.ctx.modelRegistry.find.mockReturnValue(undefined);
     await fixture.start();
@@ -392,22 +443,72 @@ describe("automatic Pi session names", () => {
       ),
     );
     await fixture.message("try again");
+    await vi.advanceTimersByTimeAsync(0);
     expect(fixture.name()).toBe(TEMP);
     expect(complete).not.toHaveBeenCalled();
-    expect(fixture.pi.appendEntry).toHaveBeenCalledWith(ENTRY, {
-      phase: "failed",
-      name: TEMP,
-      sessionId: "12345678-abcdef",
-    });
+    expect(fixture.pi.appendEntry).toHaveBeenCalledTimes(1);
     expect(fixture.ctx.ui.notify).toHaveBeenCalledTimes(1);
+
+    fixture.ctx.modelRegistry.find.mockReturnValue(fixture.small);
+    await fixture.message("model available");
+    await generated(fixture);
+    expect(complete).toHaveBeenCalledTimes(1);
   });
 
-  it("reports a provider error rather than using error content as a name", async () => {
-    complete.mockResolvedValue({
-      content: [{ type: "text", text: "Error output" }],
-      stopReason: "error",
-      errorMessage: "provider rejected",
+  it("retries after credentials become available, including after reload", async () => {
+    const fixture = await setup();
+    fixture.ctx.modelRegistry.getApiKeyAndHeaders.mockResolvedValue({
+      ok: false,
+      error: "No credentials",
     });
+    await fixture.start();
+    await fixture.message();
+    await vi.waitFor(() =>
+      expect(fixture.ctx.ui.notify).toHaveBeenCalledWith(
+        expect.stringContaining("No credentials for global small model"),
+        "error",
+      ),
+    );
+    expect(fixture.pi.appendEntry).toHaveBeenCalledTimes(1);
+    expect(complete).not.toHaveBeenCalled();
+
+    fixture.ctx.modelRegistry.getApiKeyAndHeaders.mockResolvedValue({
+      ok: true,
+      apiKey: "title-key",
+    });
+    await fixture.start();
+    await generated(fixture);
+    expect(complete).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves a manual name after a configuration failure", async () => {
+    const fixture = await setup();
+    fixture.ctx.modelRegistry.find.mockReturnValue(undefined);
+    await fixture.start();
+    await fixture.message();
+    await vi.waitFor(() =>
+      expect(fixture.ctx.ui.notify).toHaveBeenCalledWith(
+        expect.stringContaining("Global small model not found"),
+        "error",
+      ),
+    );
+    await fixture.rename("Manual name");
+    fixture.ctx.modelRegistry.find.mockReturnValue(fixture.small);
+    await fixture.message("model available");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fixture.name()).toBe("Manual name");
+    expect(complete).not.toHaveBeenCalled();
+    expect(fixture.pi.setSessionName).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["response", "network"])("does not retry a provider %s error", async (failure) => {
+    if (failure === "network") complete.mockRejectedValue(new Error("provider rejected"));
+    else
+      complete.mockResolvedValue({
+        content: [{ type: "text", text: "Error output" }],
+        stopReason: "error",
+        errorMessage: "provider rejected",
+      });
     const fixture = await setup();
     await fixture.start();
     await fixture.message();
@@ -417,7 +518,16 @@ describe("automatic Pi session names", () => {
         "error",
       ),
     );
+    await fixture.message("try again");
+    await vi.advanceTimersByTimeAsync(0);
     expect(fixture.name()).toBe(TEMP);
+    expect(complete).toHaveBeenCalledTimes(1);
+    expect(fixture.ctx.ui.notify).toHaveBeenCalledTimes(1);
+    expect(fixture.pi.appendEntry).toHaveBeenCalledWith(ENTRY, {
+      phase: "failed",
+      name: TEMP,
+      sessionId: "12345678-abcdef",
+    });
   });
 
   it("times out a stalled provider and clears the timer", async () => {

@@ -5,6 +5,12 @@ import { createTimeoutController } from "../../../lib/fetch-timeout.ts";
 import { extractText } from "../../../lib/session-utils.ts";
 import { resolveSmallModel } from "../../../lib/small-model.ts";
 
+export class TitleConfigurationError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+  }
+}
+
 export function cleanName(text: string): string {
   return [
     ...text
@@ -25,7 +31,9 @@ export async function generateTitle(
   const timeout = createTimeoutController({ timeoutMs: 15_000, signal });
   signal.addEventListener("abort", timeout.cleanup, { once: true });
   try {
-    const resolved = await resolveSmallModel(ctx);
+    const resolved = await resolveSmallModel(ctx).catch((error: unknown) => {
+      throw new TitleConfigurationError(error);
+    });
     if (timeout.signal.aborted) throw new Error("Session naming cancelled");
     const reasoning = resolved.config.thinkingLevel === "off" ? undefined : resolved.reasoning;
     const response = await ctx.modelRegistry

@@ -39,7 +39,9 @@ Title requests have a 15-second timeout and no prompt-cache retention.
 
 The output limit is 1,024 tokens with thinking enabled, or 256 otherwise. Reasoning tokens share this limit with the title text.
 
-A failed request keeps the temporary name and reports one error. It does not select a fallback model or retry automatically.
+Configuration or credential errors keep the temporary name and report once per session. Later user messages retry model resolution until it succeeds. Naming still uses the first user message. Reload and resume can also retry these errors.
+
+Provider errors and timeouts keep the temporary name and report one error. The extension does not retry these requests or select a fallback model.
 
 The extension saves ownership and request outcome in `session-name:state` transcript entries. Reload and resume preserve generated, failed, and manual names.
 
