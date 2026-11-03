@@ -48,6 +48,10 @@ const ROOT_TARGETS = new Set([
   "./.git",
 ]);
 
+// Every spelling of a home directory: ~, $HOME, ${HOME}, /home/<user>, /Users/<user>, /root.
+const HOME_CREDENTIAL_STORE =
+  /^(?:~|\$HOME|\$\{HOME\}|\/home\/[^/]+|\/Users\/[^/]+|\/root)\/(?:\.ssh|\.gnupg|\.pi)(?:\/|$)/;
+
 // --- Types ---
 
 export type CommandClass = "hard-deny" | "known-safe" | "needs-jev";
@@ -70,7 +74,7 @@ function isRootDeletionStage(stage: string, cwd: string, agentDir: string): bool
     bareTarget.startsWith(`${bareAgentDir}/`) ||
     /^(?:\/home|\/root|\/etc|\/usr|\/var|\/tmp|\/opt|\/dev|\/sys|\/proc)$/.test(bareTarget) ||
     /^(?:\/Users|\/Applications|\/Library|\/System|\/Volumes|\/private)$/.test(bareTarget) ||
-    /^~\/(?:\.ssh|\.gnupg|\.pi)(?:\/|$)/.test(target) ||
+    HOME_CREDENTIAL_STORE.test(target) ||
     /(?:^|\/)\.git(?:\/|$)/.test(target)
   );
 }
@@ -107,7 +111,8 @@ function isProtectedForcePush(command: string): boolean {
   return stages.some(
     (stage) =>
       /\bgit\s+push\b/i.test(stage) &&
-      /(?:--force(?:-with-lease)?\b|--mirror\b|(?:^|\s)-[a-z]*f\b)/i.test(stage) &&
+      // A leading + on a refspec forces that update exactly like --force.
+      /(?:--force(?:-with-lease)?\b|--mirror\b|(?:^|\s)-[a-z]*f\b|(?:^|\s)\+\S)/i.test(stage) &&
       /\b(?:main|master|production|prod)\b/i.test(stage),
   );
 }

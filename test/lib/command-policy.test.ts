@@ -126,6 +126,40 @@ describe("command policy", () => {
     expect(classifyCommand("rm -rf ~/.pi", "/workspace", "/custom/agent")).toBe("hard-deny");
   });
 
+  it.each([
+    "rm -rf $HOME/.ssh",
+    "rm -rf $" + "{HOME}/.ssh",
+    "rm -rf /home/me/.ssh",
+    "rm -rf /Users/me/.ssh",
+    "rm -rf /root/.ssh",
+    "rm -rf $HOME/.pi",
+    "rm -rf $" + "{HOME}/.gnupg",
+    'rm -rf "$HOME/.ssh"',
+  ])("hard-denies the home-relative credential store spelling %s", (command) => {
+    expect(classifyCommand(command, "/workspace", "/custom/agent")).toBe("hard-deny");
+  });
+
+  it("keeps other dot directories under a home path judgeable", () => {
+    expect(classifyCommand("rm -rf $HOME/.cache", "/workspace", "/custom/agent")).toBe("needs-jev");
+    expect(classifyCommand("rm -rf /home/me/.sshx", "/workspace", "/custom/agent")).toBe(
+      "needs-jev",
+    );
+  });
+
+  it.each([
+    "git push origin +main",
+    "git push origin +main:main",
+    "git push origin +refs/heads/main:refs/heads/main",
+    "git push origin +HEAD:production",
+  ])("hard-denies the forced refspec push %s", (command) => {
+    expect(classifyCommand(command, "/workspace")).toBe("hard-deny");
+  });
+
+  it("keeps a forced refspec push of an unprotected branch judgeable", () => {
+    expect(classifyCommand("git push origin +feature", "/workspace")).toBe("needs-jev");
+    expect(classifyCommand("git push origin main", "/workspace")).toBe("needs-jev");
+  });
+
   it("hard-denies only macOS privilege escalation, not every osascript call", () => {
     expect(
       classifyCommand(
