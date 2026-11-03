@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startWorkerSandbox } from "../../extensions/worker-sandbox/src/client.ts";
 import {
   loadSessionSandboxPolicy,
@@ -17,6 +17,10 @@ vi.mock("../../extensions/worker-sandbox/src/policy.ts", () => ({
 }));
 
 import { spawn } from "node:child_process";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 // The broker script must live beside client.ts; workers provision imports the
 // client from another extension, so the path cannot depend on the caller.
@@ -129,13 +133,19 @@ describe("worker sandbox broker client", () => {
     await client.close();
   });
 
-  it("refuses calls when startup fails", async () => {
+  it("kills the broker and removes its temporary tree when startup fails", async () => {
     const child = fakeChild((request) =>
       request.type === "init" ? { type: "fatal", error: "socat not installed" } : undefined,
     );
+    child.pid = 12345;
+    const kill = vi.spyOn(process, "kill").mockReturnValue(true);
     vi.mocked(spawn).mockReturnValue(child as never);
     await expect(startWorkerSandbox("/worktree")).rejects.toThrow(/socat not installed/);
     expect(child.requests.map((request) => request.type)).toEqual(["init"]);
+    expect(kill).toHaveBeenCalledWith(-12345, "SIGKILL");
+    const temporaryDirectory = vi.mocked(spawn).mock.calls[0]?.[2]?.cwd;
+    expect(typeof temporaryDirectory).toBe("string");
+    expect(existsSync(String(temporaryDirectory))).toBe(false);
   });
 
   it("refuses pending and future calls if the broker exits", async () => {

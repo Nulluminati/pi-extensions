@@ -116,6 +116,11 @@ export default async function workerSandboxExtension(pi: ExtensionAPI) {
   pi.on("session_shutdown", async () => {
     stopExecListening?.();
     stopExecListening = undefined;
+    try {
+      await starting;
+    } catch {
+      // Startup failures release broker resources in startWorkerSandbox.
+    }
     const running = client;
     client = undefined;
     starting = undefined;

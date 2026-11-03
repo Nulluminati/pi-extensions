@@ -299,6 +299,96 @@ describe("worker sandbox extension", () => {
     ).rejects.toThrow(/sandbox not ready/);
   });
 
+  it.each(["worker", "main"])(
+    "waits for a slow %s sandbox start and closes the broker before shutdown completes",
+    async (mode) => {
+      vi.stubEnv("PI_WORKER", mode === "worker" ? "1" : "");
+      const client = mockClient();
+      let resolveStart: (value: typeof client) => void = () => {};
+      vi.mocked(startWorkerSandbox).mockReturnValue(
+        new Promise((resolve) => {
+          resolveStart = resolve;
+        }),
+      );
+      const pi = createMockPi();
+      if (mode === "main") pi.getFlag.mockReturnValue("inline policy");
+      const unsubscribe = vi.fn();
+      pi.events.on.mockReturnValue(unsubscribe);
+      const ctx = createMockCommandContext();
+      await workerSandboxExtension(pi);
+      const starting = getEventHandler(pi, "session_start")(
+        { type: "session_start", reason: "startup" },
+        ctx,
+      );
+      const stopped = vi.fn();
+      const shutdown = getEventHandler(pi, "session_shutdown");
+      const stopping = Promise.resolve(shutdown({ type: "session_shutdown" }, ctx)).then(stopped);
+      await Promise.resolve();
+      const stoppedBeforeReady = stopped.mock.calls.length;
+      expect(unsubscribe).toHaveBeenCalledTimes(1);
+      resolveStart(client);
+      await Promise.all([starting, stopping]);
+
+      expect(client.close).toHaveBeenCalledTimes(1);
+      expect(stoppedBeforeReady).toBe(0);
+      const tool = pi.registerTool.mock.calls.find(([tool]) => tool.name === "read")?.[0];
+      expect(tool).toBeDefined();
+      await expect(tool?.execute("late", {}, undefined, undefined, ctx)).rejects.toThrow(
+        /sandbox not ready/,
+      );
+      await shutdown({ type: "session_shutdown" }, ctx);
+      expect(client.close).toHaveBeenCalledTimes(1);
+
+      const replacement = mockClient();
+      vi.mocked(startWorkerSandbox).mockResolvedValue(replacement);
+      await getEventHandler(pi, "session_start")({ type: "session_start", reason: "switch" }, ctx);
+      await tool?.execute("replacement", { path: "file.txt" }, undefined, undefined, ctx);
+      expect(replacement.runTool).toHaveBeenCalledWith(
+        "read",
+        { path: "file.txt" },
+        expect.objectContaining({ cwd: ctx.cwd }),
+      );
+      await shutdown({ type: "session_shutdown" }, ctx);
+      expect(replacement.close).toHaveBeenCalledTimes(1);
+      expect(client.close).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("finishes shutdown after a pending start fails and permits a fresh session", async () => {
+    vi.stubEnv("PI_WORKER", "1");
+    let rejectStart: (error: Error) => void = () => {};
+    vi.mocked(startWorkerSandbox).mockReturnValue(
+      new Promise((_resolve, reject) => {
+        rejectStart = reject;
+      }),
+    );
+    const pi = createMockPi();
+    const ctx = createMockCommandContext();
+    await workerSandboxExtension(pi);
+    const start = getEventHandler(pi, "session_start");
+    const starting = expect(
+      start({ type: "session_start", reason: "startup" }, ctx),
+    ).rejects.toThrow("broker failed during shutdown");
+    const shutdown = getEventHandler(pi, "session_shutdown");
+    const stopping = shutdown({ type: "session_shutdown" }, ctx);
+    rejectStart(new Error("broker failed during shutdown"));
+    await Promise.all([starting, stopping]);
+
+    const replacement = mockClient();
+    vi.mocked(startWorkerSandbox).mockResolvedValue(replacement);
+    await start({ type: "session_start", reason: "switch" }, ctx);
+    const tool = pi.registerTool.mock.calls.find(([tool]) => tool.name === "read")?.[0];
+    expect(tool).toBeDefined();
+    await tool?.execute("replacement", {}, undefined, undefined, ctx);
+    expect(replacement.runTool).toHaveBeenCalledWith(
+      "read",
+      {},
+      expect.objectContaining({ cwd: ctx.cwd }),
+    );
+    await shutdown({ type: "session_shutdown" }, ctx);
+    expect(replacement.close).toHaveBeenCalledTimes(1);
+  });
+
   it("runs claimed exec requests in the session sandbox with bounded output", async () => {
     vi.stubEnv("PI_WORKER", "");
     const pi = createMockPi();
