@@ -66,6 +66,48 @@ describe("command policy", () => {
     expect(classifyCommand(command, "/workspace")).toBe("hard-deny");
   });
 
+  it.each([
+    "rm -rf ./dist && rm -rf /",
+    "rm -rf node_modules; rm -rf $HOME",
+    "rm -rf /tmp/x && rm -rf ~",
+    "rm -rf /tmp/x | true; rm -rf ~",
+    "echo done\nrm -rf /",
+  ])("hard-denies a root deletion in any stage of %s", (command) => {
+    expect(classifyCommand(command, "/workspace")).toBe("hard-deny");
+  });
+
+  it.each([
+    "rm -r -f /",
+    "rm -f -r /",
+    "rm -r -f $HOME",
+    "rm -r -f ~",
+    "rm -r -f /etc",
+    "rm -rf --no-preserve-root /",
+    "rm -rf --verbose /",
+    "rm -rf --one-file-system ~",
+    "rm -f --recursive -- /",
+  ])("hard-denies a root deletion with extra flags in %s", (command) => {
+    expect(classifyCommand(command, "/workspace")).toBe("hard-deny");
+  });
+
+  it.each(["/*", "~/*", "$HOME/*", "$" + "{HOME}/*"])(
+    "hard-denies recursive deletion of the glob %s",
+    (target) => {
+      expect(classifyCommand(`rm -rf ${target}`, "/workspace")).toBe("hard-deny");
+    },
+  );
+
+  it("keeps ordinary recursive deletions judgeable", () => {
+    for (const command of [
+      "rm -rf ./dist && rm -rf node_modules",
+      "rm -r -f build",
+      "rm -rf --verbose /tmp/scratch",
+      "rm -f /",
+      "rm -rf /tmp/*",
+    ])
+      expect(classifyCommand(command, "/workspace")).toBe("needs-jev");
+  });
+
   it("hard-denies recursive deletion of the resolved agent directory", () => {
     for (const command of [
       "rm -rf /custom/agent",

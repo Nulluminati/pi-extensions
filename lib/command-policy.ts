@@ -20,8 +20,11 @@ const HARD_DENIES = [
   /\b(?:curl|wget|scp|rsync)\b[^\n;&|]*(?:@|\s)(?:\.env(?:\b|\.)|~\/\.ssh\/|\/\.ssh\/|[^\s]*\/(?:id_rsa|id_ed25519|auth\.json)\b)/i,
 ];
 
-const RECURSIVE_DELETE =
-  /(?:^|[\s;&|])rm\s+(?:(?:-[a-z]*[rR][a-z]*|--recursive|--force)\s+)+(?:--\s+)?([^\s;&|]+)/i;
+/** Splits a command into the stages that shell separators start. */
+const COMMAND_STAGES = /[;\n&|]/;
+/** An rm stage: the run of option words, then the first operand. */
+const RM_INVOCATION = /(?:^|\s)rm\s+((?:-{1,2}[a-z][\w-]*\s+)+)(?:--\s+)?(\S+)/i;
+const RECURSIVE_FLAG = /(?:^|\s)(?:-[a-z]*r[a-z]*|--recursive|--force)(?=\s)/i;
 const ROOT_TARGETS = new Set([
   "/",
   "~",
@@ -35,6 +38,10 @@ const ROOT_TARGETS = new Set([
   "../",
   "*",
   "./*",
+  "/*",
+  "~/*",
+  "$HOME/*",
+  "$" + "{HOME}/*",
   ".*",
   "./.*",
   ".git",
@@ -46,7 +53,13 @@ const ROOT_TARGETS = new Set([
 export type CommandClass = "hard-deny" | "known-safe" | "needs-jev";
 
 function isRootDeletion(command: string, cwd: string, agentDir: string): boolean {
-  const target = RECURSIVE_DELETE.exec(command)?.[1]?.replace(/^["']|["'](?=\/*$)/g, "");
+  return command.split(COMMAND_STAGES).some((stage) => isRootDeletionStage(stage, cwd, agentDir));
+}
+
+function isRootDeletionStage(stage: string, cwd: string, agentDir: string): boolean {
+  const match = RM_INVOCATION.exec(stage);
+  if (!match || !RECURSIVE_FLAG.test(match[1] ?? "")) return false;
+  const target = match[2]?.replace(/^["']|["'](?=\/*$)/g, "");
   if (!target) return false;
   const bareTarget = target.replace(/\/+$/, "") || "/";
   const bareAgentDir = agentDir.replace(/\/+$/, "");
