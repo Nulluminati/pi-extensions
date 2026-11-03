@@ -72,7 +72,9 @@ export function runExec(command: string, options: ExecOptions): Promise<ExecOutc
       if (settled) return;
       settled = true;
       clearTimeout(deadlineTimer);
-      clearTimeout(graceTimer);
+      // The grace timer stays armed: the shell can exit on SIGTERM while a
+      // descendant that ignores it keeps running, and only the group
+      // SIGKILL stops that descendant.
       resolve({
         ...outcome,
         stdout: captured.stdout.text(),

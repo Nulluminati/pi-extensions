@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -139,6 +139,28 @@ describe("runExec", () => {
       expect(Number.isInteger(descendantPid) && descendantPid > 0).toBe(true);
       // The killed descendant is reparented and reaped asynchronously.
       const gone = await waitUntil(() => !isAlive(descendantPid), 2_000);
+      expect(gone).toBe(true);
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "kills a SIGTERM-ignoring descendant after the shell exits on SIGTERM",
+    async () => {
+      const dir = await tempDir("exec-descendant-");
+      const pidFile = join(dir, "descendant.pid");
+      // The shell dies on SIGTERM, so "close" fires before the SIGKILL is
+      // due. The descendant does not hold the pipes, so only the group
+      // SIGKILL can stop it.
+      const out = await runExec(
+        `( trap "" TERM; sleep 60 & echo $! > "${pidFile}"; wait ) >/dev/null 2>&1 & sleep 30`,
+        { cwd: dir, timeoutMs: 300 },
+      );
+
+      expect(out.ok).toBe(false);
+      expect(out.error).toContain("timed out after 300 ms");
+      const descendantPid = Number((await readFile(pidFile, "utf8")).trim());
+      expect(Number.isInteger(descendantPid) && descendantPid > 0).toBe(true);
+      const gone = await waitUntil(() => !isAlive(descendantPid), 3_000);
       expect(gone).toBe(true);
     },
   );
