@@ -135,15 +135,26 @@ describe("codemode evaluation workspace", () => {
     expect(result.wallMs).toBeLessThan(2000);
   });
 
+  // The fake Pi signals the runner after it starts, so the test does not race
+  // process start-up. It records the SIGTERM that the runner sends to its process
+  // group, which the 5 s SIGKILL fallback cannot fake. The wide time limits keep
+  // tsx start-up inside the budget when the full suite loads the machine.
   it("stops the detached Pi child when the runner receives a termination signal", async () => {
     const root = await mkdtemp(join(tmpdir(), "codemode-signal-test-"));
     cleanups.push(() => rm(root, { recursive: true, force: true }));
     const fakePi = join(root, "pi");
-    await writeFile(fakePi, "#!/usr/bin/env node\nsetTimeout(() => process.exit(0), 2000);\n");
+    const marker = join(root, "terminated");
+    await writeFile(
+      fakePi,
+      `#!/usr/bin/env node
+process.on("SIGTERM", () => { require("node:fs").writeFileSync(${JSON.stringify(marker)}, "SIGTERM"); process.exit(0); });
+process.kill(process.ppid, "SIGTERM");
+setTimeout(() => process.exit(0), 60_000);
+`,
+    );
     await chmod(fakePi, 0o755);
     const source = `import { captureRun } from ${JSON.stringify(resolve(import.meta.dirname, "../../scripts/codemode-evaluation/runtime.ts"))};
-      const pending = captureRun({cwd: ${JSON.stringify(root)}, agentDir: ${JSON.stringify(root)}, model: "example/test", arm: "off", prompt: "test", outputPrefix: ${JSON.stringify(join(root, "run"))}, timeoutMs: 5000});
-      setTimeout(() => process.kill(process.pid, "SIGTERM"), 200);
+      const pending = captureRun({cwd: ${JSON.stringify(root)}, agentDir: ${JSON.stringify(root)}, model: "example/test", arm: "off", prompt: "test", outputPrefix: ${JSON.stringify(join(root, "run"))}, timeoutMs: 120_000});
       const result = await pending; console.log(JSON.stringify({error: result.error, wallMs: result.wallMs}));`;
     const result = await promisify(execFile)(
       process.execPath,
@@ -151,13 +162,14 @@ describe("codemode evaluation workspace", () => {
       {
         cwd: resolve(import.meta.dirname, "../.."),
         env: { ...process.env, PATH: `${root}:${process.env.PATH ?? ""}` },
-        timeout: 7000,
+        timeout: 45_000,
       },
     );
     expect(JSON.parse(result.stdout)).toMatchObject({ error: "Evaluation interrupted" });
-    expect(JSON.parse(result.stdout).wallMs).toBeLessThan(2000);
+    expect(JSON.parse(result.stdout).wallMs).toBeLessThan(30_000);
+    expect(await readFile(marker, "utf8")).toBe("SIGTERM");
     expect(result.stderr).toBe("");
-  });
+  }, 60_000);
 
   it("reads the real Vitest JSON report instead of its stdout notice", async () => {
     const root = await mkdtemp(join(tmpdir(), "codemode-report-test-"));
