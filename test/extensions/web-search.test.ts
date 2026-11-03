@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { Check } from "typebox/value";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { decodeHtmlEntities } from "../../extensions/web-search/src/html.ts";
 import webSearchExtension from "../../extensions/web-search/web-search.ts";
 import { createMockCommandContext } from "../mocks/context-mocks.ts";
@@ -1070,6 +1070,153 @@ describe("web-search-extension", () => {
   // --- web_fetch (provider-independent) ---
 
   describe("web_fetch", () => {
+    describe("timeout and cancellation cleanup", () => {
+      beforeEach(() => {
+        vi.useFakeTimers();
+      });
+
+      afterEach(() => {
+        vi.useRealTimers();
+        vi.restoreAllMocks();
+      });
+
+      it.each(["timeout", "caller abort"])(
+        "stops a stalled body after headers on %s",
+        async (cause) => {
+          const bodyStarted = new Promise<void>((resolveBodyStarted) => {
+            mockFetch.mockImplementation((_url: string, init: RequestInit) => {
+              const stream = new ReadableStream<Uint8Array>({
+                start(controller) {
+                  controller.enqueue(new TextEncoder().encode("<html>partial body"));
+                  init.signal?.addEventListener(
+                    "abort",
+                    () => controller.error(new DOMException("Body read aborted", "AbortError")),
+                    { once: true },
+                  );
+                },
+              });
+              const response = new Response(stream, {
+                headers: { "content-type": "text/html" },
+              });
+              const readText = response.text.bind(response);
+              vi.spyOn(response, "text").mockImplementation(() => {
+                resolveBodyStarted();
+                return readText();
+              });
+              return Promise.resolve(response);
+            });
+          });
+          const caller = new AbortController();
+          const removeListener = vi.spyOn(caller.signal, "removeEventListener");
+          const mockPi = createMockPi();
+          await webSearchExtension(mockPi);
+          const tool = getRegisteredTool(mockPi, "web_fetch");
+          const pending = tool.execute(
+            "stalled-body",
+            { url: "https://example.com" },
+            caller.signal,
+            undefined,
+            createMockCommandContext(),
+          );
+          await bodyStarted;
+          const fetchSignal = mockFetch.mock.calls[0][1].signal as AbortSignal;
+          expect(fetchSignal.aborted).toBe(false);
+
+          if (cause === "timeout") {
+            await vi.advanceTimersByTimeAsync(29_999);
+            expect(fetchSignal.aborted).toBe(false);
+            await vi.advanceTimersByTimeAsync(1);
+          } else {
+            caller.abort();
+          }
+
+          expect(fetchSignal.aborted).toBe(true);
+          const result = await pending;
+          expect(result).toEqual({
+            content: [{ type: "text", text: "Error: Body read aborted" }],
+            isError: true,
+            details: { url: "https://example.com", isError: true },
+          });
+          expect(result.terminate).toBeUndefined();
+          expect(vi.getTimerCount()).toBe(0);
+          expect(removeListener).toHaveBeenCalledWith("abort", expect.any(Function));
+        },
+      );
+
+      it.each(["success", "body failure", "HTTP error", "network error", "binary", "too large"])(
+        "cleans up the timer and caller listener after %s",
+        async (scenario) => {
+          const caller = new AbortController();
+          const removeListener = vi.spyOn(caller.signal, "removeEventListener");
+          const text = vi.fn(async () => {
+            expect(vi.getTimerCount()).toBe(1);
+            expect(removeListener).not.toHaveBeenCalled();
+            if (scenario === "body failure") throw new Error("Body failed");
+            return "complete";
+          });
+          const response = {
+            ...fetchResponse("", {
+              contentType: scenario === "binary" ? "image/png" : "text/plain",
+              ...(scenario === "too large" ? { contentLength: 2_000_000 } : {}),
+              ...(scenario === "HTTP error"
+                ? { ok: false, status: 503, statusText: "Service Unavailable" }
+                : {}),
+            }),
+            text,
+          };
+          if (scenario === "network error") {
+            mockFetch.mockRejectedValue(new Error("Network failed"));
+          } else {
+            mockFetch.mockResolvedValue(response);
+          }
+          const mockPi = createMockPi();
+          await webSearchExtension(mockPi);
+          const tool = getRegisteredTool(mockPi, "web_fetch");
+          const result = await tool.execute(
+            "cleanup",
+            { url: "https://example.com" },
+            caller.signal,
+            undefined,
+            createMockCommandContext(),
+          );
+
+          if (scenario === "success") {
+            expect(result).toEqual({
+              content: [
+                {
+                  type: "text",
+                  text: "URL: https://example.com\nContent-Type: text/plain\n\ncomplete",
+                },
+              ],
+              details: {
+                url: "https://example.com",
+                contentType: "text/plain",
+                contentLength: undefined,
+              },
+            });
+          } else {
+            expect(result.isError).toBe(true);
+            expect(result.details).toMatchObject({ url: "https://example.com", isError: true });
+            expect(result.content).toEqual([
+              { type: "text", text: expect.stringMatching(/^Error: /) },
+            ]);
+            if (scenario === "body failure") {
+              expect(result.content[0].text).toBe("Error: Body failed");
+            }
+          }
+          expect(result.terminate).toBeUndefined();
+          expect(text).toHaveBeenCalledTimes(
+            ["success", "body failure"].includes(scenario) ? 1 : 0,
+          );
+          expect(vi.getTimerCount()).toBe(0);
+          expect(removeListener).toHaveBeenCalledWith("abort", expect.any(Function));
+          const fetchSignal = mockFetch.mock.calls[0][1].signal as AbortSignal;
+          caller.abort();
+          expect(fetchSignal.aborted).toBe(false);
+        },
+      );
+    });
+
     it("returns error when url is empty", async () => {
       const mockPi = createMockPi();
       await webSearchExtension(mockPi);

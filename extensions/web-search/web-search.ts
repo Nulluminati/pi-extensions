@@ -20,11 +20,13 @@
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { SelectItem } from "@earendil-works/pi-tui";
+import { createTimeoutController } from "../../lib/fetch-timeout.ts";
 import { createSearchableSelectModal } from "../../lib/searchable-select.ts";
 import { asStructuredContent } from "../../lib/structured-content.ts";
 import {
   DEFAULT_MAX_RESULTS,
   DEFAULT_PROVIDER_ID,
+  FETCH_TIMEOUT_MS,
   MAX_FETCH_CONTENT_LENGTH,
   MAX_INLINE_CHARS,
   MAX_MAX_RESULTS,
@@ -266,8 +268,13 @@ export default async function webSearchExtension(pi: ExtensionAPI) {
         details: { url },
       });
 
+      // Keep timeout and caller cancellation active until the body read settles.
+      const { signal: timeoutSignal, cleanup } = createTimeoutController({
+        timeoutMs: FETCH_TIMEOUT_MS,
+        signal,
+      });
       try {
-        const res = await fetchUrlOrThrow(url, signal);
+        const res = await fetchUrlOrThrow(url, timeoutSignal);
         const contentType = res.headers.get("content-type") ?? "";
         assertTextContentType(contentType);
 
@@ -328,6 +335,8 @@ export default async function webSearchExtension(pi: ExtensionAPI) {
           isError: true,
           details: { url, isError: true },
         };
+      } finally {
+        cleanup();
       }
     },
   });
