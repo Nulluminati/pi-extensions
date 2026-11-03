@@ -72,8 +72,8 @@ The catalog comes from Neuralwatt's `/v1/models` metadata. Pricing is per millio
 | nw-large | 1M | yes | yes | $3.00 / $15.00 |
 | nw-flash | 1M | yes | yes | $0.15 / $0.60 |
 | nw-small | 256K | yes | yes | $0.45 / $3.20 |
-| qwen3.6-35b | 128K | yes | yes | $0.29 / $1.15 |
-| qwen3.6-35b-fast | 128K | no | yes | $0.29 / $1.15 |
+| qwen3.6-35b | 256K | yes | yes | $0.29 / $1.15 |
+| qwen3.6-35b-fast | 256K | no | yes | $0.29 / $1.15 |
 | qwen-3.8-27b | 256K | yes | yes | $0.45 / $3.20 |
 
 The GLM-5.2, Kimi, and Qwen3.6 reasoning models pair with `-fast` non-reasoning variants that share pricing. The nw-* ids are Neuralwatt's tracking aliases: first-class selectable ids that follow the catalog's current model per size tier (nw-large currently tracks Kimi K3, nw-flash DeepSeek V4.1 Flash, nw-small Qwen3.8-27B) with notice before each move, and they match the tracked model's pricing, limits, and reasoning behavior. `glm-5.3-flash` is the exception: a reasoning fast variant (exited preview 2026-09-11) with native vision at its own pricing. `glm-5.3` remains a gated preview at GLM-5.2 parity pricing with no fast variant, and `qwen-3.8-27b` is a dense VL model with no fast variant. Neuralwatt publishes the base and canary DeepSeek V4 Flash ids for the same 0731 checkpoint. The Speed tier uses that checkpoint with speculative decoding. DeepSeek V4.1 Flash has vision and separate pricing, and `deepseek-v4.1-flash-speed` serves that checkpoint on a private-preview dedicated lane (few sessions at the engine's solo decode rate) with the same pricing. Gemma has no listed fast variant; its catalog metadata lists reasoning support and direct probes confirm levels through `xhigh` are accepted and `none` disables it. Flex siblings are not separate entries because `/neuralwatt:flex` selects that service tier without changing the model id. The K2.5 and K2.6 families were removed from `/v1/models` (K2.5 ids now return HTTP 410 "has been deprecated"), and Qwen3.5 dropped from the catalog, so their entries were removed to mirror the live list.

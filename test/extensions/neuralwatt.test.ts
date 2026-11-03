@@ -217,6 +217,31 @@ describe("neuralwatt-extension", () => {
     );
   });
 
+  it("configures Qwen3.6 35B and its fast variant from live metadata", () => {
+    const byId = Object.fromEntries(STATIC_MODELS.map((model) => [model.id, model]));
+
+    expect(byId["qwen3.6-35b"]).toEqual(
+      expect.objectContaining({
+        name: "Qwen3.6 35B",
+        reasoning: true,
+        input: ["text", "image"],
+        cost: { input: 0.29, output: 1.15, cacheRead: 0.029, cacheWrite: 0 },
+        contextWindow: 262128,
+        maxTokens: 65536,
+      }),
+    );
+    expect(byId["qwen3.6-35b-fast"]).toEqual(
+      expect.objectContaining({
+        name: "Qwen3.6 35B Fast",
+        reasoning: false,
+        input: ["text", "image"],
+        cost: { input: 0.29, output: 1.15, cacheRead: 0.029, cacheWrite: 0 },
+        contextWindow: 262128,
+        maxTokens: 65536,
+      }),
+    );
+  });
+
   it("configures the nw-* tracking aliases from live metadata and probed reasoning behavior", () => {
     const byId = Object.fromEntries(STATIC_MODELS.map((model) => [model.id, model]));
 
