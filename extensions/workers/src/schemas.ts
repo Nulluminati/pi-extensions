@@ -64,11 +64,12 @@ export const WORKERS_PARAMETERS = {
     apply: {
       type: "boolean",
       description:
-        "collect: apply the worker's patch to the working tree (default true). false leaves the patch unapplied and still collectable.",
+        "collect: apply the worker's patch to the working tree (default true). false leaves the patch file unapplied (read it at the reported path) and still collectable; to reject a patch, use action=remove.",
     },
     cleanup: {
       type: "boolean",
-      description: "collect: remove the worktree and branch after collecting (default true).",
+      description:
+        "collect: remove the worktree and branch after this collect call, applied or not (default true).",
     },
   },
   required: ["action"],

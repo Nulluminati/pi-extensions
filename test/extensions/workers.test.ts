@@ -1512,9 +1512,39 @@ sleep 30
     });
 
     expect(contentText(collected)).toContain("Patch left unapplied");
+    expect(contentText(collected)).toContain(
+      `Collect again with workers (action=collect, id=${worker.id}) to apply it.`,
+    );
     expect(existsSync(join(cwd, "UNAPPLIED.md"))).toBe(false);
     const record = await loadWorker(cwd, worker.id as string);
     expect(record?.collectedAt).toBeUndefined();
+  });
+
+  it("workers collect after a cleaning apply=false collect reports the worktree already removed", async () => {
+    await initGitRepo(cwd);
+    await writeProvisionConfig(cwd);
+    const fixture = await writeFixture(fixtureDir, "ok-worker.sh", SUCCESS_WORKER);
+    setEnv("PI_WORKER_COMMAND", fixture);
+
+    const started = await executeTool("spawn_worker", { task: "t", isolate: true, wait: true });
+    const worker = started.details.worker;
+    const { writeFile: wf } = await import("node:fs/promises");
+    await wf(join(worker.worktree as string, "AFTER.md"), "after\n");
+    const { captureWorktreePatch } = await import("../../extensions/workers/src/worktree.ts");
+    await captureWorktreePatch(worker.worktree as string, worker.patchPath as string);
+
+    const preview = await executeTool("workers", {
+      action: "collect",
+      id: worker.id,
+      apply: false,
+    });
+    expect(contentText(preview)).toContain("Worktree and branch removed.");
+    const applied = await executeTool("workers", { action: "collect", id: worker.id });
+
+    expect(contentText(applied)).toContain("Applied patch");
+    expect(contentText(applied)).toContain("Worktree already removed.");
+    expect(contentText(applied)).not.toContain("Worktree and branch removed.");
+    expect(await readFile(join(cwd, "AFTER.md"), "utf8")).toBe("after\n");
   });
 
   it("workers collect with apply=false does not block a later apply", async () => {

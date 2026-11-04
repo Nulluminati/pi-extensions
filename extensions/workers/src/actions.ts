@@ -234,9 +234,15 @@ export async function collectWorkerPatch(
       }
     }
   } else {
-    lines.push(`Patch left unapplied at ${record.patchPath}.`);
+    lines.push(
+      `Patch left unapplied at ${record.patchPath}. Collect again with workers (action=collect, id=${id}) to apply it.`,
+    );
   }
-  if (shouldCleanup && record.worktree) {
+  if (shouldCleanup && record.worktree && !existsSync(worktreePath(cwd, id))) {
+    // An earlier apply=false collect already cleaned up; the record keeps
+    // its worktree field, so report the state instead of a second removal.
+    lines.push("Worktree already removed.");
+  } else if (shouldCleanup && record.worktree) {
     // Never remove a worktree whose changes are not durably captured:
     // if the patch file is gone, removal would destroy the only copy.
     const patchMissing = await access(record.patchPath).then(
