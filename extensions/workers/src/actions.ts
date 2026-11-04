@@ -190,8 +190,10 @@ export async function cancelWorker(options: {
 
 /**
  * Apply an isolated worker's captured patch to the working tree and remove
- * its worktree/branch. The patch file itself survives collect. Works for
- * the session's own workers and for orphans; `persistCollected` records
+ * its worktree/branch. The patch file itself survives collect. Only an
+ * applying collect records `collectedAt`; apply=false leaves the patch
+ * collectable. Works for the session's own workers and for orphans;
+ * `persistCollected` records
  * `collectedAt` in the right place (transcript for own workers, artifact
  * record file for orphans).
  */
@@ -260,8 +262,12 @@ export async function collectWorkerPatch(
   // The stream spool outlives the collect: post-mortem tails stay
   // available for 24h after the worker finished (session_start prunes
   // them). Collect removes the worktree/branch, not the forensics.
-  record.collectedAt = Date.now();
-  await persistCollected(record);
+  // Only an apply marks the patch collected: apply=false is a preview
+  // that must not block a later collect with apply=true.
+  if (shouldApply) {
+    record.collectedAt = Date.now();
+    await persistCollected(record);
+  }
   return { content: [{ type: "text", text: lines.join(" ") }], details: { worker: record } };
 }
 

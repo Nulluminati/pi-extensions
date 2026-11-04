@@ -1514,7 +1514,34 @@ sleep 30
     expect(contentText(collected)).toContain("Patch left unapplied");
     expect(existsSync(join(cwd, "UNAPPLIED.md"))).toBe(false);
     const record = await loadWorker(cwd, worker.id as string);
-    expect(record?.collectedAt).toBeDefined();
+    expect(record?.collectedAt).toBeUndefined();
+  });
+
+  it("workers collect with apply=false does not block a later apply", async () => {
+    await initGitRepo(cwd);
+    await writeProvisionConfig(cwd);
+    const fixture = await writeFixture(fixtureDir, "ok-worker.sh", SUCCESS_WORKER);
+    setEnv("PI_WORKER_COMMAND", fixture);
+
+    const started = await executeTool("spawn_worker", { task: "t", isolate: true, wait: true });
+    const worker = started.details.worker;
+    const { writeFile: wf } = await import("node:fs/promises");
+    await wf(join(worker.worktree as string, "LATER.md"), "later\n");
+    const { captureWorktreePatch } = await import("../../extensions/workers/src/worktree.ts");
+    await captureWorktreePatch(worker.worktree as string, worker.patchPath as string);
+
+    await executeTool("workers", {
+      action: "collect",
+      id: worker.id,
+      apply: false,
+      cleanup: false,
+    });
+    const applied = await executeTool("workers", { action: "collect", id: worker.id });
+
+    expect(contentText(applied)).toContain("Applied patch");
+    expect(await readFile(join(cwd, "LATER.md"), "utf8")).toBe("later\n");
+    expect(existsSync(worker.worktree as string)).toBe(false);
+    expect((await loadWorker(cwd, worker.id as string))?.collectedAt).toBeDefined();
   });
 
   it("workers collect surfaces the patch path when git apply fails", async () => {
@@ -5184,7 +5211,7 @@ describe("worker session scoping", () => {
     // An ended session left a completed isolated worker with a patch.
     const patchFile = join(cwd, CONFIG_DIR_NAME, "workers", "patches", "w-orphan.diff");
     await mkdir(join(cwd, CONFIG_DIR_NAME, "workers", "patches"), { recursive: true });
-    await writeFile(patchFile, "diff", "utf8");
+    await writeFile(patchFile, "", "utf8");
     await seedRecord(
       cwd,
       makeWorkerRecord({
@@ -5198,12 +5225,8 @@ describe("worker session scoping", () => {
       }),
     );
 
-    const collected = await executeTool("workers", {
-      action: "collect",
-      id: "w-orphan",
-      apply: false,
-    });
-    expect(contentText(collected)).toContain("Patch left unapplied");
+    const collected = await executeTool("workers", { action: "collect", id: "w-orphan" });
+    expect(contentText(collected)).toContain("nothing to apply");
     const stored = await loadWorker(cwd, "w-orphan");
     expect(stored?.collectedAt).toBeDefined();
     // No transcript entry: this session never owned the worker.

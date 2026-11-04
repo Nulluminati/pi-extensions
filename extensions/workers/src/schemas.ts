@@ -63,7 +63,8 @@ export const WORKERS_PARAMETERS = {
     },
     apply: {
       type: "boolean",
-      description: "collect: apply the worker's patch to the working tree (default true).",
+      description:
+        "collect: apply the worker's patch to the working tree (default true). false leaves the patch unapplied and still collectable.",
     },
     cleanup: {
       type: "boolean",
