@@ -1,6 +1,7 @@
 /** Deterministic command checks. Hard denies precede every approval path. */
 
 import { homedir } from "node:os";
+import { delimiter, isAbsolute } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { type AllowRule, checkCommand, commandWords, splitCommand } from "./bash-allow.ts";
 
@@ -93,6 +94,64 @@ const KNOWN_SAFE = [
 /** Card actions the herdboard CLI may run without review; other subcommands stay judgeable. */
 const HERDBOARD_SUBCOMMANDS = ["show", "list", "log", "add", "move", "attach", "edit"];
 
+/** Exact options only: argparse also accepts abbreviations, which must not bypass review. */
+const HERDBOARD_OPTIONS: Record<string, { flags: string[]; values: string[] }> = {
+  show: { flags: ["--log", "--offline"], values: [] },
+  list: {
+    flags: ["--offline", "--archived"],
+    values: ["--view", "--project", "--column", "--board", "--source"],
+  },
+  log: { flags: [], values: [] },
+  add: {
+    flags: ["--linear", "--offline"],
+    values: [
+      "--body",
+      "--parent",
+      "--type",
+      "--tag",
+      "--due",
+      "--column",
+      "--position",
+      "--board",
+      "--team",
+      "--project",
+      "--label",
+      "--state",
+    ],
+  },
+  move: { flags: ["--up", "--down", "--offline"], values: ["--board", "--position", "--state"] },
+  edit: {
+    flags: ["--no-tags", "--no-due", "--no-parent", "--no-type"],
+    values: ["--title", "--body", "--tag", "--due", "--parent", "--type"],
+  },
+  attach: { flags: [], values: ["--remove"] },
+};
+
+/** File reads and configuration overrides need Jev, even when their paths look ordinary. */
+function hasSafeHerdboardArguments(subcommand: string, args: string[]): boolean {
+  const options = HERDBOARD_OPTIONS[subcommand];
+  if (!options) return false;
+  let positionalCount = 0;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i] ?? "";
+    if (arg === "--") {
+      positionalCount += args.length - i - 1;
+      break;
+    }
+    if (!arg.startsWith("-")) {
+      positionalCount++;
+      continue;
+    }
+    const equals = arg.indexOf("=");
+    const name = equals < 0 ? arg : arg.slice(0, equals);
+    if ((name === "--json" || options.flags.includes(name)) && equals < 0) continue;
+    if (!options.values.includes(name)) return false;
+    if (equals < 0 && ++i >= args.length) return false;
+  }
+  // attach takes a card reference followed by an optional file. Removal reads no file.
+  return subcommand !== "attach" || positionalCount <= 1;
+}
+
 /** uv tools install each tool's interpreter under <home>/.local/share/uv/tools/<tool>/bin. */
 const HERDBOARD_UV_BIN = ".local/share/uv/tools/herdboard/bin";
 
@@ -100,17 +159,20 @@ const HERDBOARD_UV_BIN = ".local/share/uv/tools/herdboard/bin";
 function herdboardLaunches(home: string): string[][] {
   return [
     ["herdboard"],
-    ["python3", "-m", "herdboard"],
-    [`~/${HERDBOARD_UV_BIN}/python`, "-m", "herdboard"],
-    [`~/${HERDBOARD_UV_BIN}/python3`, "-m", "herdboard"],
-    [`${home}/${HERDBOARD_UV_BIN}/python`, "-m", "herdboard"],
-    [`${home}/${HERDBOARD_UV_BIN}/python3`, "-m", "herdboard"],
+    [`~/${HERDBOARD_UV_BIN}/herdboard`],
+    [`${home}/${HERDBOARD_UV_BIN}/herdboard`],
+    // Isolated mode ignores the working directory, PYTHONPATH, and user site packages.
+    ["python3", "-I", "-m", "herdboard"],
+    [`~/${HERDBOARD_UV_BIN}/python`, "-I", "-m", "herdboard"],
+    [`~/${HERDBOARD_UV_BIN}/python3`, "-I", "-m", "herdboard"],
+    [`${home}/${HERDBOARD_UV_BIN}/python`, "-I", "-m", "herdboard"],
+    [`${home}/${HERDBOARD_UV_BIN}/python3`, "-I", "-m", "herdboard"],
   ];
 }
 
 /**
  * Approved `[--json] <subcommand> ...` prefixes whose remaining
- * arguments may be any scanner-clean literal text (checkCommand's allowMore).
+ * arguments pass both the shell scanner and the subcommand option checks.
  */
 function herdboardRules(home: string): AllowRule[] {
   const rules: AllowRule[] = [];
@@ -133,7 +195,12 @@ function herdboardRules(home: string): AllowRule[] {
 }
 
 function isHerdboardInvocation(segment: string, rules: AllowRule[]): boolean {
-  const executable = commandWords(segment)?.[0];
+  const words = commandWords(segment);
+  const executable = words?.[0];
+  if (!words || !executable) return false;
+  // Relative PATH entries change meaning after cd and can select project executables.
+  if (!executable.includes("/") && !process.env.PATH?.split(delimiter).every(isAbsolute))
+    return false;
   // Quoted or escaped ~ names a project-relative path, not the installed tool.
   if (
     executable?.startsWith("~/") &&
@@ -141,7 +208,12 @@ function isHerdboardInvocation(segment: string, rules: AllowRule[]): boolean {
     !segment.startsWith(`${executable}\t`)
   )
     return false;
-  return checkCommand(segment, rules).allowed;
+  const rule = rules.find((candidate) =>
+    candidate.tokens.every((token, index) => words[index] === token),
+  );
+  if (!rule || !checkCommand(segment, [rule]).allowed) return false;
+  const subcommand = rule.tokens[rule.tokens.length - 1] ?? "";
+  return hasSafeHerdboardArguments(subcommand, words.slice(rule.tokens.length));
 }
 
 /** Only one literal directory, not cd options or a previous-directory lookup. */

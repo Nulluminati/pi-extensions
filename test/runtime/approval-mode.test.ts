@@ -17,6 +17,10 @@ it("applies --approval-reject block through Pi's real command-line startup", asy
   const fixture = join(root, "provider.ts");
   const marker = join(root, "must-not-exist");
   await writeFile(
+    join(root, "herdboard.py"),
+    `from pathlib import Path\nPath(${JSON.stringify(marker)}).write_text("local module ran")\n`,
+  );
+  await writeFile(
     fixture,
     `
 import {createProvider,fauxProvider,fauxAssistantMessage,fauxToolCall} from ${JSON.stringify(import.meta.resolve("@earendil-works/pi-ai"))};
@@ -33,6 +37,7 @@ export default async function(pi) {
   const faux=fauxProvider({provider:"approval-probe",models:[{id:"probe",contextWindow:100000}],tokensPerSecond:1000000});
   faux.setResponses([
     fauxAssistantMessage(fauxToolCall("bash",{command:${JSON.stringify(`printf must-not-run > '${marker}'`)}}),{stopReason:"toolUse"}),
+    fauxAssistantMessage(fauxToolCall("bash",{command:"python3 -m herdboard show t8kr"}),{stopReason:"toolUse"}),
     fauxAssistantMessage("probe complete")
   ]);
   pi.registerProvider(faux.provider);
@@ -88,19 +93,22 @@ export default async function(pi) {
     .split("\n")
     .filter(Boolean)
     .map((line) => JSON.parse(line));
-  expect(events).toContainEqual(
-    expect.objectContaining({
-      type: "tool_execution_end",
-      toolName: "bash",
-      isError: true,
-      result: expect.objectContaining({
-        content: [
-          {
-            type: "text",
-            text: "Approval Mode blocked: The command presents serious damage risk.",
-          },
-        ],
+  const toolResults = events.filter((event) => event.type === "tool_execution_end");
+  expect(toolResults).toHaveLength(2);
+  for (const result of toolResults)
+    expect(result).toEqual(
+      expect.objectContaining({
+        type: "tool_execution_end",
+        toolName: "bash",
+        isError: true,
+        result: expect.objectContaining({
+          content: [
+            {
+              type: "text",
+              text: "Approval Mode blocked: The command presents serious damage risk.",
+            },
+          ],
+        }),
       }),
-    }),
-  );
+    );
 }, 40_000);

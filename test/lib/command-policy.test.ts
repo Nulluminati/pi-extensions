@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { classifyCommand } from "../../lib/command-policy.ts";
 
 describe("command policy", () => {
@@ -201,6 +201,9 @@ describe("command policy", () => {
   });
 
   describe("herdboard known-safe policy", () => {
+    beforeEach(() => vi.stubEnv("PATH", "/usr/bin:/bin"));
+    afterEach(() => vi.unstubAllEnvs());
+
     const HOME = "/home/tester";
     const HERDBOARD_UV_BIN = ".local/share/uv/tools/herdboard/bin";
     const TILDE_UV_PY = `~/${HERDBOARD_UV_BIN}`;
@@ -222,8 +225,9 @@ describe("command policy", () => {
       (subcommand) => {
         for (const launch of [
           "herdboard",
-          "python3 -m herdboard",
-          `${TILDE_UV_PY}/python -m herdboard`,
+          "python3 -I -m herdboard",
+          `${TILDE_UV_PY}/python -I -m herdboard`,
+          `${HOME_UV_PY}/herdboard`,
         ]) {
           expect(classifyCommand(`${launch} ${subcommand}`, "/workspace", undefined, HOME)).toBe(
             "known-safe",
@@ -237,8 +241,8 @@ describe("command policy", () => {
       (subcommand) => {
         for (const launch of [
           "herdboard",
-          "python3 -m herdboard",
-          `${HOME_UV_PY}/python3 -m herdboard`,
+          "python3 -I -m herdboard",
+          `${HOME_UV_PY}/python3 -I -m herdboard`,
         ])
           expect(
             classifyCommand(`${launch} --json ${subcommand}`, "/workspace", undefined, HOME),
@@ -251,11 +255,14 @@ describe("command policy", () => {
         "herdboard show t8kr",
         'herdboard add "one two" --body body',
         'herdboard move t8kr "In progress"',
-        "herdboard attach t8kr /tmp/notes.txt",
+        "herdboard attach t8kr --remove notes.txt",
         'herdboard edit t8kr --title "Review policy"',
         "herdboard list --json",
-        "python3 -m herdboard --json log t8kr done",
-        `'${HOME_UV_PY}/python3' -m herdboard --json show t8kr`,
+        "python3 -I -m herdboard --json log t8kr done",
+        `'${HOME_UV_PY}/python3' -I -m herdboard --json show t8kr`,
+        'herdboard add --body "-C is text" -- "--config is text"',
+        "herdboard edit t8kr --title=--config --body=--body-file",
+        'herdboard log t8kr -- "--config"',
       ])
         expect(classifyCommand(command, "/workspace", undefined, HOME)).toBe("known-safe");
     });
@@ -274,7 +281,7 @@ describe("command policy", () => {
     it("allows one leading cd with a literal directory", () => {
       for (const command of [
         "cd /workspace && herdboard show",
-        "cd /tmp && python3 -m herdboard --json list",
+        "cd /tmp && python3 -I -m herdboard --json list",
         `cd "${HOME}/my dir" && herdboard edit t8kr`,
         "cd \t /tmp && herdboard --json log t8kr 'started'",
       ])
@@ -283,8 +290,109 @@ describe("command policy", () => {
 
     it("resolves the installed interpreter against the current home directory by default", () => {
       expect(
-        classifyCommand(`${homedir()}/${HERDBOARD_UV_BIN}/python -m herdboard show`, "/workspace"),
+        classifyCommand(
+          `${homedir()}/${HERDBOARD_UV_BIN}/python -I -m herdboard show`,
+          "/workspace",
+        ),
       ).toBe("known-safe");
+    });
+
+    it.each(["show", "list", "log", "add", "move", "attach", "edit"])(
+      "reviews configuration and directory overrides after %s",
+      (subcommand) => {
+        for (const option of [
+          "--config x.toml",
+          "--config=x.toml",
+          "--conf x.toml",
+          "--con=x.toml",
+          "-C /tmp",
+          "-C/tmp",
+          "-C=/tmp",
+        ]) {
+          expect(
+            classifyCommand(
+              `herdboard ${subcommand} t8kr ${option}`,
+              "/workspace",
+              undefined,
+              HOME,
+            ),
+          ).toBe("needs-jev");
+        }
+      },
+    );
+
+    it.each([
+      "herdboard attach t8kr ~/.pi/agent/auth.json",
+      "herdboard attach t8kr /tmp/notes.txt",
+      "herdboard attach t8kr --name notes -- ~/.ssh/id_ed25519",
+      "herdboard add x --linear --body-file ~/.ssh/id_ed25519",
+      "herdboard add x --body-file=/tmp/notes.txt",
+      "herdboard edit t8kr --body-file ~/.pi/agent/auth.json",
+      "herdboard edit t8kr --body-f=/tmp/notes.txt",
+      "herdboard list --unknown-option value",
+      "herdboard list --off",
+    ])("reviews file access and unknown options in %s", (command) => {
+      expect(classifyCommand(command, "/workspace", undefined, HOME)).toBe("needs-jev");
+    });
+
+    it.each([
+      "python3",
+      `${TILDE_UV_PY}/python`,
+      `${TILDE_UV_PY}/python3`,
+      `${HOME_UV_PY}/python3`,
+    ])("reviews unisolated Python modules launched by %s", (executable) => {
+      for (const prefix of ["", "cd /tmp && "]) {
+        expect(
+          classifyCommand(
+            `${prefix}${executable} -m herdboard show t8kr`,
+            "/workspace",
+            undefined,
+            HOME,
+          ),
+        ).toBe("needs-jev");
+        expect(
+          classifyCommand(
+            `${prefix}${executable} -P -m herdboard show t8kr`,
+            "/workspace",
+            undefined,
+            HOME,
+          ),
+        ).toBe("needs-jev");
+      }
+    });
+
+    it.each(["", ":/usr/bin", "/usr/bin:", "/usr/bin:.:/bin", "bin:/usr/bin"])(
+      "reviews PATH-based launches with unsafe PATH %j",
+      (path) => {
+        vi.stubEnv("PATH", path);
+        for (const command of [
+          "herdboard show t8kr",
+          "cd /tmp && herdboard show t8kr",
+          "python3 -I -m herdboard show t8kr",
+        ]) {
+          expect(classifyCommand(command, "/workspace", undefined, HOME)).toBe("needs-jev");
+        }
+        expect(
+          classifyCommand(`${HOME_UV_PY}/herdboard show t8kr`, "/workspace", undefined, HOME),
+        ).toBe("known-safe");
+        expect(
+          classifyCommand(
+            `${HOME_UV_PY}/python3 -I -m herdboard show t8kr`,
+            "/workspace",
+            undefined,
+            HOME,
+          ),
+        ).toBe("known-safe");
+      },
+    );
+
+    it("keeps routine Linear workflow changes known-safe for both approval owners", () => {
+      for (const command of [
+        'herdboard add "Task" --linear --team ENG',
+        'herdboard move ENG-123 "Review"',
+      ]) {
+        expect(classifyCommand(command, "/workspace", undefined, HOME)).toBe("known-safe");
+      }
     });
 
     it("keeps shell composition judgeable even when every segment is herdboard", () => {
@@ -335,10 +443,12 @@ describe("command policy", () => {
         "pypy3 -m herdboard show",
         "uv run herdboard show",
         "~/.local/share/uv/tools/other/bin/python -m herdboard show",
-        "'~/.local/share/uv/tools/herdboard/bin/python' -m herdboard show",
-        '"~/.local/share/uv/tools/herdboard/bin/python3" -m herdboard show',
-        String.raw`\~/.local/share/uv/tools/herdboard/bin/python -m herdboard show`,
-        "cd /tmp && '~/.local/share/uv/tools/herdboard/bin/python' -m herdboard show",
+        "'~/.local/share/uv/tools/herdboard/bin/python' -I -m herdboard show",
+        '"~/.local/share/uv/tools/herdboard/bin/python3" -I -m herdboard show',
+        String.raw`\~/.local/share/uv/tools/herdboard/bin/python -I -m herdboard show`,
+        "cd /tmp && '~/.local/share/uv/tools/herdboard/bin/python' -I -m herdboard show",
+        "'~/.local/share/uv/tools/herdboard/bin/herdboard' show t8kr",
+        String.raw`\~/.local/share/uv/tools/herdboard/bin/herdboard show t8kr`,
         `${HOME}/.local/share/uv/tools/herdboard/python -m herdboard show`,
         `${HOME}/.local/share/uv/tools/herdboard/bin/pypy -m herdboard show`,
         "/home/other/.local/share/uv/tools/herdboard/bin/python -m herdboard show",

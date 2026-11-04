@@ -13,11 +13,24 @@ Use `/approval-mode off` to skip Jev review for this session and its workers. Ch
 ## Herdboard commands
 
 Plain herdboard commands run without Jev review for these subcommands: `show`, `list`, `log`, `add`, `move`, `attach`, and `edit`.
-The gate accepts bare `herdboard`, `python3 -m herdboard`, and the installed tool's `python` or `python3` with `-m herdboard`.
+The gate accepts bare `herdboard` and the installed console script at `~/.local/share/uv/tools/herdboard/bin/herdboard`.
+It also accepts `python3 -I -m herdboard` and the installed tool's `python` or `python3` with `-I -m herdboard`.
 The installed tool path is `~/.local/share/uv/tools/herdboard/bin/`; the absolute home path also works.
+Python module calls without `-I` require Jev review. Isolated mode prevents current-directory modules and `PYTHONPATH` from replacing the installed package.
+Bare executable names require every `PATH` entry to be absolute and nonempty. The gate trusts these directories and the installed tool.
+Otherwise, use the absolute installed path or request Jev review.
 A quoted or escaped `~` names a relative path and requires Jev review.
 An optional `--json` can precede the subcommand.
 An optional `cd <dir> &&` can precede the invocation.
+
+Only exact, known options qualify. Configuration overrides, directory overrides, unknown options, and option abbreviations require Jev review.
+This includes `--config`, `-C`, and their attached-value forms.
+File attachments and `--body-file` also require review, even for ordinary project files.
+Attachment removal with `attach <ref> --remove <name>` can run without review.
+Option values can contain quoted option-like text. Use `--` before positional text that starts with a hyphen.
+
+Routine Linear creation and moves qualify for workers too. These commands do not request parent approval.
+Workers still run inside their filesystem sandbox. The installed herdboard command does not permit Linear edits.
 
 The gate uses the `lib/bash-allow.ts` scanner to check shell syntax.
 Substitutions, variable expansion, redirection, and unquoted globs do not qualify.
@@ -39,6 +52,7 @@ Use `--approval-reject block` to return `Approval Mode blocked: <reason>` to the
 Jev rejects a command when any risk score is at least `0.8`.
 Uncertain answers still prompt. The risk limits do not change.
 The parent session's value controls worker requests; workers ignore their own flag value.
+The same reject policy applies to extension command reviews through `lib/command-review.ts`, including Missions reconcile verification.
 Invalid values produce an error and block rejects. Without an interface, the extension raises an error during startup.
 This flag has no effect while Jev review is off.
 
