@@ -24,6 +24,10 @@ const ROOT = join(import.meta.dirname, "..");
 const ALLOWLIST = new Map<string, string>([
   [join("lib", "paths.ts"), "defines the resolvers; reads homedir() for the cache-root fallback"],
   [
+    join("lib", "command-policy.ts"),
+    "identifies the user's installed herdboard executable outside Pi's agent directory",
+  ],
+  [
     join("extensions", "codex-image", "src", "auth.ts"),
     "reads Codex CLI credentials from its own home, separate from Pi's agent directory",
   ],

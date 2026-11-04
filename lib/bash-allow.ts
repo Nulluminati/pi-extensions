@@ -182,6 +182,18 @@ export function parseAllowList(value: string): { rules: AllowRule[]; error?: str
   return { rules };
 }
 
+/** Literal words from one scanner-clean command, without shell separators. */
+export function commandWords(command: string): string[] | undefined {
+  const scanned = scanCommand(command);
+  if (
+    scanned.refusal ||
+    scanned.segments.length !== 1 ||
+    scanned.segments[0] !== trimShellBlanks(command)
+  )
+    return undefined;
+  return scanned.words[0];
+}
+
 export function splitCommand(command: string): { segments: string[]; refusal?: string } {
   const { segments, refusal } = scanCommand(command);
   return refusal ? { segments, refusal } : { segments };

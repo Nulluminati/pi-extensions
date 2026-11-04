@@ -1,5 +1,34 @@
 import { describe, expect, it } from "vitest";
-import { checkCommand, parseAllowList, splitCommand } from "../../lib/bash-allow.ts";
+import { checkCommand, commandWords, parseAllowList, splitCommand } from "../../lib/bash-allow.ts";
+
+describe("commandWords", () => {
+  it("returns literal words with shell quoting and escapes removed", () => {
+    expect(commandWords("cd '/some dir'")).toEqual(["cd", "/some dir"]);
+    expect(commandWords("herdboard log t8kr 'literal $VAR; *'")).toEqual([
+      "herdboard",
+      "log",
+      "t8kr",
+      "literal $VAR; *",
+    ]);
+    expect(commandWords(String.raw`cd /some\ dir`)).toEqual(["cd", "/some dir"]);
+    expect(commandWords('cd ""')).toEqual(["cd", ""]);
+  });
+
+  it.each([
+    "",
+    "a | b",
+    "a && b",
+    "a;",
+    "a &&",
+    "a $VAR",
+    "a > out",
+    "a *",
+    "a # note",
+    "a 'unfinished",
+  ])("refuses unsafe or composed command %j", (command) => {
+    expect(commandWords(command)).toBeUndefined();
+  });
+});
 
 describe("parseAllowList", () => {
   it.each(["hunk session:*,gh pr view:*", "Bash(hunk session:*),Bash(gh pr view:*)"])(

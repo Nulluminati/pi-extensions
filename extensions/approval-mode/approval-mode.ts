@@ -4,7 +4,7 @@
  * Hard denies remain active when main-session Jev review is disabled.
  * Main sessions take their initial review state from the --approval-mode on|off
  * flag; an unusable value keeps review on. Workers follow their parent's live
- * Jev mode and request approval through its UI.
+ * Jev mode and reject policy, and request approval through its UI.
  * Read-only workers also need a read-only OS sandbox.
  */
 
@@ -55,12 +55,21 @@ function parseApprovalFlag(value: string | boolean | undefined): boolean | "inva
   return "invalid";
 }
 
+/** Invalid reject policies block rejects rather than offering permission. */
+function parseRejectFlag(value: string | boolean | undefined): "ask" | "block" | "invalid" {
+  if (value === undefined) return "ask";
+  if (typeof value !== "string") return "invalid";
+  const text = value.trim();
+  return text === "ask" || text === "block" ? text : "invalid";
+}
+
 // --- Extension ---
 
 export default async function approvalMode(pi: ExtensionAPI) {
   const worker = process.env.PI_WORKER === "1";
   let readOnly = worker && process.env.PI_WORKER_READONLY === "1";
   let enabled = true;
+  let rejectPolicy: "ask" | "block" = "ask";
   let pendingApproval: Promise<void> = Promise.resolve();
   let parentContext: ExtensionContext | undefined;
   let stopListening: (() => void) | undefined;
@@ -76,6 +85,9 @@ export default async function approvalMode(pi: ExtensionAPI) {
     reason: string,
     source?: string,
   ): Promise<boolean> {
+    // The parent owns this policy for local commands and worker requests alike.
+    // Rejects do not wait behind unrelated approval dialogs.
+    if (enabled && rejectPolicy === "block" && decision === "reject") return false;
     const signal = AbortSignal.any([dialogAbort.signal, ...(ctx.signal ? [ctx.signal] : [])]);
     let release = () => {};
     const next = new Promise<void>((resolve) => {
@@ -220,6 +232,12 @@ export default async function approvalMode(pi: ExtensionAPI) {
     default: "on",
   });
 
+  pi.registerFlag("approval-reject", {
+    description: "Ask or block when Jev rejects a command (default ask; parent controls workers)",
+    type: "string",
+    default: "ask",
+  });
+
   pi.registerFlag("worker-readonly", {
     description: "Enforce investigation-only tools in a read-only worker",
     type: "boolean",
@@ -251,8 +269,19 @@ export default async function approvalMode(pi: ExtensionAPI) {
     readOnly =
       worker && (process.env.PI_WORKER_READONLY === "1" || pi.getFlag("worker-readonly") === true);
     enabled = true;
+    rejectPolicy = "ask";
     if (readOnly) pi.setActiveTools(pi.getActiveTools().filter((name) => READONLY_TOOLS.has(name)));
     if (!worker) {
+      const requestedReject = pi.getFlag("approval-reject");
+      const parsedReject = parseRejectFlag(requestedReject);
+      if (parsedReject === "invalid") {
+        rejectPolicy = "block";
+        const message = `Approval Mode: unknown --approval-reject value "${String(requestedReject)}". Use ask or block. Jev rejects stay blocked.`;
+        if (!ctx.hasUI) throw new Error(message);
+        ctx.ui.notify(message, "error");
+      } else {
+        rejectPolicy = parsedReject;
+      }
       const requested = pi.getFlag("approval-mode");
       const parsed = parseApprovalFlag(requested);
       if (parsed === "invalid") {

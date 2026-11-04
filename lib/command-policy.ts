@@ -1,6 +1,8 @@
 /** Deterministic command checks. Hard denies precede every approval path. */
 
+import { homedir } from "node:os";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { type AllowRule, checkCommand, commandWords, splitCommand } from "./bash-allow.ts";
 
 // --- Constants ---
 
@@ -88,6 +90,92 @@ const KNOWN_SAFE = [
   /^git status(?: --(?:short|porcelain))?$/, // exact forms already used for repository inspection
 ];
 
+/** Card actions the herdboard CLI may run without review; other subcommands stay judgeable. */
+const HERDBOARD_SUBCOMMANDS = ["show", "list", "log", "add", "move", "attach", "edit"];
+
+/** uv tools install each tool's interpreter under <home>/.local/share/uv/tools/<tool>/bin. */
+const HERDBOARD_UV_BIN = ".local/share/uv/tools/herdboard/bin";
+
+/** Word prefixes that start a herdboard invocation. */
+function herdboardLaunches(home: string): string[][] {
+  return [
+    ["herdboard"],
+    ["python3", "-m", "herdboard"],
+    [`~/${HERDBOARD_UV_BIN}/python`, "-m", "herdboard"],
+    [`~/${HERDBOARD_UV_BIN}/python3`, "-m", "herdboard"],
+    [`${home}/${HERDBOARD_UV_BIN}/python`, "-m", "herdboard"],
+    [`${home}/${HERDBOARD_UV_BIN}/python3`, "-m", "herdboard"],
+  ];
+}
+
+/**
+ * Approved `[--json] <subcommand> ...` prefixes whose remaining
+ * arguments may be any scanner-clean literal text (checkCommand's allowMore).
+ */
+function herdboardRules(home: string): AllowRule[] {
+  const rules: AllowRule[] = [];
+  for (const launch of herdboardLaunches(home)) {
+    const words = launch.join(" ");
+    for (const subcommand of HERDBOARD_SUBCOMMANDS) {
+      rules.push({
+        pattern: `${words} ${subcommand} *`,
+        tokens: [...launch, subcommand],
+        allowMore: true,
+      });
+      rules.push({
+        pattern: `${words} --json ${subcommand} *`,
+        tokens: [...launch, "--json", subcommand],
+        allowMore: true,
+      });
+    }
+  }
+  return rules;
+}
+
+function isHerdboardInvocation(segment: string, rules: AllowRule[]): boolean {
+  const executable = commandWords(segment)?.[0];
+  // Quoted or escaped ~ names a project-relative path, not the installed tool.
+  if (
+    executable?.startsWith("~/") &&
+    !segment.startsWith(`${executable} `) &&
+    !segment.startsWith(`${executable}\t`)
+  )
+    return false;
+  return checkCommand(segment, rules).allowed;
+}
+
+/** Only one literal directory, not cd options or a previous-directory lookup. */
+function isLiteralCdStage(segment: string): boolean {
+  const words = commandWords(segment);
+  const directory = words?.[1];
+  return words?.length === 2 && words[0] === "cd" && !!directory && !directory.startsWith("-");
+}
+
+/**
+ * One herdboard invocation, optionally after one `cd <literal dir> &&`. Other
+ * composition stays judgeable even when every segment is herdboard.
+ */
+function isKnownSafeHerdboard(command: string, home: string): boolean {
+  // JavaScript whitespace includes characters that the shell treats as executable-name text.
+  const source = command.replace(/^[ \t]+|[ \t]+$/g, "");
+  const { segments, refusal } = splitCommand(source);
+  if (refusal) return false;
+  const first = segments[0];
+  if (!first) return false;
+  const rules = herdboardRules(home);
+  if (segments.length === 1) return source === first && isHerdboardInvocation(first, rules);
+  const last = segments[1];
+  if (segments.length !== 2 || !last) return false;
+  // The scanner separates pipes and semicolons too. Only an exact && may connect cd to the tool.
+  return (
+    source.startsWith(first) &&
+    source.endsWith(last) &&
+    /^[ \t]*&&[ \t]*$/.test(source.slice(first.length, source.length - last.length)) &&
+    isLiteralCdStage(first) &&
+    isHerdboardInvocation(last, rules)
+  );
+}
+
 // --- Execution hooks ---
 
 /** These options invoke another program whose effects the outer command does not describe. */
@@ -121,6 +209,7 @@ export function classifyCommand(
   command: string,
   cwd: string,
   agentDir = getAgentDir(),
+  home = homedir(),
 ): CommandClass {
   const trimmed = command.trim();
   if (
@@ -130,6 +219,8 @@ export function classifyCommand(
   ) {
     return "hard-deny";
   }
-  if (KNOWN_SAFE.some((pattern) => pattern.test(trimmed))) return "known-safe";
+  if (KNOWN_SAFE.some((pattern) => pattern.test(trimmed)) || isKnownSafeHerdboard(command, home)) {
+    return "known-safe";
+  }
   return "needs-jev";
 }

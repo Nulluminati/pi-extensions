@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import { describe, expect, it } from "vitest";
 import { classifyCommand } from "../../lib/command-policy.ts";
 
@@ -37,9 +38,9 @@ describe("command policy", () => {
     "/",
     "~",
     "$HOME",
-    "${HOME}",
+    "$" + "{HOME}",
     "$PWD",
-    "${PWD}",
+    "$" + "{PWD}",
     ".",
     "..",
     "*",
@@ -197,5 +198,197 @@ describe("command policy", () => {
       "",
     ])
       expect(classifyCommand(command, "/workspace")).toBe("needs-jev");
+  });
+
+  describe("herdboard known-safe policy", () => {
+    const HOME = "/home/tester";
+    const HERDBOARD_UV_BIN = ".local/share/uv/tools/herdboard/bin";
+    const TILDE_UV_PY = `~/${HERDBOARD_UV_BIN}`;
+    const HOME_UV_PY = `${HOME}/.local/share/uv/tools/herdboard/bin`;
+
+    it.each([
+      "herdboard",
+      "python3 -m herdboard",
+      `${TILDE_UV_PY}/python -m herdboard`,
+      `${TILDE_UV_PY}/python3 -m herdboard`,
+      `${HOME_UV_PY}/python -m herdboard`,
+      `${HOME_UV_PY}/python3 -m herdboard`,
+    ])("requires an approved subcommand after %s", (command) => {
+      expect(classifyCommand(command, "/workspace", undefined, HOME)).toBe("needs-jev");
+    });
+
+    it.each(["show", "list", "log", "add", "move", "attach", "edit"])(
+      "allows every approved herdboard subcommand (%s)",
+      (subcommand) => {
+        for (const launch of [
+          "herdboard",
+          "python3 -m herdboard",
+          `${TILDE_UV_PY}/python -m herdboard`,
+        ]) {
+          expect(classifyCommand(`${launch} ${subcommand}`, "/workspace", undefined, HOME)).toBe(
+            "known-safe",
+          );
+        }
+      },
+    );
+
+    it.each(["show", "list", "log", "add", "move", "attach", "edit"])(
+      "allows --json before the approved subcommand (%s)",
+      (subcommand) => {
+        for (const launch of [
+          "herdboard",
+          "python3 -m herdboard",
+          `${HOME_UV_PY}/python3 -m herdboard`,
+        ])
+          expect(
+            classifyCommand(`${launch} --json ${subcommand}`, "/workspace", undefined, HOME),
+          ).toBe("known-safe");
+      },
+    );
+
+    it("allows literal arguments after an approved subcommand", () => {
+      for (const command of [
+        "herdboard show t8kr",
+        'herdboard add "one two" --body body',
+        'herdboard move t8kr "In progress"',
+        "herdboard attach t8kr /tmp/notes.txt",
+        'herdboard edit t8kr --title "Review policy"',
+        "herdboard list --json",
+        "python3 -m herdboard --json log t8kr done",
+        `'${HOME_UV_PY}/python3' -m herdboard --json show t8kr`,
+      ])
+        expect(classifyCommand(command, "/workspace", undefined, HOME)).toBe("known-safe");
+    });
+
+    it("allows quoted literal data that only looks like shell syntax", () => {
+      for (const command of [
+        "herdboard log t8kr 'a;b|c&&d'",
+        'herdboard log t8kr "semi ; colon"',
+        "herdboard log t8kr '*'",
+        "herdboard add 'handle $PATH and (groups)'",
+        'herdboard edit t8kr --body "planned | backup"',
+      ])
+        expect(classifyCommand(command, "/workspace", undefined, HOME)).toBe("known-safe");
+    });
+
+    it("allows one leading cd with a literal directory", () => {
+      for (const command of [
+        "cd /workspace && herdboard show",
+        "cd /tmp && python3 -m herdboard --json list",
+        `cd "${HOME}/my dir" && herdboard edit t8kr`,
+        "cd \t /tmp && herdboard --json log t8kr 'started'",
+      ])
+        expect(classifyCommand(command, "/workspace", undefined, HOME)).toBe("known-safe");
+    });
+
+    it("resolves the installed interpreter against the current home directory by default", () => {
+      expect(
+        classifyCommand(`${homedir()}/${HERDBOARD_UV_BIN}/python -m herdboard show`, "/workspace"),
+      ).toBe("known-safe");
+    });
+
+    it("keeps shell composition judgeable even when every segment is herdboard", () => {
+      for (const command of [
+        "herdboard show | herdboard list",
+        "herdboard show && herdboard list",
+        "herdboard show; herdboard list",
+        "herdboard show || herdboard list",
+        "herdboard show\nherdboard list",
+        "herdboard show & herdboard list",
+        "cd /tmp && herdboard show && herdboard list",
+        "cd /tmp && cd /var && herdboard show",
+        "cd /tmp | herdboard show",
+        "cd /tmp || herdboard show",
+        "cd /tmp; herdboard show",
+        "cd /tmp\nherdboard show",
+        "cd /tmp && herdboard show;",
+        "cd /tmp && herdboard show ||",
+        "; herdboard show",
+        "herdboard show &&",
+        "herdboard show;",
+        "herdboard show |",
+        "\rherdboard show",
+        "echo hi && herdboard show",
+        "herdboard show && cd /tmp",
+        "cat /tmp/x; herdboard show",
+      ])
+        expect(classifyCommand(command, "/workspace", undefined, HOME)).toBe("needs-jev");
+    });
+
+    it("keeps shell syntax the scanner refuses judgeable", () => {
+      for (const command of [
+        "herdboard show > /tmp/out",
+        "herdboard show $(touch /tmp/x)",
+        "herdboard show `touch /tmp/x`",
+        "herdboard show &",
+        "herdboard show # note",
+        "herdboard show *",
+      ])
+        expect(classifyCommand(command, "/workspace", undefined, HOME)).toBe("needs-jev");
+    });
+
+    it("keeps other interpreters, install paths, and launch flags judgeable", () => {
+      for (const command of [
+        "/usr/bin/python3 -m herdboard show",
+        "python -m herdboard show",
+        "python3.13 -m herdboard show",
+        "pypy3 -m herdboard show",
+        "uv run herdboard show",
+        "~/.local/share/uv/tools/other/bin/python -m herdboard show",
+        "'~/.local/share/uv/tools/herdboard/bin/python' -m herdboard show",
+        '"~/.local/share/uv/tools/herdboard/bin/python3" -m herdboard show',
+        String.raw`\~/.local/share/uv/tools/herdboard/bin/python -m herdboard show`,
+        "cd /tmp && '~/.local/share/uv/tools/herdboard/bin/python' -m herdboard show",
+        `${HOME}/.local/share/uv/tools/herdboard/python -m herdboard show`,
+        `${HOME}/.local/share/uv/tools/herdboard/bin/pypy -m herdboard show`,
+        "/home/other/.local/share/uv/tools/herdboard/bin/python -m herdboard show",
+        "python3 -u -m herdboard show",
+        "python3 -X dev -m herdboard show",
+        "python3 -m herdboard -c 'import os'",
+        "python3 -m herdboard /tmp/script.py",
+        "python3 -m herdboard --version",
+      ])
+        expect(classifyCommand(command, "/workspace", undefined, HOME)).toBe("needs-jev");
+    });
+
+    it("keeps global options, bare --json, and unapproved subcommands judgeable", () => {
+      for (const command of [
+        "herdboard --help",
+        "herdboard --version",
+        "herdboard --verbose show",
+        "herdboard --json",
+        "herdboard --json --json show",
+        'herdboard ""',
+        "herdboard delete t8kr",
+        "herdboard init",
+        "cd /tmp herdboard show",
+      ])
+        expect(classifyCommand(command, "/workspace", undefined, HOME)).toBe("needs-jev");
+    });
+
+    it("keeps cd forms outside one literal directory judgeable", () => {
+      for (const command of [
+        "cd && herdboard show",
+        "cd $HOME && herdboard show",
+        "cd /tmp/* && herdboard show",
+        "cd $OLDPWD && herdboard show",
+        "cd /tmp /var && herdboard show",
+        "cd -P /tmp && herdboard show",
+        "cd - && herdboard show",
+        'cd "" && herdboard show',
+      ])
+        expect(classifyCommand(command, "/workspace", undefined, HOME)).toBe("needs-jev");
+    });
+
+    it("runs hard denies before the herdboard fast path", () => {
+      for (const command of [
+        "sudo herdboard show",
+        'herdboard log t8kr "; rm -rf /"',
+        'herdboard add "then git clean -fdx"',
+        "cd /tmp && herdboard show; sudo reboot",
+        "doas herdboard list",
+      ])
+        expect(classifyCommand(command, "/workspace", undefined, HOME)).toBe("hard-deny");
+    });
   });
 });

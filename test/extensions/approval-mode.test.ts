@@ -158,6 +158,20 @@ describe("approval-mode Jev diagnostics", () => {
     }
   });
 
+  it.each([
+    ['printf "%s\\n" "[layout]" > ~/.config/herdr/layout.toml', 0.73],
+    ["rm -rf ~/.config/herdr/sessions", 0.62],
+    ["ansible-playbook bootstrap.yml -i hosts", 0.68],
+  ] as const)(
+    "keeps replay outside-write risk uncertain for %s",
+    async (command, externalChange) => {
+      const { registry } = registryAnswering({ harm: 0.01, secrets: 0.01, externalChange });
+      expect(
+        (await judgeCommand({ command, cwd: "/workspace", modelRegistry: registry })).decision,
+      ).toBe("uncertain");
+    },
+  );
+
   it("tells the judge which routine work is not risk", async () => {
     const { classify, registry } = registryAnswering({ harm: 0.01, secrets: 0.01 });
     await judgeCommand({
@@ -665,6 +679,43 @@ describe("approval-mode extension", () => {
     expect(ctx.ui.notify).not.toHaveBeenCalled();
   });
 
+  it("runs plain herdboard commands without Jev or approval dialogs", async () => {
+    const { handler, ctx, classify } = await setup({ classifiers: [] });
+    for (const toolName of ["bash", "background", "monitor"]) {
+      expect(
+        await handler(
+          {
+            toolName,
+            input: {
+              command:
+                'cd /workspace && ~/.local/share/uv/tools/herdboard/bin/python3 -m herdboard --json log t8kr "Tests pass."',
+            },
+          },
+          ctx,
+        ),
+      ).toBeUndefined();
+    }
+    expect(classify).not.toHaveBeenCalled();
+    expect(ctx.ui.custom).not.toHaveBeenCalled();
+    expect(ctx.ui.select).not.toHaveBeenCalled();
+  });
+
+  it("does not bypass Jev for herdboard commands with extra shell effects", async () => {
+    const { handler, ctx, classify } = await setup({ probabilities: { harm: 0.5, secrets: 0.01 } });
+    for (const command of [
+      'herdboard --json log t8kr "$(touch /tmp/test)"',
+      "herdboard show t8kr > /tmp/card",
+      "herdboard show t8kr | sh",
+    ]) {
+      expect(await handler({ toolName: "bash", input: { command } }, ctx)).toEqual({
+        block: true,
+        reason: expect.stringContaining("Approval Mode blocked:"),
+      });
+    }
+    expect(classify).toHaveBeenCalledTimes(3);
+    expect(ctx.ui.custom).toHaveBeenCalledTimes(3);
+  });
+
   it("allows exact Git status without Jev after a reload acknowledgment", async () => {
     const { handler, ctx } = await setup({ classifiers: [] });
     ctx.sessionManager.getBranch = vi.fn(() =>
@@ -1034,6 +1085,189 @@ describe("approval-mode --approval-mode flag", () => {
   });
 });
 
+describe("approval-mode --approval-reject flag", () => {
+  it("registers ask as the default reject policy", async () => {
+    const { pi } = await setup();
+    expect(pi.registerFlag).toHaveBeenCalledWith("approval-reject", {
+      description: expect.any(String),
+      type: "string",
+      default: "ask",
+    });
+  });
+
+  it.each([undefined, "ask"])("offers approval for rejects with %s", async (rejectFlag) => {
+    const { ctx, handler } = await setup({
+      ...(rejectFlag === undefined ? {} : { rejectFlag }),
+      probabilities: { harm: 0.8, secrets: 0.01 },
+    });
+    ctx.ui.custom.mockResolvedValue("Approve once");
+    expect(
+      await handler({ toolName: "bash", input: { command: "npm test" } }, ctx),
+    ).toBeUndefined();
+    expect(ctx.ui.custom).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["harm", "secrets", "externalChange"] as const)(
+    "blocks a reject at the %s boundary without a dialog",
+    async (score) => {
+      const { pi, ctx, handler } = await setup({
+        rejectFlag: "block",
+        probabilities: { harm: 0.01, secrets: 0.01, externalChange: 0.01, [score]: 0.8 },
+      });
+      pi.events.emit.mockClear();
+      for (const toolName of ["bash", "background", "monitor"]) {
+        expect(await handler({ toolName, input: { command: "npm test" } }, ctx)).toEqual({
+          block: true,
+          reason: expect.stringMatching(/^Approval Mode blocked: .+\.$/),
+        });
+      }
+      expect(ctx.ui.custom).not.toHaveBeenCalled();
+      expect(ctx.ui.select).not.toHaveBeenCalled();
+      expect(pi.events.emit).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps low-risk commands allowed under the block policy", async () => {
+    const { ctx, handler } = await setup({
+      rejectFlag: "block",
+      probabilities: { harm: 0.3, secrets: 0.3, externalChange: 0.4 },
+    });
+    expect(
+      await handler({ toolName: "bash", input: { command: "npm test" } }, ctx),
+    ).toBeUndefined();
+    expect(ctx.ui.custom).not.toHaveBeenCalled();
+    expect(ctx.ui.select).not.toHaveBeenCalled();
+  });
+
+  it("still prompts for uncertainty below the reject boundary", async () => {
+    const { ctx, handler } = await setup({
+      rejectFlag: "block",
+      probabilities: { harm: 0.79, secrets: 0.01 },
+    });
+    ctx.mode = "rpc";
+    ctx.ui.select.mockResolvedValue("Approve once");
+    expect(
+      await handler({ toolName: "bash", input: { command: "npm test" } }, ctx),
+    ).toBeUndefined();
+    expect(ctx.ui.select).toHaveBeenCalledWith(
+      expect.stringContaining("npm test"),
+      ["Block", "Approve once"],
+      expect.any(Object),
+    );
+  });
+
+  it("applies the parent reject policy to workers while uncertainty still prompts", async () => {
+    const { pi, ctx } = await setup({ rejectFlag: "block" });
+    expect(await parentRequest(pi, { ...workerRequest(), decision: "reject" })).toEqual({
+      approved: false,
+    });
+    expect(ctx.ui.custom).not.toHaveBeenCalled();
+    ctx.ui.custom.mockResolvedValue("Approve once");
+    expect(await parentRequest(pi, workerRequest())).toEqual({ approved: true });
+    expect(ctx.ui.custom).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks rejects without waiting for an uncertain request's dialog", async () => {
+    const { pi, ctx } = await setup({ rejectFlag: "block" });
+    const opened = deferred<void>();
+    const choice = deferred<string>();
+    ctx.ui.custom.mockImplementationOnce(() => {
+      opened.resolve();
+      return choice.promise;
+    });
+    const uncertain = parentRequest(pi, workerRequest());
+    await opened.promise;
+    const rejected = parentRequest(pi, { ...workerRequest(), decision: "reject" });
+    try {
+      expect(await rejected).toEqual({ approved: false });
+    } finally {
+      choice.resolve("Approve once");
+    }
+    expect(await uncertain).toEqual({ approved: true });
+    expect(ctx.ui.custom).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["ask", "block", "invalid"])(
+    "ignores worker reject flag %s and relays rejects to the parent",
+    async (rejectFlag) => {
+      vi.stubEnv("PI_WORKER", "1");
+      vi.stubEnv("PI_WORKER_APPROVAL_FD", "3");
+      const { ctx, handler } = await setup(
+        { rejectFlag, probabilities: { harm: 0.8, secrets: 0.01 } },
+        false,
+      );
+      workerChannel.request
+        .mockResolvedValueOnce({ enabled: true })
+        .mockResolvedValueOnce({ approved: true });
+      expect(
+        await handler({ toolName: "bash", input: { command: "npm test" } }, ctx),
+      ).toBeUndefined();
+      expect(workerChannel.request).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ kind: "approval", decision: "reject" }),
+        undefined,
+      );
+      expect(ctx.ui.notify).not.toHaveBeenCalled();
+    },
+  );
+
+  it("applies reject blocking to extension command requests", async () => {
+    const { pi, ctx } = await setup({
+      rejectFlag: "block",
+      probabilities: { harm: 0.8, secrets: 0.01 },
+    });
+    expect(await reviewRequest(pi, ctx, "npm test")).toEqual({
+      approved: false,
+      reason: "Approval Mode blocked: The command presents serious damage risk.",
+    });
+    expect(ctx.ui.custom).not.toHaveBeenCalled();
+  });
+
+  it("skips reject blocking when review is off but keeps hard denies", async () => {
+    const { pi, ctx, handler, classify } = await setup({ rejectFlag: "block", flag: "off" });
+    expect(
+      await handler({ toolName: "bash", input: { command: "npm test" } }, ctx),
+    ).toBeUndefined();
+    expect(await parentRequest(pi, { ...workerRequest(), decision: "reject" })).toEqual({
+      approved: true,
+    });
+    expect(await handler({ toolName: "bash", input: { command: "rm -rf /" } }, ctx)).toEqual({
+      block: true,
+      reason: expect.stringContaining("hard deny"),
+    });
+    expect(classify).not.toHaveBeenCalled();
+  });
+
+  it.each(["invalid", "", true])("fails closed on invalid reject flag %j", async (rejectFlag) => {
+    const { ctx, handler } = await setup({
+      rejectFlag,
+      probabilities: { harm: 0.8, secrets: 0.01 },
+    });
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringMatching(/--approval-reject.*ask or block/),
+      "error",
+    );
+    expect(await handler({ toolName: "bash", input: { command: "npm test" } }, ctx)).toEqual({
+      block: true,
+      reason: expect.stringContaining("Approval Mode blocked:"),
+    });
+    expect(ctx.ui.custom).not.toHaveBeenCalled();
+    await expect(setup({ rejectFlag }, false)).rejects.toThrow(/--approval-reject.*ask or block/);
+  });
+
+  it("re-reads the reject policy when a session restarts", async () => {
+    const { pi, ctx } = await setup({ rejectFlag: "block" });
+    pi.getFlag.mockReturnValue(undefined);
+    const start = pi.on.mock.calls.find((call) => call[0] === "session_start")?.[1];
+    await start?.({ type: "session_start" }, ctx);
+    ctx.ui.custom.mockResolvedValue("Approve once");
+    expect(await parentRequest(pi, { ...workerRequest(), decision: "reject" })).toEqual({
+      approved: true,
+    });
+    expect(ctx.ui.custom).toHaveBeenCalledTimes(1);
+  });
+});
+
 // --- Helpers ---
 
 function deferred<T>() {
@@ -1175,15 +1409,16 @@ async function setup(
     probabilities?: { harm: number; secrets: number; externalChange?: number };
     classify?: ClassifyMock;
     flag?: string | boolean;
+    rejectFlag?: string | boolean;
   } = {},
   hasUI = true,
 ) {
   const pi = createMockPi();
-  if (options.flag !== undefined) {
-    pi.getFlag.mockImplementation((name: string) =>
-      name === "approval-mode" ? options.flag : undefined,
-    );
-  }
+  pi.getFlag.mockImplementation((name: string) => {
+    if (name === "approval-mode") return options.flag;
+    if (name === "approval-reject") return options.rejectFlag;
+    return undefined;
+  });
   const unsubscribe = vi.fn();
   pi.events.on.mockReturnValue(unsubscribe);
   const ctx = createMockCommandContext();
