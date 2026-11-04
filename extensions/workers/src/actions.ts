@@ -18,7 +18,13 @@ import {
 import { type RunningWorker, readSpoolLines } from "./runner.ts";
 import { streamPath } from "./store.ts";
 import type { WorkerRecord } from "./types.ts";
-import { applyPatch, removeWorktree, worktreePath } from "./worktree.ts";
+import {
+  applyPatch,
+  branchExists,
+  removeWorktree,
+  worktreeBranch,
+  worktreePath,
+} from "./worktree.ts";
 
 // --- Actions ---
 
@@ -210,7 +216,9 @@ export async function collectWorkerPatch(
     );
   }
   if (record.collectedAt !== undefined) {
-    throw new Error(`Worker ${id}'s patch was already collected.`);
+    throw new Error(
+      `Worker ${id}'s patch was already applied to the working tree. The patch file is at ${record.patchPath}.`,
+    );
   }
   const shouldApply = params.apply !== false;
   const shouldCleanup = params.cleanup !== false;
@@ -238,11 +246,12 @@ export async function collectWorkerPatch(
       `Patch left unapplied at ${record.patchPath}. Collect again with workers (action=collect, id=${id}) to apply it.`,
     );
   }
-  if (shouldCleanup && record.worktree && !existsSync(worktreePath(cwd, id))) {
-    // An earlier apply=false collect already cleaned up; the record keeps
-    // its worktree field, so report the state instead of a second removal.
-    lines.push("Worktree already removed.");
-  } else if (shouldCleanup && record.worktree) {
+  if (shouldCleanup && record.worktree) {
+    // An earlier apply=false collect, or a manual delete, can leave the
+    // directory gone while the record keeps its worktree field. Cleanup
+    // still runs so a stale registration or branch is removed; only the
+    // message reflects the earlier state.
+    const alreadyRemoved = !existsSync(worktreePath(cwd, id));
     // Never remove a worktree whose changes are not durably captured:
     // if the patch file is gone, removal would destroy the only copy.
     const patchMissing = await access(record.patchPath).then(
@@ -261,8 +270,16 @@ export async function collectWorkerPatch(
       lines.push(
         `Warning: worktree removal failed; remove it manually at ${worktreePath(cwd, id)}.`,
       );
+    } else if (await branchExists(cwd, id)) {
+      lines.push(
+        `${alreadyRemoved ? "Worktree already removed" : "Worktree removed"}. Warning: branch ${worktreeBranch(id)} was not deleted; delete it with git branch -D ${worktreeBranch(id)}.`,
+      );
     } else {
-      lines.push("Worktree and branch removed.");
+      lines.push(
+        alreadyRemoved
+          ? "Worktree already removed; branch removed."
+          : "Worktree and branch removed.",
+      );
     }
   }
   // The stream spool outlives the collect: post-mortem tails stay

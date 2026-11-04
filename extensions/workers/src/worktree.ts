@@ -264,6 +264,19 @@ export async function removeWorktree(cwd: string, workerId: string): Promise<voi
   await runGit(cwd, ["branch", "-D", worktreeBranch(workerId)]).catch(() => {});
 }
 
+/** Whether the worker's `workers/<id>` branch still exists. */
+export async function branchExists(cwd: string, workerId: string): Promise<boolean> {
+  return runGit(cwd, [
+    "rev-parse",
+    "--verify",
+    "--quiet",
+    `refs/heads/${worktreeBranch(workerId)}`,
+  ]).then(
+    () => true,
+    () => false,
+  );
+}
+
 /** Outcome of a worktree discard attempt. */
 export type WorktreeDiscard = "removed" | "absent" | "kept" | "failed";
 

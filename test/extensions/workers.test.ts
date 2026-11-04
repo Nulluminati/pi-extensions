@@ -1488,7 +1488,7 @@ sleep 30
 
     await executeTool("workers", { action: "collect", id: worker.id });
     await expect(executeTool("workers", { action: "collect", id: worker.id })).rejects.toThrow(
-      /already collected/,
+      `Worker ${worker.id}'s patch was already applied to the working tree. The patch file is at ${worker.patchPath}.`,
     );
   });
 
@@ -1520,6 +1520,54 @@ sleep 30
     expect(record?.collectedAt).toBeUndefined();
   });
 
+  it("workers collect cleans up a leftover branch when the worktree directory is gone", async () => {
+    await initGitRepo(cwd);
+    await writeProvisionConfig(cwd);
+    const fixture = await writeFixture(fixtureDir, "ok-worker.sh", SUCCESS_WORKER);
+    setEnv("PI_WORKER_COMMAND", fixture);
+
+    const started = await executeTool("spawn_worker", { task: "t", isolate: true, wait: true });
+    const worker = started.details.worker;
+    const id = worker.id as string;
+    // The directory is deleted by hand; Git still has the worktree
+    // registration and the workers/<id> branch.
+    await rm(worker.worktree as string, { recursive: true, force: true });
+    expect(await runGit(cwd, ["branch", "--list", worktreeBranch(id)])).toContain(
+      worktreeBranch(id),
+    );
+
+    const collected = await executeTool("workers", { action: "collect", id });
+
+    expect(contentText(collected)).toContain("Worktree already removed; branch removed.");
+    expect(await runGit(cwd, ["branch", "--list", worktreeBranch(id)])).toBe("");
+    expect(await runGit(cwd, ["worktree", "list"])).not.toContain(id);
+  });
+
+  it("workers collect warns when the worker branch survives cleanup", async () => {
+    await initGitRepo(cwd);
+    await writeProvisionConfig(cwd);
+    const fixture = await writeFixture(fixtureDir, "ok-worker.sh", SUCCESS_WORKER);
+    setEnv("PI_WORKER_COMMAND", fixture);
+
+    const started = await executeTool("spawn_worker", { task: "t", isolate: true, wait: true });
+    const id = started.details.worker.id as string;
+    const actualGit = await vi.importActual<typeof import("../../lib/git.ts")>("../../lib/git.ts");
+    vi.mocked(runGit).mockImplementation(async (dir, args, ...rest) => {
+      if (args[0] === "branch" && args[1] === "-D") throw new Error("branch is locked");
+      return actualGit.runGit(dir, args, ...rest);
+    });
+
+    const collected = await executeTool("workers", { action: "collect", id }).finally(() =>
+      // Restore the call-through git spy so later tests keep real git.
+      vi.mocked(runGit).mockRestore(),
+    );
+
+    expect(contentText(collected)).toContain(
+      `Worktree removed. Warning: branch ${worktreeBranch(id)} was not deleted; delete it with git branch -D ${worktreeBranch(id)}.`,
+    );
+    expect(contentText(collected)).not.toContain("Worktree and branch removed.");
+  });
+
   it("workers collect after a cleaning apply=false collect reports the worktree already removed", async () => {
     await initGitRepo(cwd);
     await writeProvisionConfig(cwd);
@@ -1542,7 +1590,7 @@ sleep 30
     const applied = await executeTool("workers", { action: "collect", id: worker.id });
 
     expect(contentText(applied)).toContain("Applied patch");
-    expect(contentText(applied)).toContain("Worktree already removed.");
+    expect(contentText(applied)).toContain("Worktree already removed; branch removed.");
     expect(contentText(applied)).not.toContain("Worktree and branch removed.");
     expect(await readFile(join(cwd, "AFTER.md"), "utf8")).toBe("after\n");
   });
