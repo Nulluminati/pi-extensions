@@ -60,10 +60,10 @@ const ALWAYS_ON_THINKING_MAP: ThinkingLevelMap = {
  * probes of GLM-5.2 and Kimi-K3 rejected the non-OpenAI "max" sentinel, while
  * the GLM-5.3-Flash and Qwen3.8-27B probes returned HTTP 200 for it (the
  * identity map is kept either way — max is not a pi thinking level and is
- * never sent). One model always thinks and cannot be turned off
- * (gpt-oss-120b), so off maps to null for it. Kimi-K3 briefly rejected
- * `medium` (probed 2026-07) but the 2026-08 probe shows it accepted again, so
- * the full identity map applies.
+ * never sent). Two models always think and cannot be turned off
+ * (gpt-oss-120b, Kimi-K3.1-Pro), so off maps to null for them. Kimi-K3 briefly
+ * rejected `medium` (probed 2026-07) but the 2026-08 probe shows it accepted
+ * again, so the full identity map applies.
  *
  * Kimi-K2.7-Code and MiniMax-M3 no longer appear in /v1/models and return
  * HTTP 404 "no longer supported", so their static entries were removed.
@@ -222,6 +222,25 @@ export const STATIC_MODELS: ProviderChatModelConfig[] = [
     thinkingLevelMap: DISABLEABLE_THINKING_MAP,
     input: ["text", "image"],
     cost: { input: 3.0, output: 15.0, cacheRead: 0.45, cacheWrite: 0 },
+    contextWindow: 524288,
+    maxTokens: 65536,
+    compat: SYNTHETIC_COMPAT,
+  },
+  // Kimi-K3.1-Pro — 2.8T-parameter sibling of Kimi-K3 with vision and a 524K
+  // context, priced below it (2.0/10.0 versus 3.0/15.0 per million). Probed
+  // 2026-10: the gateway accepts every pi level and thinking cannot be turned
+  // off — `none` still produces thinking (reasoning_tokens=65 on a reasoning
+  // prompt), so off is hidden. The thinking block arrives under `reasoning`,
+  // not `reasoning_content`. The catalog lists efforts [low, high, max], which
+  // is a tier hint: minimal/medium/xhigh are accepted too.
+  {
+    id: "hf:moonshotai/Kimi-K3.1-Pro",
+    name: "Kimi-K3.1-Pro",
+    api: "openai-completions",
+    reasoning: true,
+    thinkingLevelMap: ALWAYS_ON_THINKING_MAP,
+    input: ["text", "image"],
+    cost: { input: 2.0, output: 10.0, cacheRead: 0.2, cacheWrite: 0 },
     contextWindow: 524288,
     maxTokens: 65536,
     compat: SYNTHETIC_COMPAT,

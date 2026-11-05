@@ -23,6 +23,7 @@ const EXPECTED_MODEL_IDS = [
   "hf:zai-org/GLM-5.3",
   "hf:zai-org/GLM-5.3-Flash",
   "hf:moonshotai/Kimi-K3",
+  "hf:moonshotai/Kimi-K3.1-Pro",
   "hf:Qwen/Qwen3.6-27B",
   "hf:Qwen/Qwen3.8-27B",
   "hf:zai-org/GLM-4.7-Flash",
@@ -36,7 +37,11 @@ const EXPECTED_MODEL_IDS = [
 // Reasoning models whose thinking cannot be disabled (probed; see
 // ALWAYS_ON_THINKING_MAP in the extension source). off maps to null so pi
 // hides the off level instead of sending a value the model ignores.
-const ALWAYS_ON_IDS = ["hf:openai/gpt-oss-120b", "hf:zai-org/GLM-5.3"];
+const ALWAYS_ON_IDS = [
+  "hf:openai/gpt-oss-120b",
+  "hf:zai-org/GLM-5.3",
+  "hf:moonshotai/Kimi-K3.1-Pro",
+];
 
 describe("synthetic-extension", () => {
   describe("file structure", () => {
@@ -200,6 +205,33 @@ describe("synthetic-extension", () => {
     );
     // The undated entry stays registered: Synthetic serves both snapshots.
     expect(STATIC_MODELS.some((m) => m.id === "hf:deepseek-ai/DeepSeek-V4.1-Flash")).toBe(true);
+  });
+
+  it("configures Kimi-K3.1-Pro as an always-on vision sibling of Kimi-K3", () => {
+    // Probed 2026-10: the gateway accepts every pi level, but `none` still
+    // produces reasoning tokens, so thinking cannot be disabled and off is
+    // hidden. The thinking block arrives under `reasoning`.
+    const pro = STATIC_MODELS.find((m) => m.id === "hf:moonshotai/Kimi-K3.1-Pro");
+    expect(pro).toMatchObject({
+      name: "Kimi-K3.1-Pro",
+      api: "openai-completions",
+      reasoning: true,
+      input: ["text", "image"],
+      cost: { input: 2.0, output: 10.0, cacheRead: 0.2, cacheWrite: 0 },
+      contextWindow: 524288,
+      maxTokens: 65536,
+      thinkingLevelMap: {
+        off: null,
+        minimal: "minimal",
+        low: "low",
+        medium: "medium",
+        high: "high",
+        xhigh: "xhigh",
+      },
+      compat: { supportsReasoningEffort: true },
+    });
+    // Both Kimi ids stay registered: Synthetic serves the 3 and the 3.1.
+    expect(STATIC_MODELS.some((m) => m.id === "hf:moonshotai/Kimi-K3")).toBe(true);
   });
 
   it("maps every reasoning model through the full identity map (incl. medium)", () => {
