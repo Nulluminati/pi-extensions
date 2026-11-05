@@ -53,6 +53,41 @@ export function buildRecentTranscript(entries: Entry[], fromLastUser = true): st
   return lines.join("\n");
 }
 
+/** Written into the prompt when the oldest transcript lines are dropped. */
+export const OMITTED_TRANSCRIPT_MARKER = "[earlier transcript omitted]";
+
+/**
+ * Fit a transcript into a character budget by dropping whole lines from the
+ * front. The newest activity always survives the cut, because a recap that
+ * cannot name the last step has no value. The marker tells the model that the
+ * transcript starts mid-turn.
+ */
+export function fitTranscriptTail(transcript: string, maxChars: number): string {
+  if (transcript.length <= maxChars) return transcript;
+
+  const lines = transcript.split("\n");
+  const budget = maxChars - OMITTED_TRANSCRIPT_MARKER.length - 1;
+  // Too small to hold the marker and any line: fall back to a plain tail cut.
+  if (budget < 1) return transcript.slice(Math.max(0, transcript.length - maxChars));
+
+  let start = lines.length;
+  let length = 0;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i] ?? "";
+    const cost = start === lines.length ? line.length : line.length + 1;
+    if (length + cost > budget) break;
+    length += cost;
+    start = i;
+  }
+
+  if (start === lines.length) {
+    // A single line exceeds the budget on its own: keep the tail of that line.
+    const last = lines[lines.length - 1] ?? "";
+    return [OMITTED_TRANSCRIPT_MARKER, last.slice(Math.max(0, last.length - budget))].join("\n");
+  }
+  return [OMITTED_TRANSCRIPT_MARKER, ...lines.slice(start)].join("\n");
+}
+
 export function hasMeaningfulActivity(entries: Entry[]): boolean {
   let lastUserIdx = -1;
   for (let i = entries.length - 1; i >= 0; i--) {

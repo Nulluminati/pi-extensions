@@ -30,7 +30,7 @@ The extension generates recaps automatically in three scenarios:
 
 ### Recap generation
 
-1. **Context extraction** — Reads the session branch and builds a text transcript from the last user message onward. Includes user text, assistant text, tool calls (with truncated arguments), and tool results.
+1. **Context extraction** — Reads the session branch and builds a text transcript from the last user message onward. Includes user text, assistant text, tool calls (with truncated arguments), and tool results. The prompt carries at most 12000 characters of transcript. When the text is longer, whole lines are dropped from the front so the newest steps always reach the model; a `[earlier transcript omitted]` marker shows where the cut starts.
 2. **Meaningful activity check** — Only generates a recap if the transcript contains at least 50 assistant words or 1+ tool call after the last user message. This prevents empty/empty-looking recaps.
 3. **LLM call** — Uses `completeSimple()` from `@earendil-works/pi-ai` with a dedicated system prompt ("You write terse, concrete session recaps for a coding agent UI."). The prompt instructs the model to produce exactly one line in the format: `recap: <what happened, past tense, concrete>. Next: <one-line next step>.`
 4. **Display** — The recap is published through the shared widget strip (`setStripWidget` with `WIDGET_PRIORITY_RECAP`), which pins it above the other strip widgets (workers, jobs, todos, missions, autoresearch). A `recap:changed` event is still emitted on the shared `pi.events` bus for external consumers.
@@ -82,6 +82,7 @@ All state is stored in a `WeakMap<ExtensionAPI, RecapState>` with the following 
 - **`completeSimple()`** — Uses the simpler API instead of `complete()` because recaps don't need streaming, tool calls, or complex payload construction.
 - **Cache retention: "none"** — Recaps are ephemeral and should not be cached by the provider.
 - **Max tokens: 256** — Caps the LLM response to prevent long rambling recaps.
+- **Prompt budget keeps the tail** — The recap prompt holds the last 12000 characters of transcript, not the first. A long turn or a resumed session can then name the step that just happened instead of the step it started with.
 
 ## Pi APIs Used
 

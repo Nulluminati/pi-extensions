@@ -10,6 +10,9 @@ export const RESUME_RECAP_DELAY_MS = 300;
 
 export const AUTO_DISMISS_MS = 120_000;
 
+/** Character budget for the transcript embedded in the recap prompt. */
+export const PROMPT_TRANSCRIPT_MAX_CHARS = 12_000;
+
 /** Wire name of the recap widget event published on the pi.events bus
  * ("recap:changed") whenever the recap widget appears or clears. Sibling
  * widgets — todos — subscribe to re-insert themselves below the recap.

@@ -3,10 +3,19 @@ import { resolve } from "node:path";
 import { type AssistantMessage, fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import sessionRecapExtension from "../../extensions/session-recap/session-recap.ts";
+import {
+  fitTranscriptTail,
+  OMITTED_TRANSCRIPT_MARKER,
+} from "../../extensions/session-recap/src/transcript.ts";
 import { __resetWidgetStrip, STRIP_KEY_ABOVE } from "../../lib/widget-strip.ts";
 import { createMockCommandContext, createMockModel } from "../mocks/context-mocks.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
-import { getCommandHandler, getEventHandler, sessionEntries } from "../mocks/test-helpers.ts";
+import {
+  firstContentText,
+  getCommandHandler,
+  getEventHandler,
+  sessionEntries,
+} from "../mocks/test-helpers.ts";
 
 vi.mock("@earendil-works/pi-ai/compat", () => ({
   completeSimple: vi.fn(),
@@ -861,6 +870,54 @@ describe("session-recap-extension", () => {
     expect(recapCalls.length).toBe(0);
   });
 
+  // --- Prompt budget tests ---
+
+  it("sends the newest steps when the turn transcript exceeds the prompt budget", async () => {
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+    vi.mocked(completeSimple).mockResolvedValueOnce(
+      fauxAssistantMessage([{ type: "text", text: "recap: renamed the broker module" }]),
+    );
+
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildLongTurnBranch()));
+    mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-long");
+    await sessionRecapExtension(mockPi);
+
+    await getCommandHandler(mockPi, "recap")("", mockCtx);
+    await vi.waitFor(() => expect(completeSimple).toHaveBeenCalled());
+
+    const prompt = firstContentText(vi.mocked(completeSimple).mock.calls[0][1].messages[0]) ?? "";
+    expect(prompt).toContain("ZEBRA_FINAL_STEP");
+    expect(prompt).not.toContain("ZEBRA_FIRST_STEP");
+    expect(prompt).toContain("[earlier transcript omitted]");
+    expect(prompt.length).toBeLessThan(PROMPT_LENGTH_BOUND);
+  });
+
+  it("resume recap of a long session covers where the session left off", async () => {
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+    vi.mocked(completeSimple).mockResolvedValueOnce(
+      fauxAssistantMessage([{ type: "text", text: "recap: renamed the broker module" }]),
+    );
+
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildLongTurnBranch()));
+    mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-long");
+    await sessionRecapExtension(mockPi);
+
+    await getEventHandler(mockPi, "session_start")(
+      { type: "session_start", reason: "resume" },
+      mockCtx,
+    );
+    vi.advanceTimersByTime(400);
+    await vi.waitFor(() => expect(completeSimple).toHaveBeenCalled());
+
+    const prompt = firstContentText(vi.mocked(completeSimple).mock.calls[0][1].messages[0]) ?? "";
+    expect(prompt).toContain("ZEBRA_FINAL_STEP");
+    expect(prompt.length).toBeLessThan(PROMPT_LENGTH_BOUND);
+  });
+
   // --- Wrapping tests ---
 
   it("wraps long recap text via render width", async () => {
@@ -895,6 +952,86 @@ describe("session-recap-extension", () => {
     // header line + at least one text line
     expect(lines.length).toBeGreaterThanOrEqual(2);
     expect(lines[0]).toContain("recap"); // header
+  });
+});
+
+// Every assistant step of the long turn is filled to this width, so 40 steps
+// push the transcript far past the 12000-character prompt budget.
+const LONG_STEP_FILLER = "x".repeat(500);
+
+// The recap prompt holds 12000 characters of transcript plus a fixed rules
+// header. The whole prompt stays below this bound when the budget holds.
+const PROMPT_LENGTH_BOUND = 13_000;
+
+/** One user turn with 40 long assistant steps and a final step that names the
+ *  last change. The final marker only reaches the model when the prompt keeps
+ *  the newest transcript lines. */
+function buildLongTurnBranch(): unknown[] {
+  const branch: unknown[] = [
+    {
+      id: "entry-user",
+      type: "message",
+      message: { role: "user", content: [{ type: "text", text: "rename the broker module" }] },
+    },
+  ];
+  for (let i = 0; i < 40; i++) {
+    const marker = i === 0 ? "ZEBRA_FIRST_STEP: " : "";
+    branch.push({
+      id: `entry-step-${i}`,
+      type: "message",
+      message: {
+        role: "assistant",
+        content: [
+          { type: "text", text: `${marker}step ${i} ${LONG_STEP_FILLER}` },
+          { type: "toolCall", name: "bash", arguments: { command: `step-${i}` } },
+        ],
+      },
+    });
+  }
+  branch.push({
+    id: "entry-final",
+    type: "message",
+    message: {
+      role: "assistant",
+      content: [
+        {
+          type: "text",
+          text: "ZEBRA_FINAL_STEP: renamed the broker module and the tests pass.",
+        },
+      ],
+    },
+  });
+  return branch;
+}
+
+describe("fitTranscriptTail", () => {
+  it("returns a transcript that fits unchanged", () => {
+    const transcript = "User: rename it\nAssistant: done";
+    expect(fitTranscriptTail(transcript, 1000)).toBe(transcript);
+  });
+
+  it("drops whole lines from the front and keeps the newest lines", () => {
+    const transcript = Array.from({ length: 10 }, (_, i) => `step-${i} ok`).join("\n");
+    const fitted = fitTranscriptTail(transcript, 50);
+    expect(fitted).toContain("step-9");
+    expect(fitted).toContain("step-8");
+    expect(fitted).not.toContain("step-0");
+    expect(fitted.split("\n")[0]).toBe(OMITTED_TRANSCRIPT_MARKER);
+  });
+
+  it("keeps the tail of a single line that exceeds the budget", () => {
+    const transcript = `${"a".repeat(200)}NEWEST`;
+    const fitted = fitTranscriptTail(transcript, 60);
+    expect(fitted.endsWith("NEWEST")).toBe(true);
+    expect(fitted.length).toBeLessThanOrEqual(60);
+  });
+
+  it("never returns more than the requested budget", () => {
+    const transcript = Array.from({ length: 500 }, (_, i) => `line-${i} ${"x".repeat(80)}`).join(
+      "\n",
+    );
+    expect(fitTranscriptTail(transcript, 12_000).length).toBeLessThanOrEqual(12_000);
+    expect(fitTranscriptTail(transcript, 200).length).toBeLessThanOrEqual(200);
   });
 });
 

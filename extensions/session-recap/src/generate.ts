@@ -2,6 +2,8 @@ import type { SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { resolveSmallModel } from "../../../lib/small-model.ts";
+import { PROMPT_TRANSCRIPT_MAX_CHARS } from "./constants.ts";
+import { fitTranscriptTail } from "./transcript.ts";
 
 export async function generateRecap(
   transcript: string,
@@ -9,6 +11,7 @@ export async function generateRecap(
   signal: AbortSignal | undefined,
 ): Promise<string | undefined> {
   const resolved = await resolveSmallModel(ctx);
+  const promptTranscript = fitTranscriptTail(transcript, PROMPT_TRANSCRIPT_MAX_CHARS);
 
   const prompt = `You produce a single-line recap of what the coding agent just did, so the user can re-enter flow after switching focus back to this session.
 
@@ -21,7 +24,7 @@ Rules:
 - Max ~220 characters.
 
 <transcript>
-${transcript.slice(0, 12000)}
+${promptTranscript}
 </transcript>`;
 
   const options: SimpleStreamOptions = {
