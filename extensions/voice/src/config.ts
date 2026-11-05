@@ -67,7 +67,7 @@ export function loadActiveSpeakerId(configPath: string): number {
   }
   if (typeof voice !== "string") return 0;
   const speakerId = KITTEN_VOICES.indexOf(voice as (typeof KITTEN_VOICES)[number]);
-  return speakerId >= 0 ? speakerId : 0;
+  return Math.max(speakerId, 0);
 }
 
 export function loadActiveTtsModelId(configPath: string): string {
