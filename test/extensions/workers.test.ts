@@ -1665,6 +1665,55 @@ sleep 30
     expect(record?.collectedAt).toBeDefined();
   });
 
+  it("workers collect of an already collected empty patch says it had no changes", async () => {
+    const patchPath = join(cwd, "w-empty2.patch");
+    await writeFile(patchPath, "");
+    await seedRecord(
+      cwd,
+      makeWorkerRecord({ id: "w-empty2", name: "reader", status: "completed", patchPath }),
+    );
+
+    await executeTool("workers", { action: "collect", id: "w-empty2" });
+    await expect(executeTool("workers", { action: "collect", id: "w-empty2" })).rejects.toThrow(
+      `Worker w-empty2's patch was already collected; it had no changes to apply. The patch file is at ${patchPath}.`,
+    );
+  });
+
+  it("workers collect with apply=false on an empty patch gives no apply hint", async () => {
+    const patchPath = join(cwd, "w-empty3.patch");
+    await writeFile(patchPath, "");
+    await seedRecord(
+      cwd,
+      makeWorkerRecord({ id: "w-empty3", name: "reader", status: "completed", patchPath }),
+    );
+
+    const collected = await executeTool("workers", {
+      action: "collect",
+      id: "w-empty3",
+      apply: false,
+    });
+
+    expect(contentText(collected)).toBe("No changes in worker reader's patch; nothing to apply.");
+  });
+
+  it("workers collect says changes are lost when the patch and worktree are both gone", async () => {
+    await initGitRepo(cwd);
+    await writeProvisionConfig(cwd);
+    const fixture = await writeFixture(fixtureDir, "ok-worker.sh", SUCCESS_WORKER);
+    setEnv("PI_WORKER_COMMAND", fixture);
+
+    const started = await executeTool("spawn_worker", { task: "t", isolate: true, wait: true });
+    const worker = started.details.worker;
+    await executeTool("workers", { action: "collect", id: worker.id, apply: false });
+    await rm(worker.patchPath as string, { force: true });
+
+    await expect(
+      executeTool("workers", { action: "collect", id: worker.id, apply: false }),
+    ).rejects.toThrow(
+      `Patch file ${worker.patchPath} is missing and the worktree is already removed; the worker's changes cannot be recovered.`,
+    );
+  });
+
   it("workers collect on a whitespace-only patch applies nothing and cleans up", async () => {
     vi.mocked(runGit).mockClear();
     const patchPath = join(cwd, "w-blank.patch");

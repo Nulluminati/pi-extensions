@@ -10,7 +10,7 @@ spawn_worker (task="Replace all fmtAmount call sites with formatCurrency", isola
 workers (action=list)
 workers (action=status, id="w-...")
 workers (action=collect, id="w-...")   # apply the worker's patch to the working tree
-workers (action=collect, id="w-...", apply=false)   # keep the patch unapplied; collect again later to apply
+workers (action=collect, id="w-...", apply=false)   # keep the patch unapplied; collect again within the 7-day retention window to apply
 workers (action=cancel, id="w-...")
 workers (action=remove, id="w-...")   # delete a FINISHED worker's record and artifacts
 ```

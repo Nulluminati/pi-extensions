@@ -215,31 +215,32 @@ export async function collectWorkerPatch(
       `Worker ${id} has no patch (only isolated workers produce patches, after finishing).`,
     );
   }
+  // A read-only worker captures an empty patch; `git apply` rejects it
+  // ("No valid patches in input"). Nothing to apply is success, decided
+  // before any git invocation. An unreadable patch file falls through to
+  // git apply so its error (and the kept patch path) surfaces as before.
+  const patchText = await readFile(record.patchPath, "utf8").catch(() => null);
+  const patchEmpty = patchText !== null && patchText.trim() === "";
   if (record.collectedAt !== undefined) {
     throw new Error(
-      `Worker ${id}'s patch was already applied to the working tree. The patch file is at ${record.patchPath}.`,
+      patchEmpty
+        ? `Worker ${id}'s patch was already collected; it had no changes to apply. The patch file is at ${record.patchPath}.`
+        : `Worker ${id}'s patch was already applied to the working tree. The patch file is at ${record.patchPath}.`,
     );
   }
   const shouldApply = params.apply !== false;
   const shouldCleanup = params.cleanup !== false;
   const lines: string[] = [];
-  if (shouldApply) {
-    // A read-only worker captures an empty patch; `git apply` rejects it
-    // ("No valid patches in input"). Nothing to apply is success, decided
-    // before any git invocation. An unreadable patch file falls through to
-    // git apply so its error (and the kept patch path) surfaces as before.
-    const patchText = await readFile(record.patchPath, "utf8").catch(() => null);
-    if (patchText !== null && patchText.trim() === "") {
-      lines.push(`No changes in worker ${record.name}'s patch; nothing to apply.`);
-    } else {
-      try {
-        await applyPatch(cwd, record.patchPath);
-        lines.push(`Applied patch ${record.patchPath} to the working tree.`);
-      } catch (err) {
-        throw new Error(
-          `Patch apply failed: ${(err as Error).message}. The patch file is kept at ${record.patchPath}; resolve conflicts manually if needed.`,
-        );
-      }
+  if (patchEmpty) {
+    lines.push(`No changes in worker ${record.name}'s patch; nothing to apply.`);
+  } else if (shouldApply) {
+    try {
+      await applyPatch(cwd, record.patchPath);
+      lines.push(`Applied patch ${record.patchPath} to the working tree.`);
+    } catch (err) {
+      throw new Error(
+        `Patch apply failed: ${(err as Error).message}. The patch file is kept at ${record.patchPath}; resolve conflicts manually if needed.`,
+      );
     }
   } else {
     lines.push(
@@ -260,7 +261,9 @@ export async function collectWorkerPatch(
     );
     if (patchMissing) {
       throw new Error(
-        `Patch file ${record.patchPath} is missing; keeping worktree ${record.worktree} so the worker's changes are not lost.`,
+        alreadyRemoved
+          ? `Patch file ${record.patchPath} is missing and the worktree is already removed; the worker's changes cannot be recovered.`
+          : `Patch file ${record.patchPath} is missing; keeping worktree ${record.worktree} so the worker's changes are not lost.`,
       );
     }
     await removeWorktree(cwd, id);
