@@ -21,9 +21,10 @@ describe("presence-shards", () => {
     dir = await mkdtemp(join(tmpdir(), "presence-shards-"));
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     for (const restore of globalRestores) restore();
     globalRestores.length = 0;
+    await rm(dir, { recursive: true, force: true });
   });
 
   it("writes one shard per agent without touching other agents' shards", async () => {
