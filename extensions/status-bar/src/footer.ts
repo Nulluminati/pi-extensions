@@ -195,13 +195,17 @@ export function buildFooterLines(
   const mailStr =
     state.unreadMail > 0 ? theme.fg(MAIL_COLOR, `${ICON_MAIL} ${state.unreadMail}`) : "";
   const costStr = theme.fg("mdHeading", `$${tu.cost.toFixed(3)}`);
-  // Delegated-worker spend roll-up (published on workers:state).
+  // Delegated-worker spend roll-up (published on workers:state). Workers on
+  // unpriced models report zero cost, so tokens alone still show the segment.
+  const workerParts = [
+    ...(state.workerCostUsd > 0
+      ? [`$${state.workerCostUsd < 0.01 ? "<0.01" : state.workerCostUsd.toFixed(2)}`]
+      : []),
+    ...(state.workerTokens > 0 ? [formatTokenCount(state.workerTokens)] : []),
+  ];
   const workerStr =
-    state.workerCostUsd > 0
-      ? theme.fg(
-          WORKER_COLOR,
-          `${ICON_WORKER} $${state.workerCostUsd < 0.01 ? "<0.01" : state.workerCostUsd.toFixed(2)}${state.workerTokens > 0 ? ` · ${formatTokenCount(state.workerTokens)}` : ""}`,
-        )
+    workerParts.length > 0
+      ? theme.fg(WORKER_COLOR, `${ICON_WORKER} ${workerParts.join(" · ")}`)
       : "";
 
   const contextRows = [

@@ -2577,6 +2577,21 @@ describe("status-bar worker roll-up", () => {
     expect(component.render(160).join("\n")).not.toContain("⚙");
   });
 
+  it("renders worker tokens without a cost when worker cost is zero", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await enableBarWithWorkers(mockPi, mockCtx, {
+      running: 1,
+      workerCostUsd: 0,
+      workerTokens: 52000,
+    });
+
+    const component = getFooterFactory(mockCtx)(fakeTui(), plainTheme(), footerData());
+    const text = component.render(160).join("\n");
+    expect(text).toContain("⚙ 52.0k");
+    expect(text).not.toContain("⚙ $");
+  });
+
   it("retains worker spend and session cost on narrow terminals", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
