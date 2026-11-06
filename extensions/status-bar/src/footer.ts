@@ -40,8 +40,10 @@ import type { GitStatus, State, TokenUsage } from "./types.ts";
 const MIN_EDITOR_ROWS = 6;
 
 function formatTokenCount(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}m`;
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  // Use the rounded k value so 999,950-999,999 shows as 1.0m, not 1000.0k.
+  const thousands = (n / 1000).toFixed(1);
+  if (n >= 1_000_000 || thousands === "1000.0") return `${(n / 1_000_000).toFixed(1)}m`;
+  if (n >= 1000) return `${thousands}k`;
   return `${n}`;
 }
 

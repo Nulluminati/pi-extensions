@@ -428,6 +428,46 @@ describe("status-bar-extension", () => {
     expect(lines.join("\n")).toContain("[██████████]");
   });
 
+  it("promotes token counts that round to 1000.0k to the m form", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.getContextUsage = vi.fn(() => ({
+      tokens: 999_999,
+      contextWindow: 2_000_000,
+      percent: 50,
+    }));
+    mockCtx.sessionManager.getBranch = vi.fn(() =>
+      sessionEntries([
+        {
+          type: "message",
+          message: {
+            role: "assistant",
+            usage: {
+              input: 999_999,
+              output: 999_950,
+              cacheRead: 999_949,
+              cacheWrite: 0,
+              cost: { total: 0 },
+            },
+          },
+        },
+      ]),
+    );
+    await enableBar(mockPi, mockCtx);
+
+    const turnEndHandler = getEventHandler(mockPi, "turn_end");
+    await turnEndHandler({ type: "turn_end", turnIndex: 0, message: {}, toolResults: [] }, mockCtx);
+
+    const text = getFooterFactory(mockCtx)(fakeTui(), plainTheme(), footerData())
+      .render(160)
+      .join("\n");
+    expect(text).not.toContain("1000.0k");
+    expect(text).toContain("1.0m/2.0m");
+    expect(text).toContain("↑1.0m");
+    expect(text).toContain("↓1.0m");
+    expect(text).toContain("↗999.9k");
+  });
+
   it("does not re-query context usage on every render (cached, refreshed on events)", async () => {
     // Context usage is O(conversation) to compute; the footer must cache it and
     // refresh only when messages land, not call ctx.getContextUsage() per render.
