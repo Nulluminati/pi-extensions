@@ -226,6 +226,10 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     }
 
     ctx.ui.setFooter((tui: any, theme: any, footerData: any) => {
+      // Drop the branch seen by a previous footer: checkouts made while no
+      // footer listened never reached onBranchChange, so the cached name can be
+      // stale. Render falls back to the live footerData.getGitBranch().
+      state.gitBranch = null;
       const unsub = footerData.onBranchChange(async () => {
         state.gitBranch = footerData.getGitBranch();
         // Await so the subsequent render reflects the new branch's status, not

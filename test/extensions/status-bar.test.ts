@@ -1143,6 +1143,36 @@ describe("status-bar-extension", () => {
     });
   });
 
+  it("shows the live branch after a checkout while the bar is toggled off", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockPi.exec = mockGitExec("# branch.head feature-a\n# branch.ab +0 -0\n");
+    await enableBar(mockPi, mockCtx);
+
+    let liveBranch = "feature-a";
+    let branchChangeCallback: (() => Promise<void>) | undefined;
+    const liveFooterData = {
+      ...footerData(),
+      onBranchChange: vi.fn((cb: () => Promise<void>) => {
+        branchChangeCallback = cb;
+        return vi.fn();
+      }),
+      getGitBranch: vi.fn(() => liveBranch),
+    };
+    getFooterFactory(mockCtx)(fakeTui(), plainTheme(), liveFooterData);
+    await branchChangeCallback?.();
+
+    const handler = mockPi.registerCommand.mock.calls[0][1].handler;
+    await handler("", mockCtx); // disable
+    liveBranch = "feature-b";
+    await handler("", mockCtx); // re-enable
+
+    const footer = getFooterFactory(mockCtx)(fakeTui(), plainTheme(), liveFooterData);
+    const text = footer.render(200).join("\n");
+    expect(text).toContain("feature-b");
+    expect(text).not.toContain("feature-a");
+  });
+
   // --- Panel layout ---
 
   it("renders framed panels beside each other when their content fits", async () => {
