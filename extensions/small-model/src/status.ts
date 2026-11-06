@@ -13,10 +13,18 @@ function formatStatus(ctx: ExtensionContext, label: string, thinkingLevel?: Thin
   });
 }
 
-export async function updateStatus(ctx: ExtensionContext): Promise<void> {
+/**
+ * Publishes the resolved small model in the status area. `isCurrent` lets a
+ * caller drop the write when the session ended while the model resolved.
+ */
+export async function updateStatus(
+  ctx: ExtensionContext,
+  isCurrent: () => boolean = () => true,
+): Promise<void> {
   if (!ctx.hasUI) return;
   try {
     const resolved = await resolveSmallModel(ctx);
+    if (!isCurrent()) return;
     ctx.ui.setStatus(
       STATUS_KEY,
       formatStatus(
@@ -26,6 +34,7 @@ export async function updateStatus(ctx: ExtensionContext): Promise<void> {
       ),
     );
   } catch (error) {
+    if (!isCurrent()) return;
     const message = error instanceof Error ? error.message : String(error);
     const label = message.includes("not configured") ? "not configured" : "unavailable";
     ctx.ui.setStatus(STATUS_KEY, formatStatus(ctx, label));

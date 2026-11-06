@@ -25,8 +25,12 @@ export { STATUS_ICON };
 export default async function smallModelExtension(pi: ExtensionAPI) {
   let configWatcher: FSWatcher | undefined;
   let watcherDebounce: ReturnType<typeof setTimeout> | undefined;
+  // Increments on every stop, so an update started for an ended session can
+  // tell that its context is stale.
+  let watcherGeneration = 0;
 
   function stopWatching(): void {
+    watcherGeneration += 1;
     if (watcherDebounce) {
       clearTimeout(watcherDebounce);
       watcherDebounce = undefined;
@@ -45,7 +49,8 @@ export default async function smallModelExtension(pi: ExtensionAPI) {
       if (watcherDebounce) clearTimeout(watcherDebounce);
       watcherDebounce = setTimeout(() => {
         watcherDebounce = undefined;
-        void updateStatus(ctx);
+        const generation = watcherGeneration;
+        updateStatus(ctx, () => generation === watcherGeneration).catch(() => {});
       }, 25);
     });
   }

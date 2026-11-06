@@ -333,6 +333,64 @@ describe("small-model-extension", () => {
     await sessionShutdown({ type: "session_shutdown", reason: "quit" }, ctx);
   });
 
+  it("drops a config watcher status update that finishes after session replacement", async () => {
+    const path = configPath();
+    writeFileSync(
+      path,
+      JSON.stringify({ provider: "synthetic", model: "first-small", thinkingLevel: "minimal" }),
+    );
+    vi.stubEnv("PI_SMALL_MODEL_CONFIG", path);
+    vi.stubEnv("PI_SMALL_MODEL", "");
+    const pi = createMockPi();
+    const ctx = createMockCommandContext();
+    ctx.modelRegistry.find = vi.fn((provider: string, model: string) =>
+      createMockModel({ provider, id: model, reasoning: true }),
+    );
+    let releaseCredentials: () => void = () => {};
+    const credentialGate = new Promise<void>((resolve) => {
+      releaseCredentials = resolve;
+    });
+    let credentialCalls = 0;
+    ctx.modelRegistry.getApiKeyAndHeaders = vi.fn(async () => {
+      credentialCalls += 1;
+      if (credentialCalls > 1) await credentialGate;
+      return { ok: true as const, apiKey: "test-key" };
+    });
+    const rejections: unknown[] = [];
+    const onRejection = (reason: unknown) => rejections.push(reason);
+    process.on("unhandledRejection", onRejection);
+    try {
+      await smallModelExtension(pi);
+      await getEventHandler(pi, "session_start")({ type: "session_start", reason: "startup" }, ctx);
+
+      writeFileSync(
+        path,
+        JSON.stringify({ provider: "synthetic", model: "second-small", thinkingLevel: "low" }),
+      );
+      await vi.waitFor(() => expect(credentialCalls).toBe(2));
+
+      await getEventHandler(pi, "session_shutdown")(
+        { type: "session_shutdown", reason: "new" },
+        ctx,
+      );
+      const setStatus = ctx.ui.setStatus;
+      setStatus.mockClear();
+      const stale = (): never => {
+        throw new Error("This extension ctx is stale after session replacement or reload.");
+      };
+      Object.defineProperty(ctx, "hasUI", { get: stale });
+      Object.defineProperty(ctx, "ui", { get: stale });
+
+      releaseCredentials();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(rejections).toEqual([]);
+      expect(setStatus).not.toHaveBeenCalled();
+    } finally {
+      process.off("unhandledRejection", onRejection);
+    }
+  });
+
   it("session_shutdown clears the status", async () => {
     const pi = createMockPi();
     const ctx = createMockCommandContext();
