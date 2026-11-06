@@ -218,6 +218,23 @@ describe("session-recap-extension", () => {
     expect(tty.stdinOn).not.toHaveBeenCalled();
   });
 
+  it("session_start does not attach focus reporting when the recap is disabled", async () => {
+    const tty = mockTTY();
+    const mockPi = createMockPi();
+    mockPi.getFlag = vi.fn((name: string) => {
+      if (name === "recap-disable") return true;
+      return undefined;
+    });
+    const mockCtx = createMockCommandContext();
+    await sessionRecapExtension(mockPi);
+
+    const handler = getEventHandler(mockPi, "session_start");
+    await handler({ type: "session_start", reason: "new" }, mockCtx);
+
+    expect(tty.stdoutWrite).not.toHaveBeenCalled();
+    expect(tty.stdinOn).not.toHaveBeenCalled();
+  });
+
   it("session_start with resume triggers recap after delay", async () => {
     const { completeSimple } = await import("@earendil-works/pi-ai/compat");
     vi.mocked(completeSimple).mockResolvedValueOnce(

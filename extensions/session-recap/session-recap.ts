@@ -140,8 +140,8 @@ export default async function sessionRecapExtension(pi: ExtensionAPI) {
   pi.on("session_start", async (event, ctx) => {
     const state = getState(pi);
     resetState(state);
-    attachFocusReporting(pi, ctx);
     if (pi.getFlag("recap-disable") || !ctx.hasUI) return;
+    attachFocusReporting(pi, ctx);
     if (event.reason === "resume" || event.reason === "fork") {
       state.resumeTimer = setTimeout(() => {
         state.resumeTimer = undefined;
