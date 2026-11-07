@@ -39,7 +39,7 @@ The extension generates recaps automatically in three scenarios:
 
 The extension uses terminal focus reporting to detect when you switch away from and back to the Pi terminal:
 
-- **Enable** — On `session_start`, if TTY is available, writes `\x1b[?1004h` to stdout to enable focus reporting
+- **Enable** — On `session_start`, if TTY is available, writes `\x1b[?1004h` to stdout to enable focus reporting. The extension skips this step when `--recap-disable` or `--recap-disable-focus` is set, or when the session has no UI
 - **Listen** — Attaches a `data` listener on `process.stdin` that scans for `\x1b[I` (focus in) and `\x1b[O` (focus out) escape sequences
 - **Disable** — On `session_shutdown`, writes `\x1b[?1004l` and removes the listener
 
