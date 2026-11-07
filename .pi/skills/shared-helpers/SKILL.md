@@ -248,7 +248,7 @@ The helper accepts numeric strings. It treats missing and non-finite numbers as 
 
 ## `lib/small-model.ts` — cheap direct LLM calls
 
-Resolves the user's globally configured "small model" — a cheap, fast model used for background work (summaries, side questions, recaps) that shouldn't consume the main model's context or cost. Used by `btw`, `handoff`, `voice`, and `session-recap`.
+Resolves the user's globally configured "small model" — a cheap, fast model used for background work (summaries, side questions, recaps) that shouldn't consume the main model's context or cost. Used by `btw`, `handoff`, and `session-recap`.
 
 - `resolveSmallModel(ctx)` → `{ model, auth, config, source, reasoning }`. Throws descriptive errors when unconfigured, unknown, or missing credentials — **catch and surface via `ctx.ui.notify(..., "error")`**, then abort the operation.
 - Feed `complete` / `completeSimple` from `@earendil-works/pi-ai` with `auth.apiKey`, optional `auth.headers`/`auth.env`, and `reasoning` (pass it through; it's already `undefined` for non-reasoning models). For OpenCode Zen/Go models, `auth.headers` includes Pi's current per-session routing headers and preserves explicit provider overrides.
@@ -290,7 +290,7 @@ function installEditor(ctx: ExtensionCommandContext): void {
   const factory = installEditorFactoryLayer(
     current,
     EDITOR_LAYER_ID,
-    0, // priority: behavior layers (e.g. voice's hold-to-talk) use high values; visual layers low
+    0, // priority: behavior layers use high values; visual layers low
     (parent, tui, theme, keybindings) => {
       const base = parent?.(tui, theme, keybindings);
       return new MyEditor(tui, theme, keybindings, base);
@@ -307,7 +307,7 @@ function restoreEditor(ctx: ExtensionCommandContext): void {
 }
 ```
 
-Mandatory rules (see `status-bar`, `voice`):
+Mandatory rules (see `status-bar`):
 
 1. **Never call `setEditorComponent` with a bare factory.** Always go through `installEditorFactoryLayer` so your editor composes with others instead of clobbering them.
 2. **Check `hasEditorFactoryLayer` before installing** — installation must be idempotent (session reloads re-fire lifecycle events).

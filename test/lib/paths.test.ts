@@ -15,8 +15,8 @@ import {
 describe("paths", () => {
   describe("agentConfigPath", () => {
     it("places config at the agent root", () => {
-      expect(agentConfigPath("voice", "/home/test/.pi/agent")).toBe(
-        "/home/test/.pi/agent/voice.json",
+      expect(agentConfigPath("handoff", "/home/test/.pi/agent")).toBe(
+        "/home/test/.pi/agent/handoff.json",
       );
     });
 
@@ -46,11 +46,11 @@ describe("paths", () => {
 
   describe("cacheDir", () => {
     it("uses XDG_CACHE_HOME when set", () => {
-      expect(cacheDir("voice", { XDG_CACHE_HOME: "/xdg" }, "/home/test")).toBe("/xdg/pi-voice");
+      expect(cacheDir("handoff", { XDG_CACHE_HOME: "/xdg" }, "/home/test")).toBe("/xdg/pi-handoff");
     });
 
     it("falls back to ~/.cache when unset", () => {
-      expect(cacheDir("voice", {}, "/home/test")).toBe("/home/test/.cache/pi-voice");
+      expect(cacheDir("handoff", {}, "/home/test")).toBe("/home/test/.cache/pi-handoff");
     });
 
     it("ignores a blank XDG_CACHE_HOME", () => {

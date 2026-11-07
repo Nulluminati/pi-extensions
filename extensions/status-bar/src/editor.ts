@@ -87,7 +87,7 @@ export interface EditorModalFrameInput {
 
 /**
  * Wrap the base editor's rendered output in the same rounded accent modal
- * frame the voice/handoff overlays use (renderModalFrame), with the model and
+ * frame the handoff overlay uses (renderModalFrame), with the model and
  * thinking level shown in the title (top border). The base editor's own
  * top/bottom borders are stripped (the modal supplies its own); autocomplete
  * lines are preserved below the box. Pure — tested directly with synthetic
@@ -164,7 +164,7 @@ function mirrorPrompt(sessionId: string, text: string): void {
 
 /**
  * The default Pi editor, framed in the same rounded accent modal box the
- * voice/handoff overlays use, with the model and thinking level shown in the
+ * handoff overlay uses, with the model and thinking level shown in the
  * title (top border). Subclasses CustomEditor so all text handling,
  * keybindings and autocomplete are inherited. render() adds the frame;
  * handleMouse() maps framed coordinates back to the base editor.

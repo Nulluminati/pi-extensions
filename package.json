@@ -39,14 +39,7 @@
     "*.{ts,js,mjs,json,jsonc}": "biome check --write --no-errors-on-unmatched"
   },
   "dependencies": {
-    "@anthropic-ai/sandbox-runtime": "^0.0.81",
-    "onnxruntime-node": "^1.31.1",
-    "sherpa-onnx-node": "^1.13.8"
-  },
-  "overrides": {
-    "onnxruntime-node": {
-      "adm-zip": "0.6.1"
-    }
+    "@anthropic-ai/sandbox-runtime": "^0.0.81"
   },
   "peerDependencies": {
     "@earendil-works/pi-agent-core": "*",

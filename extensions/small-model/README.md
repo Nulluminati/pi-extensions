@@ -1,6 +1,6 @@
 # Small Model Extension
 
-Sets one global model for lightweight background tasks. Handoff summaries, BTW side turns and summaries, session recaps, and spoken voice summaries all use this model instead of the active chat model.
+Sets one global model for lightweight background tasks. Handoff summaries, BTW side turns and summaries, and session recaps all use this model instead of the active chat model.
 
 ## Usage
 

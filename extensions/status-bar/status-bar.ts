@@ -2,7 +2,7 @@
  * Status Bar Extension
  *
  * Responsive framed panels replace the default Pi footer. The input editor
- * uses the rounded accent modal frame shared with voice/handoff overlays.
+ * uses the rounded accent modal frame shared with the handoff overlay.
  * The model + thinking level live in the editor title (top border).
  *
  *  Footer panels:
@@ -17,7 +17,7 @@
  *
  *  Editor:
  *    The default Pi editor is wrapped in a rounded accent modal frame
- *    (renderModalFrame, shared with the voice/handoff overlays). The title
+ *    (renderModalFrame, shared with the handoff overlay). The title
  *    (top border) shows the main model + thinking level (+ flex badge when
  *    capable), then a "/" separator and the small model label in grey.
  *
@@ -263,8 +263,8 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     ctx.ui.setFooter(undefined);
   }
 
-  // --- Editor: install the visual frame below behavior layers such as voice
-  // input handling, so either extension can be enabled or removed independently.
+  // --- Editor: install the visual frame below behavior layers, so either
+  // layer can be enabled or removed independently.
   const editorLayerId = "status-bar";
   let editorRequestRender: (() => void) | undefined;
 

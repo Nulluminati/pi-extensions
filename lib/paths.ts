@@ -22,7 +22,7 @@ import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 
 // --- Global ---
 
-/** Global config file for an extension, e.g. `<agentDir>/voice.json`. */
+/** Global config file for an extension, e.g. `<agentDir>/handoff.json`. */
 export function agentConfigPath(name: string, agentDir = getAgentDir()): string {
   return join(agentDir, `${name}.json`);
 }
@@ -43,7 +43,7 @@ export function authPath(agentDir = getAgentDir()): string {
 
 // --- Cache ---
 
-/** Regenerable cache directory for an extension, e.g. `~/.cache/pi-voice`. */
+/** Regenerable cache directory for an extension, e.g. `~/.cache/pi-handoff`. */
 export function cacheDir(
   name: string,
   env: NodeJS.ProcessEnv = process.env,

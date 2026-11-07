@@ -89,7 +89,7 @@ The inline dialogs pass `blocked: { kind, message }` to `ctx.ui.custom()`. Witho
 Pi ignores the option for overlays. These panels are overlays, so they keep the Herdr event only:
 
 - The `approval-mode` approval dialog. It is a focused overlay, and fullscreen viewports consume page keys unless an overlay is focused.
-- The `background-jobs`, `context`, `todos`, `btw`, and `voice` panels.
+- The `background-jobs`, `context`, `todos`, and `btw` panels.
 
 Repository checks and a live Pi terminal test passed. The live test verified metadata, blocked-state reporting, and shutdown cleanup.
 

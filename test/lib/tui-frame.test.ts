@@ -26,9 +26,9 @@ describe("TUI frame helpers", () => {
   });
 
   it("renders a padded Peon-style modal with an inline concise title", () => {
-    const lines = renderModalFrame(ANSI_THEME, 30, ["content"], { title: "Voice" });
+    const lines = renderModalFrame(ANSI_THEME, 30, ["content"], { title: "Handoff" });
 
-    expect(lines[0]?.replace(ANSI_PATTERN, "")).toContain("╭── Voice ");
+    expect(lines[0]?.replace(ANSI_PATTERN, "")).toContain("╭── Handoff ");
     expect(lines[1]?.replace(ANSI_PATTERN, "")).toContain("│");
     expect(lines[2]?.replace(ANSI_PATTERN, "")).toContain("  content");
     expect(lines.at(-1)?.replace(ANSI_PATTERN, "")).toContain("╰");

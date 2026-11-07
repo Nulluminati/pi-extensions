@@ -88,8 +88,8 @@ export const TOKEN_COLORS = {
   cacheWrite: "thinkingHigh", // ↘ purple
 } as const;
 
-// Padding inside the input-box modal frame, matching the voice/handoff
-// modals so the prompt box reads as the same chrome.
+// Padding inside the input-box modal frame, matching the handoff modal so
+// the prompt box reads as the same chrome.
 export const MODAL_PADDING_X = 2;
 
 export const MODAL_PADDING_Y = 1;

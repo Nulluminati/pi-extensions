@@ -20,7 +20,7 @@ Shared `lib/` helpers that hold no state (UI frames, file locks, path helpers) a
 | `workers` | `approval-mode` in the parent session | Worker commands that need review are blocked. |
 | `workers` | Optional: `bash-allow` in the parent session | The launcher uses `PI_BASH_ALLOW` instead of a parent flag snapshot. |
 | `workers` | A worker model (`lib/worker-model.ts` config) | `spawn_worker` fails with a configuration error. `worker-model` is only the picker. |
-| `handoff`, `btw`, `goal`, `session-name`, `session-recap`, `voice` | A small model (`lib/small-model.ts` config) | Each feature that calls the small model fails or skips. `small-model` is only the picker. |
+| `handoff`, `btw`, `goal`, `session-name`, `session-recap` | A small model (`lib/small-model.ts` config) | Each feature that calls the small model fails or skips. `small-model` is only the picker. |
 | `approval-mode` | A Jev classifier model in the model registry | Commands that need review are blocked. |
 | `status-bar` | Optional: `goal`, `messenger`, `workers`, `approval-mode`, `neuralwatt` | The matching badge or footer segment stays empty. |
 | `herdr` | Optional: `missions`, `workers`, `todos`, `goal`, `messenger` | The matching pane token stays empty. |
@@ -123,7 +123,7 @@ Some `lib/` modules own a config file or a store that more than one extension re
 
 | Module | Owner of the picker or tool | Readers |
 |--------|-----------------------------|---------|
-| `lib/small-model.ts` | `small-model` (`/smallmodel`) | `btw`, `goal`, `handoff`, `session-name`, `session-recap`, `voice`, `status-bar` |
+| `lib/small-model.ts` | `small-model` (`/smallmodel`) | `btw`, `goal`, `handoff`, `session-name`, `session-recap`, `status-bar` |
 | `lib/worker-model.ts` | `worker-model` (`/worker-model`) | `workers`, `status-bar` |
 | `lib/todos.ts` | `todos` (`todo` tool) | `todos` only |
 
