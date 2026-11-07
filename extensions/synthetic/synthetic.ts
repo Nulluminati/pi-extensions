@@ -40,19 +40,30 @@ export default async function syntheticExtension(pi: ExtensionAPI) {
   // session_start: best-effort staleness check. Warns (once per session) when
   // the live catalog exposes always-on, tools-capable models the static list
   // does not include. Silent on missing key; a catalog fetch failure logs a
-  // debug diagnostic and skips the check without a UI warning. Never blocks.
+  // debug diagnostic and skips the check without a UI warning.
+  async function checkCatalog(
+    apiKey: string,
+    signal: AbortSignal | undefined,
+    notify: (message: string) => void,
+  ) {
+    const catalog = await fetchCatalog(apiKey, signal);
+    if (catalog === undefined) return;
+    const missing = findMissingModels(catalog);
+    if (missing.length === 0) return;
+    notify(`${MISSING_MODELS_MESSAGE}:\n${missing.map((id) => `  • ${id}`).join("\n")}`);
+  }
+
+  // Pi awaits session_start before the editor accepts input, so the handler
+  // only resolves the key and returns. The catalog check runs in the
+  // background and the warning arrives when the fetch settles, at worst one
+  // fetch timeout after startup. If Pi replaces the session or reloads before
+  // then, the captured ctx is stale and throws; the result is dropped.
   pi.on("session_start", async (_event, ctx) => {
     if (!ctx.hasUI) return;
     const apiKey = await getResolvedApiKey(ctx);
     if (!apiKey) return;
-    const catalog = await fetchCatalog(apiKey, ctx.signal);
-    if (catalog === undefined) return;
-    const missing = findMissingModels(catalog);
-    if (missing.length === 0) return;
-    ctx.ui.notify(
-      `${MISSING_MODELS_MESSAGE}:\n${missing.map((id) => `  • ${id}`).join("\n")}`,
-      "warning",
-    );
+    const notify = (message: string) => ctx.ui.notify(message, "warning");
+    void checkCatalog(apiKey, ctx.signal, notify).catch(() => {});
   });
 
   // /synthetic:models command

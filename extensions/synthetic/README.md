@@ -75,7 +75,7 @@ Two models (`gpt-oss-120b`, `GLM-5.3`) plus `Kimi-K3.1-Pro` always think and can
 
 ### Startup staleness check
 
-On `session_start`, the extension compares the live catalog against the static list. The check is best effort: it never blocks startup.
+On `session_start`, the extension compares the live catalog against the static list. The check is best effort and runs in the background: the handler resolves the API key and returns, so startup does not wait for the network. The warning arrives when the fetch settles, at worst one timeout after startup.
 
 1. Skip when there is no UI or no resolved API key.
 2. Fetch `GET https://api.synthetic.new/openai/v1/models` with the key (15 second timeout). A network error or non-OK response skips the warning and logs one `console.debug` diagnostic containing the provider and the error or HTTP status; no UI warning is shown for a failed check.

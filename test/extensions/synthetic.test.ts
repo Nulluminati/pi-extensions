@@ -2,6 +2,7 @@ import { readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { MISSING_MODELS_MESSAGE } from "../../extensions/synthetic/src/catalog.ts";
+import { FETCH_TIMEOUT_MS } from "../../extensions/synthetic/src/constants.ts";
 import { STATIC_MODELS } from "../../extensions/synthetic/src/models.ts";
 import type { SyntheticModelsResponse } from "../../extensions/synthetic/src/types.ts";
 import syntheticExtension from "../../extensions/synthetic/synthetic.ts";
@@ -11,6 +12,14 @@ import { getCommandHandler, getEventHandler } from "../mocks/test-helpers.ts";
 
 function mockModelsResponse(models: unknown[]): Response {
   return { ok: true, json: () => Promise.resolve({ data: models }) } as Response;
+}
+
+/**
+ * session_start returns before its catalog check finishes. Wait one macrotask so
+ * the background check settles against the resolved fetch mocks.
+ */
+function settleStartupChecks(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 // Ids present in the live catalog snapshot. Startup check tests use these.
@@ -308,6 +317,7 @@ describe("synthetic-extension", () => {
 
     const handler = getEventHandler(mockPi, "session_start");
     await handler({ type: "session_start", reason: "new" }, mockCtx);
+    await settleStartupChecks();
 
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(
       expect.stringContaining("hf:brandnew/Model-X"),
@@ -326,6 +336,7 @@ describe("synthetic-extension", () => {
 
     const handler = getEventHandler(mockPi, "session_start");
     await handler({ type: "session_start", reason: "new" }, mockCtx);
+    await settleStartupChecks();
 
     const warnings = mockCtx.ui.notify.mock.calls.filter((c) => c[1] === "warning");
     expect(warnings).toEqual([]);
@@ -339,6 +350,7 @@ describe("synthetic-extension", () => {
 
     const handler = getEventHandler(mockPi, "session_start");
     await handler({ type: "session_start", reason: "new" }, mockCtx);
+    await settleStartupChecks();
 
     expect(mockFetch).not.toHaveBeenCalled();
     expect(debugSpy).not.toHaveBeenCalled();
@@ -354,6 +366,7 @@ describe("synthetic-extension", () => {
 
     const handler = getEventHandler(mockPi, "session_start");
     await handler({ type: "session_start", reason: "new" }, mockCtx);
+    await settleStartupChecks();
 
     expect(debugSpy).toHaveBeenCalledTimes(1);
     expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining("synthetic"));
@@ -370,6 +383,7 @@ describe("synthetic-extension", () => {
 
     const handler = getEventHandler(mockPi, "session_start");
     await handler({ type: "session_start", reason: "new" }, mockCtx);
+    await settleStartupChecks();
 
     expect(debugSpy).toHaveBeenCalledTimes(1);
     expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining("synthetic"));
@@ -386,10 +400,70 @@ describe("synthetic-extension", () => {
 
     const handler = getEventHandler(mockPi, "session_start");
     await handler({ type: "session_start", reason: "new" }, mockCtx);
+    await settleStartupChecks();
 
     expect(debugSpy).not.toHaveBeenCalled();
     const warnings = mockCtx.ui.notify.mock.calls.filter((c) => c[1] === "warning");
     expect(warnings).toEqual([]);
+  });
+
+  it("startup check returns before the network answers and settles within one timeout window", async () => {
+    vi.useFakeTimers();
+    try {
+      // A server that accepts the connection and never answers: fetch settles
+      // only when its abort signal fires.
+      mockFetch.mockImplementation(
+        (_url: string, init: { signal: AbortSignal }) =>
+          new Promise((_resolve, reject) => {
+            init.signal.addEventListener("abort", () => reject(new Error("aborted")), {
+              once: true,
+            });
+          }),
+      );
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      await syntheticExtension(mockPi);
+
+      const handler = getEventHandler(mockPi, "session_start");
+      let settled = false;
+      void Promise.resolve(handler({ type: "session_start", reason: "new" }, mockCtx)).then(() => {
+        settled = true;
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(settled).toBe(true);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+
+      // The background check gives up at the fetch timeout, not before.
+      await vi.advanceTimersByTimeAsync(FETCH_TIMEOUT_MS);
+      expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining("aborted"));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("startup check drops a stale ctx instead of raising an unhandled rejection", async () => {
+    const stale = new Error("This extension ctx is stale after session replacement or reload.");
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await syntheticExtension(mockPi);
+
+    const handler = getEventHandler(mockPi, "session_start");
+    await handler({ type: "session_start", reason: "new" }, mockCtx);
+    // Pi invalidates the captured ctx after the handler returns.
+    Object.defineProperty(mockCtx, "ui", {
+      get: () => {
+        throw stale;
+      },
+    });
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+    try {
+      await settleStartupChecks();
+      await settleStartupChecks();
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      process.off("unhandledRejection", unhandled);
+    }
   });
 
   it("exposes a static message id for the missing-models notice", () => {
