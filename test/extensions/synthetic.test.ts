@@ -95,6 +95,12 @@ describe("synthetic-extension", () => {
     }
   });
 
+  it("registers each model id once (no duplicate rows in the registry)", () => {
+    const ids = STATIC_MODELS.map((m) => m.id);
+    const duplicates = [...new Set(ids.filter((id, index) => ids.indexOf(id) !== index))];
+    expect(duplicates, `duplicate static model ids: ${duplicates.join(", ")}`).toEqual([]);
+  });
+
   it("registers the verified DeepSeek 1017 snapshot with its own identity and thinking map", () => {
     const snapshot = STATIC_MODELS.find(
       (entry) => entry.id === "hf:deepseek-ai/DeepSeek-V4.1-Flash-1017",
