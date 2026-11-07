@@ -194,6 +194,8 @@ pi-extensions/
 │   ├── lib/            # Shared helper tests
 │   ├── mocks/          # Shared test mock factories
 │   ├── runtime/        # Tests against the installed Pi packages
+│   ├── scripts/        # Tests for repository scripts and secret scanning
+│   ├── setup/          # Shared Vitest setup files
 │   └── validator.test.ts
 ```
 
@@ -207,7 +209,11 @@ pi-extensions/
 | `npm run check:ci` | CI-friendly check (no --write, includes tests) |
 | `npm run validate` | Validate all extensions |
 | `npm run validate:one` | Validate a single extension |
+| `npm run create` | Scaffold an extension and its test |
 | `npm run test` | Run all tests |
+| `npm run test:runtime` | Run tests against the installed Pi packages |
+| `npm run test:secrets` | Test the Gitleaks exception and ignore rules (needs Gitleaks) |
+| `npm run test:coverage` | Run tests with coverage |
 | `npm run test:watch` | Run tests in watch mode |
 
 ## Rules

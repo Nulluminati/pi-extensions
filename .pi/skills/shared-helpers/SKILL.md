@@ -148,7 +148,7 @@ const objective = await promptText(ctx, {
 if (!objective) return; // cancelled
 ```
 
-Enter submits, Esc cancels. Use `createInputModal` directly only when embedding the input inside a larger custom component.
+Enter submits, Esc cancels. `promptText` and `confirmModal` pass `blocked` to `ctx.ui.custom()`, so Pi reports the session as blocked while the dialog waits for an answer. Use `createInputModal` directly only when embedding the input inside a larger custom component.
 
 ### `confirmModal` — framed yes/no dialog
 
@@ -386,7 +386,7 @@ Shared formatting and modal for `/smallmodel`- and `/worker-model`-style pickers
 `formatTokenCount` ("200k", "1.2m"), `formatModelDescription(model)` (name · ctx · out ·
 capability flags), and `selectModelWithSearch(ctx, items, activeValue, title)` — the
 `ui.custom` searchable modal used in TUI mode (resolves the selected value, `undefined` on
-cancel; fall back to `ctx.ui.select` outside TUI). `ModelMetadata` is the shared model shape.
+cancel; fall back to `ctx.ui.select` outside TUI). The modal also reports Pi as blocked while it is open. `ModelMetadata` is the shared model shape.
 `createModelConfigFlow(options)` shares model selection, validation, saving, thinking-level updates, and confirmation messages across the small-model and worker-model extensions. Pass extension-specific loaders, savers, titles, and validation/status callbacks. Config load/save stays in `lib/small-model.ts` / `lib/worker-model.ts`.
 
 ## `lib/fetch-timeout.ts` — network timeout and cancellation
