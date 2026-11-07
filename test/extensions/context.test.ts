@@ -67,7 +67,7 @@ const SESSION_ENTRIES = [
       timestamp: 3,
     },
   },
-  { type: "custom", customType: "goal-state", data: {} },
+  { type: "custom", customType: "todos-state", data: { items: [] } },
 ];
 
 afterEach(() => {

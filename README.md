@@ -18,7 +18,7 @@ Install a single extension by pointing a package entry at its file in `~/.pi/age
 ```json
 {
   "packages": [
-    "~/Projects/pi-extensions/extensions/goal/goal.ts"
+    "~/Projects/pi-extensions/extensions/todos/todos.ts"
   ]
 }
 ```
@@ -30,7 +30,7 @@ A file path loads that one extension. Its relative imports, such as shared `lib/
   "packages": [
     {
       "source": "~/Projects/pi-extensions",
-      "extensions": ["+extensions/goal/goal.ts"]
+      "extensions": ["+extensions/todos/todos.ts"]
     }
   ]
 }
@@ -41,7 +41,7 @@ A file path loads that one extension. Its relative imports, such as shared `lib/
 Try an extension for one session without changing settings:
 
 ```bash
-pi -e extensions/goal/goal.ts
+pi -e extensions/todos/todos.ts
 ```
 
 ## Extensions
@@ -54,7 +54,6 @@ pi -e extensions/goal/goal.ts
 | [`approval-mode/`](extensions/approval-mode/README.md) | Gates agent Bash, background, and monitor commands. Hard denies run first; a small reviewed command set runs without Jev. TypeSafe Jev checks the rest. Rejected or uncertain calls ask for one-time approval in the parent session; unavailable decisions block. `/approval-mode off` or `--approval-mode off` skips Jev for the parent and its workers, but keeps hard denies and sandbox limits. Workers cannot change the mode themselves. |
 | [`bash-allow/`](extensions/bash-allow/README.md) | Enforces a static command allow list for `bash`, `background`, and `monitor`, with no model and no prompt judgment. Configure `--bash-allow` or `PI_BASH_ALLOW`; an unset list leaves commands unrestricted. |
 | `handoff/` | Summarize the current session with the global small model and start a new focused session. `/handoff [goal]` builds a compact continuation prompt, lets you review it, then opens a new session with the summary pre-filled. |
-| `goal/` | Goal-oriented auto-continuation mode. `/goal` command with pause/resume/reset, a small-model evaluator that judges completion after every turn, and iteration/no-progress runaway guards. |
 | `background-jobs/` | Long-running work without blocking the turn. The `background` tool runs a shell command detached in its own process group and wakes the agent when it exits (or the first time output matches a pattern); `monitor` polls a command until a condition holds (exit code, output match) and wakes the agent; `jobs` lists, tails, and cancels jobs. Wake messages carry only the job id and exit status — output is read on demand and spooled to `~/.pi/agent/background-jobs/`, pruned on session start past 7 days or 200 files. Active jobs render in a framed widget above the editor (todos-style); `/jobs` opens the interactive panel (user-only; the agent cannot open modals). |
 | [`ask-user/`](extensions/ask-user/README.md) | Adds the `ask_user` tool for one to four related questions. Supports single-select, multi-select with supplemental custom text, freeform answers, tab navigation, and review before submission. |
 | `btw/` | Side conversation channel. A parallel tool-using agent in a non-capturing overlay for mid-run questions (`/btw`), with contextual/tangent modes, hidden threading, a thinking override, and full or summarized handoff to the main agent. Uses the global small model. |

@@ -43,7 +43,6 @@ import {
 import {
   APPROVAL_MODE_EVENT,
   FLEX_EVENT,
-  GOAL_STATE_EVENT,
   ICON_COLOR,
   MESSENGER_STATE_EVENT,
   STATUS_ICON,
@@ -132,9 +131,6 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
     thinkingLevel: "none",
     smallModelLabel: "",
     workerModelLabel: "",
-    goalRunning: false,
-    goalIteration: 0,
-    goalCap: null,
     gitBranch: null,
     gitStatus: null,
     tokenUsage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
@@ -153,30 +149,14 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
   let smallModelWatch: ConfigWatch | undefined;
   let workerModelWatch: ConfigWatch | undefined;
 
-  // Track a running goal so the editor frame can show a "Goal" badge in its
-  // top-right cell. Subscribed at load time rather than in session_start: the
-  // goal extension announces its state during its own session_start handler,
-  // which may run before this extension's handler registers a
-  // session_start-scoped listener, and the state would be missed on first
-  // load. Load-time subscriptions are registered before any session events
-  // dispatch.
-  pi.events.on(GOAL_STATE_EVENT, (data) => {
-    const payload = data as { status: string | null; iteration?: number; maxIterations?: number };
-    state.goalRunning = payload.status === "active";
-    state.goalIteration = payload.status === "active" ? (payload.iteration ?? 0) : 0;
-    state.goalCap = payload.status === "active" ? (payload.maxIterations ?? null) : null;
-    state.lastHandle?.requestRender();
-    editorRequestRender?.();
-  });
-
   // Track unread messenger mail so line 1 can show an "✉ N" segment in its
-  // right block. Subscribed at load time rather than in session_start, for
-  // the same reason as the goal subscription above: the messenger extension
-  // publishes its state during its own session_start handler, which may run
-  // before this extension's session_start-scoped listeners exist, and the
-  // announcement would be missed on first load. Like goalRunning, unreadMail
-  // is not reset on session boundaries — the messenger re-announces on every
-  // session_start, and resetting here could clobber that announcement.
+  // right block. Subscribed at load time rather than in session_start: the
+  // messenger extension publishes its state during its own session_start
+  // handler, which may run before this extension's session_start-scoped
+  // listeners exist, and the announcement would be missed on first load.
+  // unreadMail is not reset on session boundaries — the messenger
+  // re-announces on every session_start, and resetting here could clobber
+  // that announcement.
   pi.events.on(MESSENGER_STATE_EVENT, (data) => {
     const payload = data as { name: string | null; unread: number };
     state.unreadMail = payload.unread;
@@ -294,15 +274,8 @@ export default async function statusBarExtension(pi: ExtensionAPI) {
           () => pi.getThinkingLevel() ?? "none",
           () => ({ on: state.flexOn, capable: state.flexCapable }),
           () => (state.approvalModeOff ? "warning" : undefined),
-          () => {
-            const parts: string[] = [];
-            if (state.approvalModeOff) parts.push(ctx.ui.theme.fg("warning", "Approval Mode off"));
-            if (state.goalRunning) {
-              const capLabel = state.goalCap && state.goalCap > 0 ? `/${state.goalCap}` : "";
-              parts.push(ctx.ui.theme.fg("mdHeading", `Goal ${state.goalIteration}${capLabel}`));
-            }
-            return parts.length > 0 ? parts.join(ctx.ui.theme.fg("dim", " · ")) : undefined;
-          },
+          () =>
+            state.approvalModeOff ? ctx.ui.theme.fg("warning", "Approval Mode off") : undefined,
           () => state.workerModelLabel,
           editorHistorySessionId(ctx),
         );

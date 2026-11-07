@@ -23,8 +23,8 @@ Choose the test style by what the behavior depends on:
    - `result.details` — structured data for logs / rendering
    - `result.terminate` — when the tool should end the turn (`true` for completion, error, or abort tools)
    ```typescript
-   expect(result.content[0].text).toBe("Goal completed.");
-   expect(result.terminate).toBe(true);
+   expect(result.content[0].text).toBe("Added 1 item(s):\n1. ☐ first");
+   expect(result.details).toEqual({ items: [{ text: "first", completed: false }] });
    ```
 
 2. **Test every event handler registered by the extension.** Call `pi.on(...)` handlers directly and assert their behavior:
@@ -33,15 +33,14 @@ Choose the test style by what the behavior depends on:
    await agentEndHandler({ type: "agent_end", messages: [] }, mockCtx);
    ```
 
-3. **Write lifecycle tests for stateful extensions.** State leaks across goals, sessions, and turns. Test full sequences:
+3. **Write lifecycle tests for stateful extensions.** State leaks across missions, sessions, and turns. Test full sequences:
    ```typescript
    // BAD: tests each handler in isolation
    // GOOD: test the lifecycle
-   await handler("start goal A", mockCtx);
-   await toolDef.execute("call-1", {}, undefined, undefined, mockCtx); // complete A
-   await handler("start goal B", mockCtx);
-   await agentEndHandler({ type: "agent_end", messages: [] }, mockCtx);
-   expect(mockPi.sendUserMessage).toHaveBeenCalledWith(...); // B's continuation queued
+   await tool.execute("call-1", { action: "create", title: "Migration" }, undefined, undefined, mockCtx);
+   await tool.execute("call-2", { action: "task_update", taskId: "t1", status: "done" }, undefined, undefined, mockCtx);
+   await handler({ type: "session_start", reason: "resume" }, mockCtx);
+   expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("missions", expect.stringContaining("active"));
    ```
 
 4. **Clear mocks between lifecycle phases.** Use `mockClear()` so assertions don't pass accidentally from earlier phases:
@@ -53,39 +52,39 @@ Choose the test style by what the behavior depends on:
 5. **Assert state is persisted via `pi.appendEntry`.** Any extension that calls `appendEntry` for durability must have tests verifying the entry data shape:
    ```typescript
    expect(mockPi.appendEntry).toHaveBeenCalledWith(
-     "goal-state",
-     expect.objectContaining({ goal: expect.objectContaining({ status: "active" }) }),
+     "missions-active",
+     expect.objectContaining({ id: expect.any(String) }),
    );
    ```
 
 6. **Assert on UI calls for user-facing state.** Status lines, notifications, and confirmations must be tested:
    ```typescript
-   expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("goal", expect.stringContaining("🎯 active"));
-   expect(mockCtx.ui.notify).toHaveBeenCalledWith("Goal started: snake game", "info");
+   expect(mockCtx.ui.setStatus).toHaveBeenCalledWith("missions", expect.stringContaining("active"));
+   expect(mockCtx.ui.notify).toHaveBeenCalledWith("No active mission to reconcile.", "info");
    ```
 
 7. **Test error paths with the same rigor as success paths.** Call tools when preconditions fail, assert the error content, details, and `terminate` flag.
 
 8. **Use `toHaveBeenNthCalledWith` for ordered assertions.** When multiple calls happen to the same mock, assert order matters:
    ```typescript
-   expect(mockCtx.ui.setStatus).toHaveBeenNthCalledWith(1, "goal", undefined); // clear first
-   expect(mockCtx.ui.setStatus).toHaveBeenNthCalledWith(2, "goal", "🎯 active ...");
+   expect(mockCtx.ui.setStatus).toHaveBeenNthCalledWith(1, "missions", undefined); // clear first
+   expect(mockCtx.ui.setStatus).toHaveBeenNthCalledWith(2, "missions", expect.stringContaining("active"));
    ```
 
 9. **Test state reconstruction from `sessionManager.getBranch`.** Stateful extensions must be testable for session restore:
    ```typescript
    mockCtx.sessionManager.getBranch = () => [{
-     type: "custom", customType: "goal-state",
-     data: { goal: { id: "g1", objective: "x", status: "active", /* ... */ } },
+     type: "custom", customType: "missions-active",
+     data: { id: "m1" },
    }];
    // fire session_start, assert reconstructed behavior
    ```
 
-10. **Cover all branches in `if/else` and `switch` handlers.** Tools and commands with conditional logic need tests for each branch (budget exceeded, goal already complete, no active goal, etc.).
+10. **Cover all branches in `if/else` and `switch` handlers.** Tools and commands with conditional logic need tests for each branch (budget exceeded, task already done, no active mission, etc.).
 
 11. **Test timer and async cleanup.** If an extension uses `setTimeout` or `setInterval`, add lifecycle tests that verify the timer is cleared on state transitions (start, resume, clear, shutdown).
 
-12. **Verify that state from goal A does not contaminate goal B.** After completing or clearing one goal, start another and assert that old flags, counters, or timers are reset.
+12. **Verify that state from mission A does not contaminate mission B.** After completing or clearing one mission, start another and assert that old flags, counters, or timers are reset.
 
 13. **Use `vi.resetAllMocks()` in `beforeEach`, not `vi.clearAllMocks()`.** `clearAllMocks` only clears call counts; `resetAllMocks` also resets mock implementations, preventing stale return values from bleeding between tests:
     ```typescript
@@ -148,7 +147,7 @@ Choose the test style by what the behavior depends on:
 
 8. **Do NOT ignore the `before_agent_start` / `turn_end` / `message_end` handlers.** These are often where budget checks, pause-on-error, and system-prompt injection happen.
 
-9. **Do NOT test the extension factory in isolation from the extension instance.** Calling `await goalExtension(mockPi)` wires up handlers and closure state. Tests that skip this step miss real behavior.
+9. **Do NOT test the extension factory in isolation from the extension instance.** Calling `await missionsExtension(mockPi)` wires up handlers and closure state. Tests that skip this step miss real behavior.
 
 10. **Do NOT leave commented-out or `.only` tests in the committed suite.** Run the full suite before committing.
 
@@ -228,7 +227,7 @@ Use `setup` to append persisted entries before `session_start`, and `shutdown()`
 
 ### Extracting Handlers
 
-Use the `getEventHandler` helper pattern from `test/extensions/goal.test.ts`:
+Use the `getEventHandler` helper pattern from `test/extensions/missions.test.ts`:
 
 ```typescript
 function getEventHandler(mockPi: any, eventType: string) {
@@ -289,7 +288,7 @@ When an extension tracks budgets (tokens, time, iterations), test the boundary:
 
 When you fix a bug, add a test that would have failed before the fix. Name it descriptively:
 ```typescript
-it("goal_complete returns terminate: true so the turn ends immediately", ...);
+it("check with no ids returns terminate: true so the turn ends immediately", ...);
 ```
 
 ### Biome Import Ordering

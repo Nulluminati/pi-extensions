@@ -6,7 +6,6 @@ import {
   AUTORESEARCH_STATUS_KEY,
   BACKGROUND_JOBS_STATUS_KEY,
   BAR_SEGMENTS,
-  GOAL_STATUS_KEY,
   ICON_AHEAD,
   ICON_BEHIND,
   ICON_CONFLICTED,
@@ -227,8 +226,7 @@ export function buildFooterLines(
   if (extStatuses) {
     for (const [key, text] of extStatuses) {
       // Skip our own indicator and the small-model status: the small model is
-      // shown in the editor meta line, not the footer. Skip goal: a running
-      // goal is shown as a "Goal" badge in the editor frame. Skip missions,
+      // shown in the editor meta line, not the footer. Skip missions,
       // messenger, autoresearch, workers and background-jobs as well: their
       // setStatus entries are fallback text for the default footer. Approval
       // Mode shows its off state in the editor instead. Messenger's unread
@@ -236,7 +234,6 @@ export function buildFooterLines(
       if (
         key !== STATUS_KEY &&
         key !== SMALL_MODEL_STATUS_KEY &&
-        key !== GOAL_STATUS_KEY &&
         key !== MISSIONS_STATUS_KEY &&
         key !== MESSENGER_STATUS_KEY &&
         key !== AUTORESEARCH_STATUS_KEY &&

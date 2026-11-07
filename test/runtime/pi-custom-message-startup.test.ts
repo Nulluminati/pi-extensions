@@ -11,7 +11,7 @@ import { Type } from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const agentDist = dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent")));
-const GOAL_OBJECTIVE = "ship the snake game";
+const PROBE_CONTEXT = "probe context for this turn";
 
 type StartupHandler = (
   event: BeforeAgentStartEvent,
@@ -38,29 +38,14 @@ function deferred<T = void>() {
   return { promise, resolve: resolvePromise };
 }
 
-function activeGoalEntry() {
-  return {
-    goal: {
-      id: "goal-test",
-      objective: GOAL_OBJECTIVE,
-      status: "active",
-      startTime: 0,
-      elapsedMs: 0,
-      iteration: 0,
-      tokensUsed: 0,
-      baselineTokens: 0,
-    },
-  };
-}
-
 function requestText(context: ModelRequest): string {
   return JSON.stringify(context.messages);
 }
 
 /**
- * Starts a real Pi session with an active goal and a probe extension. The faux
- * provider answers every model request, so the session needs no credentials
- * and makes no network requests.
+ * Starts a real Pi session with a probe extension that injects one context
+ * message per turn. The faux provider answers every model request, so the
+ * session needs no credentials and makes no network requests.
  */
 async function startSession(
   options: { onStartup?: StartupHandler; customTools?: { name: string }[] } = {},
@@ -105,6 +90,13 @@ async function startSession(
         idle: ctx.isIdle(),
       });
       await options.onStartup?.(event, ctx, pi);
+      return {
+        message: {
+          customType: "probe-context",
+          content: PROBE_CONTEXT,
+          display: false,
+        },
+      };
     });
     pi.on("agent_start", () => {
       agentStarts += 1;
@@ -115,7 +107,6 @@ async function startSession(
   };
 
   const sessionManager = sdk.SessionManager.inMemory(dir);
-  sessionManager.appendCustomEntry("goal-state", activeGoalEntry());
   const settingsManager = sdk.SettingsManager.inMemory({
     compaction: { enabled: false },
     retry: { enabled: false },
@@ -124,7 +115,6 @@ async function startSession(
     cwd: dir,
     agentDir: dir,
     settingsManager,
-    additionalExtensionPaths: [resolve("extensions/goal/goal.ts")],
     extensionFactories: [probe],
     noSkills: true,
     noPromptTemplates: true,
@@ -178,7 +168,7 @@ async function startSession(
 afterEach(() => vi.unstubAllEnvs());
 
 describe("Pi 1.2.0 custom-message startup", () => {
-  it("starts an idle run from a custom message with the goal reminder", async () => {
+  it("starts an idle run from a custom message with the extension context", async () => {
     const harness = await startSession();
     try {
       harness.wake("probe-wake", "wake up");
@@ -188,13 +178,13 @@ describe("Pi 1.2.0 custom-message startup", () => {
       ]);
       expect(harness.requests).toHaveLength(1);
       expect(requestText(harness.requests[0])).toContain("wake up");
-      expect(requestText(harness.requests[0])).toContain(GOAL_OBJECTIVE);
+      expect(requestText(harness.requests[0])).toContain(PROBE_CONTEXT);
     } finally {
       harness.dispose();
     }
   });
 
-  it("starts a user prompt run with the goal reminder", async () => {
+  it("starts a user prompt run with the extension context", async () => {
     const harness = await startSession();
     try {
       await harness.session.prompt("hello");
@@ -203,7 +193,7 @@ describe("Pi 1.2.0 custom-message startup", () => {
       ]);
       expect(harness.requests).toHaveLength(1);
       expect(requestText(harness.requests[0])).toContain("hello");
-      expect(requestText(harness.requests[0])).toContain(GOAL_OBJECTIVE);
+      expect(requestText(harness.requests[0])).toContain(PROBE_CONTEXT);
     } finally {
       harness.dispose();
     }

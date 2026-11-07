@@ -30,7 +30,6 @@ rows = [
   ["agent", "$pi_messenger"],
   ["$pi_mission", "$pi_mission_status"],
   ["$pi_workers", "$pi_cost", "$pi_todos"],
-  ["$pi_goal"],
 ]
 ```
 
@@ -83,7 +82,6 @@ The adapter clears a pane label only after it set a name during the active sessi
 | `pi_worker_cost` | `workers:state` | Worker-only cost in dollars, with four decimal places |
 | `pi_worker_tokens` | `workers:state` | Worker token total |
 | `pi_todos` | `todos:changed` | Completed tasks divided by total tasks, such as `2/5` |
-| `pi_goal` | `goal:state-change` | Goal status and iteration, such as `active 3/25` |
 | `pi_messenger` | `messenger:state` | Session's messenger name |
 | `pi_unread` | `messenger:state` | Unread message count |
 

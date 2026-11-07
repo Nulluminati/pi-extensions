@@ -46,7 +46,7 @@ The new session name comes from the goal, capitalized and truncated for display;
 
 ### Loading modal
 
-While the summary is generating, a framed modal (`ctx.ui.custom`, the same `renderModalFrame` chrome as the goal prompt) shows a braille spinner with "Generating summary…". Input is swallowed while it is up; it closes itself when generation finishes or fails, then the review editor opens (or an error notification is shown).
+While the summary is generating, a framed modal (`ctx.ui.custom`, the same `renderModalFrame` chrome as the input modals) shows a braille spinner with "Generating summary…". Input is swallowed while it is up; it closes itself when generation finishes or fails, then the review editor opens (or an error notification is shown).
 
 ## Key Design Decisions
 

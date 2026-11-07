@@ -130,7 +130,6 @@ describe("real Pi tool contracts", () => {
   });
 });
 
-const GOAL_DISCOVERY = "/goal:new <objective>";
 const WEB_FETCH_RULE = "fetch it directly";
 const PROBE_RULE = "Probe extension rule.";
 
@@ -140,11 +139,11 @@ interface SystemMessage {
 }
 
 /**
- * Starts a real Pi session with web-search, goal, and a probe extension that
- * adds its own guideline. The faux provider records every request, so no
- * credentials or network access are needed.
+ * Starts a real Pi session with web-search and a probe extension that adds its
+ * own guideline. The faux provider records every request, so no credentials
+ * or network access are needed.
  */
-async function startGuidanceSession(options: { activeGoal?: boolean } = {}) {
+async function startGuidanceSession() {
   const dir = mkdtempSync(join(tmpdir(), "pi-guidance-"));
   vi.stubEnv("PI_CODING_AGENT_DIR", dir);
   vi.stubEnv("PI_SMALL_MODEL", "");
@@ -180,20 +179,6 @@ async function startGuidanceSession(options: { activeGoal?: boolean } = {}) {
     );
   };
   const sessionManager = sdk.SessionManager.inMemory(dir);
-  if (options.activeGoal) {
-    sessionManager.appendCustomEntry("goal-state", {
-      goal: {
-        id: "goal-test",
-        objective: "ship the snake game",
-        status: "active",
-        startTime: 0,
-        elapsedMs: 0,
-        iteration: 0,
-        tokensUsed: 0,
-        baselineTokens: 0,
-      },
-    });
-  }
   const settingsManager = sdk.SettingsManager.inMemory({
     compaction: { enabled: false },
     retry: { enabled: false },
@@ -202,10 +187,7 @@ async function startGuidanceSession(options: { activeGoal?: boolean } = {}) {
     cwd: dir,
     agentDir: dir,
     settingsManager,
-    additionalExtensionPaths: [
-      resolve("extensions/web-search/web-search.ts"),
-      resolve("extensions/goal/goal.ts"),
-    ],
+    additionalExtensionPaths: [resolve("extensions/web-search/web-search.ts")],
     extensionFactories: [probe],
     noSkills: true,
     noPromptTemplates: true,
@@ -244,52 +226,46 @@ function occurrences(text: string, needle: string): number {
 }
 
 describe("real Pi prompt guidance delivery", () => {
-  it("renders active tool guidance, goal discovery, and other guidelines once each", async () => {
+  it("renders active tool guidance and extension guidelines once each", async () => {
     const harness = await startGuidanceSession();
     try {
       await harness.session.prompt("hello");
       const text = harness.systemText(0);
       expect(occurrences(text, WEB_FETCH_RULE)).toBe(1);
-      expect(occurrences(text, GOAL_DISCOVERY)).toBe(1);
       expect(occurrences(text, PROBE_RULE)).toBe(1);
     } finally {
       harness.dispose();
     }
   });
 
-  it("drops guidance for inactive tools but keeps goal discovery", async () => {
+  it("drops guidance for inactive tools but keeps extension guidelines", async () => {
     const harness = await startGuidanceSession();
     try {
       harness.session.setActiveToolsByName(["read", "bash"]);
       await harness.session.prompt("hello");
       const text = harness.systemText(0);
       expect(text).not.toContain(WEB_FETCH_RULE);
-      expect(occurrences(text, GOAL_DISCOVERY)).toBe(1);
+      expect(occurrences(text, PROBE_RULE)).toBe(1);
     } finally {
       harness.dispose();
     }
   });
 
-  it("keeps the rules section stable across runs and goal states", async () => {
-    const idle = await startGuidanceSession();
-    const active = await startGuidanceSession({ activeGoal: true });
+  it("keeps the rules section stable across runs", async () => {
+    const harness = await startGuidanceSession();
     try {
-      await idle.session.prompt("first");
-      await idle.session.prompt("second");
-      await active.session.prompt("first");
+      await harness.session.prompt("first");
+      await harness.session.prompt("second");
       // A second run with an unchanged prompt sends no system patch.
-      const secondRunSystemMessages = idle.requests[1].messages.filter(
+      const secondRunSystemMessages = harness.requests[1].messages.filter(
         (message) => message.role === "system",
       );
       expect(secondRunSystemMessages).toHaveLength(1);
-      expect(idle.systemText(1)).toBe(idle.systemText(0));
+      expect(harness.systemText(1)).toBe(harness.systemText(0));
       const rules = (text: string) => text.match(/<rules>[\s\S]*?<\/rules>/)?.[0];
-      expect(rules(active.systemText(0))).toBeDefined();
-      expect(rules(active.systemText(0))).toBe(rules(idle.systemText(0)));
-      expect(active.systemText(0)).not.toContain("ship the snake game");
+      expect(rules(harness.systemText(0))).toBeDefined();
     } finally {
-      idle.dispose();
-      active.dispose();
+      harness.dispose();
     }
   });
 });

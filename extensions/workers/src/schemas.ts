@@ -16,7 +16,7 @@ export const DELEGATE_PARAMETERS = {
       type: "array",
       items: { type: "string" },
       description:
-        "Extension names for the worker to load (resolution: this param, then $PI_WORKER_EXTENSIONS, then worker-extensions.json, then the default set). messenger and worker-sandbox are always loaded. Workflow extensions (workers, missions, autoresearch, goal) are forbidden in workers.",
+        "Extension names for the worker to load (resolution: this param, then $PI_WORKER_EXTENSIONS, then worker-extensions.json, then the default set). messenger and worker-sandbox are always loaded. Workflow extensions (workers, missions, autoresearch) are forbidden in workers.",
     },
     isolate: {
       type: "boolean",

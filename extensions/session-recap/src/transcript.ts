@@ -14,7 +14,7 @@ function formatToolCallSummary(content: unknown): string[] {
 
 /**
  * Id of the last message entry on the branch, or undefined when the branch
- * has no messages. Custom entries (e.g. todos-state, goal-state) advance the
+ * has no messages. Custom entries (e.g. todos-state) advance the
  * session leaf but are not conversation content, so staleness checks compare
  * message ids instead of leaf ids.
  */

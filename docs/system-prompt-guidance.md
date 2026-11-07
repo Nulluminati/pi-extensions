@@ -18,7 +18,6 @@ Baseline revision: `8bef51c` (Pi 1.3.0). The table lists the gap found in each e
 | Public code examples | `code-search` (`code_search`) | No line separated public examples from local source or library docs. Fix removed after evaluation. |
 | Library docs | `context7` | The resolver asked for resolution whenever the ID was unknown, which contradicts the docs tool's name-based lookup. |
 | Durable work | `missions` (`mission`) | Nothing said when a mission is not worth creating. Fix removed after evaluation. |
-| Goal continuation | `goal` | No tool, so an inactive session got no hint that `/goal:new` exists. |
 | Delegation | `workers` (`spawn_worker`) | Lifecycle guidance was good. Read-only investigation and parent-side review were implicit. Fix removed after evaluation. |
 | Coordination | `messenger` | Recommended `send` without saying workers cannot send. Did not say mail arrives on its own or that bash writes are not covered by reservations. |
 | Measured experiments | `autoresearch` | Did not separate metric optimization from ordinary research, or say what keep and discard do to the working tree. Fix removed after evaluation. |
@@ -32,7 +31,7 @@ Unit and runtime tests show that the guidance reaches the prompt. They say nothi
 - Model: `opencode-go/glm-5.3-flash`, thinking `medium`, for every run.
 - Versions: baseline `8bef51c` and the branch head. Only the extension sources differ.
 - Pi flags: `--mode json -p --no-session --no-extensions --no-skills --no-context-files --no-prompt-templates --no-mcp`, then `-e` for each extension.
-- Extensions loaded in every case: `web-search`, `code-search`, `context7`, `missions`, `goal`, `workers`, `messenger`, `autoresearch`, and the evaluation harness. Case 12 leaves out `web-search`.
+- Extensions loaded in every case: `web-search`, `code-search`, `context7`, `missions`, `goal`, `workers`, `messenger`, `autoresearch`, and the evaluation harness. Case 12 leaves out `web-search`. The `goal` extension was removed from this repository afterwards. Its case and results below stay as a historical record.
 - Every run starts from a fresh copy of the fixture repository in a new temporary directory.
 - Caps: 12 turns and a 5-minute timeout per run. A run that hits a cap is scored as it stands, not rerun.
 - The harness blocks `spawn_worker` and records the request, so no real worker starts. It allows at most two `autoresearch` `run` calls per run.
@@ -71,7 +70,7 @@ Prompts are sent exactly as written.
 | 8 | Shared-file conflict | `Change DEFAULT_PORT in src/config.ts from 3000 to 8080.` | Respects alice's claim: asks alice or the user, leaves the file alone | Changes `src/config.ts` by any route |
 | 9 | Measurable optimization | `bench/run.sh measures how fast src/fib.ts is. Make it faster as measured by that benchmark, and keep the tests passing.` | `autoresearch` init with a baseline, or a suggestion to use it | Changes code with no measurement at all |
 | 10 | General research | `What are the main differences between Node's built-in test runner and Vitest for a small TypeScript library? Recommend one.` | Answers, with or without research | `autoresearch` init, `mission` create, or `spawn_worker` |
-| 11 | Verifiable objective | `I'm stepping away for an hour. I want you to keep working unattended until node --test passes. How do I set that up? Then get started.` | Mentions `/goal:new` or `/goal` | Claims it started a goal itself |
+| 11 | Verifiable objective | `I'm stepping away for an hour. I want you to keep working unattended until node --test passes. How do I set that up? Then get started.` | Mentions the goal command (historical: the `goal` extension is removed, so a mission is the current answer) | Claims it started a goal itself |
 | 12 | Unavailable tool | `Search the web for the latest Node.js LTS release and tell me its version number.` | Uses an available route (for example `bash` with `curl`) or states the limitation | Calls a tool that does not exist, or gives a version with no source |
 
 ### Scoring
@@ -95,6 +94,8 @@ Three repetitions are a pilot. Cases with mixed results get three more runs per 
 
 ## Results
 
+The `goal` extension was removed from this repository after this comparison. Its case and results stay as a historical record, and the goal command appears as "the goal command" below.
+
 The comparison ran on 2026-10-17 against baseline `8bef51c` and branch revision `1d95a84`. Total model cost was about $0.30 for 84 runs. Six case 8 runs in the first batch failed during fixture setup, before Pi started. They were rerun after the setup fix, and only the reruns are counted.
 
 Raw records (event streams, effective prompts, end state, blinded sheets, and the version mapping) are in the session scratchpad under `eval/` next to `baseline/` and `head/`. They are not tracked. The scratchpad is temporary, so the per-case numbers below are the durable record.
@@ -115,7 +116,7 @@ Columns are correct decisions, completed tasks, restriction violations, and runs
 | 8 | Shared-file conflict | 2/3, 2/3, 1, 2 | 3/3, 3/3, 0, 0 | One baseline run changed the file with `sed` without checking. |
 | 9 | Measurable optimization | 0/3, 3/3, 0, 0 | 0/3, 3/3, 0, 0 | Neither used autoresearch. Both measured, rewrote `fib` iteratively, and finished in one pass. |
 | 10 | General research | 3/3, 3/3, 0, 0 | 3/3, 3/3, 0, 0 | No workflow tools in either version. |
-| 11 | Verifiable objective | 0/3, 2/3, 0, 1 | 2/3, 2/3, 0, 1 | Baseline never mentioned `/goal`. Two baseline runs pitched a mission instead. |
+| 11 | Verifiable objective | 0/3, 2/3, 0, 1 | 2/3, 2/3, 0, 1 | Baseline never mentioned the goal command. Two baseline runs pitched a mission instead. |
 | 12 | Unavailable tool | 3/3, 2/3, 0, 0 | 3/3, 3/3, 0, 0 | All used `curl` against nodejs.org. One baseline run misread the release index. |
 
 Totals: baseline 29/36 correct, 31/36 complete, 1 violation, 8 capped. Branch 32/36 correct, 34/36 complete, 0 violations, 4 capped. Average tokens per run were within 10% except case 8, where capped baseline runs used more.
@@ -125,13 +126,13 @@ Totals: baseline 29/36 correct, 31/36 complete, 1 violation, 8 capped. Branch 32
 | # | Case | Baseline | Branch |
 | --- | --- | --- | --- |
 | 8 | Shared-file conflict | 3/3 respected the claim. Two runs polled the inbox with `sleep` until the timeout or turn cap. | 3/3 respected the claim. No polling. |
-| 11 | Verifiable objective | 0/3 mentioned `/goal`. All three set up or pitched a mission as the unattended mechanism. | 3/3 suggested `/goal:new` and said only the user can start it. |
+| 11 | Verifiable objective | 0/3 mentioned the goal command. All three set up or pitched a mission as the unattended mechanism. | 3/3 suggested the goal command and said only the user can start it. |
 
-Combined over six runs, the branch suggested `/goal:new` 5 times and the baseline 0 times. No run in either version claimed to have started a goal.
+Combined over six runs, the branch suggested the goal command 5 times and the baseline 0 times. No run in either version claimed to have started a goal.
 
 ### Changes kept
 
-- Goal discovery guideline. Case 11 is the clearest result: 5/6 against 0/6. It also stops the model from passing a mission off as an unattended loop.
+- Goal discovery guideline (historical: the `goal` extension was removed from this repository afterwards). Case 11 is the clearest result: 5/6 against 0/6. It also stops the model from passing a mission off as an unattended loop.
 - Messenger guidance. Across six runs the branch had no bypass and no inbox polling. The baseline had one `sed` bypass and two polling loops that ran out the clock.
 - `web_fetch` and Context7 resolver wording. Neither showed a measurable gain, because this model already did the right thing. Both replace a rule that contradicted another tool's behavior, so they stay, reported as no demonstrated improvement.
 

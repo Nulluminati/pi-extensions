@@ -40,15 +40,6 @@ export interface State {
   // small model is configured.
   smallModelLabel: string;
   workerModelLabel: string;
-  // True while the goal extension has a running goal (status "active"),
-  // published on the pi.events bus (see goal:state-change). Shown as a
-  // "Goal N/cap" badge in the editor frame's top-right cell.
-  goalRunning: boolean;
-  // Iteration count and cap from the goal:state-change payload, shown in the
-  // badge while the goal is running. goalIteration resets to 0 when no goal
-  // is active; goalCap is null when unset and 0 means unlimited.
-  goalIteration: number;
-  goalCap: number | null;
   gitBranch: string | null;
   gitStatus: GitStatus | null;
   tokenUsage: TokenUsage;
@@ -64,10 +55,9 @@ export interface State {
   approvalModeOff: boolean;
   // Unread messenger mail count, published by the messenger extension on the
   // pi.events bus (see messenger:state). Shown as an "✉ N" segment in the
-  // Session panel while N > 0. Like goalRunning, it is not cleared on
-  // session boundaries: the messenger re-announces its state during its own
-  // session_start, and a reset here could clobber an announcement that has
-  // already fired.
+  // Session panel while N > 0. It is not cleared on session boundaries: the
+  // messenger re-announces its state during its own session_start, and a
+  // reset here could clobber an announcement that has already fired.
   unreadMail: number;
   // Aggregated token/cost usage of the project's delegated workers
   // (published on workers:state). Zero while no workers have run.

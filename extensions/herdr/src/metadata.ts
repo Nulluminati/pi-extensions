@@ -4,7 +4,6 @@ export const METADATA_EVENTS = [
   "missions:state",
   "workers:state",
   "todos:changed",
-  "goal:state-change",
   "messenger:state",
 ] as const;
 
@@ -22,7 +21,6 @@ export function emptyTokens(): MetadataTokens {
     pi_cost: null,
     pi_context: null,
     pi_todos: null,
-    pi_goal: null,
     pi_messenger: null,
     pi_unread: null,
   };
@@ -92,17 +90,6 @@ export function eventTokens(event: MetadataEvent, data: unknown): MetadataTokens
         return undefined;
       const completed = data.items.filter((item) => item.completed).length;
       return { pi_todos: `${completed}/${data.items.length}` };
-    }
-    case "goal:state-change": {
-      if (data.status === null) return { pi_goal: null };
-      const status = text(data.status);
-      if (!status) return undefined;
-      const iteration = count(data.iteration) ? ` ${data.iteration}` : "";
-      const limit =
-        iteration && count(data.maxIterations) && data.maxIterations > 0
-          ? `/${data.maxIterations}`
-          : "";
-      return { pi_goal: text(`${status}${iteration}${limit}`) };
     }
     case "messenger:state":
       if (!count(data.unread) || (data.name !== null && typeof data.name !== "string"))

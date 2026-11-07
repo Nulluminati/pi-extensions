@@ -42,10 +42,10 @@ export const DEFAULT_WORKER_EXTENSIONS = [
 
 /**
  * Workflow extensions that must never load in a worker: workers would allow
- * nested delegation, missions/autoresearch/goal would let a one-shot worker
+ * nested delegation, missions/autoresearch would let a one-shot worker
  * mutate durable project records or run campaigns.
  */
-export const FORBIDDEN_WORKER_EXTENSIONS = ["workers", "missions", "autoresearch", "goal"] as const;
+export const FORBIDDEN_WORKER_EXTENSIONS = ["workers", "missions", "autoresearch"] as const;
 
 /** Coordination, command gates, and sandbox extensions loaded by every
  *  worker. worker-sandbox pins last so its built-in tool overrides cannot be

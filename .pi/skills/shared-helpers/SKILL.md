@@ -69,7 +69,7 @@ Two jobs, both pure string formatting against a theme:
 - `formatStatusLine(theme, { icon, prefix, text, iconColor?, textColor? })` produces `"<icon> <Prefix>: <text>"` with theme colors (defaults: icon `accent`, text `muted`). Feed the result to `ctx.ui.setStatus(STATUS_KEY, text)`; pass `undefined` to clear.
 - `formatStyledKeyHints(theme, [["enter", "select"], ["esc", "cancel"]])` produces a themed hint bar for the bottom of a dialog. `formatKeyHints` is the unthemed variant for plain-text contexts.
 
-Canonical status pattern (from `goal`, `handoff`, `web-search`):
+Canonical status pattern (from `missions`, `autoresearch`, `workers`):
 
 ```typescript
 function updateStatusLine(ctx: ExtensionContext) {
@@ -81,7 +81,7 @@ function updateStatusLine(ctx: ExtensionContext) {
       ? undefined
       : formatStatusLine(ctx.ui.theme, {
           icon: STATUS_ICON,
-          prefix: "Goal",
+          prefix: "Mission",
           text,
           iconColor: ICON_COLOR,
           textColor: TEXT_COLOR,
@@ -137,27 +137,27 @@ Messenger's unread count is the one line-1 exception: the status bar subscribes 
 
 ## `lib/input-modal.ts` — framed text prompt
 
-A single-line `Input` from pi-tui wrapped in `renderModalFrame`, with the same border/title/key-hint styling as the searchable select. Use `promptText(ctx, { title, placeholder, initialValue? })` from a command handler instead of `ctx.ui.input` when you want the modal look (goal and handoff do); it falls back to `ctx.ui.input` outside TUI mode and resolves `undefined` on cancel:
+A single-line `Input` from pi-tui wrapped in `renderModalFrame`, with the same border/title/key-hint styling as the searchable select. Use `promptText(ctx, { title, placeholder, initialValue? })` from a command handler instead of `ctx.ui.input` when you want the modal look; it falls back to `ctx.ui.input` outside TUI mode and resolves `undefined` on cancel:
 
 ```typescript
-const objective = await promptText(ctx, {
-  title: "Goal",
-  placeholder: "What should this run accomplish?",
-  initialValue: state.objective, // prefilled for edits
+const name = await promptText(ctx, {
+  title: "New project name",
+  placeholder: "Name this project",
+  initialValue: currentName, // prefilled for edits
 });
-if (!objective) return; // cancelled
+if (!name) return; // cancelled
 ```
 
 Enter submits, Esc cancels. `promptText` and `confirmModal` pass `blocked` to `ctx.ui.custom()`, so Pi reports the session as blocked while the dialog waits for an answer. Use `createInputModal` directly only when embedding the input inside a larger custom component.
 
 ### `confirmModal` — framed yes/no dialog
 
-Ask a confirmation question in a framed modal (same border, title, and key-hint styling as `promptText`); body lines word-wrap to the frame width. Use `confirmModal(ctx, { title, body })` from a command handler instead of raw `ctx.ui.confirm` whenever the user must approve a destructive action (clear, goal reset, btw reset/inject do); it falls back to plain `ctx.ui.confirm` outside TUI mode and resolves `false` without UI (matching pi's no-op confirm context):
+Ask a confirmation question in a framed modal (same border, title, and key-hint styling as `promptText`); body lines word-wrap to the frame width. Use `confirmModal(ctx, { title, body })` from a command handler instead of raw `ctx.ui.confirm` whenever the user must approve a destructive action (clear and btw reset/inject do); it falls back to plain `ctx.ui.confirm` outside TUI mode and resolves `false` without UI (matching pi's no-op confirm context):
 
 ```typescript
 const confirmed = await confirmModal(ctx, {
-  title: "Reset current goal?",
-  body: `Goal: "${objective}"\n\nThis discards the goal and its usage counters.`,
+  title: "Reset side thread?",
+  body: "This wipes the whole side conversation and closes the side window.",
 });
 if (!confirmed) return; // declined or cannot ask
 ```
@@ -378,7 +378,7 @@ domain in the error. Used by `messenger` (registry claims, reservations, mailbox
 
 ## `lib/token-count.ts` — token count labels
 
-`formatTokenCount(value, style?)` formats counts for model metadata, goal status, and context breakdowns. The default style keeps model-picker labels. Goal uses `{ underThousand: "raw", thousands: "rounded", millions: "fixed" }`; context uses `{ underThousand: "raw", thousands: "fixed", millions: "fixed" }`. These styles preserve existing labels rather than changing the user interface.
+`formatTokenCount(value, style?)` formats counts for model metadata and context breakdowns. The default style keeps model-picker labels. Context uses `{ underThousand: "raw", thousands: "fixed", millions: "fixed" }`. These styles preserve existing labels rather than changing the user interface.
 
 ## `lib/model-picker.ts` — model picker pieces
 

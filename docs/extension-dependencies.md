@@ -20,10 +20,10 @@ Shared `lib/` helpers that hold no state (UI frames, file locks, path helpers) a
 | `workers` | `approval-mode` in the parent session | Worker commands that need review are blocked. |
 | `workers` | Optional: `bash-allow` in the parent session | The launcher uses `PI_BASH_ALLOW` instead of a parent flag snapshot. |
 | `workers` | A worker model (`lib/worker-model.ts` config) | `spawn_worker` fails with a configuration error. `worker-model` is only the picker. |
-| `handoff`, `btw`, `goal`, `session-name`, `session-recap` | A small model (`lib/small-model.ts` config) | Each feature that calls the small model fails or skips. `small-model` is only the picker. |
+| `handoff`, `btw`, `session-name`, `session-recap` | A small model (`lib/small-model.ts` config) | Each feature that calls the small model fails or skips. `small-model` is only the picker. |
 | `approval-mode` | A Jev classifier model in the model registry | Commands that need review are blocked. |
-| `status-bar` | Optional: `goal`, `messenger`, `workers`, `approval-mode`, `neuralwatt` | The matching badge or footer segment stays empty. |
-| `herdr` | Optional: `missions`, `workers`, `todos`, `goal`, `messenger` | The matching pane token stays empty. |
+| `status-bar` | Optional: `messenger`, `workers`, `approval-mode`, `neuralwatt` | The matching badge or footer segment stays empty. |
+| `herdr` | Optional: `missions`, `workers`, `todos`, `messenger` | The matching pane token stays empty. |
 | `ask-user`, `approval-mode` | Optional: the official Herdr Pi integration (outside this repository) | Herdr does not show blocked dialogs. |
 
 ```mermaid
@@ -35,7 +35,6 @@ flowchart LR
   workers -. loads in worker .-> approval-mode
   workers -. loads in worker .-> worker-sandbox
   workers -- approval requests --> approval-mode
-  goal -. goal:state-change .-> status-bar
   messenger -. messenger:state .-> status-bar
   workers -. workers:state .-> status-bar
   approval-mode -. approval-mode:state .-> status-bar
@@ -43,7 +42,6 @@ flowchart LR
   missions -. missions:state .-> herdr
   workers -. workers:state .-> herdr
   todos -. todos:changed .-> herdr
-  goal -. goal:state-change .-> herdr
   messenger -. messenger:state .-> herdr
 ```
 
@@ -63,7 +61,7 @@ Each worker runs as a separate `pi` process with `--no-extensions` and an explic
 |-----|------------|------|
 | Required | `messenger`, `worker-blocker`, `bash-allow`, `approval-mode`, `worker-sandbox` | Always added. `bash-allow` precedes `approval-mode`; `worker-sandbox` loads last so its built-in tool overrides win. |
 | Default | `messenger`, `code-search`, `context7`, `web-search`, `synthetic`, `neuralwatt`, `approval-mode`, `worker-sandbox` | Used when the call, `PI_WORKER_EXTENSIONS`, and the config file give no list. |
-| Forbidden | `workers`, `missions`, `autoresearch`, `goal` | Rejected even when requested. |
+| Forbidden | `workers`, `missions`, `autoresearch` | Rejected even when requested. |
 
 The required extensions each carry one part of the parent-worker protocol:
 
@@ -93,7 +91,6 @@ When you rename an event, change both sides.
 
 | Event | Sender | Receivers |
 |-------|--------|-----------|
-| `goal:state-change` | `goal` | `status-bar` (Goal badge), `herdr` (pane token) |
 | `messenger:state` | `messenger` | `status-bar` (unread mail), `herdr` (pane token) |
 | `workers:state` | `workers` | `status-bar` (worker spend), `herdr` (combined cost) |
 | `approval-mode:state` | `approval-mode` | `status-bar` (review-off badge) |
@@ -115,7 +112,7 @@ Event names are defined in these files:
 
 ### Status keys
 
-`status-bar` also hides some `setStatus` keys from its footer, because their owners already show the same state in a widget. The keys are `small-model`, `goal`, `missions`, `messenger`, `approval-mode`, `autoresearch`, `workers`, and `background-jobs`. `extensions/status-bar/src/footer.ts` has the list. Without `status-bar`, Pi shows these keys in its default footer.
+`status-bar` also hides some `setStatus` keys from its footer, because their owners already show the same state in a widget. The keys are `small-model`, `missions`, `messenger`, `approval-mode`, `autoresearch`, `workers`, and `background-jobs`. `extensions/status-bar/src/footer.ts` has the list. Without `status-bar`, Pi shows these keys in its default footer.
 
 ## 4. Shared configuration
 
@@ -123,7 +120,7 @@ Some `lib/` modules own a config file or a store that more than one extension re
 
 | Module | Owner of the picker or tool | Readers |
 |--------|-----------------------------|---------|
-| `lib/small-model.ts` | `small-model` (`/smallmodel`) | `btw`, `goal`, `handoff`, `session-name`, `session-recap`, `status-bar` |
+| `lib/small-model.ts` | `small-model` (`/smallmodel`) | `btw`, `handoff`, `session-name`, `session-recap`, `status-bar` |
 | `lib/worker-model.ts` | `worker-model` (`/worker-model`) | `workers`, `status-bar` |
 | `lib/todos.ts` | `todos` (`todo` tool) | `todos` only |
 

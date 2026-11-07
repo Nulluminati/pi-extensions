@@ -77,7 +77,7 @@ describe("session-identity", () => {
   it("ignores entries from other extensions and malformed entries", async () => {
     vi.mocked(mockCtx.sessionManager.getBranch).mockReturnValue(
       sessionEntries([
-        { type: "custom", customType: "goal-state", data: { goal: {} } },
+        { type: "custom", customType: "todos-state", data: { items: [] } },
         { type: "custom", customType: "test-identity", data: {} },
       ]),
     );

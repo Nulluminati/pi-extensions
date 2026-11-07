@@ -88,7 +88,7 @@ An explicit tool parameter or `PI_WORKER_EXTENSIONS` takes precedence over that 
 
 The temporary list must retain the usual provider extensions and add the experimental router.
 The resolver always includes messenger, worker-blocker, approval-mode, and worker-sandbox.
-It loads worker-sandbox last. It rejects workers, missions, autoresearch, and goal.
+It loads worker-sandbox last. It rejects workers, missions, and autoresearch.
 Do not change the saved allowlist or weaken these boundaries for the pilot.
 
 An initial read-only audit worker could not read repository files.

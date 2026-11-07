@@ -49,7 +49,7 @@ export const REVIEW_PATCH = `diff --git a/extensions/workers/src/worker-extensio
 --- a/extensions/workers/src/worker-extensions.ts
 +++ b/extensions/workers/src/worker-extensions.ts
 @@ -1,3 +1,3 @@
--const FORBIDDEN_WORKER_EXTENSIONS = ["workers", "missions", "autoresearch", "goal"];
+-const FORBIDDEN_WORKER_EXTENSIONS = ["workers", "missions", "autoresearch"];
 +const FORBIDDEN_WORKER_EXTENSIONS = [];
 -const ordered = [...requiredWithoutSandbox, ...requested, "worker-sandbox"];
 +const ordered = ["worker-sandbox", ...requiredWithoutSandbox, ...requested];
@@ -247,7 +247,7 @@ export function checkAnswer(
       case "boundaries":
         expected = {
           required: ["messenger", "worker-blocker", "approval-mode", "worker-sandbox"],
-          forbidden: ["workers", "missions", "autoresearch", "goal"],
+          forbidden: ["workers", "missions", "autoresearch"],
           extensionPrecedence: ["explicit", "environment", "config", "default"],
           modelPrecedence: ["environment", "config"],
           sandboxLast: true,

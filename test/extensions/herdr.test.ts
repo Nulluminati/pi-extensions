@@ -170,7 +170,6 @@ describe("Herdr status adapter", () => {
   it("registers listeners before session start without opening sockets or timers", async () => {
     const fixture = await setup();
     expect([...fixture.listeners.keys()].sort()).toEqual([
-      "goal:state-change",
       "messenger:state",
       "missions:state",
       "todos:changed",
@@ -203,7 +202,6 @@ describe("Herdr status adapter", () => {
         pi_cost: "$0.000",
         pi_context: null,
         pi_todos: null,
-        pi_goal: null,
         pi_messenger: null,
         pi_unread: null,
       },
@@ -365,13 +363,12 @@ describe("Herdr status adapter", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("coalesces all five extension events into one metadata snapshot", async () => {
+  it("coalesces all four extension events into one metadata snapshot", async () => {
     const fixture = await setup();
     await fixture.start();
     fixture.emit("missions:state", { active: true, title: "Fix auth", status: "active" });
     fixture.emit("workers:state", { running: 2, workerCostUsd: 0.125, workerTokens: 1200 });
     fixture.emit("todos:changed", { items: [{ completed: true }, { completed: false }] });
-    fixture.emit("goal:state-change", { status: "active", iteration: 3, maxIterations: 25 });
     fixture.emit("messenger:state", { name: "auth-parent", unread: 4 });
     await flushUpdates();
     expect(requests).toHaveLength(2);
@@ -385,7 +382,6 @@ describe("Herdr status adapter", () => {
       pi_cost: "$0.125",
       pi_context: null,
       pi_todos: "1/2",
-      pi_goal: "active 3/25",
       pi_messenger: "auth-parent",
       pi_unread: "4",
     });
@@ -395,21 +391,18 @@ describe("Herdr status adapter", () => {
     const fixture = await setup();
     await fixture.start();
     fixture.emit("missions:state", { active: true, title: "Auth", status: "paused" });
-    fixture.emit("goal:state-change", { status: "paused", iteration: 3 });
     fixture.emit("messenger:state", { name: "auth", unread: 0 });
     await flushUpdates();
-    expect(latestRequest().params.tokens.pi_goal).toBe("paused 3");
+    expect(latestRequest().params.tokens.pi_messenger).toBe("auth");
     fixture.emit("missions:state", { active: true, title: "Auth", status: "paused" });
     await flushUpdates();
     expect(requests).toHaveLength(2);
     fixture.emit("missions:state", { active: false, title: null, status: null });
-    fixture.emit("goal:state-change", { status: null });
     fixture.emit("messenger:state", { name: null, unread: 0 });
     await flushUpdates();
     expect(latestRequest().params.tokens).toMatchObject({
       pi_mission: null,
       pi_mission_status: null,
-      pi_goal: null,
       pi_messenger: null,
       pi_unread: "0",
     });
@@ -425,7 +418,6 @@ describe("Herdr status adapter", () => {
     });
     fixture.emit("workers:state", { running: 1, workerCostUsd: Number.NaN, workerTokens: -1 });
     fixture.emit("todos:changed", { items: [{ completed: "yes" }] });
-    fixture.emit("goal:state-change", { status: "active", iteration: Number.POSITIVE_INFINITY });
     fixture.emit("messenger:state", null);
     await flushUpdates();
     expect(latestRequest().params.tokens.pi_mission).toBe(`Auth ${"x".repeat(75)}`);
@@ -434,7 +426,6 @@ describe("Herdr status adapter", () => {
       pi_worker_cost: null,
       pi_worker_tokens: null,
       pi_todos: null,
-      pi_goal: "active",
       pi_messenger: null,
     });
     fixture.emit("workers:state", { running: -1 });
@@ -499,7 +490,7 @@ describe("Herdr status adapter", () => {
     expect(Object.values(latestRequest().params.tokens).every((value) => value === null)).toBe(
       true,
     );
-    expect(fixture.unsubscribe).toHaveBeenCalledTimes(5);
+    expect(fixture.unsubscribe).toHaveBeenCalledTimes(4);
     expect(fixture.listeners.size).toBe(0);
     expect(vi.getTimerCount()).toBe(0);
     const count = requests.length;
@@ -515,7 +506,7 @@ describe("Herdr status adapter", () => {
     await flushUpdates();
     await fixture.stop();
     await fixture.start();
-    expect(fixture.listeners.size).toBe(5);
+    expect(fixture.listeners.size).toBe(4);
     expect(latestRequest().params.tokens.pi_mission).toBeNull();
     fixture.emit("missions:state", { active: true, title: "Current mission", status: "paused" });
     await flushUpdates();

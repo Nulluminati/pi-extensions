@@ -51,7 +51,7 @@ describe("frozen virtual-model pilot fixtures", () => {
   it("checks exact repository boundary facts and rejects duplicates and missing keys", () => {
     const facts = {
       required: ["messenger", "worker-blocker", "approval-mode", "worker-sandbox"],
-      forbidden: ["workers", "missions", "autoresearch", "goal"],
+      forbidden: ["workers", "missions", "autoresearch"],
       extensionPrecedence: ["explicit", "environment", "config", "default"],
       modelPrecedence: ["environment", "config"],
       sandboxLast: true,

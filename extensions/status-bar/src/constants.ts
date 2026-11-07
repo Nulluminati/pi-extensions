@@ -107,32 +107,15 @@ export const EDITOR_META_SEPARATOR = "  ";
 export const SMALL_MODEL_STATUS_KEY = "small-model";
 
 /**
- * Status key the goal extension publishes under. Suppressed from footer line
- * 2 because a running goal is shown as a "Goal" badge in the editor frame
- * (see GOAL_STATE_EVENT); the setStatus entry remains the fallback for the
- * default footer when the status bar is disabled.
- */
-export const GOAL_STATUS_KEY = "goal";
-
-/**
- * Event the goal extension emits on pi.events whenever the goal state
- * changes. The editor frame shows a "Goal N/cap" badge in its top-right cell
- * while a goal is running (cap omitted when unlimited). Defined here (not
- * imported) so the status-bar extension stays self-contained; the goal
- * extension owns the contract and emits the same string.
- */
-export const GOAL_STATE_EVENT = "goal:state-change";
-
-/**
  * Status keys the missions, messenger, autoresearch, workers, and
  * background-jobs extensions publish under. All five are widget-first: their
  * live state renders in dedicated widgets, so their setStatus entries are
  * only fallbacks for the default footer when the status bar is disabled.
  * Showing them on line 2 would double-render, so they are suppressed
- * alongside STATUS_KEY, SMALL_MODEL_STATUS_KEY, and GOAL_STATUS_KEY. The
- * messenger's unread count reaches the footer through the messenger:state
- * event instead (see MESSENGER_STATE_EVENT), and the workers spend roll-up
- * through workers:state (see WORKERS_STATE_EVENT).
+ * alongside STATUS_KEY and SMALL_MODEL_STATUS_KEY. The messenger's unread
+ * count reaches the footer through the messenger:state event instead (see
+ * MESSENGER_STATE_EVENT), and the workers spend roll-up through
+ * workers:state (see WORKERS_STATE_EVENT).
  */
 export const MISSIONS_STATUS_KEY = "missions";
 

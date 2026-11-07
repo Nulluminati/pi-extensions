@@ -21,7 +21,6 @@ The adapter subscribes to events that existing extensions publish. It sends disp
 | `missions:state` | Mission title and status |
 | `workers:state` | Running worker count, worker cost, and worker tokens |
 | `todos:changed` | Completed and total tasks |
-| `goal:state-change` | Goal iteration and limit |
 | `messenger:state` | Messenger name and unread messages |
 | `session_start`, `session_info_changed` | Saved Pi session name |
 

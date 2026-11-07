@@ -29,7 +29,7 @@ Order imports as follows:
 2. `import type` declarations from `pi`
 3. Relative modules, with explicit `.ts` extensions
 
-Use `UPPER_SNAKE_CASE` for constants, `PascalCase` for types, and `camelCase` for functions. Use kebab-case for file names, widget keys, and custom entry types. Namespace related slash commands with a colon, such as `/goal:pause`; keep an existing command's public name during maintenance.
+Use `UPPER_SNAKE_CASE` for constants, `PascalCase` for types, and `camelCase` for functions. Use kebab-case for file names, widget keys, and custom entry types. Namespace related slash commands with a colon, such as `/neuralwatt:flex`; keep an existing command's public name during maintenance.
 
 ## Errors and UI
 
