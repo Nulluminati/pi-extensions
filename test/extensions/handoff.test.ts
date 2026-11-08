@@ -139,7 +139,9 @@ describe("handoff-extension", () => {
   it("prints a summary when called without args in non-UI mode", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
+    // Print mode: no dialogs and no custom components.
     mockCtx.hasUI = false;
+    mockCtx.mode = "print";
     mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildBranch()));
 
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -421,7 +423,9 @@ describe("handoff-extension", () => {
   it("prints summary and skips session creation in non-UI mode", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
+    // Print mode: no dialogs and no custom components.
     mockCtx.hasUI = false;
+    mockCtx.mode = "print";
     mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildBranch()));
 
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -491,6 +495,75 @@ describe("handoff-extension", () => {
       "Model returned an empty handoff summary.",
       "error",
     );
+  });
+
+  describe("non-TUI dialog modes", () => {
+    // rpc-mode.js implements ui.custom() as `async custom() { return undefined; }`
+    // while hasUI stays true, so the modal must be gated on ctx.mode.
+    function mockCtxWithoutCustomModal() {
+      const mockCtx = createMockCommandContext();
+      mockCtx.mode = "rpc";
+      mockCtx.ui.custom = mockFn(async () => undefined);
+      mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildBranch()));
+      mockCtx.sessionManager.getSessionFile = vi.fn(() => "/sessions/old.json");
+      mockCtx.ui.editor = vi.fn(() => Promise.resolve("edited summary"));
+      mockCtx.newSession = vi.fn(() => Promise.resolve({ cancelled: false }));
+      return mockCtx;
+    }
+
+    it("completes the handoff in RPC mode without the custom modal", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = mockCtxWithoutCustomModal();
+
+      const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+      vi.mocked(completeSimple).mockResolvedValue(
+        fauxAssistantMessage([{ type: "text", text: "summary text" }]),
+      );
+
+      await expect(runHandoff(mockPi, mockCtx, "finish the refactor")).resolves.toBeUndefined();
+
+      expect(mockCtx.ui.custom).not.toHaveBeenCalled();
+      expect(mockCtx.ui.editor).toHaveBeenCalledWith("Review handoff prompt", "summary text");
+      expect(mockCtx.newSession).toHaveBeenCalledWith(
+        expect.objectContaining({ parentSession: "/sessions/old.json" }),
+      );
+    });
+
+    it("reports a summary error in RPC mode without throwing", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = mockCtxWithoutCustomModal();
+
+      const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+      vi.mocked(completeSimple).mockRejectedValue(new Error("rate limited"));
+
+      await expect(runHandoff(mockPi, mockCtx, "finish the refactor")).resolves.toBeUndefined();
+
+      expect(mockCtx.ui.notify).toHaveBeenCalledWith(
+        "Failed to generate handoff summary: rate limited",
+        "error",
+      );
+      expect(mockCtx.ui.editor).not.toHaveBeenCalled();
+      expect(mockCtx.newSession).not.toHaveBeenCalled();
+    });
+
+    it("treats a missing custom result in TUI mode as a cancellation", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      // A mode that reports hasUI but resolves custom() to undefined.
+      mockCtx.ui.custom = mockFn(async () => undefined);
+      mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildBranch()));
+
+      const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+      vi.mocked(completeSimple).mockResolvedValue(
+        fauxAssistantMessage([{ type: "text", text: "summary text" }]),
+      );
+
+      await expect(runHandoff(mockPi, mockCtx, "finish the refactor")).resolves.toBeUndefined();
+
+      expect(mockCtx.ui.notify).toHaveBeenCalledWith("Handoff cancelled.", "info");
+      expect(mockCtx.ui.editor).not.toHaveBeenCalled();
+      expect(mockCtx.newSession).not.toHaveBeenCalled();
+    });
   });
 
   it("notifies when new session is cancelled", async () => {

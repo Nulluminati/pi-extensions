@@ -13,7 +13,12 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { renderModalFrame } from "../../lib/tui-frame.ts";
 import { formatGoalForSessionName, resolveGoal } from "./src/goal.ts";
-import { generateSummary, type SummaryResult } from "./src/summary.ts";
+import {
+  generateSummary,
+  type SummaryError,
+  type SummaryOk,
+  type SummaryResult,
+} from "./src/summary.ts";
 import { buildTranscript, type HandoffEntry } from "./src/transcript.ts";
 
 // --- Constants ---
@@ -38,6 +43,25 @@ interface HandoffReplacementContext {
   };
 }
 
+/**
+ * Narrow an unknown value from ctx.ui.custom() into a SummaryResult.
+ *
+ * Modes without custom components resolve custom() to undefined, and a modal
+ * can also close without a result. Both count as a cancellation, so nothing
+ * downstream reads `.ok` off a non-result.
+ */
+function toSummaryResult(value: unknown): SummaryResult | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const candidate = value as Partial<SummaryOk> & Partial<SummaryError>;
+  if (candidate.ok === true && typeof candidate.text === "string") {
+    return { ok: true, text: candidate.text };
+  }
+  if (candidate.ok === false && typeof candidate.error === "string") {
+    return { ok: false, error: candidate.error };
+  }
+  return undefined;
+}
+
 // --- Extension ---
 
 export default async function handoffExtension(pi: ExtensionAPI) {
@@ -56,8 +80,11 @@ export default async function handoffExtension(pi: ExtensionAPI) {
         return;
       }
 
-      let summary: SummaryResult;
-      if (ctx.hasUI) {
+      // The spinner modal needs a custom component, which only the TUI has.
+      // RPC mode reports hasUI but resolves custom() to undefined, so gate the
+      // modal on the mode instead of on hasUI.
+      let summary: SummaryResult | undefined;
+      if (ctx.mode === "tui") {
         const pending = generateSummary(transcript, goal, ctx);
         summary = await ctx.ui.custom<SummaryResult>((tui, theme, _keybindings, done) => {
           // Resolve the modal when the summary finishes; generation started
@@ -88,8 +115,16 @@ export default async function handoffExtension(pi: ExtensionAPI) {
             },
           };
         });
+        summary = toSummaryResult(summary);
       } else {
         summary = await generateSummary(transcript, goal, ctx);
+      }
+
+      if (summary === undefined) {
+        if (ctx.hasUI) {
+          ctx.ui.notify("Handoff cancelled.", "info");
+        }
+        return;
       }
 
       if (!summary.ok) {
