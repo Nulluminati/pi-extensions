@@ -36,6 +36,7 @@ export interface ResolvedSmallModel {
   model: Model<any>;
   auth: SmallModelAuth;
   config: SmallModelConfig;
+  /** "environment" when PI_SMALL_MODEL supplied the model, otherwise "config". */
   source: "config" | "environment";
   reasoning: SmallModelReasoning;
 }
@@ -68,41 +69,83 @@ export function resolveSmallModelConfigPath(
   return override || agentConfigPath("small-model", agentDir);
 }
 
+/**
+ * Load the small-model selection from the environment on top of the config file.
+ * `PI_SMALL_MODEL` replaces the provider and model; `PI_SMALL_MODEL_THINKING`,
+ * when set, replaces the thinking level. Both variables together fully override
+ * the file, so the file is not read in that case.
+ */
 export function loadSmallModelConfig(options: ConfigOptions = {}): {
   config: SmallModelConfig;
   source: "config" | "environment";
 } {
   const env = options.env ?? process.env;
-  const environmentSpec = env[SMALL_MODEL_ENV_VAR]?.trim();
-  if (environmentSpec) {
-    const parsed = parseSmallModelSpec(environmentSpec);
-    if (!parsed) {
-      throw new Error(
-        `Invalid ${SMALL_MODEL_ENV_VAR} value "${environmentSpec}". Expected provider/model-id.`,
-      );
-    }
+  const environmentModel = parseEnvironmentModel(env);
+  const environmentThinking = parseEnvironmentThinkingLevel(env);
+
+  if (environmentModel && environmentThinking) {
     return {
-      config: {
-        ...parsed,
-        thinkingLevel: parseThinkingLevel(
-          env[SMALL_MODEL_THINKING_ENV_VAR],
-          SMALL_MODEL_THINKING_ENV_VAR,
-        ),
-      },
+      config: { ...environmentModel, thinkingLevel: environmentThinking },
       source: "environment",
     };
   }
 
   const configPath = options.configPath ?? resolveSmallModelConfigPath(env);
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(readFileSync(configPath, "utf8"));
-  } catch (error) {
-    if (isNodeError(error) && error.code === "ENOENT") {
+  const saved = readSavedSmallModelConfig(configPath);
+
+  if (!saved) {
+    if (!environmentModel) {
       throw new Error(
         `Global small model is not configured. Run /smallmodel to select one (${configPath}).`,
       );
     }
+    return {
+      config: {
+        ...environmentModel,
+        thinkingLevel: environmentThinking ?? DEFAULT_THINKING_LEVEL,
+      },
+      source: "environment",
+    };
+  }
+
+  return {
+    config: {
+      provider: environmentModel?.provider ?? saved.provider,
+      model: environmentModel?.model ?? saved.model,
+      thinkingLevel: environmentThinking ?? saved.thinkingLevel,
+    },
+    source: environmentModel ? "environment" : "config",
+  };
+}
+
+function parseEnvironmentModel(
+  env: NodeJS.ProcessEnv,
+): Pick<SmallModelConfig, "provider" | "model"> | undefined {
+  const environmentSpec = env[SMALL_MODEL_ENV_VAR]?.trim();
+  if (!environmentSpec) return undefined;
+  const parsed = parseSmallModelSpec(environmentSpec);
+  if (!parsed) {
+    throw new Error(
+      `Invalid ${SMALL_MODEL_ENV_VAR} value "${environmentSpec}". Expected provider/model-id.`,
+    );
+  }
+  return parsed;
+}
+
+/** An empty variable counts as unset, like an empty PI_SMALL_MODEL. */
+function parseEnvironmentThinkingLevel(env: NodeJS.ProcessEnv): ThinkingLevel | undefined {
+  const value = env[SMALL_MODEL_THINKING_ENV_VAR]?.trim();
+  if (!value) return undefined;
+  return parseThinkingLevel(value, SMALL_MODEL_THINKING_ENV_VAR);
+}
+
+/** Returns undefined when the file does not exist; throws when it is unreadable or invalid. */
+function readSavedSmallModelConfig(configPath: string): SmallModelConfig | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(configPath, "utf8"));
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") return undefined;
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Could not read global small model config ${configPath}: ${message}`);
   }
@@ -123,12 +166,9 @@ export function loadSmallModelConfig(options: ConfigOptions = {}): {
   }
 
   return {
-    config: {
-      provider: value.provider.trim(),
-      model: value.model.trim(),
-      thinkingLevel: parseThinkingLevel(value.thinkingLevel, "thinkingLevel"),
-    },
-    source: "config",
+    provider: value.provider.trim(),
+    model: value.model.trim(),
+    thinkingLevel: parseThinkingLevel(value.thinkingLevel, "thinkingLevel"),
   };
 }
 

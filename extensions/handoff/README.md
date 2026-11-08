@@ -78,4 +78,4 @@ The modal is TUI-only. `ctx.hasUI` is also true in RPC mode, but RPC mode resolv
 
 Set the shared model with `/smallmodel`. Handoff stops with an error if that model is missing or unauthenticated; it does not fall back to the active chat model.
 
-Two environment variables also apply when handoff resolves the small model: `PI_SMALL_MODEL` overrides the model as `provider/model-id`, and `PI_SMALL_MODEL_THINKING` overrides its reasoning level.
+Two environment variables also apply when handoff resolves the small model: `PI_SMALL_MODEL` overrides the model as `provider/model-id`, and `PI_SMALL_MODEL_THINKING` overrides its reasoning level. Both are overrides on top of the saved config: `PI_SMALL_MODEL` keeps the saved level, and `PI_SMALL_MODEL_THINKING` works on its own.

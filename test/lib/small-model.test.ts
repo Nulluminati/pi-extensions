@@ -89,6 +89,107 @@ describe("small-model config", () => {
     });
   });
 
+  it("honors PI_SMALL_MODEL_THINKING without PI_SMALL_MODEL", () => {
+    const path = temporaryConfigPath();
+    writeFileSync(
+      path,
+      JSON.stringify({ provider: "synthetic", model: "syn:small:text", thinkingLevel: "high" }),
+    );
+
+    expect(
+      loadSmallModelConfig({
+        configPath: path,
+        env: { PI_SMALL_MODEL_THINKING: "off" },
+      }),
+    ).toEqual({
+      config: {
+        provider: "synthetic",
+        model: "syn:small:text",
+        thinkingLevel: "off",
+      },
+      source: "config",
+    });
+  });
+
+  it("keeps the configured thinking level when only PI_SMALL_MODEL is set", () => {
+    const path = temporaryConfigPath();
+    writeFileSync(
+      path,
+      JSON.stringify({ provider: "synthetic", model: "syn:small:text", thinkingLevel: "off" }),
+    );
+
+    expect(
+      loadSmallModelConfig({
+        configPath: path,
+        env: { PI_SMALL_MODEL: "p/m" },
+      }),
+    ).toEqual({
+      config: { provider: "p", model: "m", thinkingLevel: "off" },
+      source: "environment",
+    });
+  });
+
+  it("uses the default level when PI_SMALL_MODEL is set and no config file exists", () => {
+    const path = temporaryConfigPath();
+
+    expect(loadSmallModelConfig({ configPath: path, env: { PI_SMALL_MODEL: "p/m" } })).toEqual({
+      config: { provider: "p", model: "m", thinkingLevel: "minimal" },
+      source: "environment",
+    });
+  });
+
+  it("treats an empty PI_SMALL_MODEL_THINKING as unset", () => {
+    const path = temporaryConfigPath();
+    writeFileSync(
+      path,
+      JSON.stringify({ provider: "synthetic", model: "syn:small:text", thinkingLevel: "low" }),
+    );
+
+    expect(
+      loadSmallModelConfig({
+        configPath: path,
+        env: { PI_SMALL_MODEL: "p/m", PI_SMALL_MODEL_THINKING: "  " },
+      }).config.thinkingLevel,
+    ).toBe("low");
+  });
+
+  it("rejects an invalid PI_SMALL_MODEL value even when a config file exists", () => {
+    const path = temporaryConfigPath();
+    writeFileSync(
+      path,
+      JSON.stringify({ provider: "synthetic", model: "syn:small:text", thinkingLevel: "low" }),
+    );
+
+    expect(() =>
+      loadSmallModelConfig({ configPath: path, env: { PI_SMALL_MODEL: "nonsense" } }),
+    ).toThrow(`Invalid PI_SMALL_MODEL value "nonsense"`);
+  });
+
+  it("rejects an invalid PI_SMALL_MODEL_THINKING value before reading the file", () => {
+    const path = temporaryConfigPath();
+
+    expect(() =>
+      loadSmallModelConfig({
+        configPath: path,
+        env: { PI_SMALL_MODEL_THINKING: "extreme" },
+      }),
+    ).toThrow(`Invalid PI_SMALL_MODEL_THINKING value "extreme"`);
+  });
+
+  it("does not read the config file when both environment variables are set", () => {
+    const path = temporaryConfigPath();
+
+    expect(
+      loadSmallModelConfig({
+        configPath: path,
+        env: { PI_SMALL_MODEL: "p/m", PI_SMALL_MODEL_THINKING: "low" },
+      }),
+    ).toEqual({
+      config: { provider: "p", model: "m", thinkingLevel: "low" },
+      source: "environment",
+    });
+  });
+
   it("reports a missing config with an actionable error", () => {
     const path = temporaryConfigPath();
 
@@ -280,6 +381,31 @@ describe("resolveSmallModel", () => {
     const resolved = await resolveSmallModel(ctx, { configPath: configuredPath(), env: {} });
 
     expect(resolved.reasoning).toBeUndefined();
+  });
+
+  it("omits reasoning when PI_SMALL_MODEL_THINKING turns thinking off for a saved model", async () => {
+    const path = temporaryConfigPath();
+    writeFileSync(
+      path,
+      JSON.stringify({ provider: "synthetic", model: "syn:small:text", thinkingLevel: "high" }),
+    );
+    const ctx = createMockCommandContext();
+    ctx.modelRegistry.find = vi.fn(() =>
+      createMockModel({
+        id: "syn:small:text",
+        provider: "synthetic",
+        reasoning: true,
+      }),
+    );
+
+    const resolved = await resolveSmallModel(ctx, {
+      configPath: path,
+      env: { PI_SMALL_MODEL_THINKING: "off" },
+    });
+
+    expect(resolved.config.thinkingLevel).toBe("off");
+    expect(resolved.reasoning).toBeUndefined();
+    expect(resolved.source).toBe("config");
   });
 
   it("omits reasoning when the thinking level is off", async () => {
