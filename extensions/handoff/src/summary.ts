@@ -82,6 +82,15 @@ export async function generateSummary(
       options,
     );
 
+    // completeSimple resolves (does not throw) on provider failures, so the
+    // error has to be read from the stop reason.
+    if (response.stopReason === "error" || response.stopReason === "aborted") {
+      return {
+        ok: false,
+        error: `Failed to generate handoff summary: ${response.errorMessage || response.stopReason}`,
+      };
+    }
+
     const text = response.content
       .filter(
         (block): block is { type: "text"; text: string } =>

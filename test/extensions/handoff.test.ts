@@ -481,6 +481,49 @@ describe("handoff-extension", () => {
     );
   });
 
+  it("notifies with the provider error when the request fails", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCustomResolvesOnDone(mockCtx);
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildBranch()));
+
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+    vi.mocked(completeSimple).mockResolvedValue(
+      fauxAssistantMessage([], {
+        stopReason: "error",
+        errorMessage: "401 Unauthorized: invalid api key",
+      }),
+    );
+
+    await runHandoff(mockPi, mockCtx, "finish the refactor");
+
+    expect(mockCtx.ui.notify).toHaveBeenCalledWith(
+      "Failed to generate handoff summary: 401 Unauthorized: invalid api key",
+      "error",
+    );
+    expect(mockCtx.newSession).not.toHaveBeenCalled();
+  });
+
+  it("notifies with the stop reason when an aborted request has no error message", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCustomResolvesOnDone(mockCtx);
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildBranch()));
+
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+    vi.mocked(completeSimple).mockResolvedValue(
+      fauxAssistantMessage([], { stopReason: "aborted" }),
+    );
+
+    await runHandoff(mockPi, mockCtx, "finish the refactor");
+
+    expect(mockCtx.ui.notify).toHaveBeenCalledWith(
+      "Failed to generate handoff summary: aborted",
+      "error",
+    );
+    expect(mockCtx.newSession).not.toHaveBeenCalled();
+  });
+
   describe("non-TUI dialog modes", () => {
     // rpc-mode.js implements ui.custom() as `async custom() { return undefined; }`
     // while hasUI stays true, so the modal must be gated on ctx.mode.
