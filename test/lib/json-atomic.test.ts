@@ -1,3 +1,4 @@
+import * as fs from "node:fs/promises";
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,6 +14,40 @@ vi.mock("node:crypto", async (importOriginal) => {
 
 import { randomBytes } from "node:crypto";
 
+// Spied (calls through by default) so failure tests can wrap the staging
+// file handle and inject a write, sync, or close error.
+vi.mock("node:fs/promises", { spy: true });
+
+const realFs = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+
+type HandleStep = "writeFile" | "sync" | "close";
+
+/** Make the next `open` return a real handle whose `step` fails with
+ *  ENOSPC. A failing `writeFile` writes partial bytes first, the way a
+ *  full disk does. */
+function failNextHandle(step: HandleStep): void {
+  vi.mocked(fs.open).mockImplementationOnce((async (...args: Parameters<typeof fs.open>) => {
+    const handle = await realFs.open(...args);
+    const enospc = () =>
+      Object.assign(new Error("ENOSPC: no space left on device"), { code: "ENOSPC" });
+    return {
+      writeFile: async (text: string, encoding: BufferEncoding) => {
+        if (step !== "writeFile") return handle.writeFile(text, encoding);
+        await handle.write("PARTIAL");
+        throw enospc();
+      },
+      sync: async () => {
+        if (step === "sync") throw enospc();
+        return handle.sync();
+      },
+      close: async () => {
+        await handle.close();
+        if (step === "close") throw enospc();
+      },
+    };
+  }) as unknown as typeof fs.open);
+}
+
 describe("json-atomic", () => {
   let dir: string;
 
@@ -24,6 +59,7 @@ describe("json-atomic", () => {
 
   afterEach(async () => {
     vi.mocked(randomBytes).mockRestore();
+    vi.mocked(fs.open).mockReset();
     await rm(dir, { recursive: true, force: true });
   });
 
@@ -101,6 +137,17 @@ describe("json-atomic", () => {
     await expect(writeTextAtomic(path, "x")).rejects.toThrow();
     expect(await tmpLeftovers()).toEqual([]);
   });
+
+  it.each<HandleStep>(["writeFile", "sync", "close"])(
+    "writeTextAtomic removes the temp file and rethrows when %s fails",
+    async (step) => {
+      const path = join(dir, "state.json");
+      failNextHandle(step);
+
+      await expect(writeTextAtomic(path, "x".repeat(100))).rejects.toThrow(/ENOSPC/);
+      expect(await readdir(dir)).toEqual([]);
+    },
+  );
 
   it("reuses the existing file's mode on rewrites when no mode is passed", async () => {
     const path = join(dir, "secret.json");

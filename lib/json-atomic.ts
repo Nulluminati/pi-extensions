@@ -65,13 +65,16 @@ export async function writeTextAtomic(
       `Could not create a temp file for ${path}: ${TEMP_NAME_ATTEMPTS} exclusive-create attempts all hit an existing file`,
     );
   }
+  // Any failure from here on (a full disk mid-write, a failed fsync or
+  // close, a failed rename) removes the staging file, so a failed write
+  // leaves the directory as it found it.
   try {
-    await handle.writeFile(text, "utf8");
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-  try {
+    try {
+      await handle.writeFile(text, "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
     await rename(tmp, path);
   } catch (error) {
     await unlink(tmp).catch(() => {});
