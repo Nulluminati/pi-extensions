@@ -935,6 +935,62 @@ describe("Herdr pane name sync", () => {
     await vi.waitFor(() => expect(fixture.ctx.ui.notify).toHaveBeenCalledTimes(2));
   });
 
+  it("retries a failed startup rename on the periodic refresh", async () => {
+    respond = (socket, request) => {
+      if (request.method === "pane.rename")
+        socket.emit(
+          "data",
+          Buffer.from(
+            `${JSON.stringify({ id: request.id, error: { message: "rename rejected" } })}\n`,
+          ),
+        );
+      else acknowledge(socket, request);
+    };
+    const fixture = await setup();
+    fixture.pi.getSessionName.mockReturnValue("Startup name");
+    await fixture.start();
+    await vi.waitFor(() => expect(fixture.ctx.ui.notify).toHaveBeenCalledTimes(1));
+    expect(paneRequests("pane.rename")).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(paneRequests("pane.rename")).toHaveLength(2);
+    expect(fixture.ctx.ui.notify).toHaveBeenCalledTimes(1);
+    respond = acknowledge;
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(paneRequests("pane.rename")).toHaveLength(3);
+    expect(paneRequests("pane.rename")[2].params).toEqual({
+      pane_id: "w1:p1",
+      label: "Startup name",
+    });
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(paneRequests("pane.rename")).toHaveLength(3);
+  });
+
+  it("retries the latest event name, not a stale startup name, on refresh", async () => {
+    const fixture = await setup();
+    fixture.pi.getSessionName.mockReturnValue("Startup name");
+    await fixture.start();
+    await vi.waitFor(() => expect(paneRequests("pane.rename")).toHaveLength(1));
+    respond = (socket, request) => {
+      if (request.method === "pane.rename")
+        socket.emit(
+          "data",
+          Buffer.from(
+            `${JSON.stringify({ id: request.id, error: { message: "rename rejected" } })}\n`,
+          ),
+        );
+      else acknowledge(socket, request);
+    };
+    fixture.emit("session_info_changed", { name: "Renamed" });
+    await vi.waitFor(() => expect(paneRequests("pane.rename")).toHaveLength(2));
+    respond = acknowledge;
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(paneRequests("pane.rename").map((request) => request.params.label)).toEqual([
+      "Startup name",
+      "Renamed",
+      "Renamed",
+    ]);
+  });
+
   it("drops queued names, aborts in-flight requests, and ignores events after shutdown", async () => {
     const fixture = await setup();
     await fixture.start();

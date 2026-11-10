@@ -28,12 +28,15 @@ export function createPaneNameSync(options: {
   warn(error: unknown): void;
 }): {
   sync(name: unknown): void;
+  retry(): void;
   stop(): Promise<void>;
 } {
   const { socketPath, parentPaneId, signal, ok, warn } = options;
   let stopped = false;
   // The last label this adapter confirmed, or null after an explicit clear.
   let applied: string | null | undefined;
+  // The newest label requested through sync, kept so a failed write can retry.
+  let requested: string | null | undefined;
   let pending: string | null | undefined;
   let writing: string | null | undefined;
   let running: Promise<void> | undefined;
@@ -85,7 +88,11 @@ export function createPaneNameSync(options: {
 
   function sync(name: unknown): void {
     if (stopped) return;
-    const label = requestedLabel(name);
+    request(requestedLabel(name));
+  }
+
+  function request(label: string | null): void {
+    requested = label;
     if (writing !== undefined) {
       // Keep only the newest name; a duplicate of the in-flight write adds nothing.
       pending = writing !== label ? label : undefined;
@@ -102,12 +109,19 @@ export function createPaneNameSync(options: {
     running ??= drain();
   }
 
+  // Request the newest label again; this sends nothing once Herdr confirmed it.
+  function retry(): void {
+    if (stopped || requested === undefined) return;
+    request(requested);
+  }
+
   async function stop(): Promise<void> {
     stopped = true;
     pending = undefined;
     await running;
     applied = undefined;
+    requested = undefined;
   }
 
-  return { sync, stop };
+  return { sync, retry, stop };
 }

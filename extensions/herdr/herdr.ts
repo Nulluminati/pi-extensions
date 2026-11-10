@@ -185,6 +185,7 @@ export default async function herdrExtension(pi: ExtensionAPI) {
     await publish();
     if (context !== ctx || controller.signal.aborted) return;
     refresh = setInterval(() => {
+      nameSync?.retry();
       void publish();
     }, REFRESH_MS);
     refresh.unref?.();
