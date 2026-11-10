@@ -68,15 +68,22 @@ export default async function handoffExtension(pi: ExtensionAPI) {
   pi.registerCommand("handoff", {
     description: "Summarize the current session and start a new focused session",
     handler: async (args, ctx) => {
+      // Print and JSON modes have no review editor and no new session to open.
+      // Pi also takes over process.stdout in those modes and forwards it to
+      // stderr, so the summary could not reach stdout. Fail on stderr before
+      // spending a model call.
+      if (!ctx.hasUI) {
+        console.error("handoff needs an interactive session (TUI or RPC mode).");
+        return;
+      }
+
       const goal = await resolveGoal(args, ctx);
       if (goal === undefined) return;
 
       const entries = ctx.sessionManager.getBranch() as HandoffEntry[];
       const transcript = buildTranscript(entries);
       if (!transcript.trim()) {
-        if (ctx.hasUI) {
-          ctx.ui.notify("No conversation to hand off.", "error");
-        }
+        ctx.ui.notify("No conversation to hand off.", "error");
         return;
       }
 
@@ -121,24 +128,12 @@ export default async function handoffExtension(pi: ExtensionAPI) {
       }
 
       if (summary === undefined) {
-        if (ctx.hasUI) {
-          ctx.ui.notify("Handoff cancelled.", "info");
-        }
+        ctx.ui.notify("Handoff cancelled.", "info");
         return;
       }
 
       if (!summary.ok) {
-        if (ctx.hasUI) {
-          ctx.ui.notify(summary.error, "error");
-        } else {
-          console.error(summary.error);
-        }
-        return;
-      }
-
-      // Print mode: emit the summary and stop.
-      if (!ctx.hasUI) {
-        console.log(summary.text);
+        ctx.ui.notify(summary.error, "error");
         return;
       }
 

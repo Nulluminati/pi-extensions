@@ -136,29 +136,6 @@ describe("handoff-extension", () => {
     expect(setupSessionManager.appendSessionInfo).toHaveBeenCalledWith("Handoff session");
   });
 
-  it("prints a summary when called without args in non-UI mode", async () => {
-    const mockPi = createMockPi();
-    const mockCtx = createMockCommandContext();
-    // Print mode: no dialogs and no custom components.
-    mockCtx.hasUI = false;
-    mockCtx.mode = "print";
-    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildBranch()));
-
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-
-    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
-    vi.mocked(completeSimple).mockResolvedValue(
-      fauxAssistantMessage([{ type: "text", text: "print mode summary" }]),
-    );
-
-    await runHandoff(mockPi, mockCtx, "");
-
-    expect(logSpy).toHaveBeenCalledWith("print mode summary");
-    expect(mockCtx.newSession).not.toHaveBeenCalled();
-
-    logSpy.mockRestore();
-  });
-
   it("errors when goal exceeds max length", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
@@ -420,29 +397,36 @@ describe("handoff-extension", () => {
     expect(mockCtx.ui.notify).not.toHaveBeenCalled();
   });
 
-  it("prints summary and skips session creation in non-UI mode", async () => {
-    const mockPi = createMockPi();
-    const mockCtx = createMockCommandContext();
-    // Print mode: no dialogs and no custom components.
-    mockCtx.hasUI = false;
-    mockCtx.mode = "print";
-    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildBranch()));
+  // Pi takes over process.stdout in non-interactive modes and forwards it to
+  // stderr, so an extension cannot print the summary to stdout.
+  it.each(["print", "json"] as const)(
+    "reports that handoff needs an interactive session in %s mode",
+    async (mode) => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      mockCtx.hasUI = false;
+      mockCtx.mode = mode;
+      mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildBranch()));
 
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
-    vi.mocked(completeSimple).mockResolvedValue(
-      fauxAssistantMessage([{ type: "text", text: "print mode summary" }]),
-    );
+      const { completeSimple } = await import("@earendil-works/pi-ai/compat");
 
-    await runHandoff(mockPi, mockCtx, "finish the refactor");
+      await runHandoff(mockPi, mockCtx, "finish the refactor");
 
-    expect(logSpy).toHaveBeenCalledWith("print mode summary");
-    expect(mockCtx.newSession).not.toHaveBeenCalled();
-    expect(mockPi.setSessionName).not.toHaveBeenCalled();
+      expect(errorSpy).toHaveBeenCalledWith(
+        "handoff needs an interactive session (TUI or RPC mode).",
+      );
+      expect(logSpy).not.toHaveBeenCalled();
+      expect(completeSimple).not.toHaveBeenCalled();
+      expect(mockCtx.newSession).not.toHaveBeenCalled();
+      expect(mockPi.setSessionName).not.toHaveBeenCalled();
 
-    logSpy.mockRestore();
-  });
+      logSpy.mockRestore();
+      errorSpy.mockRestore();
+    },
+  );
 
   it("cancels when the editor is dismissed", async () => {
     const mockPi = createMockPi();

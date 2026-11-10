@@ -48,7 +48,7 @@ The new session name comes from the goal, capitalized and truncated for display;
 
 While the summary is generating, a framed modal (`ctx.ui.custom`, the same `renderModalFrame` chrome as the input modals) shows a braille spinner with "Generating summary…". Input is swallowed while it is up; it closes itself when generation finishes or fails, then the review editor opens (or an error notification is shown).
 
-The modal is TUI-only. `ctx.hasUI` is also true in RPC mode, but RPC mode resolves `ctx.ui.custom()` to `undefined`, so the gate is `ctx.mode === "tui"`. Other modes generate the summary without a modal: RPC mode still opens the review editor, print mode prints the summary. A custom result that is not a summary result counts as a cancellation.
+The modal is TUI-only. `ctx.hasUI` is also true in RPC mode, but RPC mode resolves `ctx.ui.custom()` to `undefined`, so the gate is `ctx.mode === "tui"`. RPC mode generates the summary without a modal and still opens the review editor. Print and JSON modes (`ctx.hasUI` false) stop at once with "handoff needs an interactive session" on stderr: they have no review editor or new session, and Pi forwards `process.stdout` to stderr in those modes, so the summary cannot reach stdout. A custom result that is not a summary result counts as a cancellation.
 
 ## Key Design Decisions
 
