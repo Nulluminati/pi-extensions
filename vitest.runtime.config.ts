@@ -5,6 +5,9 @@ export default defineConfig({
     environment: "node",
     include: ["test/runtime/**/*.test.ts"],
     setupFiles: [],
-    testTimeout: 30_000,
+    // Each runtime test starts real Pi processes. Half the cores and a wide
+    // time limit keep the suite stable when other suites share the machine.
+    maxWorkers: "50%",
+    testTimeout: 90_000,
   },
 });

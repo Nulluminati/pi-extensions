@@ -95,7 +95,7 @@ export default async function(pi) {
             PI_OFFLINE: "1",
             PI_WORKER: "",
           },
-          timeout: 30_000,
+          timeout: 60_000,
           maxBuffer: 2_000_000,
         },
       );
@@ -127,7 +127,7 @@ export default async function(pi) {
       expect(events).toContainEqual(
         expect.objectContaining({ type: "tool_execution_end", toolName: "write", isError: true }),
       );
-    }, 40_000);
+    });
 
     it("runs quoted excluded commands on the host but keeps chained commands sandboxed", async () => {
       root = await mkdtemp(join(tmpdir(), "pi-session-exclusions-test-"));
@@ -169,7 +169,7 @@ export default async function(pi) {
       expect(chained.exitCode).not.toBe(0);
       expect(Buffer.concat(denied).toString()).toMatch(/denied|permitted|read-only/i);
       expect(await readFile(output, "utf8")).toBe("button.primary");
-    }, 30_000);
+    });
 
     it("reaches an explicitly allowed loopback HTTP daemon through the filtered proxy", async () => {
       root = await mkdtemp(join(tmpdir(), "pi-session-loopback-test-"));
@@ -190,7 +190,7 @@ export default async function(pi) {
         const chunks: Buffer[] = [];
         const result = await client.runShell("curl -fsS http://127.0.0.1:$HUNK_MCP_PORT", {
           cwd,
-          timeout: 5,
+          timeout: 30,
           onData: (chunk) => chunks.push(chunk),
         });
         expect(result.exitCode).toBe(0);
@@ -206,7 +206,7 @@ export default async function(pi) {
         const denied: Buffer[] = [];
         const blocked = await client.runShell(`curl -fsS http://localhost:${address.port}`, {
           cwd,
-          timeout: 5,
+          timeout: 30,
           onData: (chunk) => denied.push(chunk),
         });
         expect(blocked.exitCode).not.toBe(0);
@@ -217,7 +217,7 @@ export default async function(pi) {
           server.close((error) => (error ? reject(error) : resolve())),
         );
       }
-    }, 30_000);
+    });
 
     it("connects a Bun HTTP and WebSocket client through the sandbox proxy", async () => {
       root = await mkdtemp(join(tmpdir(), "pi-session-bun-test-"));
@@ -233,7 +233,7 @@ export default async function(pi) {
       });
       try {
         const [line] = await Promise.race([
-          once(lines, "line", { signal: AbortSignal.timeout(5000) }),
+          once(lines, "line", { signal: AbortSignal.timeout(30_000) }),
           once(daemon, "error").then(([error]) => Promise.reject(error)),
         ]);
         const { port } = JSON.parse(line);
@@ -249,7 +249,7 @@ export default async function(pi) {
           "bash",
           {
             command: `bun '${fixture}' client ${port}`,
-            timeout: 10,
+            timeout: 30,
           },
           { cwd },
         );
@@ -269,7 +269,7 @@ export default async function(pi) {
           "bash",
           {
             command: `bun '${fixture}' direct-client ${port}`,
-            timeout: 10,
+            timeout: 30,
           },
           { cwd },
         );
@@ -294,7 +294,7 @@ export default async function(pi) {
           await exited;
         }
       }
-    }, 30_000);
+    });
 
     it("reads source, writes an outside review folder, and refuses other file and shell writes", async () => {
       root = await mkdtemp(join(tmpdir(), "pi-session-sandbox-test-"));
@@ -333,6 +333,6 @@ export default async function(pi) {
       expect(Buffer.concat(chunks).toString()).toMatch(/denied|permitted|read-only/i);
       expect(await readFile(source, "utf8")).toBe("unchanged");
       expect(await readFile(outside, "utf8")).toBe("outside");
-    }, 30_000);
+    });
   },
 );

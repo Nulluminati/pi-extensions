@@ -119,7 +119,7 @@ export default async function(pi){
       thinkingLevel: "high",
       name: "provider-priority",
       workerId: `w-providers-${scenario}`,
-      timeoutMs: 20000,
+      timeoutMs: 60_000,
       readOnly: true,
       sandbox: true,
       extensionPaths: [

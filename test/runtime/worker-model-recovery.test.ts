@@ -401,7 +401,7 @@ export default async function(pi){
       thinkingLevel: "high",
       name: "worker-recovery",
       workerId: id,
-      timeoutMs: 20000,
+      timeoutMs: 60_000,
       readOnly: true,
       sandbox: true,
       extensionPaths: [

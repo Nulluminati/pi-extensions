@@ -79,7 +79,7 @@ async function launch(list: string, loadGate = true) {
     model: "allow-test/scripted",
     thinkingLevel: "off",
     name: "allow-test",
-    timeoutMs: 20_000,
+    timeoutMs: 60_000,
     workerId: "w-allow-test",
     extensionPaths: [
       providerPath,

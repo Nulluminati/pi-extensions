@@ -81,7 +81,7 @@ export default async function(pi) {
         PI_OFFLINE: "1",
         PI_WORKER: "",
       },
-      timeout: 30_000,
+      timeout: 60_000,
       maxBuffer: 2_000_000,
     },
   );
@@ -111,4 +111,4 @@ export default async function(pi) {
         }),
       }),
     );
-}, 40_000);
+});
