@@ -24,7 +24,11 @@ concurrency:
 jobs:
   check:
     name: Lint, typecheck, validate, test
-    runs-on: ubuntu-latest
+    # Pinned because the worker sandbox runtime tests need capability-bearing
+    # nested user namespaces. On ubuntu-26.04 the sandbox's apply-seccomp
+    # helper cannot write /proc/self/setgroups inside bubblewrap, even with the
+    # sysctl below, so every sandboxed tool call fails.
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
