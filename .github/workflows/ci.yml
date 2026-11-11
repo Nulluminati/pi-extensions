@@ -24,11 +24,7 @@ concurrency:
 jobs:
   check:
     name: Lint, typecheck, validate, test
-    # Pinned because the worker sandbox runtime tests need capability-bearing
-    # nested user namespaces. On ubuntu-26.04 the sandbox's apply-seccomp
-    # helper cannot write /proc/self/setgroups inside bubblewrap, even with the
-    # sysctl below, so every sandboxed tool call fails.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
 
     steps:
@@ -49,11 +45,22 @@ jobs:
       # The worker sandbox runs tools under bubblewrap, which needs socat and
       # ripgrep too. Ubuntu's AppArmor blocks the unprivileged user namespaces
       # that bubblewrap creates, so the runner lifts that restriction.
+      #
+      # Newer Ubuntu releases also load the bwrap-userns-restrict profile. It
+      # moves bubblewrap's children to a profile without capabilities, so the
+      # sandbox's apply-seccomp helper cannot set up its nested user namespace
+      # (write /proc/self/setgroups fails). The sysctl does not affect that
+      # profile, so the runner unloads it when it is present.
       - name: Install sandbox tools
         run: |
           sudo apt-get update
           sudo apt-get install -y bubblewrap socat ripgrep
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          profile=/etc/apparmor.d/bwrap-userns-restrict
+          if [ -f "$profile" ]; then
+            sudo apparmor_parser -R "$profile"
+          fi
+          sudo aa-status | grep -i bwrap || echo "No bwrap AppArmor profiles loaded"
 
       - name: Install dependencies
         run: npm ci
