@@ -18,6 +18,7 @@
 
 // --- Imports ---
 
+import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { excludeFromGit } from "../../lib/git.ts";
 import { projectStateRelative } from "../../lib/paths.ts";
@@ -41,9 +42,11 @@ import {
   heartbeat,
   leaveRegistry,
   loadReservations,
+  messengerDir,
   readInbox,
   readoptReservations,
 } from "./src/store.ts";
+import type { ReservationMap } from "./src/types.ts";
 import { createInboxWatcher } from "./src/watcher.ts";
 
 // --- Constants ---
@@ -131,8 +134,18 @@ export default async function messengerExtension(pi: ExtensionAPI) {
   // --- Reservation enforcement (edit/write only; bash is not covered) ---
 
   pi.on("tool_call", async (event, ctx) => {
+    if (event.toolName !== "edit" && event.toolName !== "write") return undefined;
     if (!agentName) return undefined;
-    const reservations = await loadReservations(ctx.cwd);
+    let reservations: ReservationMap;
+    try {
+      reservations = await loadReservations(ctx.cwd);
+    } catch (error) {
+      const path = join(messengerDir(ctx.cwd), "reservations.json");
+      const detail = error instanceof Error ? error.message : String(error);
+      const reason = `Cannot check messenger reservations at ${path}: ${detail}. Use read or bash to inspect the file and resolve access or lock errors. Restore a valid reservations file if it is corrupt. Retry edit or write after recovery.`;
+      if (ctx.hasUI) ctx.ui.notify(reason, "warning");
+      return { block: true, reason };
+    }
     const block = checkToolCall(
       event.toolName,
       event.input as Record<string, unknown>,

@@ -631,6 +631,117 @@ describe("messenger-extension", () => {
     );
   });
 
+  it.each(["read", "bash", "ls", "grep", "messenger"])(
+    "tool_call lets %s bypass reservation storage failures",
+    async (toolName) => {
+      await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+      const path = join(messengerDir(cwd), "reservations.json");
+      const handler = getEventHandler("tool_call");
+      const event = { type: "tool_call" as const, toolName, input: { action: "release" } };
+
+      for (const raw of ['{"src":{"owner":""}}', "{broken JSON"]) {
+        await writeFile(path, raw);
+        vi.mocked(withFileLock).mockClear();
+        mockCtx.ui.notify.mockClear();
+        expect(await handler(event, mockCtx)).toBeUndefined();
+        expect(withFileLock).not.toHaveBeenCalled();
+        expect(mockCtx.ui.notify).not.toHaveBeenCalled();
+        expect(await readFile(path, "utf8")).toBe(raw);
+      }
+
+      // A directory at the file path causes a read failure without relying on permissions.
+      await rm(path);
+      await mkdir(path);
+      vi.mocked(withFileLock).mockClear();
+      expect(await handler(event, mockCtx)).toBeUndefined();
+      expect(withFileLock).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ["edit", true],
+    ["write", true],
+    ["edit", false],
+    ["write", false],
+  ] as const)("tool_call blocks %s with recovery guidance (UI: %s)", async (toolName, hasUI) => {
+    await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+    mockCtx.hasUI = hasUI;
+    const path = join(messengerDir(cwd), "reservations.json");
+    const raw = '{"src":{"owner":""}}';
+    await writeFile(path, raw);
+    mockCtx.ui.notify.mockClear();
+
+    const result = await getEventHandler("tool_call")(
+      { type: "tool_call", toolName, input: { path: "src/file.ts" } },
+      mockCtx,
+    );
+    expect(result).toEqual({
+      block: true,
+      reason: expect.stringContaining(path),
+    });
+    expect(result).toMatchObject({ reason: expect.stringContaining("invalid shape") });
+    expect(result).toMatchObject({
+      reason: expect.stringContaining("Restore a valid reservations file"),
+    });
+    expect(result).toMatchObject({ reason: expect.stringContaining("bash") });
+    expect(await readFile(path, "utf8")).toBe(raw);
+    if (hasUI) {
+      expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining(path), "warning");
+    } else {
+      expect(mockCtx.ui.notify).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each(["edit", "write"])(
+    "tool_call blocks %s on reservation read or lock failures",
+    async (toolName) => {
+      await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+      const path = join(messengerDir(cwd), "reservations.json");
+      const handler = getEventHandler("tool_call");
+      const event = { type: "tool_call" as const, toolName, input: { path: "src/file.ts" } };
+
+      await writeFile(path, "{broken JSON");
+      expect(await handler(event, mockCtx)).toEqual({
+        block: true,
+        reason: expect.stringContaining("is corrupt"),
+      });
+
+      await rm(path);
+      await mkdir(path);
+      expect(await handler(event, mockCtx)).toEqual({
+        block: true,
+        reason: expect.stringContaining("Cannot read messenger reservations"),
+      });
+
+      vi.mocked(withFileLock).mockRejectedValueOnce(new Error("Lock timeout"));
+      const result = await handler(event, mockCtx);
+      expect(result).toEqual({ block: true, reason: expect.stringContaining("Lock timeout") });
+      expect(result).toMatchObject({ reason: expect.stringContaining(path) });
+      expect(result).toMatchObject({
+        reason: expect.stringContaining("Restore a valid reservations file"),
+      });
+    },
+  );
+
+  it("messenger list still works while release preserves an invalid reservations file", async () => {
+    vi.stubEnv("PI_MESSENGER_NAME", "me");
+    await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+    const path = join(messengerDir(cwd), "reservations.json");
+    const raw = '{"src":{"owner":""}}';
+    await writeFile(path, raw);
+
+    expect(await executeTool({ action: "whoami" })).toEqual({
+      content: [{ type: "text", text: 'You are "me".' }],
+      details: { name: "me" },
+    });
+    const result = await executeTool({ action: "list" });
+    expect(contentText(result)).toContain("me");
+    expect(result.details).toEqual({ count: 1 });
+    expect(result.terminate).toBeUndefined();
+    await expect(executeTool({ action: "release" })).rejects.toThrow("invalid shape");
+    expect(await readFile(path, "utf8")).toBe(raw);
+  });
+
   it("release drops only the caller's reservations", async () => {
     await reserve(cwd, "a", ["src/a"]);
     await reserve(cwd, "b", ["src/b"]);
