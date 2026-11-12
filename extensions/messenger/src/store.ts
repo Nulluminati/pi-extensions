@@ -569,6 +569,9 @@ export async function reserve(
   pid?: number,
   options?: CaseFoldOptions,
 ): Promise<{ reserved: string[]; conflicts: Array<{ path: string; owner: string }> }> {
+  // readReservations rejects a map with an unusable owner, so saving one
+  // would make every later read throw for every session in the project.
+  assertValidAgentName(name);
   return withFileLock(reservationsLockPath(cwd), async () => {
     const reservations = await loadReservationsUnlocked(cwd);
     const fold = resolveCaseFold(cwd, options);

@@ -47,6 +47,15 @@ export async function runMessengerAction(
 ): Promise<AgentToolResult<unknown>> {
   const { agentName, refreshStatus } = deps;
 
+  // A failed session_start leaves no identity. Every action except list
+  // acts under the agent name, and an empty name writes shared state that
+  // fails validation for every session in the project.
+  if (!agentName && action !== "list") {
+    throw new Error(
+      "no agent identity: the session did not claim a name. Check the session_start error (for example an invalid PI_MESSENGER_NAME) and restart the session.",
+    );
+  }
+
   if (action === "whoami") {
     return {
       content: [{ type: "text", text: `You are "${agentName}".` }],

@@ -360,6 +360,35 @@ describe("messenger-extension", () => {
     expect(existsSync(emptyShard)).toBe(false);
   });
 
+  it("a session without an identity refuses actions that need one and writes no shared state", async () => {
+    vi.stubEnv("PI_MESSENGER_NAME", "bad/name");
+    await expect(
+      getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx),
+    ).rejects.toThrow(/agent name/i);
+
+    const needIdentity: Array<Record<string, unknown>> = [
+      { action: "whoami" },
+      { action: "send", to: "peer", text: "hi" },
+      { action: "inbox" },
+      { action: "reserve", paths: ["src/auth"] },
+      { action: "release" },
+      { action: "status", status: "working" },
+    ];
+    for (const params of needIdentity) {
+      await expect(executeTool(params)).rejects.toThrow(
+        "no agent identity: the session did not claim a name",
+      );
+    }
+
+    const dir = join(cwd, CONFIG_DIR_NAME, "messenger");
+    expect(existsSync(join(dir, "reservations.json"))).toBe(false);
+    expect(existsSync(join(dir, "registry", ".json"))).toBe(false);
+    expect(await loadReservations(cwd)).toEqual({});
+
+    // A read-only listing still works without an identity.
+    await expect(executeTool({ action: "list" })).resolves.toBeDefined();
+  });
+
   it("send delivers to a mailbox and inbox reads and clears it", async () => {
     vi.stubEnv("PI_MESSENGER_NAME", "receiver");
     await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
@@ -1020,6 +1049,15 @@ describe("messenger-store", () => {
     expect(normalizePathPrefix(process.cwd(), "src/x.ts")).toBe("src/x.ts");
     expect(normalizePathPrefix(process.cwd(), "extensions/missions")).toBe("extensions/missions");
     expect(normalizePathPrefix(process.cwd(), "/etc/passwd")).toBeUndefined();
+  });
+
+  it("reserve rejects an owner that cannot be an agent name and leaves the map untouched", async () => {
+    await reserve(cwd, "owner", ["src/a"]);
+    for (const bad of ["", "bad/name"]) {
+      await expect(reserve(cwd, bad, ["src/b"])).rejects.toThrow(/agent name/i);
+    }
+    const claims = await loadReservations(cwd);
+    expect(Object.keys(claims)).toEqual(["src/a"]);
   });
 
   it("reserve records the owning pid", async () => {
