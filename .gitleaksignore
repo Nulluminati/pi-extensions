@@ -1,0 +1,7 @@
+# Findings that gitleaks reports but that are not secrets.
+# Format: <commit>:<file>:<rule>:<line> fingerprints from `gitleaks git`.
+
+# Commit SHA a9ac3e3 in a tool-search evaluation note. The
+# sourcegraph-access-token rule matches any bare 40-character hex string.
+5c624a0684d85ff36b391abb20ba48c79ed0ab72:docs/tool-search-evaluation.md:sourcegraph-access-token:25
+5c624a0684d85ff36b391abb20ba48c79ed0ab72:docs/tool-search-evaluation.md:sourcegraph-access-token:146
