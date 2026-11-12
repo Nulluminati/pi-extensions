@@ -100,10 +100,11 @@ function parseLockOwner(content: string): LockOwnership | undefined {
   return startedAt === undefined ? { pid, token } : { pid, token, startedAt };
 }
 
-/** One owner read, distinguishing a pathname in flux from junk content. */
+/** One owner read, distinguishing missing or unreadable records from junk content. */
 type LockOwnerRead =
   | { kind: "owner"; owner: LockOwnership }
   | { kind: "missing" }
+  | { kind: "unreadable" }
   | { kind: "corrupt" };
 
 async function readLockState(lockPath: string): Promise<LockOwnerRead> {
@@ -114,7 +115,8 @@ async function readLockState(lockPath: string): Promise<LockOwnerRead> {
     if (isNodeError(error) && (error.code === "ENOENT" || error.code === "ENOTDIR")) {
       return { kind: "missing" };
     }
-    return { kind: "corrupt" };
+    // A read failure proves neither malformed content nor a dead holder.
+    return { kind: "unreadable" };
   }
   const owner = parseLockOwner(content);
   return owner === undefined ? { kind: "corrupt" } : { kind: "owner", owner };

@@ -41,6 +41,13 @@ const ownerReadRace = vi.hoisted(() => ({
   guardPause: undefined as (() => Promise<void>) | undefined,
 }));
 
+const ownerReadFailure = vi.hoisted(() => ({
+  path: "",
+  code: "EIO",
+  skipReads: 0,
+  failedReads: 0,
+}));
+
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
   const passthrough =
@@ -50,6 +57,13 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   return {
     ...actual,
     readFile: vi.fn(async (path: unknown, ...rest: unknown[]) => {
+      if (path === ownerReadFailure.path) {
+        if (ownerReadFailure.skipReads > 0) ownerReadFailure.skipReads -= 1;
+        else {
+          ownerReadFailure.failedReads += 1;
+          throw Object.assign(new Error("Ownership read failed"), { code: ownerReadFailure.code });
+        }
+      }
       const content = await passthrough(actual.readFile)(path as never, ...(rest as never[]));
       if (
         reclaimRace.armed &&
@@ -91,6 +105,9 @@ describe("file-lock", () => {
   });
 
   afterEach(async () => {
+    ownerReadFailure.path = "";
+    ownerReadFailure.skipReads = 0;
+    ownerReadFailure.failedReads = 0;
     await rm(dir, { recursive: true, force: true });
   });
 
@@ -380,6 +397,62 @@ describe("file-lock", () => {
     );
     expect(await readdir(dir)).toHaveLength(2);
   });
+
+  it.each([
+    ["EIO", "initial owner read"],
+    ["EACCES", "initial owner read"],
+    ["EPERM", "initial owner read"],
+    ["EIO", "guarded owner read"],
+    ["EACCES", "guarded owner read"],
+    ["EPERM", "guarded owner read"],
+  ])("preserves an unreadable stale lock (%s, %s)", async (code, stage) => {
+    const lockPath = join(dir, "test.lock");
+    const content =
+      stage === "initial owner read" ? `${process.pid} live-holder\n` : "999999 dead-holder\n";
+    await writeFile(lockPath, content);
+    const abandoned = new Date(Date.now() - 120_000);
+    await utimes(lockPath, abandoned, abandoned);
+    const identity = await stat(lockPath, { bigint: true });
+    ownerReadFailure.path = lockPath;
+    ownerReadFailure.code = code;
+    ownerReadFailure.skipReads = stage === "guarded owner read" ? 1 : 0;
+    const work = vi.fn(async () => "stolen");
+
+    await expect(
+      withFileLock(lockPath, work, {
+        staleMs: 1_000,
+        timeoutMs: 0,
+        timeoutMessage: "resource timeout",
+      }),
+    ).rejects.toThrow("resource timeout");
+
+    expect(ownerReadFailure.failedReads).toBe(stage === "guarded owner read" ? 2 : 1);
+    expect(work).not.toHaveBeenCalled();
+    ownerReadFailure.path = "";
+    await expect(readFile(lockPath, "utf8")).resolves.toBe(content);
+    expect((await stat(lockPath, { bigint: true })).ino).toBe(identity.ino);
+    await expect(readdir(dir)).resolves.toEqual(["test.lock"]);
+  });
+
+  it.each([false, true])(
+    "preserves the callback outcome when release cannot read ownership (throws: %s)",
+    async (throws) => {
+      const lockPath = join(dir, "test.lock");
+      const callbackError = new Error("callback failed");
+      const outcome = withFileLock(lockPath, async () => {
+        ownerReadFailure.path = lockPath;
+        ownerReadFailure.code = "EIO";
+        if (throws) throw callbackError;
+        return "result";
+      });
+
+      if (throws) await expect(outcome).rejects.toBe(callbackError);
+      else await expect(outcome).resolves.toBe("result");
+
+      expect(ownerReadFailure.failedReads).toBe(1);
+      await expect(readdir(dir)).resolves.toEqual(["test.lock"]);
+    },
+  );
 
   it("reclaims an ownerless corrupt lock file", async () => {
     const lockPath = join(dir, "test.lock");
