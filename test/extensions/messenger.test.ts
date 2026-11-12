@@ -1177,6 +1177,56 @@ describe("messenger-store", () => {
     );
   });
 
+  it.each([false, true])(
+    "blocks project-root aliases with a symlinked cwd: %s",
+    async (symlinkedCwd) => {
+      const project = join(cwd, "project");
+      const alias = join(cwd, "alias");
+      await mkdir(join(project, "src", "auth"), { recursive: true });
+      await writeFile(join(project, "src", "auth", "login.ts"), "original", "utf8");
+      symlinkSync(project, alias);
+      const sessionCwd = symlinkedCwd ? alias : project;
+      const targetRoot = symlinkedCwd ? project : alias;
+      await reserve(sessionCwd, "owner", ["src/auth"]);
+      const reservations = await loadReservations(sessionCwd);
+      const block = { prefix: "src/auth", owner: "owner" };
+
+      expect(normalizePathPrefix(sessionCwd, targetRoot)).toBe(".");
+      expect(normalizePathPrefix(sessionCwd, join(targetRoot, "src/auth"))).toBe("src/auth");
+      for (const target of [
+        join(targetRoot, "src/auth/login.ts"),
+        join("..", symlinkedCwd ? "project" : "alias", "src/auth/login.ts"),
+      ]) {
+        expect(findBlockingReservation(sessionCwd, target, "other", reservations)).toEqual(block);
+        expect(checkToolCall("edit", { path: target }, sessionCwd, "other", reservations)).toEqual(
+          block,
+        );
+        expect(
+          checkToolCall("edit", { path: target }, sessionCwd, "owner", reservations),
+        ).toBeUndefined();
+      }
+      expect(
+        checkToolCall(
+          "write",
+          { path: join(targetRoot, "src/auth/missing/deep/new.ts") },
+          sessionCwd,
+          "other",
+          reservations,
+        ),
+      ).toEqual(block);
+      expect(
+        checkToolCall(
+          "write",
+          { path: join(targetRoot, "src/auth2/new.ts") },
+          sessionCwd,
+          "other",
+          reservations,
+        ),
+      ).toBeUndefined();
+      expect(normalizePathPrefix(sessionCwd, join(cwd, "outside/new.ts"))).toBeUndefined();
+    },
+  );
+
   it("findBlockingReservation blocks the real path of a claim made through a symlink", async () => {
     await mkdir(join(cwd, "src", "auth"), { recursive: true });
     symlinkSync(join("src", "auth"), join(cwd, "link"));

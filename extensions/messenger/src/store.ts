@@ -517,13 +517,19 @@ function findStoredKey(
 /**
  * Normalize a user-supplied reservation or target path into a stable relative
  * prefix key (posix separators, relative to cwd). Absolute paths inside the
- * project are converted; paths outside the project are returned unresolved
+ * project are converted, including alternate spellings of the project root
+ * through symbolic links. Paths outside the project are returned unresolved
  * (undefined) because reservations are project-scoped.
  */
 export function normalizePathPrefix(cwd: string, raw: string): string | undefined {
   const trimmed = raw.trim().replace(/^@/, "");
   if (!trimmed) return undefined;
   const abs = resolve(cwd, trimmed);
+  return lexicalPathPrefix(cwd, abs) ?? resolveRealPrefix(cwd, abs);
+}
+
+/** A relative prefix for a lexically contained path, without resolving links. */
+function lexicalPathPrefix(cwd: string, abs: string): string | undefined {
   const rel = relative(cwd, abs);
   // ".."-prefixed rels are outside the project; the separator check keeps
   // top-level entries that merely start with dots ("..notes", "...") inside.
@@ -546,7 +552,7 @@ function realpathOrSelf(path: string): string {
 }
 
 /**
- * The prefix key of a normalized prefix after symbolic links resolve: the
+ * The prefix key of a path after symbolic links resolve: the
  * deepest existing ancestor goes through realpath, the rest of the path is
  * appended lexically (so not-yet-created files still resolve), and the result
  * is made relative to the real project root. Undefined when the real path is
@@ -558,7 +564,7 @@ function resolveRealPrefix(cwd: string, prefix: string): string | undefined {
   const suffix: string[] = [];
   for (;;) {
     try {
-      return normalizePathPrefix(realCwd, join(realpathSync(existing), ...suffix));
+      return lexicalPathPrefix(realCwd, join(realpathSync(existing), ...suffix));
     } catch {
       const parent = dirname(existing);
       if (parent === existing) return undefined;
