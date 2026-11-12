@@ -21,10 +21,14 @@ import {
 import { SANDBOX_EXEC_EVENT, type SandboxExecRequest } from "../../lib/sandbox-exec.ts";
 import { startWorkerSandbox, type WorkerSandboxClient } from "./src/client.ts";
 
+/** `--sandbox` value that selects the project's `.pi/sandbox.json`. */
+const PROJECT_POLICY = "project";
+
 // --- Extension ---
 export default async function workerSandboxExtension(pi: ExtensionAPI) {
   pi.registerFlag("sandbox", {
-    description: "Sandbox this session with an inline sandbox-runtime JSON policy",
+    description:
+      "Sandbox this session with an inline sandbox-runtime JSON policy, or 'project' for .pi/sandbox.json",
     type: "string",
   });
   const worker = process.env.PI_WORKER === "1";
@@ -98,11 +102,13 @@ export default async function workerSandboxExtension(pi: ExtensionAPI) {
       stopExecListening = pi.events.on(SANDBOX_EXEC_EVENT, receiveExecRequest);
     if (starting || client) return;
     startError = undefined;
-    starting = worker
-      ? startWorkerSandbox(ctx.cwd)
-      : typeof sessionPolicy === "string"
-        ? startWorkerSandbox(ctx.cwd, sessionPolicy)
-        : Promise.reject(new Error("--sandbox requires a JSON policy"));
+    // "project" applies the worker policy from .pi/sandbox.json unchanged.
+    starting =
+      worker || sessionPolicy === PROJECT_POLICY
+        ? startWorkerSandbox(ctx.cwd)
+        : typeof sessionPolicy === "string"
+          ? startWorkerSandbox(ctx.cwd, sessionPolicy)
+          : Promise.reject(new Error("--sandbox requires a JSON policy"));
     try {
       client = await starting;
     } catch (error) {

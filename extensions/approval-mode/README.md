@@ -44,6 +44,8 @@ Use `--approval-mode off` to start a main session without Jev review or approval
 Use `--approval-mode on` to enable review. The default is `on`.
 Invalid values keep review on and produce an error with the accepted values.
 Workers ignore their own flag value and follow the parent session's live mode.
+A worker that gets `--approval-mode off` reports a warning (a notification, or standard error without an interface). Review stays on.
+To test a project sandbox policy without workers, use `--sandbox project` in a main session. See [Worker Sandbox](../worker-sandbox/README.md#project-policy-in-a-main-session).
 When review starts off, the extension skips the classifier availability check.
 Hard denies, read-only restrictions, and sandbox limits remain active.
 

@@ -292,6 +292,12 @@ export default async function approvalMode(pi: ExtensionAPI) {
       } else {
         enabled = parsed;
       }
+    } else if (parseApprovalFlag(pi.getFlag("approval-mode")) === false) {
+      // Workers follow the parent's live mode; say so instead of ignoring the flag silently.
+      const message =
+        "Approval Mode: --approval-mode off has no effect in a worker session (PI_WORKER=1). Workers follow the parent's approval mode; without a parent, Jev review stays on.";
+      if (ctx.hasUI) ctx.ui.notify(message, "warning");
+      else console.error(message);
     }
     publish(ctx);
     if (!worker && enabled && ctx.hasUI) {

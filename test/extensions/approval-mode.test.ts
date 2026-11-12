@@ -679,6 +679,37 @@ describe("approval-mode extension", () => {
     expect(ctx.ui.notify).not.toHaveBeenCalled();
   });
 
+  it("warns on stderr when a headless worker ignores --approval-mode off", async () => {
+    vi.stubEnv("PI_WORKER", "1");
+    const stderr = vi.spyOn(console, "error").mockImplementation(() => {});
+    await setup({ flag: "off" }, false);
+    expect(stderr).toHaveBeenCalledWith(
+      expect.stringContaining("--approval-mode off has no effect in a worker session"),
+    );
+    stderr.mockRestore();
+  });
+
+  it("notifies when a worker with a UI ignores --approval-mode off", async () => {
+    vi.stubEnv("PI_WORKER", "1");
+    const stderr = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { ctx } = await setup({ flag: "off" });
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("--approval-mode off has no effect in a worker session"),
+      "warning",
+    );
+    expect(stderr).not.toHaveBeenCalled();
+    stderr.mockRestore();
+  });
+
+  it("does not warn when a worker gets the default approval mode", async () => {
+    vi.stubEnv("PI_WORKER", "1");
+    const stderr = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { ctx } = await setup({ flag: "on" }, false);
+    expect(stderr).not.toHaveBeenCalled();
+    expect(ctx.ui.notify).not.toHaveBeenCalled();
+    stderr.mockRestore();
+  });
+
   it("runs plain herdboard commands without Jev or approval dialogs", async () => {
     const { handler, ctx, classify } = await setup({ classifiers: [] });
     for (const toolName of ["bash", "background", "monitor"]) {

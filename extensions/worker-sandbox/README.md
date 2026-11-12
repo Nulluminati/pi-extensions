@@ -4,7 +4,7 @@ Operating-system (OS) sandbox for delegated workers and explicitly restricted ma
 
 ## What It Does
 
-Active in worker sessions (`PI_WORKER=1`) and main sessions with `--sandbox '<JSON>'`. Without either, it leaves tools unchanged. On `session_start` the extension starts a per-session broker process and overrides every built-in tool with a fail-closed wrapper. Each tool call is forwarded to the broker, which spawns the call inside the sandbox under the project's policy. If the broker dies, pending and future calls reject instead of running unsandboxed.
+Active in worker sessions (`PI_WORKER=1`) and main sessions with `--sandbox project` or `--sandbox '<JSON>'`. Without either, it leaves tools unchanged. On `session_start` the extension starts a per-session broker process and overrides every built-in tool with a fail-closed wrapper. Each tool call is forwarded to the broker, which spawns the call inside the sandbox under the project's policy. If the broker dies, pending and future calls reject instead of running unsandboxed.
 
 ## Main-session command line
 
@@ -37,6 +37,27 @@ These tools could otherwise bypass the sandbox. Use sandboxed `bash` instead.
 These tools only read remote documentation and search results.
 Trusted extension lifecycle handlers and Pi itself still run on the host. Load only trusted extensions.
 Extensions that run shell commands themselves can ask the sandbox to run them through `lib/sandbox-exec.ts`. Missions uses this for reconcile verification commands. A failed broker returns a failure; the command never falls back to the host.
+
+### Project policy in a main session
+
+Use `--sandbox project` to run a main session under the project's `.pi/sandbox.json`.
+The session applies the same policy and checks as a worker. Use it to test a policy before you give the project to workers.
+
+```bash
+cd /path/to/project
+pi -p --no-session --approval-mode off --sandbox project \
+  "Run cargo build and cargo test. Report each result."
+```
+
+This form needs `worker-sandbox` and `approval-mode` in your installed extensions.
+Otherwise add `--no-extensions -e <path>/worker-sandbox.ts -e <path>/approval-mode.ts`.
+Do not load an installed extension again with `-e`. Pi refuses the duplicate flags.
+
+Do not set `PI_WORKER=1` for this test. In worker mode, Approval Mode ignores `--approval-mode` and expects a parent approval channel.
+Without that channel, Jev review stays on and blocks uncertain commands. Approval Mode reports a warning when this happens.
+
+`--sandbox project` keeps the worker rules. Write rules must stay inside the project, and `excludedCommands` are refused.
+The sandbox uses a scratch home folder, as in a worker. A missing or weak policy stops the session start.
 
 ### Excluded commands
 

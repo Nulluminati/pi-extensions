@@ -157,6 +157,25 @@ describe("worker sandbox extension", () => {
     expect(pi.registerTool.mock.calls.map(([tool]) => tool.name)).toContain("write");
   });
 
+  it("loads the project policy in a main session with --sandbox project", async () => {
+    vi.stubEnv("PI_WORKER", "");
+    const pi = createMockPi();
+    pi.getFlag.mockImplementation((name) => (name === "sandbox" ? "project" : undefined));
+    const client = mockClient();
+    vi.mocked(startWorkerSandbox).mockResolvedValue(client);
+    const ctx = createMockCommandContext();
+    await workerSandboxExtension(pi);
+    await getEventHandler(pi, "session_start")({ type: "session_start", reason: "startup" }, ctx);
+    expect(startWorkerSandbox).toHaveBeenCalledWith(ctx.cwd);
+    expect(pi.registerTool.mock.calls.map(([tool]) => tool.name)).toContain("bash");
+    expect(
+      await getEventHandler(pi, "tool_call")(
+        { type: "tool_call", toolCallId: "bg", toolName: "background", input: { command: "pwd" } },
+        ctx,
+      ),
+    ).toMatchObject({ block: true });
+  });
+
   it("keeps main-session tools blocked after an invalid inline policy fails", async () => {
     vi.stubEnv("PI_WORKER", "");
     const pi = createMockPi();
