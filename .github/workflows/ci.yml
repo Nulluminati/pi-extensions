@@ -9,12 +9,9 @@ on:
   pull_request:
     branches: [main]
 
-# Read-only token is enough for both jobs below. pull-requests: read lets
-# gitleaks-action's ScanPullRequest mode fetch the PR's commits to scan just
-# the diff (it calls /pulls/{n}/commits, which 403s without this scope).
+# Read-only token is enough for both jobs below.
 permissions:
   contents: read
-  pull-requests: read
 
 # Cancel in-progress runs for the same ref so a force-push doesn't queue stale work.
 concurrency:
@@ -74,6 +71,12 @@ jobs:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      # Dependabot does not track this download. Update the version and the
+      # checksum together, from gitleaks_<version>_checksums.txt.
+      # Top-level [[allowlists]] require Gitleaks 8.25.0 or later.
+      GITLEAKS_VERSION: "8.30.1"
+      GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
 
     steps:
       - name: Checkout
@@ -83,24 +86,23 @@ jobs:
           # Gitleaks needs the full history to detect past leaks.
           fetch-depth: 0
 
-      - name: Run gitleaks
-        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
-        env:
-          GITLEAKS_CONFIG: .gitleaks.toml
-          # Top-level [[allowlists]] require Gitleaks 8.25.0 or later.
-          GITLEAKS_VERSION: "8.30.1"
-          # The action fails the job on any leak by default. GITHUB_TOKEN
-          # is required for the action to post annotations on the PR.
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Fork pull requests have read-only tokens. Report findings in the
-          # job without attempting to write review comments.
-          GITLEAKS_ENABLE_COMMENTS: "false"
+      - name: Install gitleaks
+        run: |
+          set -euo pipefail
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfL -o "$RUNNER_TEMP/$archive" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/$archive"
+          echo "$GITLEAKS_SHA256  $RUNNER_TEMP/$archive" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" gitleaks
+
+      # gitleaks reads .gitleaks.toml from the repository root.
+      - name: Scan the history
+        run: '"$RUNNER_TEMP/gitleaks" git --redact --no-banner --log-opts="--all" .'
 
       - name: Setup Node.js for secret scan regression tests
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "lts/*"
 
-      # gitleaks-action adds its installed scanner to PATH.
       - name: Test secret scan exceptions
-        run: npm run test:secrets
+        run: GITLEAKS_BIN="$RUNNER_TEMP/gitleaks" npm run test:secrets
