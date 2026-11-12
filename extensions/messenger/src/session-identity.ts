@@ -45,11 +45,14 @@ function lastPersistedName(
 /**
  * Whether a persisted name belongs to the lineage an env name addresses:
  * the name itself, or a claim-time suffix of it (`w1-2` from `w1`, see
- * claimIdentity). A changed env names a different session on purpose and
- * must win.
+ * claimIdentity). Any other `env-` prefix — for example a generated
+ * `<adjective>-<noun>-<hex>` name that starts with the env name — is a
+ * different session, so a changed env must win.
  */
 function isSameLineage(persisted: string, env: string): boolean {
-  return persisted === env || persisted.startsWith(`${env}-`);
+  if (persisted === env) return true;
+  if (!persisted.startsWith(`${env}-`)) return false;
+  return /^\d+$/.test(persisted.slice(env.length + 1));
 }
 
 /**

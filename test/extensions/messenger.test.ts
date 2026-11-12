@@ -340,6 +340,24 @@ describe("messenger-extension", () => {
     expect((await loadRegistry(cwd))["w1-2"]).toBeUndefined();
   });
 
+  it("a changed env override abandons a generated name that merely starts with it", async () => {
+    // Generated names are `<adjective>-<noun>-<hex>`, so an env name can be a
+    // prefix of one without naming the same session; only a claim suffix
+    // (`-2`, `-3`, …) keeps the persisted name.
+    vi.stubEnv("PI_MESSENGER_NAME", "swift");
+    vi.mocked(mockCtx.sessionManager.getBranch).mockReturnValue(
+      sessionEntries([
+        { type: "custom", customType: "messenger-identity", data: { name: "swift-otter-3f" } },
+      ]),
+    );
+    await getEventHandler("session_start")({ type: "session_start", reason: "startup" }, mockCtx);
+
+    expect((await loadRegistry(cwd)).swift).toBeDefined();
+    expect((await loadRegistry(cwd))["swift-otter-3f"]).toBeUndefined();
+    // "swift" is free, so the claim needs no suffix and no new entry.
+    expect(mockPi.appendEntry).not.toHaveBeenCalled();
+  });
+
   it("a failed identity claim never heartbeats or releases an empty name", async () => {
     vi.stubEnv("PI_MESSENGER_NAME", "bad/name");
     const start = getEventHandler("session_start");
