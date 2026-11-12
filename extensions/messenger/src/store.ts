@@ -11,9 +11,9 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { statSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
 import { appendFile, readFile, unlink } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { isNodeError } from "../../../lib/errors.ts";
 import { withFileLock } from "../../../lib/file-lock.ts";
 import { isCaseInsensitiveVolume } from "../../../lib/fs-case.ts";
@@ -536,6 +536,49 @@ export function normalizePathPrefix(cwd: string, raw: string): string | undefine
   return posix === "" ? "." : posix;
 }
 
+/** The real path of `path`, or `path` itself when it cannot be resolved. */
+function realpathOrSelf(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+}
+
+/**
+ * The prefix key of a normalized prefix after symbolic links resolve: the
+ * deepest existing ancestor goes through realpath, the rest of the path is
+ * appended lexically (so not-yet-created files still resolve), and the result
+ * is made relative to the real project root. Undefined when the real path is
+ * outside the project.
+ */
+function resolveRealPrefix(cwd: string, prefix: string): string | undefined {
+  const realCwd = realpathOrSelf(cwd);
+  let existing = resolve(cwd, prefix);
+  const suffix: string[] = [];
+  for (;;) {
+    try {
+      return normalizePathPrefix(realCwd, join(realpathSync(existing), ...suffix));
+    } catch {
+      const parent = dirname(existing);
+      if (parent === existing) return undefined;
+      suffix.unshift(basename(existing));
+      existing = parent;
+    }
+  }
+}
+
+/**
+ * The keys a normalized prefix matches under: its lexical form plus its real
+ * form when a symbolic link changes it. Matching on either key stops a
+ * symlinked spelling from sidestepping a claim on the real path, or the
+ * reverse.
+ */
+function prefixKeys(cwd: string, prefix: string): string[] {
+  const real = resolveRealPrefix(cwd, prefix);
+  return real === undefined || real === prefix ? [prefix] : [prefix, real];
+}
+
 /**
  * Whether two normalized path prefixes cover any of the same tree: equal,
  * one nested under the other, or either being the project root ("."). Under
@@ -549,14 +592,17 @@ function overlapsPrefix(a: string, b: string, fold = false): boolean {
 }
 
 function findOverlappingOwner(
+  cwd: string,
   reservations: ReservationMap,
   prefix: string,
   selfName: string,
   fold = false,
 ): string | undefined {
+  const needles = prefixKeys(cwd, prefix);
   for (const [key, claim] of Object.entries(reservations)) {
     if (claim.owner === selfName) continue;
-    if (overlapsPrefix(prefix, key, fold)) return claim.owner;
+    const stored = prefixKeys(cwd, key);
+    if (needles.some((n) => stored.some((s) => overlapsPrefix(n, s, fold)))) return claim.owner;
   }
   return undefined;
 }
@@ -594,7 +640,7 @@ export async function reserve(
       }
       // Claims may not overlap an ancestor or descendant claim held by
       // another agent, so reservation matching stays unambiguous.
-      const overlappingOwner = findOverlappingOwner(reservations, prefix, name, fold);
+      const overlappingOwner = findOverlappingOwner(cwd, reservations, prefix, name, fold);
       if (overlappingOwner) {
         conflicts.push({ path: prefix, owner: overlappingOwner });
         continue;
@@ -676,7 +722,9 @@ export interface ReservationBlock {
  * directory boundary (prefix `src/auth` matches `src/auth/login.ts` and
  * `src/auth/sub/x.ts`, not `src/auth2/x.ts`). Under the fold policy (detected
  * from the volume, or forced via `options`) both sides compare without case,
- * so `Docs` and `docs` match on a case-insensitive filesystem.
+ * so `Docs` and `docs` match on a case-insensitive filesystem. Both sides
+ * also match by their real paths, so a symbolic link to a reserved tree is
+ * blocked the same as the direct path.
  */
 export function findBlockingReservation(
   cwd: string,
@@ -688,11 +736,15 @@ export function findBlockingReservation(
   const prefix = normalizePathPrefix(cwd, targetPath);
   if (prefix === undefined) return undefined;
   const fold = resolveCaseFold(cwd, options);
-  const needle = foldKey(prefix, fold);
+  const needles = prefixKeys(cwd, prefix).map((p) => foldKey(p, fold));
   for (const [key, claim] of Object.entries(reservations)) {
     if (claim.owner === selfName) continue;
-    const stored = foldKey(key, fold);
-    const covered = stored === "." ? true : needle === stored || needle.startsWith(`${stored}/`);
+    const storedKeys = prefixKeys(cwd, key).map((k) => foldKey(k, fold));
+    const covered = needles.some((needle) =>
+      storedKeys.some(
+        (stored) => stored === "." || needle === stored || needle.startsWith(`${stored}/`),
+      ),
+    );
     if (covered) {
       return {
         prefix: key,

@@ -4,6 +4,7 @@ import {
   type FSWatcher,
   rmSync,
   statSync,
+  symlinkSync,
   unlinkSync,
   watch,
   writeFileSync,
@@ -1155,6 +1156,59 @@ describe("messenger-store", () => {
     expect(
       findBlockingReservation(cwd, "src/auth/login.ts", "owner", reservations),
     ).toBeUndefined();
+  });
+
+  it("findBlockingReservation blocks a target spelled through a symlinked directory", async () => {
+    await mkdir(join(cwd, "src", "auth"), { recursive: true });
+    await writeFile(join(cwd, "src", "auth", "login.ts"), "original", "utf8");
+    symlinkSync(join("src", "auth"), join(cwd, "link"));
+    await reserve(cwd, "owner", ["src/auth"]);
+    const reservations = await loadReservations(cwd);
+
+    expect(checkToolCall("edit", { path: "link/login.ts" }, cwd, "other", reservations)).toEqual({
+      prefix: "src/auth",
+      owner: "owner",
+    });
+    expect(
+      checkToolCall("write", { path: join(cwd, "link", "new.ts") }, cwd, "other", reservations),
+    ).toMatchObject({ owner: "owner" });
+    expect(checkToolCall("edit", { path: "link/login.ts" }, cwd, "owner", reservations)).toBe(
+      undefined,
+    );
+  });
+
+  it("findBlockingReservation blocks the real path of a claim made through a symlink", async () => {
+    await mkdir(join(cwd, "src", "auth"), { recursive: true });
+    symlinkSync(join("src", "auth"), join(cwd, "link"));
+    await reserve(cwd, "owner", ["link"]);
+    const reservations = await loadReservations(cwd);
+
+    expect(findBlockingReservation(cwd, "src/auth/login.ts", "other", reservations)).toMatchObject({
+      prefix: "link",
+      owner: "owner",
+    });
+    expect(findBlockingReservation(cwd, "src/auth2/x.ts", "other", reservations)).toBeUndefined();
+  });
+
+  it("findBlockingReservation ignores a symlink that points outside the project", async () => {
+    const outside = await mkdtemp(join(tmpdir(), "messenger-outside-"));
+    globalRestores.push(() => rmSync(outside, { recursive: true, force: true }));
+    symlinkSync(outside, join(cwd, "ext"));
+    await reserve(cwd, "owner", ["src"]);
+    const reservations = await loadReservations(cwd);
+
+    expect(findBlockingReservation(cwd, "ext/x.ts", "other", reservations)).toBeUndefined();
+  });
+
+  it("reserve conflicts with another agent's claim reached through a symlink", async () => {
+    await mkdir(join(cwd, "src", "auth"), { recursive: true });
+    symlinkSync(join("src", "auth"), join(cwd, "link"));
+    await reserve(cwd, "owner", ["src/auth"]);
+
+    const { reserved, conflicts } = await reserve(cwd, "other", ["link/sub"]);
+
+    expect(reserved).toEqual([]);
+    expect(conflicts).toEqual([{ path: "link/sub", owner: "owner" }]);
   });
 
   it("reserve conflicts on a case variant of a held claim when the volume folds case", async () => {
