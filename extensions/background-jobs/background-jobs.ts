@@ -20,12 +20,20 @@
  * and is read on demand via the jobs tool. This keeps a malicious command's
  * stdout from being injected as user-authored content.
  *
+ * In print and json modes pi exits when the turn ends, so nothing can wake
+ * the agent and pending jobs die with the process. The background and monitor
+ * tools are deactivated there and refuse to start if called anyway.
+ *
  * Output is also spooled to <agentDir>/background-jobs/job-<id>-<label>.log
  * so a future restart-reconcile layer can audit past jobs; the registry
  * itself is in-memory and session-scoped.
  */
 
-import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+  ExtensionUIContext,
+} from "@earendil-works/pi-coding-agent";
 import { agentStateDir } from "../../lib/paths.ts";
 import { formatStatusLine } from "../../lib/ui-format.ts";
 import { setStripWidget, WIDGET_PRIORITY_JOBS } from "../../lib/widget-strip.ts";
@@ -54,6 +62,10 @@ const WIDGET_KEY = "background-jobs";
 const SNAPSHOT_TYPE = "background-jobs";
 const WAKE_CUSTOM_TYPE = "background-jobs:wake";
 
+// Tools that rely on a later wake-up. Print and json modes run one turn and
+// exit, so these tools cannot deliver their result there.
+const WAKE_TOOLS = new Set(["background", "monitor"]);
+
 // Status fallback key for pi's default footer; mirrors WIDGET_KEY so the
 // status bar's line-2 skip list can suppress it while its widget is visible.
 const STATUS_KEY = "background-jobs";
@@ -69,6 +81,17 @@ function err(code: string, text: string) {
     details: { error: code },
     terminate: true as const,
   };
+}
+
+function isSingleTurnMode(mode: ExtensionContext["mode"]): boolean {
+  return mode === "print" || mode === "json";
+}
+
+function singleTurnErr() {
+  return err(
+    "single_turn_mode",
+    "Background jobs are unavailable in print and json modes: pi exits when the turn ends and stops the job. Run the command with the bash tool and a sufficient timeout instead.",
+  );
 }
 
 // --- Extension ---
@@ -180,6 +203,9 @@ export default async function backgroundJobsExtension(pi: ExtensionAPI) {
     // session_start. The registry is empty here, so the entry is removed
     // (factory undefined) until a new job publishes it again.
     if (ctx.hasUI) publish(ctx.ui);
+    if (isSingleTurnMode(ctx.mode)) {
+      pi.setActiveTools(pi.getActiveTools().filter((name) => !WAKE_TOOLS.has(name)));
+    }
     try {
       await pruneSpoolDir(agentStateDir("background-jobs"), { keep: liveSpoolPaths });
     } catch (error) {
@@ -211,6 +237,7 @@ export default async function backgroundJobsExtension(pi: ExtensionAPI) {
     parameters: BACKGROUND_PARAMETERS,
     execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
       lastUi = ctx.ui;
+      if (isSingleTurnMode(ctx.mode)) return singleTurnErr();
       const command = String(params.command ?? "").trim();
       if (!command) return err("command_required", "command is required.");
 
@@ -267,6 +294,7 @@ export default async function backgroundJobsExtension(pi: ExtensionAPI) {
     parameters: MONITOR_PARAMETERS,
     execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
       lastUi = ctx.ui;
+      if (isSingleTurnMode(ctx.mode)) return singleTurnErr();
       const command = String(params.command ?? "").trim();
       if (!command) return err("command_required", "command is required.");
 

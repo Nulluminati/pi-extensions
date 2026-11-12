@@ -89,6 +89,7 @@ describe("background-jobs in a real Pi session", () => {
   it("stops running jobs on session_shutdown", async () => {
     harness = await createPiSession({
       extensions: [backgroundJobsExtension],
+      mode: "rpc",
       responses: [
         callTool("background", { command: "sleep 30", label: "sleeper" }),
         fauxAssistantMessage("started"),

@@ -1193,6 +1193,57 @@ describe("background-jobs-extension", () => {
     });
   });
 
+  describe("single-turn modes", () => {
+    it.each(["print", "json"] as const)(
+      "deactivates background and monitor on session_start in %s mode",
+      async (mode) => {
+        const mockPi = createMockPi();
+        mockPi.getActiveTools = vi.fn(() => ["bash", "background", "monitor", "jobs"]);
+        const mockCtx = createMockCommandContext();
+        mockCtx.mode = mode;
+        mockCtx.hasUI = false;
+        await backgroundJobsExtension(mockPi);
+
+        const sessionStart = getEventHandler(mockPi, "session_start");
+        await sessionStart({ type: "session_start", reason: "new" }, mockCtx);
+
+        expect(mockPi.setActiveTools).toHaveBeenCalledWith(["bash", "jobs"]);
+      },
+    );
+
+    it.each(["tui", "rpc"] as const)("keeps the tools active in %s mode", async (mode) => {
+      const mockPi = createMockPi();
+      mockPi.getActiveTools = vi.fn(() => ["bash", "background", "monitor", "jobs"]);
+      const mockCtx = createMockCommandContext();
+      mockCtx.mode = mode;
+      await backgroundJobsExtension(mockPi);
+
+      const sessionStart = getEventHandler(mockPi, "session_start");
+      await sessionStart({ type: "session_start", reason: "new" }, mockCtx);
+
+      expect(mockPi.setActiveTools).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["background", { command: "cargo build" }],
+      ["monitor", { command: "true", satisfy_on: "exit_zero" }],
+    ] as const)("refuses to start %s in print mode", async (name, params) => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      mockCtx.mode = "print";
+      mockCtx.hasUI = false;
+      await backgroundJobsExtension(mockPi);
+
+      const tool = getTool(mockPi, name);
+      const result = await tool.execute("call-1", params, undefined, undefined, mockCtx);
+
+      expect(result.details).toEqual({ error: "single_turn_mode" });
+      expect(contentText(result)).toContain("bash");
+      expect(spawnMock).not.toHaveBeenCalled();
+      expect(mockPi.exec).not.toHaveBeenCalled();
+    });
+  });
+
   describe("status-line fallback", () => {
     it("publishes the status fallback while jobs are active", async () => {
       const mockPi = createMockPi();

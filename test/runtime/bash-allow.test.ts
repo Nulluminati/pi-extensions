@@ -70,6 +70,7 @@ it.each([{ env: { GH_BROWSER: "printf injected" } }, { cwd: "/outside" }])(
     vi.stubEnv("PI_BASH_ALLOW", "printf:*");
     harness = await createPiSession({
       extensions: [bashAllowExtension, backgroundJobsExtension],
+      mode: "rpc",
       responses: [
         fauxAssistantMessage(fauxToolCall("background", { command: "printf allowed", ...extra }), {
           stopReason: "toolUse",
@@ -95,6 +96,7 @@ it("blocks an unlisted real monitor and executes a listed monitor", async () => 
   vi.stubEnv("PI_BASH_ALLOW", "touch:*");
   harness = await createPiSession({
     extensions: [bashAllowExtension, backgroundJobsExtension],
+    mode: "rpc",
     responses: [
       fauxAssistantMessage(
         fauxToolCall("monitor", {

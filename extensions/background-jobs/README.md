@@ -83,6 +83,14 @@ Wakes are sent with `pi.sendMessage`, custom type `background-jobs:wake`,
 after the current tool-call batch, or starts a fresh turn when the agent is
 idle. Shutdown suppresses wakes.
 
+### Print and json modes
+
+`pi -p` and `--mode json` run one turn and then exit. Nothing can wake the
+agent later, and the exit stops any running job. In these modes the extension
+removes `background` and `monitor` from the active tools on `session_start`.
+If the model calls either tool anyway, the call fails with `single_turn_mode`
+and tells the model to use `bash` with a timeout. `jobs` stays available.
+
 ### Capture and spool
 
 Output (stdout and stderr) feeds a rolling in-memory buffer (200,000 chars per
@@ -137,7 +145,8 @@ removed when no jobs are active, and re-registered on `session_start`.
 | `pi.registerTool()` | Registers `background`, `monitor`, and `jobs` |
 | `pi.exec()` | Runs each monitor poll under `/bin/sh -c` |
 | `pi.registerCommand("jobs")` | The `/jobs` panel command |
-| `pi.on("session_start")` | Resets the registry and prunes the spool |
+| `pi.on("session_start")` | Resets the registry, prunes the spool, and deactivates wake tools in print and json modes |
+| `pi.getActiveTools()` / `pi.setActiveTools()` | Removes `background` and `monitor` in print and json modes |
 | `pi.on("session_shutdown")` | Cancels active jobs, suppresses wakes |
 | `pi.sendMessage()` | Trusted wake messages (`triggerTurn`, `deliverAs: "steer"`) |
 | `pi.appendEntry("background-jobs")` | Registry snapshot on the session branch |

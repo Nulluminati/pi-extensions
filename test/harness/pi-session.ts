@@ -53,6 +53,8 @@ export interface PiSessionOptions {
   settings?: Settings;
   /** Prepare the session before extensions bind, such as appending persisted entries. */
   setup?: (sessionManager: SessionManager) => void;
+  /** Run mode reported to extensions as `ctx.mode`. Pi defaults an unbound session to "print". */
+  mode?: "tui" | "rpc" | "json" | "print";
 }
 
 export interface PiSession {
@@ -136,7 +138,7 @@ export async function createPiSession(options: PiSessionOptions = {}): Promise<P
       settingsManager,
       noTools: "builtin",
     });
-    await session.bindExtensions({});
+    await session.bindExtensions(options.mode ? { mode: options.mode } : {});
 
     let shutdown: Promise<void> | undefined;
     const emitShutdown = () => {
