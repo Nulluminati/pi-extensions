@@ -18,7 +18,7 @@ import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vite
 import messengerExtension from "../../extensions/messenger/messenger.ts";
 import { checkToolCall } from "../../extensions/messenger/src/enforce.ts";
 import { formatBlockReason } from "../../extensions/messenger/src/format.ts";
-import { resolveAgentName } from "../../extensions/messenger/src/identity.ts";
+import { assertValidAgentName, resolveAgentName } from "../../extensions/messenger/src/identity.ts";
 import {
   claimIdentity,
   ensureUniqueAgentName,
@@ -1442,6 +1442,25 @@ describe("messenger-store", () => {
     }
   });
 
+  it("claimIdentity suffixes a name whose encoded form is at the limit", async () => {
+    // The validator reserves the claim suffix, so a collision on the longest
+    // accepted name still yields a usable mailbox rather than ENAMETOOLONG.
+    const name = `a${" ".repeat(8)}${"a".repeat(191)}`;
+    await heartbeat(cwd, name, { pid: 999999999, cwd });
+    makePidLookAlive(999999999);
+
+    expect(await claimIdentity(cwd, name, process.pid)).toBe(`${name}-2`);
+    const derived = join(
+      cwd,
+      CONFIG_DIR_NAME,
+      "messenger",
+      "registry",
+      `${encodeURIComponent(`${name}-2`)}.json`,
+    );
+    expect(existsSync(derived)).toBe(true);
+    expect((await loadRegistry(cwd))[`${name}-2`]?.pid).toBe(process.pid);
+  });
+
   it("claimIdentity treats a case-variant holder as taken on a folding volume", async () => {
     // APFS folds case: "Raven" must not claim beside a live "raven", or the
     // two agents would share one shard file and one mailbox.
@@ -1717,6 +1736,23 @@ describe("messenger-store", () => {
     expect(existsSync(join(cwd, CONFIG_DIR_NAME, "escape.jsonl"))).toBe(false);
   });
 
+  it("sendMessage rejects a recipient whose encoded name cannot be a filename", async () => {
+    // 149 characters, but each space encodes to three bytes: the mailbox and
+    // its atomic-write sibling cannot fit the filesystem's filename limit.
+    const spaced = `${"ab ".repeat(49)}ab`;
+    expect(spaced).toHaveLength(149);
+    await expect(sendMessage(cwd, spaced, "me", "hi")).rejects.toThrow(/percent-encoded/);
+    const mailbox = join(
+      cwd,
+      CONFIG_DIR_NAME,
+      "messenger",
+      "inbox",
+      `${encodeURIComponent(spaced)}.jsonl`,
+    );
+    expect(existsSync(mailbox)).toBe(false);
+    expect(existsSync(`${mailbox}.lock`)).toBe(false);
+  });
+
   it("concurrent reserve calls keep every claim", async () => {
     await Promise.all(
       Array.from({ length: 8 }, (_, i) => reserve(cwd, `agent-${i}`, [`src/dir-${i}`])),
@@ -1893,6 +1929,41 @@ describe("messenger-identity", () => {
     // Empty/unset falls through to generation instead of throwing.
     expect(resolveAgentName({ PI_MESSENGER_NAME: "  " })).toMatch(/^[a-z]+-[a-z]+-[0-9a-f]{1,2}$/);
     expect(resolveAgentName({})).toMatch(/^[a-z]+-[a-z]+-[0-9a-f]{1,2}$/);
+  });
+
+  it("rejects names whose percent-encoded form cannot be a mailbox filename", () => {
+    // 30 CJK characters encode to 270 bytes and pass the 200-character bound.
+    const cjk = "日".repeat(30);
+    expect(cjk).toHaveLength(30);
+    expect(encodeURIComponent(cjk)).toHaveLength(270);
+    expect(() => resolveAgentName({ PI_MESSENGER_NAME: cjk })).toThrow(/percent-encoded/);
+
+    // UTF-16 input that percent-encoding cannot represent at all.
+    expect(() => assertValidAgentName("lone-\uD800")).toThrow(/cannot be used as an agent name/);
+    expect(() => assertValidAgentName("lone-\uD800")).toThrow(/UTF-16/);
+  });
+
+  it("bounds the encoded name so every derived filename fits the filesystem limit", () => {
+    // 200 characters (192 ASCII plus 8 spaces) encode to 216 bytes: the
+    // longest name the validator accepts.
+    const longest = `a${" ".repeat(8)}${"a".repeat(191)}`;
+    expect(longest).toHaveLength(200);
+    expect(encodeURIComponent(longest)).toHaveLength(216);
+    expect(() => assertValidAgentName(longest)).not.toThrow();
+
+    // The mailbox inside an atomic write plus a claimIdentity collision suffix
+    // must still fit one path segment. The pid is reserved at seven digits,
+    // the widest a Linux pid can be.
+    const mailbox = `${encodeURIComponent(`${longest}-101`)}.jsonl`;
+    const staged = `${mailbox}.4194304.${"0".repeat(16)}.tmp`;
+    expect(Buffer.byteLength(staged, "utf8")).toBeLessThanOrEqual(255);
+
+    // One more encoded byte is rejected up front instead of failing later
+    // with ENAMETOOLONG from an unrelated write.
+    const oneOver = longest.replace("a", " ");
+    expect(oneOver).toHaveLength(200);
+    expect(encodeURIComponent(oneOver)).toHaveLength(218);
+    expect(() => assertValidAgentName(oneOver)).toThrow(/percent-encoded/);
   });
 });
 

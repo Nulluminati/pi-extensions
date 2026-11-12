@@ -14,6 +14,21 @@ import { randomBytes } from "node:crypto";
  *  long name. */
 const MAX_NAME_LENGTH = 200;
 
+/** Filesystems cap one path segment at 255 bytes, and percent-encoding expands
+ *  each non-ASCII byte and each space to three. The longest filename a name
+ *  becomes is the mailbox inside an atomic write:
+ *  `<encoded>.jsonl.<pid>.<16 hex>.tmp` — `.jsonl` (6 bytes) plus a staging
+ *  suffix of `.` + pid (7 digits, the widest Linux pid) + `.` + 16 hex +
+ *  `.tmp` (29 bytes). A claim collision suffix (`-101`, 4 bytes, appended to
+ *  the name before it is encoded) also lengthens the filename, so the encoded
+ *  name gets 255 - 6 - 29 - 4 = 216 bytes. See store.ts (inboxFileName) and
+ *  lib/presence-shards.ts (shardPath). */
+const MAILBOX_SUFFIX_BYTES = ".jsonl".length;
+const ATOMIC_TEMP_SUFFIX_BYTES = 1 + 7 + 1 + 16 + ".tmp".length;
+const CLAIM_SUFFIX_BYTES = "-101".length;
+const MAX_ENCODED_NAME_LENGTH =
+  255 - MAILBOX_SUFFIX_BYTES - ATOMIC_TEMP_SUFFIX_BYTES - CLAIM_SUFFIX_BYTES;
+
 const ADJECTIVES = [
   "swift",
   "lunar",
@@ -48,15 +63,44 @@ const NOUNS = [
 
 /**
  * Reject names that cannot be a mailbox: empty, longer than 200 characters,
- * or containing a path separator or NUL. Throws so a bad `PI_MESSENGER_NAME`
- * fails fast at session start instead of silently losing mail.
+ * containing a path separator or NUL, or long enough once percent-encoded that
+ * the filename it becomes would exceed the filesystem's limit. Throws so a bad
+ * `PI_MESSENGER_NAME` fails fast at session start instead of silently losing
+ * mail.
  */
 export function assertValidAgentName(name: string): void {
   if (!name || name.length > MAX_NAME_LENGTH || /[\\/\0]/.test(name)) {
-    throw new Error(
-      `${JSON.stringify(name)} cannot be used as an agent name: it must be a non-empty ` +
-        `single path segment of at most ${MAX_NAME_LENGTH} characters (no "/", "\\", or NUL).`,
+    throw invalidNameError(
+      name,
+      `it must be a non-empty single path segment of at most ${MAX_NAME_LENGTH} characters ` +
+        `(no "/", "\\", or NUL).`,
     );
+  }
+  const encoded = encodedNameLength(name);
+  if (encoded === undefined) {
+    throw invalidNameError(name, "it is not valid UTF-16, so it cannot be percent-encoded.");
+  }
+  if (encoded > MAX_ENCODED_NAME_LENGTH) {
+    throw invalidNameError(
+      name,
+      `its percent-encoded form is ${encoded} bytes, and at most ` +
+        `${MAX_ENCODED_NAME_LENGTH} bytes fit in a mailbox filename.`,
+    );
+  }
+}
+
+function invalidNameError(name: string, reason: string): Error {
+  return new Error(`${JSON.stringify(name)} cannot be used as an agent name: ${reason}`);
+}
+
+/** Percent-encoded length of a name, or undefined when the string is not valid
+ *  UTF-16: `encodeURIComponent` throws URIError on a lone surrogate, and no
+ *  filename encoding can represent one. */
+function encodedNameLength(name: string): number | undefined {
+  try {
+    return encodeURIComponent(name).length;
+  } catch {
+    return undefined;
   }
 }
 
