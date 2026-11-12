@@ -368,12 +368,16 @@ Crash-safe state file writes: `writeJsonAtomic(path, data)` pretty-prints JSON. 
 ## `lib/file-lock.ts` — cross-process advisory file lock
 
 Mutual exclusion for read-modify-write cycles on shared files: `withFileLock(lockPath, fn,
-options?)` runs `fn` holding a `wx`-created lock file. Waiters poll; a lock untouched for
-`staleMs` (default 15s) is reclaimed as crashed, the holder refreshes its mtime every
-`refreshMs` (default 5s) so long critical sections are never stolen, and `timeoutMs`
-(default 30s, must be ≥ `staleMs`) caps the wait — `timeoutMessage` lets a consumer name its
-domain in the error. Used by `messenger` (registry claims, reservations, mailbox compaction),
-`missions` (mission saves, via an acquire/release adapter in its storage module) and `workers`
+options?)` runs `fn` holding an atomically linked ownership record. Waiters reclaim a
+lock only when its mtime exceeds `staleMs` (default 15s) and its recorded process is dead
+or has a different start time. The holder refreshes its mtime every `refreshMs` (default
+5s). Reclamation holds a sibling `.file-lock-<dev>-<ino>.reclaim` lock, keeps the abandoned
+inode open, and rechecks its identity and owner before unlinking. A delayed reclaimer
+cannot replace a fresh lock. Sidecar locks use the same crash-recovery protocol.
+`timeoutMs` (default 30s) caps the wait, including sidecar acquisition; `timeoutMessage`
+lets a consumer name its domain in the error. Used by `messenger` (registry claims,
+reservations, mailbox compaction), `missions` (mission saves, via an acquire/release
+adapter in its storage module) and `workers`
 (worker registry read-modify-writes).
 
 ## `lib/token-count.ts` — token count labels

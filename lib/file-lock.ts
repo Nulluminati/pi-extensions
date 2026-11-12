@@ -17,19 +17,20 @@
  * holder to the exact inode it created: refreshes go through the original
  * file handle (never the pathname), and release verifies ownership before
  * unlinking, so a lock that was reclaimed and recreated by a waiter is never
- * refreshed or deleted by the old holder. Reclamation claims the pathname by
- * atomic rename instead of unlinking it, so two racing reclaimers serialize
- * (last claim wins) and no waiter ever unlinks a fresh replacement it does
- * not own. Waiters poll until the holder unlinks the file; a lock whose
- * mtime has not moved for `staleMs` is reclaimed only when the recorded pid
+ * refreshed or deleted by the old holder. Reclamation serializes on a
+ * sidecar lock keyed by the abandoned inode. The reclaimer keeps that inode
+ * open and rechecks the pathname under the sidecar before unlinking it, so
+ * delayed reclaimers cannot remove a fresh replacement. Waiters poll until
+ * the holder unlinks the file; a lock whose mtime has not moved for
+ * `staleMs` is reclaimed only when the recorded pid
  * is no longer alive, so a live holder that merely stalled past the stale
  * window is never robbed.
  */
 
 import { randomBytes } from "node:crypto";
 import type { FileHandle } from "node:fs/promises";
-import { link, mkdir, open, readFile, rename, stat, unlink } from "node:fs/promises";
-import { dirname } from "node:path";
+import { link, mkdir, open, readFile, stat, unlink } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { isNodeError } from "./errors.ts";
 import { currentProcessStartTime, isRecycledPid } from "./process-identity.ts";
 
@@ -124,18 +125,6 @@ async function readLockOwner(lockPath: string): Promise<LockOwnership | undefine
   return state.kind === "owner" ? state.owner : undefined;
 }
 
-/**
- * Atomically replace the pathname with an ownership record of our own (a
- * "claim") while reclaiming a stale lock. rename is atomic, so the pathname
- * carries a complete, live-pid record at every instant: a waiter that
- * observed the old crashed holder re-reads the live claim and stops
- * reclaiming, and a second claimant's rename simply replaces the first's —
- * last claimant wins, earlier claimants wait. A claim never grants the
- * critical section: the claimant replaces it with a real lock by the same
- * verify-own-then-unlink rule release uses. This closes the recheck-then-
- * unlink race, where a second waiter past its checks unlinked the pathname
- * after a first waiter had already created its fresh replacement.
- */
 /** The `<pid> <token> [startedAt]` ownership line; the stamp is omitted when
  *  this process's start time cannot be read (keeps pid-only semantics). */
 async function ownershipContent(token: string): Promise<string> {
@@ -150,20 +139,48 @@ async function holderOwnsLock(owner: LockOwnership): Promise<boolean> {
   return isProcessAlive(owner.pid) && !(await isRecycledPid(owner.pid, owner.startedAt));
 }
 
-async function placeClaim(lockPath: string): Promise<string> {
-  const token = randomBytes(8).toString("hex");
-  const tempPath = `${lockPath}.${process.pid}.${randomBytes(8).toString("hex")}.tmp`;
-  const handle = await open(tempPath, "wx", 0o600);
+/** Serialize removal of one abandoned inode, never a pathname replacement.
+ * Keeping the inode open prevents reuse of its identity while we wait. Each
+ * sidecar uses this same protocol, so a crashed reclaimer's sidecar can be
+ * reclaimed under a guard for its own inode without reusing the outer guard.
+ */
+async function reclaimLock(
+  lockPath: string,
+  staleMs: number,
+  deadline: number,
+  timeoutMessage: string,
+): Promise<void> {
+  let abandoned: FileHandle;
   try {
-    await handle.writeFile(await ownershipContent(token), "utf8");
-    await rename(tempPath, lockPath);
+    abandoned = await open(lockPath, "r");
   } catch (error) {
-    await unlink(tempPath).catch(() => {});
+    if (isNodeError(error) && error.code === "ENOENT") return;
     throw error;
-  } finally {
-    await handle.close().catch(() => {});
   }
-  return token;
+  try {
+    const identity = await abandoned.stat({ bigint: true });
+    const guardPath = join(dirname(lockPath), `.file-lock-${identity.dev}-${identity.ino}.reclaim`);
+    await withFileLock(
+      guardPath,
+      async () => {
+        const current = await stat(lockPath, { bigint: true }).catch(() => undefined);
+        if (current?.dev !== identity.dev || current.ino !== identity.ino) return;
+        if (Date.now() - Number(current.mtimeMs) < staleMs) return;
+        const state = await readLockState(lockPath);
+        if (
+          state.kind === "corrupt" ||
+          (state.kind === "owner" && !(await holderOwnsLock(state.owner)))
+        ) {
+          // All removers of this inode hold the same guard. A dead holder
+          // cannot release it; fresh creates cannot win until this unlink.
+          await unlink(lockPath);
+        }
+      },
+      { staleMs, timeoutMs: Math.max(0, deadline - Date.now()), timeoutMessage },
+    );
+  } finally {
+    await abandoned.close().catch(() => {});
+  }
 }
 
 /**
@@ -213,25 +230,9 @@ async function acquireFileLock(
   timeoutMessage: string,
 ): Promise<AcquiredLock> {
   const deadline = Date.now() + timeoutMs;
-  // The claim this acquirer placed while reclaiming; replaced by a real
-  // lock through the verify-own rule below.
-  let claimToken: string | undefined;
   while (true) {
     const acquired = await createLockFile(lockPath);
     if (acquired !== undefined) return acquired;
-    if (claimToken !== undefined) {
-      const own = await readLockState(lockPath);
-      if (own.kind === "owner" && own.owner.pid === process.pid && own.owner.token === claimToken) {
-        // Our claim: unlink the pathname and create for real. The absence
-        // window resolves by create race — only a createLockFile win grants
-        // the critical section, and another waiter's create may win instead.
-        await unlink(lockPath).catch(() => {});
-        continue;
-      }
-      // Another claimant's rename or a fresh create replaced our claim:
-      // wait normally.
-      claimToken = undefined;
-    }
     const lockStat = await stat(lockPath).catch(() => undefined);
     if (lockStat && Date.now() - lockStat.mtimeMs >= staleMs) {
       // Reclaim only when the recorded holder is gone. A live process that
@@ -244,7 +245,7 @@ async function acquireFileLock(
       // A missing pathname means another waiter is mid-replacement; absence
       // is never ownerless. The next create attempt decides who holds.
       if (reclaimable) {
-        claimToken = await placeClaim(lockPath);
+        await reclaimLock(lockPath, staleMs, deadline, timeoutMessage);
         continue;
       }
     }

@@ -1,3 +1,5 @@
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { mkdtemp, readdir, readFile, rm, stat, unlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -5,38 +7,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { withFileLock } from "../../lib/file-lock.ts";
 
 // Reclaim-race interposition, armed only by the racing-reclaimers test.
-// It forces the interleaving the recheck-then-unlink race needs: both
-// waiters complete their stale+dead-owner reads before either acts, and
-// the second waiter's pathname unlink lands only after the first has
-// created a fresh lock and entered its critical section. Every other
-// test runs the real fs untouched.
+// Both waiters finish reading the same stale ownership record before
+// either can reclaim it. The delayed-owner and delayed-guard tests below
+// separately force a reclaim attempt after a fresh holder enters.
 const reclaimRace = vi.hoisted(() => ({
   armed: false,
   readCounts: new Map<string, number>(),
-  unlinkCounts: new Map<string, number>(),
   readBarriers: new Map<string, { gate: Promise<void>; release: () => void }>(),
-  sectionStarted: undefined as Promise<void> | undefined,
-  sectionStartedRelease: undefined as (() => void) | undefined,
   arm() {
     this.armed = true;
-    if (this.sectionStarted === undefined) {
-      this.sectionStarted = new Promise<void>((resolve) => {
-        this.sectionStartedRelease = resolve;
-      });
-    }
   },
   disarm() {
     this.armed = false;
     this.readCounts.clear();
-    this.unlinkCounts.clear();
     this.readBarriers.clear();
-    this.sectionStarted = undefined;
-    this.sectionStartedRelease = undefined;
   },
   barrierFor(path: string) {
     let entry = this.readBarriers.get(path);
     if (!entry) {
-      let release!: () => void;
+      let release = () => {};
       const gate = new Promise<void>((resolve) => {
         release = resolve;
       });
@@ -45,6 +34,11 @@ const reclaimRace = vi.hoisted(() => ({
     }
     return entry;
   },
+}));
+
+const ownerReadRace = vi.hoisted(() => ({
+  pause: undefined as (() => Promise<void>) | undefined,
+  guardPause: undefined as (() => Promise<void>) | undefined,
 }));
 
 vi.mock("node:fs/promises", async (importOriginal) => {
@@ -56,6 +50,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   return {
     ...actual,
     readFile: vi.fn(async (path: unknown, ...rest: unknown[]) => {
+      const content = await passthrough(actual.readFile)(path as never, ...(rest as never[]));
       if (
         reclaimRace.armed &&
         typeof path === "string" &&
@@ -70,17 +65,20 @@ vi.mock("node:fs/promises", async (importOriginal) => {
         if (count === 1) await barrier.gate;
         else barrier.release();
       }
-      return passthrough(actual.readFile)(path as never, ...(rest as never[]));
-    }),
-    unlink: vi.fn(async (path: unknown, ...rest: unknown[]) => {
-      if (reclaimRace.armed && typeof path === "string" && path.endsWith(".lock")) {
-        const count = (reclaimRace.unlinkCounts.get(path) ?? 0) + 1;
-        reclaimRace.unlinkCounts.set(path, count);
-        // Simulate the second waiter's unlink having been delayed past the
-        // first waiter's create: it must not destroy a fresh replacement.
-        if (count >= 2) await reclaimRace.sectionStarted;
+      if (typeof path === "string" && path.endsWith(".lock") && ownerReadRace.pause) {
+        const pause = ownerReadRace.pause;
+        ownerReadRace.pause = undefined;
+        await pause();
       }
-      return passthrough(actual.unlink)(path as never, ...(rest as never[]));
+      return content;
+    }),
+    link: vi.fn(async (source: string, target: string) => {
+      if (target.endsWith(".reclaim") && ownerReadRace.guardPause) {
+        const pause = ownerReadRace.guardPause;
+        ownerReadRace.guardPause = undefined;
+        await pause();
+      }
+      return actual.link(source, target);
     }),
   };
 });
@@ -207,7 +205,6 @@ describe("file-lock", () => {
     const work = async (label: string): Promise<string> => {
       inside += 1;
       if (inside > 1) overlapping += 1;
-      reclaimRace.sectionStartedRelease?.();
       await new Promise((resolve) => setTimeout(resolve, 30));
       inside -= 1;
       return label;
@@ -219,15 +216,169 @@ describe("file-lock", () => {
         withFileLock(lockPath, () => work("second"), { staleMs: 1_000 }),
       ]);
       expect([first, second].sort()).toEqual(["first", "second"]);
-      // The forced interleaving: both waiters observe the same stale owner,
-      // and the second waiter's unlink lands after the first has created a
-      // fresh lock and started working. The critical sections must still
-      // have been exclusive.
+      // Both waiters observed the same stale owner. Only one can remove
+      // that generation; their critical sections must remain exclusive.
       expect(overlapping).toBe(0);
     } finally {
       reclaimRace.disarm();
     }
     await expect(stat(lockPath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it.each([
+    ["same process", "stale-owner read"],
+    ["child process", "stale-owner read"],
+    ["same process", "reclaim guard acquisition"],
+    ["child process", "reclaim guard acquisition"],
+  ])("does not replace a fresh live lock (%s, delayed %s)", async (holderKind, pauseAt) => {
+    const lockPath = join(dir, "test.lock");
+    await writeFile(lockPath, "999999 deadbeef\n");
+    const abandoned = new Date(Date.now() - 120_000);
+    await utimes(lockPath, abandoned, abandoned);
+
+    let resumeRead = () => {};
+    const readGate = new Promise<void>((resolve) => {
+      resumeRead = resolve;
+    });
+    let readPaused = () => {};
+    const paused = new Promise<void>((resolve) => {
+      readPaused = resolve;
+    });
+    const pause = async () => {
+      readPaused();
+      await readGate;
+    };
+    if (pauseAt === "stale-owner read") ownerReadRace.pause = pause;
+    else ownerReadRace.guardPause = pause;
+    let releaseHolder = () => {};
+    const holderGate = new Promise<void>((resolve) => {
+      releaseHolder = resolve;
+    });
+    let holderStarted = () => {};
+    const started = new Promise<void>((resolve) => {
+      holderStarted = resolve;
+    });
+    const events: string[] = [];
+    const delayed = withFileLock(lockPath, async () => events.push("delayed"), {
+      staleMs: 1_000,
+      timeoutMs: holderKind === "child process" ? 2_000 : 300,
+    });
+    // Handle rejection immediately, including when setup fails.
+    const outcome = delayed.then(
+      () => "acquired",
+      (error: unknown) => (error instanceof Error ? error.message : String(error)),
+    );
+    let holder: Promise<void> | undefined;
+    try {
+      await paused;
+      if (holderKind === "same process") {
+        holder = withFileLock(
+          lockPath,
+          async () => {
+            events.push("holder");
+            holderStarted();
+            await holderGate;
+          },
+          { staleMs: 1_000 },
+        );
+      } else {
+        const moduleUrl = new URL("../../lib/file-lock.ts", import.meta.url).href;
+        const child = spawn(
+          process.execPath,
+          [
+            "--import",
+            "tsx",
+            "--input-type=module",
+            "-e",
+            `
+          import { once } from "node:events";
+          import { withFileLock } from ${JSON.stringify(moduleUrl)};
+          await withFileLock(${JSON.stringify(lockPath)}, async () => {
+            process.stdin.resume();
+            process.stdout.write("held\\n");
+            await once(process.stdin, "end");
+          }, { staleMs: 1000 });
+        `,
+          ],
+          { stdio: ["pipe", "pipe", "pipe"] },
+        );
+        let stderr = "";
+        child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
+          stderr += chunk;
+        });
+        holder = once(child, "close").then(([code]) => {
+          expect(stderr).toBe("");
+          expect(code).toBe(0);
+        });
+        void holderGate.then(() => child.stdin.end());
+        const [output] = await Promise.race([
+          once(child.stdout, "data"),
+          holder.then(() => {
+            throw new Error("Child exited before acquiring lock");
+          }),
+        ]);
+        expect(String(output)).toBe("held\n");
+        events.push("holder");
+        holderStarted();
+      }
+      await started;
+      const freshContent = await readFile(lockPath, "utf8");
+      resumeRead();
+
+      expect(await outcome).toMatch(/Timed out waiting for lock/);
+      expect(events).toEqual(["holder"]);
+      await expect(readFile(lockPath, "utf8")).resolves.toBe(freshContent);
+    } finally {
+      ownerReadRace.pause = undefined;
+      ownerReadRace.guardPause = undefined;
+      resumeRead();
+      releaseHolder();
+      await Promise.all([outcome, holder]);
+    }
+    await expect(readdir(dir)).resolves.toEqual([]);
+  });
+
+  it("recovers a crashed reclaimer's stale guard", async () => {
+    const lockPath = join(dir, "test.lock");
+    await writeFile(lockPath, "999999 deadbeef\n");
+    const identity = await stat(lockPath, { bigint: true });
+    const guardPath = join(dir, `.file-lock-${identity.dev}-${identity.ino}.reclaim`);
+    await writeFile(guardPath, "999999 crashed-reclaimer\n");
+    const abandoned = new Date(Date.now() - 120_000);
+    await utimes(lockPath, abandoned, abandoned);
+    await utimes(guardPath, abandoned, abandoned);
+
+    await expect(withFileLock(lockPath, async () => "recovered", { staleMs: 1_000 })).resolves.toBe(
+      "recovered",
+    );
+    await expect(readdir(dir)).resolves.toEqual([]);
+  });
+
+  it("honors the waiter timeout while a live reclaimer holds the guard", async () => {
+    const lockPath = join(dir, "test.lock");
+    const content = "999999 deadbeef\n";
+    await writeFile(lockPath, content);
+    const identity = await stat(lockPath, { bigint: true });
+    const guardPath = join(dir, `.file-lock-${identity.dev}-${identity.ino}.reclaim`);
+    const guardContent = `${process.pid} live-reclaimer\n`;
+    await writeFile(guardPath, guardContent);
+    const abandoned = new Date(Date.now() - 120_000);
+    await utimes(lockPath, abandoned, abandoned);
+    await utimes(guardPath, abandoned, abandoned);
+
+    await expect(
+      withFileLock(lockPath, async () => "stolen", {
+        staleMs: 1_000,
+        timeoutMs: 100,
+        timeoutMessage: "resource timeout",
+      }),
+    ).rejects.toThrow("resource timeout");
+    await expect(readFile(lockPath, "utf8")).resolves.toBe(content);
+    await expect(readFile(guardPath, "utf8")).resolves.toBe(guardContent);
+    await expect(readdir(dir)).resolves.toEqual(
+      expect.arrayContaining(["test.lock", expect.stringContaining(".reclaim")]),
+    );
+    expect(await readdir(dir)).toHaveLength(2);
   });
 
   it("reclaims an ownerless corrupt lock file", async () => {
