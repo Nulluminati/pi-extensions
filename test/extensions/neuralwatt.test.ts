@@ -36,24 +36,15 @@ function makeModel(id: string, provider = "neuralwatt") {
   return createMockModel({ id, name: id, provider });
 }
 
-// Ids present in the static catalog. Startup check tests use these.
+// Ids the live public catalog publishes (flex siblings excluded). The static
+// list must match this set exactly so removed models do not stay selectable.
 const EXPECTED_MODEL_IDS = [
-  "deepseek-ai/DeepSeek-V4-Flash",
-  "deepseek-v4-flash",
-  "deepseek-v4-flash-speed",
   "deepseek-v4.1-flash",
   "deepseek-v4.1-flash-speed",
   "gemma-4-31b",
-  "glm-5.2",
-  "glm-5.2-fast",
-  "glm-5.2-short",
-  "glm-5.2-short-fast",
   "glm-5.3",
   "glm-5.3-flash",
-  "kimi-k2.7-code",
-  "kimi-k2.7-code-fast",
-  "kimi-k3",
-  "kimi-k3-fast",
+  "kimi-k3.1-pro",
   "mimo-v2.6-pro",
   "nw-flash",
   "nw-large",
@@ -99,14 +90,12 @@ describe("neuralwatt-extension", () => {
 
   // --- static list ---
 
-  it("exposes a static list covering every known model id", () => {
+  it("exposes a static list matching the live catalog's model ids", () => {
     const ids = STATIC_MODELS.map((m) => m.id).sort();
-    for (const id of EXPECTED_MODEL_IDS) {
-      expect(ids, `static list missing ${id}`).toContain(id);
-    }
+    expect(ids).toEqual([...EXPECTED_MODEL_IDS].sort());
   });
 
-  it("documents the DeepSeek Speed, V4.1, and MiMo models in the introduction and catalog tables", async () => {
+  it("documents the DeepSeek V4.1, Kimi K3.1 Pro, and MiMo models in the introduction and catalog tables", async () => {
     const readme = await readFile(
       resolve(import.meta.dirname, "../../extensions/neuralwatt/README.md"),
       "utf8",
@@ -115,17 +104,16 @@ describe("neuralwatt-extension", () => {
     const catalog = readme.split("### Static catalog")[1]?.split("### Startup staleness check")[0];
     const thinking = readme.split("## Thinking levels")[1]?.split("## Pi APIs Used")[0];
 
-    expect(introduction).toContain("DeepSeek V4 Flash (Speed)");
     expect(introduction).toContain("DeepSeek V4.1 Flash");
     expect(introduction).toContain("DeepSeek V4.1 Flash (Speed)");
+    expect(introduction).toContain("Kimi K3.1 Pro");
     expect(introduction).toContain("MiMo-V2.6-Pro");
-    expect(catalog).toContain("| deepseek-v4-flash-speed | 1M | yes | — | $0.14 / $0.28 |");
+    expect(catalog).toContain("| kimi-k3.1-pro | 1M | yes | yes | $2.00 / $10.00 |");
+    expect(catalog).toContain("| nw-large | 1M | yes | yes | $2.00 / $10.00 |");
     expect(catalog).toContain("| deepseek-v4.1-flash | 1M | yes | yes | $0.15 / $0.60 |");
     expect(catalog).toContain("| deepseek-v4.1-flash-speed | 1M | yes | yes | $0.15 / $0.60 |");
     expect(catalog).toContain("| mimo-v2.6-pro | 1M | yes | yes | $0.87 / $1.74 |");
-    expect(thinking).toContain(
-      "| deepseek-v4-flash-speed | none | minimal | low | medium | high | max |",
-    );
+    expect(thinking).toContain("| kimi-k3.1-pro | none | minimal | low | medium | high | max |");
     expect(thinking).toContain(
       "| deepseek-v4.1-flash | none | minimal | low | medium | high | xhigh |",
     );
@@ -150,42 +138,15 @@ describe("neuralwatt-extension", () => {
     );
   });
 
-  it("configures DeepSeek V4 Flash from live metadata and probed reasoning behavior", () => {
-    const model = STATIC_MODELS.find(
-      (candidate) => candidate.id === "deepseek-ai/DeepSeek-V4-Flash",
-    );
+  it("configures Kimi K3.1 Pro from live metadata", () => {
+    const model = STATIC_MODELS.find((candidate) => candidate.id === "kimi-k3.1-pro");
 
     expect(model).toEqual(
       expect.objectContaining({
-        name: "DeepSeek V4 Flash 0731 (Canary)",
-        reasoning: true,
-        input: ["text"],
-        cost: { input: 0.14, output: 0.28, cacheRead: 0.028, cacheWrite: 0 },
-        contextWindow: 1048560,
-        maxTokens: 65536,
-      }),
-    );
-  });
-
-  it("configures Kimi K3 and its fast variant from live metadata", () => {
-    const byId = Object.fromEntries(STATIC_MODELS.map((model) => [model.id, model]));
-
-    expect(byId["kimi-k3"]).toEqual(
-      expect.objectContaining({
-        name: "Kimi K3",
+        name: "Kimi K3.1 Pro",
         reasoning: true,
         input: ["text", "image"],
-        cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 0 },
-        contextWindow: 1048560,
-        maxTokens: 65536,
-      }),
-    );
-    expect(byId["kimi-k3-fast"]).toEqual(
-      expect.objectContaining({
-        name: "Kimi K3 Fast",
-        reasoning: false,
-        input: ["text", "image"],
-        cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 0 },
+        cost: { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 0 },
         contextWindow: 1048560,
         maxTokens: 65536,
       }),
@@ -250,7 +211,7 @@ describe("neuralwatt-extension", () => {
         name: "Neuralwatt Large",
         reasoning: true,
         input: ["text", "image"],
-        cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 0 },
+        cost: { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 0 },
         contextWindow: 1048560,
         maxTokens: 65536,
       }),
@@ -345,33 +306,6 @@ describe("neuralwatt-extension", () => {
     const byId = Object.fromEntries(STATIC_MODELS.map((m) => [m.id, m]));
 
     // Disableable + accepts identity-mapped levels through xhigh.
-    expect(byId["deepseek-ai/DeepSeek-V4-Flash"].thinkingLevelMap).toEqual({
-      off: "none",
-      minimal: "minimal",
-      low: "low",
-      medium: "medium",
-      high: "high",
-      xhigh: "xhigh",
-    });
-    expect(byId["deepseek-v4-flash"].thinkingLevelMap).toEqual({
-      off: "none",
-      minimal: "minimal",
-      low: "low",
-      medium: "medium",
-      high: "high",
-      xhigh: "xhigh",
-    });
-    // deepseek-v4-flash-speed (2026-09 probe): same checkpoint as
-    // deepseek-v4-flash and also disableable, but the catalog aliases
-    // xhigh -> max, so xhigh maps to "max" like the GLM/Kimi full-enum models.
-    expect(byId["deepseek-v4-flash-speed"].thinkingLevelMap).toEqual({
-      off: "none",
-      minimal: "minimal",
-      low: "low",
-      medium: "medium",
-      high: "high",
-      xhigh: "max",
-    });
     // deepseek-v4.1-flash (2026-09 probe): disableable, full enum accepted.
     // The catalog aliases medium -> high and minimal -> low but keeps xhigh
     // and max distinct, so identity through xhigh is correct.
@@ -396,14 +330,6 @@ describe("neuralwatt-extension", () => {
       xhigh: "xhigh",
     });
     expect(byId["gemma-4-31b"].thinkingLevelMap).toEqual({
-      off: "none",
-      minimal: "minimal",
-      low: "low",
-      medium: "medium",
-      high: "high",
-      xhigh: "xhigh",
-    });
-    expect(byId["kimi-k3"].thinkingLevelMap).toEqual({
       off: "none",
       minimal: "minimal",
       low: "low",
@@ -436,35 +362,9 @@ describe("neuralwatt-extension", () => {
 
     // Disableable + accepts full enum (incl. max); xhigh -> "max" for deepest
     // tier.
-    expect(byId["glm-5.2"].thinkingLevelMap).toEqual({
-      off: "none",
-      minimal: "minimal",
-      low: "low",
-      medium: "medium",
-      high: "high",
-      xhigh: "max",
-    });
-    expect(byId["glm-5.2-short"].thinkingLevelMap).toEqual({
-      off: "none",
-      minimal: "minimal",
-      low: "low",
-      medium: "medium",
-      high: "high",
-      xhigh: "max",
-    });
-    // kimi-k2.7-code was always-on at probe time; the 2026-08 re-probe shows
-    // none disables thinking, so off maps to "none" and the full map applies.
-    expect(byId["kimi-k2.7-code"].thinkingLevelMap).toEqual({
-      off: "none",
-      minimal: "minimal",
-      low: "low",
-      medium: "medium",
-      high: "high",
-      xhigh: "max",
-    });
-    // kimi-k2.7-code-fast now reasons (catalog metadata + 2026-08 probe), same
-    // map as its sibling.
-    expect(byId["kimi-k2.7-code-fast"].thinkingLevelMap).toEqual({
+    // kimi-k3.1-pro: disableable (catalog supported_efforts include none),
+    // and the catalog aliases xhigh -> max, so the full map applies.
+    expect(byId["kimi-k3.1-pro"].thinkingLevelMap).toEqual({
       off: "none",
       minimal: "minimal",
       low: "low",
@@ -510,7 +410,7 @@ describe("neuralwatt-extension", () => {
     });
 
     // nw-large (2026-10 probe): tracking alias for the large tier (currently
-    // Kimi K3). Disableable, and the catalog aliases xhigh -> max (accepted
+    // Kimi K3.1 Pro). Disableable, and the catalog aliases xhigh -> max (accepted
     // natively by the gateway), so the full map applies like the other
     // full-enum models.
     expect(byId["nw-large"].thinkingLevelMap).toEqual({
@@ -654,10 +554,10 @@ describe("neuralwatt-extension", () => {
 
     const live = [
       ...STATIC_MODELS.map((m) => ({ id: m.id })),
-      { id: "glm-5.2-flex" },
-      { id: "glm-5.2-short-flex" },
-      { id: "glm-5.2-short-fast-flex" },
-      { id: "kimi-k2.7-code-flex" },
+      { id: "glm-5.3-flex" },
+      { id: "glm-5.3-flash-flex" },
+      { id: "kimi-k3.1-pro-flex" },
+      { id: "nw-large-flex" },
     ];
     mockFetch.mockResolvedValueOnce(mockModelsResponse(live));
 
@@ -878,7 +778,10 @@ describe("neuralwatt-extension", () => {
 
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("vision"), "info");
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("reasoning"), "info");
-    expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("glm-5.2"), "info");
+    expect(mockCtx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("kimi-k3.1-pro"),
+      "info",
+    );
   });
 
   it("/neuralwatt:models shows no fetch on subsequent calls (purely static)", async () => {

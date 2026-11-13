@@ -38,14 +38,14 @@ const NEURALWATT_REASONING_COMPAT = {
  * `reasoning` field for thinking output. Two findings drive these maps as of
  * the 2026-08 re-probe:
  *
- *   1. Neuralwatt's gateway accepts `max` for the GLM and Kimi K2.7 family and
+ *   1. Neuralwatt's gateway accepts `max` for the GLM and Kimi families and
  *      it produces deeper reasoning than `xhigh` there. Where accepted, xhigh
  *      maps to `max` so pi's deepest tier engages the deepest thinking. The
  *      probe-model skill warns `max` is usually rejected by OpenAI-compatible
  *      shims; Neuralwatt's vLLM gateway is an exception.
  *   2. Every reasoning model except the glm-5.3 family is disableable: `none`
- *      disables thinking (verified 2026-08 for kimi-k2.7-code and qwen3.6-35b,
- *      which were always-on and restricted in earlier probes, and 2026-09 for
+ *      disables thinking (verified 2026-08 for qwen3.6-35b, which was
+ *      always-on and restricted in earlier probes, and 2026-09 for
  *      qwen-3.8-27b). glm-5.3 and glm-5.3-flash are the exceptions: their
  *      catalog entries mark reasoning mandatory and the probes show thinking
  *      output even at `none`, so they use ALWAYS_ON_FULL_MAP with off:null.
@@ -56,8 +56,8 @@ const NEURALWATT_REASONING_COMPAT = {
  * high are also accepted and engage thinking, so they are exposed here.
  */
 
-// Disableable with identity mapping through xhigh (DeepSeek V4 Flash,
-// gemma-4-31b, kimi-k3, nw-flash, nw-small, qwen3.6-35b, qwen-3.8-27b).
+// Disableable with identity mapping through xhigh (DeepSeek V4.1 Flash,
+// gemma-4-31b, nw-flash, nw-small, qwen3.6-35b, qwen-3.8-27b).
 const DISABLEABLE_IDENTITY_MAP: ThinkingLevelMap = {
   off: "none",
   minimal: "minimal",
@@ -67,9 +67,9 @@ const DISABLEABLE_IDENTITY_MAP: ThinkingLevelMap = {
   xhigh: "xhigh",
 };
 
-// Disableable, accepts the full enum including `max` (glm-5.2, glm-5.2-short,
-// kimi-k2.7-code, kimi-k2.7-code-fast, nw-large). xhigh maps to `max` because
-// the gateway accepts it and it produces deeper reasoning than `xhigh`.
+// Disableable, accepts the full enum including `max` (kimi-k3.1-pro,
+// nw-large). xhigh maps to `max` because the gateway accepts it and it
+// produces deeper reasoning than `xhigh`.
 const DISABLEABLE_FULL_MAP: ThinkingLevelMap = {
   off: "none",
   minimal: "minimal",
@@ -124,11 +124,9 @@ const DISABLEABLE_BINARY_MAP: ThinkingLevelMap = {
  * records the underlying model its probe evidence is based on. Re-probe an
  * alias after Neuralwatt announces a move.
  *
- * The GLM-5.2, Kimi, and Qwen3.6 reasoning/fast pairs share pricing; their
- * "-fast" variants are non-reasoning. glm-5.3-flash, deepseek-v4-flash-speed,
- * and deepseek-v4.1-flash-speed are the exceptions: reasoning fast/speed
- * variants. Neuralwatt publishes both DeepSeek V4 Flash ids (and the Speed
- * variant) for the same 0731 checkpoint. The glm-5.3 family (gated glm-5.3 preview,
+ * The Qwen3.6 reasoning/fast pair shares pricing; its "-fast" variant is
+ * non-reasoning. glm-5.3-flash and deepseek-v4.1-flash-speed are the
+ * exceptions: reasoning fast/speed variants. The glm-5.3 family (gated glm-5.3 preview,
  * glm-5.3-flash) forces always-on thinking (catalog marks reasoning mandatory;
  * see their entries); every other reasoning model is disableable
  * (qwen3.6-35b's previous restriction was lifted in 2026-08, and qwen-3.8-27b
@@ -136,12 +134,12 @@ const DISABLEABLE_BINARY_MAP: ThinkingLevelMap = {
  */
 export const STATIC_MODELS: ProviderChatModelConfig[] = [
   // --- Neuralwatt tracking aliases (nw-*) ---
-  // nw-large — large tier (catalog: currently Kimi K3; same pricing and
-  // limits as the kimi-k3 entry). Probed 2026-10: every effort returns HTTP
-  // 200 and `none` produces no thinking, so thinking is disableable. The
-  // catalog aliases xhigh -> max (accepted natively by the gateway) plus
-  // medium -> high and minimal -> low, so DISABLEABLE_FULL_MAP applies like
-  // the other full-enum models.
+  // nw-large — large tier (catalog: currently Kimi K3.1 Pro; same pricing and
+  // limits as the kimi-k3.1-pro entry). Probed 2026-10 while it tracked
+  // Kimi K3: every effort returned HTTP 200 and `none` produced no thinking,
+  // so thinking is disableable. The current catalog entry still lists `none`
+  // in supported_efforts and aliases xhigh -> max and minimal -> low, so
+  // DISABLEABLE_FULL_MAP applies like kimi-k3.1-pro.
   {
     id: "nw-large",
     name: "Neuralwatt Large",
@@ -149,7 +147,7 @@ export const STATIC_MODELS: ProviderChatModelConfig[] = [
     reasoning: true,
     thinkingLevelMap: DISABLEABLE_FULL_MAP,
     input: ["text", "image"],
-    cost: { input: 3.0, output: 15.0, cacheRead: 0.3, cacheWrite: 0 },
+    cost: { input: 2.0, output: 10.0, cacheRead: 0.2, cacheWrite: 0 },
     contextWindow: 1048560,
     maxTokens: 65536,
     compat: NEURALWATT_REASONING_COMPAT,
@@ -212,63 +210,7 @@ export const STATIC_MODELS: ProviderChatModelConfig[] = [
     compat: NEURALWATT_REASONING_COMPAT,
   },
 
-  // --- GLM-5.2 (ZhipuAI) ---
-  // Probed 2026-08: every effort returns HTTP 200 and `none` produces no
-  // thinking, so thinking is disableable. xhigh maps to `max` because the
-  // gateway accepts `max` and it produces deeper reasoning than `xhigh`.
-  {
-    id: "glm-5.2",
-    name: "GLM-5.2",
-    api: "openai-completions",
-    reasoning: true,
-    thinkingLevelMap: DISABLEABLE_FULL_MAP,
-    input: ["text"],
-    cost: { input: 1.45, output: 4.5, cacheRead: 0.145, cacheWrite: 0 },
-    contextWindow: 1048560,
-    maxTokens: 65536,
-    compat: NEURALWATT_REASONING_COMPAT,
-  },
-  {
-    id: "glm-5.2-fast",
-    name: "GLM-5.2 Fast",
-    api: "openai-completions",
-    reasoning: false,
-    input: ["text"],
-    cost: { input: 1.45, output: 4.5, cacheRead: 0.145, cacheWrite: 0 },
-    contextWindow: 1048560,
-    maxTokens: 65536,
-    compat: NEURALWATT_COMPAT,
-  },
-
-  // GLM-5.2 (short) — 200K context variant, same pricing as the 1M glm-5.2.
-  // Gateway-acceptance probed 2026-08: accepts the full reasoning_effort enum
-  // (none, minimal, low, medium, high, xhigh, max all return HTTP 200), and
-  // `none` produces no thinking, so thinking is disableable. Uses the same
-  // DISABLEABLE_FULL_MAP as glm-5.2: xhigh maps to `max` for the deepest tier.
-  {
-    id: "glm-5.2-short",
-    name: "GLM-5.2 Short",
-    api: "openai-completions",
-    reasoning: true,
-    thinkingLevelMap: DISABLEABLE_FULL_MAP,
-    input: ["text"],
-    cost: { input: 1.45, output: 4.5, cacheRead: 0.145, cacheWrite: 0 },
-    contextWindow: 199984,
-    maxTokens: 65536,
-    compat: NEURALWATT_REASONING_COMPAT,
-  },
-  {
-    id: "glm-5.2-short-fast",
-    name: "GLM-5.2 Short Fast",
-    api: "openai-completions",
-    reasoning: false,
-    input: ["text"],
-    cost: { input: 1.45, output: 4.5, cacheRead: 0.145, cacheWrite: 0 },
-    contextWindow: 199984,
-    maxTokens: 65536,
-    compat: NEURALWATT_COMPAT,
-  },
-
+  // --- GLM-5.3 (ZhipuAI) ---
   // GLM-5.3 (gated preview) — same architecture as GLM-5.2 ("weight swap
   // confirmed" per the catalog description) at GLM-5.2 parity pricing and
   // context. Probed 2026-08: every effort returns HTTP 200, but the catalog
@@ -276,7 +218,7 @@ export const STATIC_MODELS: ProviderChatModelConfig[] = [
   // disable check shows a reasoning block even at `none` (r=735 on the
   // reasoning prompt), so thinking cannot be turned off: off is hidden.
   // xhigh maps to `max`, which the gateway accepts and which produces deeper
-  // reasoning than `xhigh`, matching the other GLM entries.
+  // reasoning than `xhigh`.
   {
     id: "glm-5.3",
     name: "GLM 5.3",
@@ -306,57 +248,6 @@ export const STATIC_MODELS: ProviderChatModelConfig[] = [
     cost: { input: 0.15, output: 0.5, cacheRead: 0.03, cacheWrite: 0 },
     contextWindow: 1048560,
     maxTokens: 65536,
-    compat: NEURALWATT_REASONING_COMPAT,
-  },
-
-  // --- DeepSeek V4 Flash (DeepSeek) ---
-  // Probed 2026-07: every effort (none/minimal/low/medium/high/xhigh/max)
-  // returns HTTP 200 and `none` produces no thinking, so thinking is
-  // disableable. minimal through xhigh all engage reasoning under the
-  // top-level `reasoning` field; the identity map through xhigh is correct.
-  // Neuralwatt publishes both ids for the same 0731 checkpoint.
-  {
-    id: "deepseek-v4-flash",
-    name: "DeepSeek V4 Flash",
-    api: "openai-completions",
-    reasoning: true,
-    thinkingLevelMap: DISABLEABLE_IDENTITY_MAP,
-    input: ["text"],
-    cost: { input: 0.14, output: 0.28, cacheRead: 0.028, cacheWrite: 0 },
-    contextWindow: 1048560,
-    maxTokens: 65536,
-    compat: NEURALWATT_REASONING_COMPAT,
-  },
-  {
-    id: "deepseek-ai/DeepSeek-V4-Flash",
-    name: "DeepSeek V4 Flash 0731 (Canary)",
-    api: "openai-completions",
-    reasoning: true,
-    thinkingLevelMap: DISABLEABLE_IDENTITY_MAP,
-    input: ["text"],
-    cost: { input: 0.14, output: 0.28, cacheRead: 0.028, cacheWrite: 0 },
-    contextWindow: 1048560,
-    maxTokens: 65536,
-    compat: NEURALWATT_REASONING_COMPAT,
-  },
-
-  // deepseek-v4-flash-speed — the same 0731 checkpoint as deepseek-v4-flash
-  // (identical huggingface_id and pricing) with improved speculative decoding
-  // ("Speed" tier). Despite the name it reasons: probed 2026-09, every effort
-  // returns HTTP 200 with `reasoning` output and `none` produces no thinking,
-  // so thinking is disableable. The catalog aliases xhigh -> max (plus
-  // medium/low/minimal -> high), so the gateway's real deepest level is `max`
-  // and xhigh maps to `max` like the GLM/Kimi full-enum models.
-  {
-    id: "deepseek-v4-flash-speed",
-    name: "DeepSeek V4 Flash (Speed)",
-    api: "openai-completions",
-    reasoning: true,
-    thinkingLevelMap: DISABLEABLE_FULL_MAP,
-    input: ["text"],
-    cost: { input: 0.14, output: 0.28, cacheRead: 0.028, cacheWrite: 0 },
-    contextWindow: 1048560,
-    maxTokens: 393216,
     compat: NEURALWATT_REASONING_COMPAT,
   },
 
@@ -404,66 +295,24 @@ export const STATIC_MODELS: ProviderChatModelConfig[] = [
     compat: NEURALWATT_REASONING_COMPAT,
   },
 
-  // --- Kimi K2.7 / K3 (MoonshotAI) ---
-  // kimi-k2.7-code was always-on originally (none still reasoned) but a
-  // re-probe in 2026-08 showed `none` now disables thinking, so off maps to
-  // "none". The K2.5 ids are hard-deprecated by the gateway (HTTP 410 "has
-  // been deprecated"); the K2.5 and K2.6 families no longer appear in
-  // /v1/models, so their static entries were removed to mirror the catalog.
+  // --- Kimi K3.1 Pro (MoonshotAI) ---
+  // Multimodal, 1M context. The catalog lists supported_efforts
+  // max/high/medium/low/none (none disables thinking) and aliases
+  // xhigh -> max and minimal -> low, so DISABLEABLE_FULL_MAP applies like
+  // nw-large, which tracks this model. Older Kimi families (K2.5, K2.6, K2.7,
+  // K3) no longer appear in /v1/models, so their static entries were removed
+  // to mirror the catalog.
   {
-    id: "kimi-k2.7-code",
-    name: "Kimi K2.7 Code",
+    id: "kimi-k3.1-pro",
+    name: "Kimi K3.1 Pro",
     api: "openai-completions",
     reasoning: true,
     thinkingLevelMap: DISABLEABLE_FULL_MAP,
     input: ["text", "image"],
-    cost: { input: 0.95, output: 4.0, cacheRead: 0.095, cacheWrite: 0 },
-    contextWindow: 262128,
-    maxTokens: 65536,
-    compat: NEURALWATT_REASONING_COMPAT,
-  },
-  // kimi-k2.7-code-fast is the fast sibling of kimi-k2.7-code and now reasons:
-  // catalog metadata lists reasoning:true, and a 2026-08 probe showed every
-  // effort returns HTTP 200 with `reasoning` output while `none` disables it.
-  // Registered as a reasoning model with the same map as its sibling.
-  {
-    id: "kimi-k2.7-code-fast",
-    name: "Kimi K2.7 Code Fast",
-    api: "openai-completions",
-    reasoning: true,
-    thinkingLevelMap: DISABLEABLE_FULL_MAP,
-    input: ["text", "image"],
-    cost: { input: 0.95, output: 4.0, cacheRead: 0.095, cacheWrite: 0 },
-    contextWindow: 262128,
-    maxTokens: 65536,
-    compat: NEURALWATT_REASONING_COMPAT,
-  },
-  // Probed 2026-08: none disables thinking and minimal through xhigh all
-  // return HTTP 200 with reasoning output, so the identity map is correct.
-  // The fast sibling produced no reasoning at high and follows its catalog's
-  // reasoning:false metadata.
-  {
-    id: "kimi-k3",
-    name: "Kimi K3",
-    api: "openai-completions",
-    reasoning: true,
-    thinkingLevelMap: DISABLEABLE_IDENTITY_MAP,
-    input: ["text", "image"],
-    cost: { input: 3.0, output: 15.0, cacheRead: 0.3, cacheWrite: 0 },
+    cost: { input: 2.0, output: 10.0, cacheRead: 0.2, cacheWrite: 0 },
     contextWindow: 1048560,
     maxTokens: 65536,
     compat: NEURALWATT_REASONING_COMPAT,
-  },
-  {
-    id: "kimi-k3-fast",
-    name: "Kimi K3 Fast",
-    api: "openai-completions",
-    reasoning: false,
-    input: ["text", "image"],
-    cost: { input: 3.0, output: 15.0, cacheRead: 0.3, cacheWrite: 0 },
-    contextWindow: 1048560,
-    maxTokens: 65536,
-    compat: NEURALWATT_COMPAT,
   },
 
   // --- Qwen (Qwen) ---
@@ -498,7 +347,7 @@ export const STATIC_MODELS: ProviderChatModelConfig[] = [
   // and `none` disables thinking, so the identity map with off:"none" is
   // correct. The catalog aliases max -> xhigh, so xhigh (not max) is the
   // gateway's real deepest level — identity through xhigh, unlike the
-  // GLM/Kimi full-enum models.
+  // Kimi full-enum models.
   {
     id: "qwen-3.8-27b",
     name: "Qwen3.8 27B",
