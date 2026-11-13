@@ -112,7 +112,7 @@ describe("neuralwatt-extension", () => {
     expect(catalog).toContain("| nw-large | 1M | yes | yes | $2.00 / $10.00 |");
     expect(catalog).toContain("| deepseek-v4.1-flash | 1M | yes | yes | $0.15 / $0.60 |");
     expect(catalog).toContain("| deepseek-v4.1-flash-speed | 1M | yes | yes | $0.15 / $0.60 |");
-    expect(catalog).toContain("| mimo-v2.6-pro | 1M | yes | yes | $0.87 / $1.74 |");
+    expect(catalog).toContain("| mimo-v2.6-pro | 1M | yes | yes | $0.435 / $0.87 |");
     expect(thinking).toContain("| kimi-k3.1-pro | none | minimal | low | medium | high | max |");
     expect(thinking).toContain(
       "| deepseek-v4.1-flash | none | minimal | low | medium | high | xhigh |",
@@ -246,7 +246,7 @@ describe("neuralwatt-extension", () => {
         name: "MiMo-V2.6-Pro",
         reasoning: true,
         input: ["text", "image"],
-        cost: { input: 0.87, output: 1.74, cacheRead: 0.036, cacheWrite: 0 },
+        cost: { input: 0.435, output: 0.87, cacheRead: 0.0036, cacheWrite: 0 },
         contextWindow: 1048560,
         maxTokens: 393216,
       }),

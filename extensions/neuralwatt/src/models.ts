@@ -377,7 +377,7 @@ export const STATIC_MODELS: ProviderChatModelConfig[] = [
     reasoning: true,
     thinkingLevelMap: DISABLEABLE_BINARY_MAP,
     input: ["text", "image"],
-    cost: { input: 0.87, output: 1.74, cacheRead: 0.036, cacheWrite: 0 },
+    cost: { input: 0.435, output: 0.87, cacheRead: 0.0036, cacheWrite: 0 },
     contextWindow: 1048560,
     maxTokens: 393216,
     compat: NEURALWATT_REASONING_COMPAT,

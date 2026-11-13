@@ -58,7 +58,7 @@ The catalog comes from Neuralwatt's `/v1/models` metadata. Pricing is per millio
 | glm-5.3 | 1M | yes | — | $1.45 / $4.50 |
 | glm-5.3-flash | 1M | yes | yes | $0.15 / $0.50 |
 | kimi-k3.1-pro | 1M | yes | yes | $2.00 / $10.00 |
-| mimo-v2.6-pro | 1M | yes | yes | $0.87 / $1.74 |
+| mimo-v2.6-pro | 1M | yes | yes | $0.435 / $0.87 |
 | nw-large | 1M | yes | yes | $2.00 / $10.00 |
 | nw-flash | 1M | yes | yes | $0.15 / $0.60 |
 | nw-small | 256K | yes | yes | $0.45 / $3.20 |
