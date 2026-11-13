@@ -75,27 +75,43 @@ export default async function neuralwattExtension(pi: ExtensionAPI) {
     }
   }
 
+  // Each session_start increments the generation. A startup run whose
+  // generation no longer matches belongs to a replaced session, so its flex
+  // result and emit are dropped instead of overwriting the live session's set.
+  let startupGeneration = 0;
+
   // Build the flex-capable set from the authenticated catalog. Silent on fetch
   // error so the indicator and toggle just report flex as unavailable.
-  async function loadFlexCapableIds(apiKey: string, signal: AbortSignal | undefined) {
-    flexCapableIds = await fetchFlexCapableIds(apiKey, signal);
+  async function loadFlexCapableIds(
+    apiKey: string,
+    signal: AbortSignal | undefined,
+    isCurrent: () => boolean,
+  ) {
+    const capable = await fetchFlexCapableIds(apiKey, signal);
+    if (isCurrent()) flexCapableIds = capable;
   }
 
   // Pi awaits session_start before the editor accepts input, so the handler
   // only resolves the key and returns. Both fetches run in the background and
   // in parallel; the warning and flex state arrive when they settle, at worst
   // one fetch timeout after startup. If Pi replaces the session or reloads
-  // before then, the captured ctx is stale and throws; the result is dropped.
+  // before then, a later session_start changes the generation and the stale
+  // run's flex result is dropped; a stale captured ctx also throws.
   pi.on("session_start", async (_event, ctx) => {
+    startupGeneration += 1;
+    const generation = startupGeneration;
+    const isCurrent = () => generation === startupGeneration;
     if (!ctx.hasUI) return;
     const apiKey = await getResolvedApiKey(ctx);
-    if (!apiKey) return;
+    if (!apiKey || !isCurrent()) return;
     const notify = (msg: string) => ctx.ui.notify(msg, "warning");
     void Promise.allSettled([
       checkCatalog(ctx.signal, notify),
-      loadFlexCapableIds(apiKey, ctx.signal),
+      loadFlexCapableIds(apiKey, ctx.signal, isCurrent),
     ])
-      .then(() => emitFlexState(ctx.model))
+      .then(() => {
+        if (isCurrent()) emitFlexState(ctx.model);
+      })
       .catch(() => {});
   });
 

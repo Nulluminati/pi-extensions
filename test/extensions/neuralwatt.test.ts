@@ -1380,4 +1380,45 @@ describe("neuralwatt flex integration", () => {
     const emit = mockPi.events.emit.mock.calls.find((c) => c[0] === FLEX_EVENT);
     expect(emit?.[1]).toEqual({ flexOn: false, flexCapable: true });
   });
+
+  it("drops a stale session_start result that settles after the live session's", async () => {
+    const mockPi = createMockPi();
+    await neuralwattExtension(mockPi);
+    const startHandler = getEventHandler(mockPi, "session_start");
+    const providerHandler = getEventHandler(mockPi, "before_provider_request");
+    const flexHandler = getCommandHandler(mockPi, "neuralwatt:flex");
+
+    // Session A starts, and its fetches stay pending.
+    const staleResolvers: Array<(r: Response) => void> = [];
+    mockFetch.mockImplementation(
+      () => new Promise<Response>((resolve) => staleResolvers.push(resolve)),
+    );
+    const staleCtx = createMockCommandContext();
+    staleCtx.model = makeModel("glm-5.2");
+    await startHandler({ type: "session_start", reason: "new" }, staleCtx);
+    await settleStartupChecks();
+
+    // The user switches to session B, whose fetches succeed.
+    mockFetch.mockReset();
+    mockFetch.mockResolvedValue(flexCatalog(["glm-5.2"]));
+    const liveCtx = createMockCommandContext();
+    liveCtx.model = makeModel("glm-5.2");
+    await startHandler({ type: "session_start", reason: "resume" }, liveCtx);
+    await settleStartupChecks();
+    await flexHandler("", liveCtx); // enable flex in session B
+
+    // A's fetches settle last and fail.
+    mockPi.events.emit.mockClear();
+    for (const resolve of staleResolvers) {
+      resolve({ ok: false, status: 500, statusText: "Server Error" } as Response);
+    }
+    await settleStartupChecks();
+
+    expect(mockPi.events.emit.mock.calls.filter((c) => c[0] === FLEX_EVENT)).toEqual([]);
+    const result = await providerHandler(
+      { type: "before_provider_request", payload: { model: "glm-5.2", messages: [] } },
+      liveCtx,
+    );
+    expect(result).toEqual({ model: "glm-5.2", messages: [], service_tier: "flex" });
+  });
 });
