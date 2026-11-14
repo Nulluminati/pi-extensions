@@ -363,7 +363,7 @@ Ephemeral spills with no retention go in `os.tmpdir()` with a `pi-<name>-` prefi
 
 ## `lib/json-atomic.ts` — atomic JSON writes
 
-Crash-safe state file writes: `writeJsonAtomic(path, data)` pretty-prints JSON. For plain text such as JSONL, use `writeTextAtomic(path, text)`. Both write and sync a `${path}.${pid}.${random}.tmp` sibling, then rename it over the target (rename is atomic). They create parent directories as needed and remove the temp file if rename fails. Use `writeJsonAtomic` for every persisted JSON state file (reservations, missions, registries).
+Crash-safe state file writes: `writeJsonAtomic(path, data)` pretty-prints JSON. For plain text such as JSONL, use `writeTextAtomic(path, text)`. Both write and sync a `${path}.${pid}.${random}.tmp` sibling, then rename it over the target (rename is atomic). They create parent directories as needed and remove the temp file if the write, sync, close, or rename fails. Use `writeJsonAtomic` for every persisted JSON state file (reservations, missions, registries).
 
 ## `lib/file-lock.ts` — cross-process advisory file lock
 

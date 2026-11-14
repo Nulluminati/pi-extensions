@@ -223,7 +223,7 @@ expect(harness.session.messages.filter((m) => m.role === "toolResult")).toMatchO
 await harness.dispose(); // emits session_shutdown, then removes the temporary directory
 ```
 
-Use `setup` to append persisted entries before `session_start`, and `shutdown()` to assert on cleanup before `dispose()`. The harness only works in the runtime suite: the default suite stubs `@earendil-works/pi-coding-agent`.
+Use `setup` to append persisted entries before `session_start`, and `shutdown()` to assert on cleanup before `dispose()`. Use `mode` (`"tui"`, `"rpc"`, `"json"`, or `"print"`) to set `ctx.mode`. Without it, Pi reports `"print"`. The harness only works in the runtime suite: the default suite stubs `@earendil-works/pi-coding-agent`.
 
 ### Extracting Handlers
 
