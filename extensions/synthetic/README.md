@@ -50,7 +50,7 @@ The extension calls `pi.registerProvider("synthetic", config)` at load time. The
 
 ### Static model catalog
 
-The extension ships a hardcoded list of always-on, tools-capable models with known pricing and capabilities (priced per million tokens, sourced from the live catalog). The table lists registered ids exactly as the live catalog reports them: `syn:` ids are first-class Synthetic catalog entries, and the rest carry the `hf:` prefix.
+The extension ships a hardcoded list of always-on, tools-capable models with known pricing and capabilities (priced per million tokens, sourced from the live catalog). The table lists registered ids exactly as the live catalog reports them: `syn:` ids are first-class Synthetic catalog entries, the `infinite:` id is included with the Big subscription plan, and the rest carry the `hf:` prefix.
 
 | Model | Context | Reasoning | Vision | Input/Output Cost |
 |-------|---------|-----------|--------|-------------------|
@@ -58,6 +58,7 @@ The extension ships a hardcoded list of always-on, tools-capable models with kno
 | syn:small:text | 196K | ✓ | — | $0.10 / $0.50 |
 | syn:large:vision | 524K | ✓ | ✓ | $3.00 / $15.00 |
 | syn:small:vision | 262K | ✓ | ✓ | $0.45 / $2.20 |
+| infinite:small:vision | 524K | ✓ | ✓ | $0 / $0 (Big plan) |
 | hf:zai-org/GLM-5.2 | 524K | ✓ | — | $1.00 / $3.00 |
 | hf:zai-org/GLM-5.3 | 524K | ✓ (always on) | — | $1.40 / $4.40 |
 | hf:zai-org/GLM-5.3-Flash | 524K | ✓ | ✓ | $0.15 / $0.50 |
