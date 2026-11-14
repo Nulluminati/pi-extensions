@@ -32,7 +32,7 @@ A goal is optional but useful: it tells the model what the next session should p
 
 1. **Transcript build** — Walks backward through the current branch and extracts the most recent user text, assistant text, and tool results until the transcript reaches its size limit. Each segment is bounded (a couple thousand characters for messages, a few hundred for tool results) so the input stays in a predictable size range.
 2. **Goal and transcript sent to the model** — When a goal is given, it opens the prompt; without one the goal line is omitted and the summary is steered by the transcript alone. `completeSimple` from `@earendil-works/pi-ai` is called with a system prompt that asks for a concise continuation prompt: original request, what's done, key decisions, files touched, what remains, concrete next steps. No greetings, no code fences, no meta-commentary.
-3. **Output validation** — Empty or unparseable responses surface as a notification; the handoff is cancelled.
+3. **Output validation** — Empty or unparseable responses surface as a notification; the handoff is cancelled. A provider error or an aborted request also cancels the handoff, and the notification gives the provider's error message.
 
 ### Review and edit
 
