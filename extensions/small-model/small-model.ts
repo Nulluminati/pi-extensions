@@ -14,6 +14,7 @@ import {
   resolveSmallModelConfigPath,
   resolveSmallModelFromConfig,
   SMALL_MODEL_ENV_VAR,
+  SMALL_MODEL_THINKING_ENV_VAR,
 } from "../../lib/small-model.ts";
 import { applyConfig, applyThinkingLevel, parseCommandConfig, selectModel } from "./src/config.ts";
 import { STATUS_ICON, STATUS_KEY, THINKING_LEVELS } from "./src/constants.ts";
@@ -102,6 +103,15 @@ export default async function smallModelExtension(pi: ExtensionAPI) {
 
       const tokens = trimmed.split(/\s+/).filter(Boolean);
       if (tokens[0] === "thinking") {
+        if (process.env[SMALL_MODEL_THINKING_ENV_VAR]?.trim()) {
+          ctx.ui.notify(
+            `${SMALL_MODEL_THINKING_ENV_VAR} is overriding the thinking level. Unset it before using /smallmodel thinking.`,
+            "warning",
+          );
+          await updateStatus(ctx);
+          return;
+        }
+
         const requestedLevel = tokens[1];
         if (
           tokens.length !== 2 ||

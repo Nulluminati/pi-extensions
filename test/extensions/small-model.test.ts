@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import smallModelExtension, { STATUS_ICON } from "../../extensions/small-model/small-model.ts";
+import { loadSmallModelConfig } from "../../lib/small-model.ts";
 import { createMockCommandContext, createMockModel } from "../mocks/context-mocks.ts";
 import { mockFn } from "../mocks/mock-types.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
@@ -218,6 +219,113 @@ describe("small-model-extension", () => {
     });
     expect(ctx.ui.notify).toHaveBeenCalledWith(
       "Global small model set to opencode-go/deepseek-flash (high).",
+      "info",
+    );
+  });
+
+  it.each(["high", " high ", "invalid"])(
+    "refuses thinking changes without writing the config when PI_SMALL_MODEL_THINKING=%j",
+    async (override) => {
+      const path = configPath();
+      vi.stubEnv("PI_SMALL_MODEL_CONFIG", path);
+      vi.stubEnv("PI_SMALL_MODEL", "");
+      vi.stubEnv("PI_SMALL_MODEL_THINKING", override);
+      const saved = JSON.stringify({
+        provider: "synthetic",
+        model: "syn:small:text",
+        thinkingLevel: "minimal",
+      });
+      writeFileSync(path, saved);
+      const pi = createMockPi();
+      const ctx = createMockCommandContext();
+      ctx.modelRegistry.find = vi.fn(() =>
+        createMockModel({ provider: "synthetic", id: "syn:small:text", reasoning: true }),
+      );
+      await smallModelExtension(pi);
+
+      await getCommandHandler(pi, "smallmodel")("thinking off", ctx);
+
+      expect(ctx.ui.notify).toHaveBeenCalledExactlyOnceWith(
+        "PI_SMALL_MODEL_THINKING is overriding the thinking level. Unset it before using /smallmodel thinking.",
+        "warning",
+      );
+      expect(readFileSync(path, "utf8")).toBe(saved);
+      if (override.trim() !== "invalid") {
+        expect(loadSmallModelConfig().config.thinkingLevel).toBe("high");
+        expect(ctx.ui.setStatus).toHaveBeenCalledWith(
+          "small-model",
+          expect.stringContaining("high"),
+        );
+      }
+    },
+  );
+
+  it.each(["", "   "])(
+    "allows thinking changes when the thinking override is %j",
+    async (override) => {
+      const path = configPath();
+      vi.stubEnv("PI_SMALL_MODEL_CONFIG", path);
+      vi.stubEnv("PI_SMALL_MODEL", "");
+      vi.stubEnv("PI_SMALL_MODEL_THINKING", override);
+      writeFileSync(
+        path,
+        JSON.stringify({
+          provider: "synthetic",
+          model: "syn:small:text",
+          thinkingLevel: "minimal",
+        }),
+      );
+      const pi = createMockPi();
+      const ctx = createMockCommandContext();
+      ctx.modelRegistry.find = vi.fn(() =>
+        createMockModel({ provider: "synthetic", id: "syn:small:text", reasoning: true }),
+      );
+      await smallModelExtension(pi);
+
+      await getCommandHandler(pi, "smallmodel")("thinking off", ctx);
+
+      expect(loadSmallModelConfig().config.thinkingLevel).toBe("off");
+      expect(ctx.ui.notify).toHaveBeenCalledExactlyOnceWith(
+        "Global small model set to synthetic/syn:small:text (off).",
+        "info",
+      );
+    },
+  );
+
+  it("keeps model selection and status available with a thinking override", async () => {
+    const path = configPath();
+    vi.stubEnv("PI_SMALL_MODEL_CONFIG", path);
+    vi.stubEnv("PI_SMALL_MODEL", "");
+    vi.stubEnv("PI_SMALL_MODEL_THINKING", "high");
+    writeFileSync(
+      path,
+      JSON.stringify({ provider: "synthetic", model: "syn:small:text", thinkingLevel: "minimal" }),
+    );
+    const pi = createMockPi();
+    const ctx = createMockCommandContext();
+    ctx.modelRegistry.find = vi.fn(() =>
+      createMockModel({ provider: "synthetic", id: "other-small", reasoning: true }),
+    );
+    await smallModelExtension(pi);
+    const command = getCommandHandler(pi, "smallmodel");
+
+    await command("synthetic/other-small", ctx);
+
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
+      provider: "synthetic",
+      model: "other-small",
+      thinkingLevel: "high",
+    });
+    expect(ctx.ui.notify).toHaveBeenCalledExactlyOnceWith(
+      "Global small model set to synthetic/other-small (high).",
+      "info",
+    );
+    ctx.ui.notify.mockClear();
+
+    await command("status", ctx);
+
+    expect(ctx.ui.notify).toHaveBeenCalledExactlyOnceWith(
+      "Global small model is synthetic/other-small (high, config).",
       "info",
     );
   });
