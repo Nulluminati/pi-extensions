@@ -24,6 +24,14 @@ export function handleFocusOut(pi: ExtensionAPI, ctx: ExtensionContext) {
   void generateAndShow(pi, ctx, { reason: "focus" });
 }
 
+/** Parse the --recap-focus-min-seconds flag. A value that is not finite
+ *  ("3s", "abc") or negative falls back to the default, mirroring the
+ *  Number.isFinite guard in scheduleIdleRecap. */
+function parseFocusMinSeconds(flag: string | boolean | undefined): number {
+  const value = Number(flag ?? DEFAULT_FOCUS_MIN_SECONDS);
+  return Number.isFinite(value) && value >= 0 ? value : DEFAULT_FOCUS_MIN_SECONDS;
+}
+
 export function handleFocusIn(pi: ExtensionAPI, ctx: ExtensionContext) {
   const state = getState(pi);
   const outAt = state.focusedOutAt;
@@ -32,7 +40,7 @@ export function handleFocusIn(pi: ExtensionAPI, ctx: ExtensionContext) {
   if (outAt === undefined) return;
 
   const duration = Date.now() - outAt;
-  const minMs = Number(pi.getFlag("recap-focus-min-seconds") ?? DEFAULT_FOCUS_MIN_SECONDS) * 1000;
+  const minMs = parseFocusMinSeconds(pi.getFlag("recap-focus-min-seconds")) * 1000;
   if (duration < minMs) {
     state.pendingRecap = undefined;
     state.lastDraftedLeafId = undefined;

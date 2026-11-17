@@ -873,10 +873,86 @@ describe("session-recap-extension", () => {
     listener!(Buffer.from("\x1b[I"));
 
     // Should not show the recap
+    // Should not show the recap
     const recapCalls = (mockCtx.ui.setWidget as ReturnType<typeof vi.fn>).mock.calls.filter(
       (call) => call[0] === STRIP_KEY_ABOVE && call[1] !== undefined,
     );
     expect(recapCalls.length).toBe(0);
+  });
+
+  it.each(["3s", "-1", "abc"])(
+    "invalid recap-focus-min-seconds value %s falls back to the default gate",
+    async (invalidValue) => {
+      const tty = mockTTY();
+      const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+      vi.mocked(completeSimple).mockResolvedValueOnce(
+        fauxAssistantMessage([{ type: "text", text: "recap: some work done" }]),
+      );
+
+      const mockPi = createMockPi();
+      mockPi.getFlag = vi.fn((name: string) => {
+        if (name === "recap-focus-min-seconds") return invalidValue;
+        return undefined;
+      });
+      const mockCtx = createMockCommandContext();
+      mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildMeaningfulBranch()));
+      mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
+      await sessionRecapExtension(mockPi);
+
+      const sessionStartHandler = getEventHandler(mockPi, "session_start");
+      await sessionStartHandler({ type: "session_start", reason: "new" }, mockCtx);
+
+      const listener = tty.capturedListener;
+      expect(listener).toBeDefined();
+      listener!(Buffer.from("\x1b[O"));
+
+      await vi.waitFor(() => expect(completeSimple).toHaveBeenCalled());
+
+      // A 1 s glance stays below the 3 s default and must not show the recap
+      vi.advanceTimersByTime(1000);
+      listener!(Buffer.from("\x1b[I"));
+
+      const recapCalls = (mockCtx.ui.setWidget as ReturnType<typeof vi.fn>).mock.calls.filter(
+        (call) => call[0] === STRIP_KEY_ABOVE && call[1] !== undefined,
+      );
+      expect(recapCalls.length).toBe(0);
+    },
+  );
+
+  it("a valid recap-focus-min-seconds value below the glance length still shows the recap", async () => {
+    const tty = mockTTY();
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+    vi.mocked(completeSimple).mockResolvedValueOnce(
+      fauxAssistantMessage([{ type: "text", text: "recap: some work done" }]),
+    );
+
+    const mockPi = createMockPi();
+    mockPi.getFlag = vi.fn((name: string) => {
+      if (name === "recap-focus-min-seconds") return "1";
+      return undefined;
+    });
+    const mockCtx = createMockCommandContext();
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildMeaningfulBranch()));
+    mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
+    await sessionRecapExtension(mockPi);
+
+    const sessionStartHandler = getEventHandler(mockPi, "session_start");
+    await sessionStartHandler({ type: "session_start", reason: "new" }, mockCtx);
+
+    const listener = tty.capturedListener;
+    expect(listener).toBeDefined();
+    listener!(Buffer.from("\x1b[O"));
+
+    await vi.waitFor(() => expect(completeSimple).toHaveBeenCalled());
+
+    // 1 s meets the configured 1 s minimum, so the recap shows
+    vi.advanceTimersByTime(1000);
+    listener!(Buffer.from("\x1b[I"));
+
+    const recapCalls = (mockCtx.ui.setWidget as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (call) => call[0] === STRIP_KEY_ABOVE && call[1] !== undefined,
+    );
+    expect(recapCalls.length).toBeGreaterThan(0);
   });
 
   // --- Prompt budget tests ---
