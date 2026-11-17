@@ -27,8 +27,8 @@ export function getModelLabel(ctx: ExtensionCommandContext): string {
 
 /**
  * Build the title segments shown in the editor's top border. The main group
- * comes first — model (accent), thinking level (color-coded per level, muted
- * when off), and a flex badge when the model is flex-capable. When a small
+ * comes first — model (accent), thinking level (color-coded per level),
+ * and a flex badge when the model is flex-capable. When a small
  * model is configured, a dim "/" introduces its label, rendered grey to read
  * as subordinate to the main model. Segments are pre-colored so the frame
  * function stays a pure layout concern.

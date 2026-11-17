@@ -904,24 +904,34 @@ describe("status-bar-extension", () => {
     expect(lines.join("\n")).toContain("↑500");
   });
 
-  it("editor metadata line color-codes the thinking level (low/medium/high)", async () => {
+  it.each([
+    ["off", "thinkingOff"],
+    ["minimal", "thinkingMinimal"],
+    ["low", "thinkingLow"],
+    ["medium", "thinkingMedium"],
+    ["high", "thinkingHigh"],
+    ["xhigh", "thinkingXhigh"],
+    ["max", "thinkingMax"],
+  ] as const)("editor metadata line colors %s with %s", async (level, color) => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
     await enableBar(mockPi, mockCtx);
 
-    for (const [level, color] of [
-      ["low", "thinkingLow"],
-      ["medium", "thinkingMedium"],
-      ["high", "thinkingHigh"],
-    ] as const) {
-      mockPi.getThinkingLevel = vi.fn(() => level);
-      const fgMock = vi.fn((_c: string, t: string) => t);
-      // biome-ignore lint/suspicious/noExplicitAny: test mock
-      (mockCtx.ui as any).theme = { fg: fgMock };
-      const editor = renderInstalledEditor(mockCtx);
-      editor.render(80);
-      expect(fgMock).toHaveBeenCalledWith(color, expect.stringContaining(level));
-    }
+    mockPi.getThinkingLevel = vi.fn(() => level);
+    const fgMock = vi.fn((_c: string, t: string) => t);
+    mockCtx.ui.theme.fg = fgMock;
+    const editor = renderInstalledEditor(mockCtx);
+    editor.render(80);
+    expect(fgMock).toHaveBeenCalledWith(color, expect.stringContaining(level));
+  });
+
+  it.each([
+    ["unknown", "unknown"],
+    ["", "none"],
+  ])("editor metadata line uses muted for unsupported thinking level %j", (level, label) => {
+    const fgMock = vi.fn((_c: string, t: string) => t);
+    buildEditorMetaSegments("model", level, { on: false, capable: false }, "", { fg: fgMock });
+    expect(fgMock).toHaveBeenCalledWith("muted", expect.stringContaining(label));
   });
 
   // --- Git status indicators (Starship-style) ---

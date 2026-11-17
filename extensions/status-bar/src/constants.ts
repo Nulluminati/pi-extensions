@@ -73,9 +73,13 @@ export const ICON_DELETED = "✘";
 export const ICON_TYPECHANGED = "T";
 
 export const THINKING_THEME_COLOR: Record<string, string> = {
+  off: "thinkingOff",
+  minimal: "thinkingMinimal",
   low: "thinkingLow",
   medium: "thinkingMedium",
   high: "thinkingHigh",
+  xhigh: "thinkingXhigh",
+  max: "thinkingMax",
 };
 
 // Distinct hues per token indicator, drawn from the theme's harmonized
