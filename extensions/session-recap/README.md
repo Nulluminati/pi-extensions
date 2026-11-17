@@ -24,7 +24,7 @@ The extension generates recaps automatically in three scenarios:
 
 1. **Focus reporting** — When your terminal loses focus (you switch to another window/app), a recap is drafted in the background. When you switch back, if you were away for at least 3 seconds, the recap is revealed. Quick glances (< 3 seconds) are ignored.
 2. **Idle fallback** — After each `turn_end`, a timer starts (default 45 seconds). If no new activity occurs, a recap is generated.
-3. **Session resume/fork** — When Pi starts with `reason: "resume"` or `"fork"`, a recap is generated after a 300ms delay to summarize where the prior session left off.
+3. **Session resume/fork** — When Pi starts with `reason: "resume"` or `"fork"`, a recap is generated after a 300ms delay to summarize where the prior session left off. User input, `agent_start`, or `turn_start` before the delay elapses cancels it: a session that already moved on needs no orientation.
 
 ## How It Works
 
@@ -51,8 +51,8 @@ If focus-out occurs while the agent is actively running (and `--recap-during-act
 
 ### Cancellation and cleanup
 
-- **User input** — Clears any displayed recap and cancels pending idle timers and active LLM requests
-- **Turn start** — Cancels idle timers and active LLM requests
+- **User input** — Clears any displayed recap and cancels pending idle/resume timers and active LLM requests
+- **Turn start** — Cancels idle/resume timers and active LLM requests
 - **Agent start** — Clears displayed recap and cancels pending work
 - **Branch navigation** — If the last message entry changes during recap generation, the result is discarded
 
@@ -91,7 +91,7 @@ All state is stored in a `WeakMap<ExtensionAPI, RecapState>` with the following 
 | `pi.registerCommand("recap")` | Manual `/recap` command |
 | `pi.registerFlag()` | Configuration flags for idle time, focus min, disable, etc. |
 | `pi.on("turn_end")` | Schedules idle recap timer |
-| `pi.on("turn_start")` | Cancels idle timer and active requests |
+| `pi.on("turn_start")` | Cancels idle/resume timers and active requests |
 | `pi.on("input")` | Clears displayed recap and cancels pending work |
 | `pi.on("agent_start")` | Tracks agent active state |
 | `pi.on("agent_end")` | Generates deferred focus recaps |

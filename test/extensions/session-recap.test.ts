@@ -299,6 +299,93 @@ describe("session-recap-extension", () => {
     ).toBe(false);
   });
 
+  it("input cancels the pending resume recap", async () => {
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+    vi.mocked(completeSimple).mockResolvedValueOnce(
+      fauxAssistantMessage([{ type: "text", text: "recap: fixed the auth bug" }]),
+    );
+
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildMeaningfulBranch()));
+    mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
+    await sessionRecapExtension(mockPi);
+
+    const startHandler = getEventHandler(mockPi, "session_start");
+    await startHandler({ type: "session_start", reason: "resume" }, mockCtx);
+
+    // The user types before the 300 ms resume delay elapses: the pending
+    // recap must not fire on a session the user has already moved past.
+    const inputHandler = getEventHandler(mockPi, "input");
+    await inputHandler({ type: "input", text: "continue", source: "interactive" }, mockCtx);
+
+    await vi.advanceTimersByTimeAsync(400);
+    expect(completeSimple).not.toHaveBeenCalled();
+    expect(
+      mockCtx.ui.setWidget.mock.calls.some(
+        (call: unknown[]) => call[0] === STRIP_KEY_ABOVE && typeof call[1] === "function",
+      ),
+    ).toBe(false);
+  });
+
+  it("turn_start cancels the pending resume recap", async () => {
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+    vi.mocked(completeSimple).mockResolvedValueOnce(
+      fauxAssistantMessage([{ type: "text", text: "recap: fixed the auth bug" }]),
+    );
+
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildMeaningfulBranch()));
+    mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
+    await sessionRecapExtension(mockPi);
+
+    const startHandler = getEventHandler(mockPi, "session_start");
+    await startHandler({ type: "session_start", reason: "resume" }, mockCtx);
+
+    // A queued message starts a turn before the resume delay elapses: the
+    // recap must not fire mid-turn.
+    const turnStartHandler = getEventHandler(mockPi, "turn_start");
+    await turnStartHandler({ type: "turn_start", turnIndex: 1, timestamp: Date.now() });
+
+    await vi.advanceTimersByTimeAsync(400);
+    expect(completeSimple).not.toHaveBeenCalled();
+    expect(
+      mockCtx.ui.setWidget.mock.calls.some(
+        (call: unknown[]) => call[0] === STRIP_KEY_ABOVE && typeof call[1] === "function",
+      ),
+    ).toBe(false);
+  });
+
+  it("agent_start cancels the pending resume recap", async () => {
+    const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+    vi.mocked(completeSimple).mockResolvedValueOnce(
+      fauxAssistantMessage([{ type: "text", text: "recap: fixed the auth bug" }]),
+    );
+
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildMeaningfulBranch()));
+    mockCtx.sessionManager.getLeafId = vi.fn(() => "leaf-1");
+    await sessionRecapExtension(mockPi);
+
+    const startHandler = getEventHandler(mockPi, "session_start");
+    await startHandler({ type: "session_start", reason: "resume" }, mockCtx);
+
+    // The agent starts before the resume delay elapses: the recap must not
+    // fire while the turn is running.
+    const agentStartHandler = getEventHandler(mockPi, "agent_start");
+    await agentStartHandler({ type: "agent_start" }, mockCtx);
+
+    await vi.advanceTimersByTimeAsync(400);
+    expect(completeSimple).not.toHaveBeenCalled();
+    expect(
+      mockCtx.ui.setWidget.mock.calls.some(
+        (call: unknown[]) => call[0] === STRIP_KEY_ABOVE && typeof call[1] === "function",
+      ),
+    ).toBe(false);
+  });
+
   it("turn_end schedules idle recap", async () => {
     const { completeSimple } = await import("@earendil-works/pi-ai/compat");
     vi.mocked(completeSimple).mockResolvedValueOnce(

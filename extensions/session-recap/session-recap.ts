@@ -79,6 +79,10 @@ export default async function sessionRecapExtension(pi: ExtensionAPI) {
       clearTimeout(state.idleTimer);
       state.idleTimer = undefined;
     }
+    if (state.resumeTimer) {
+      clearTimeout(state.resumeTimer);
+      state.resumeTimer = undefined;
+    }
     if (state.activeController) {
       state.activeController.abort();
       state.activeController = undefined;
@@ -93,6 +97,10 @@ export default async function sessionRecapExtension(pi: ExtensionAPI) {
     if (state.idleTimer) {
       clearTimeout(state.idleTimer);
       state.idleTimer = undefined;
+    }
+    if (state.resumeTimer) {
+      clearTimeout(state.resumeTimer);
+      state.resumeTimer = undefined;
     }
     if (state.activeController) {
       state.activeController.abort();
@@ -111,6 +119,10 @@ export default async function sessionRecapExtension(pi: ExtensionAPI) {
     if (state.idleTimer) {
       clearTimeout(state.idleTimer);
       state.idleTimer = undefined;
+    }
+    if (state.resumeTimer) {
+      clearTimeout(state.resumeTimer);
+      state.resumeTimer = undefined;
     }
     if (state.activeController) {
       state.activeController.abort();
