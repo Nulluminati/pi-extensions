@@ -92,36 +92,48 @@ export default async function handoffExtension(pi: ExtensionAPI) {
       // modal on the mode instead of on hasUI.
       let summary: SummaryResult | undefined;
       if (ctx.mode === "tui") {
-        const pending = generateSummary(transcript, goal, ctx);
-        summary = await ctx.ui.custom<SummaryResult>((tui, theme, _keybindings, done) => {
-          // Resolve the modal when the summary finishes; generation started
-          // before the modal opened so no time is lost to the paint.
-          void pending.then(done);
+        // Escape aborts the request through this controller and closes the
+        // modal, so a stalled provider cannot block the session.
+        const cancelController = new AbortController();
+        const pending = generateSummary(transcript, goal, ctx, cancelController.signal);
+        summary = await ctx.ui.custom<SummaryResult | undefined>(
+          (tui, theme, keybindings, done) => {
+            // Resolve the modal when the summary finishes; generation started
+            // before the modal opened so no time is lost to the paint. After
+            // an Escape the promise is already resolved, so this is a no-op.
+            void pending.then(done);
 
-          const t = tui as { requestRender: () => void };
-          let frameIndex = 0;
-          const tick = setInterval(() => t.requestRender(), SPINNER_INTERVAL_MS);
-          tick.unref();
+            const t = tui as { requestRender: () => void };
+            let frameIndex = 0;
+            const tick = setInterval(() => t.requestRender(), SPINNER_INTERVAL_MS);
+            tick.unref();
 
-          return {
-            render(width: number): string[] {
-              const frame = SPINNER_FRAMES[frameIndex % SPINNER_FRAMES.length] ?? "⠋";
-              frameIndex++;
-              const spinner = theme.fg("accent", frame);
-              const text = theme.fg("dim", "Generating summary…");
-              return renderModalFrame(theme, width, [`${spinner} ${text}`], {
-                title: "Handoff",
-              });
-            },
-            invalidate(): void {},
-            // Swallow input: the modal is informational and closes itself
-            // when the summary lands.
-            handleInput(): void {},
-            dispose(): void {
-              clearInterval(tick);
-            },
-          };
-        });
+            return {
+              render(width: number): string[] {
+                const frame = SPINNER_FRAMES[frameIndex % SPINNER_FRAMES.length] ?? "⠋";
+                frameIndex++;
+                const spinner = theme.fg("accent", frame);
+                const text = theme.fg("dim", "Generating summary…");
+                return renderModalFrame(theme, width, [`${spinner} ${text}`], {
+                  title: "Handoff",
+                });
+              },
+              invalidate(): void {},
+              // Escape cancels the handoff and aborts the request; the modal
+              // also closes itself when the summary finishes or fails. Other
+              // keys are swallowed: the modal is informational.
+              handleInput(data: string): void {
+                if (keybindings.matches(data, "tui.select.cancel")) {
+                  cancelController.abort();
+                  done(undefined);
+                }
+              },
+              dispose(): void {
+                clearInterval(tick);
+              },
+            };
+          },
+        );
         summary = toSummaryResult(summary);
       } else {
         summary = await generateSummary(transcript, goal, ctx);

@@ -32,7 +32,7 @@ A goal is optional but useful: it tells the model what the next session should p
 
 1. **Transcript build** — Walks backward through the current branch and extracts the most recent user text, assistant text, and tool results until the transcript reaches its size limit. Each segment is bounded (a couple thousand characters for messages, a few hundred for tool results) so the input stays in a predictable size range.
 2. **Goal and transcript sent to the model** — When a goal is given, it opens the prompt; without one the goal line is omitted and the summary is steered by the transcript alone. `completeSimple` from `@earendil-works/pi-ai` is called with a system prompt that asks for a concise continuation prompt: original request, what's done, key decisions, files touched, what remains, concrete next steps. No greetings, no code fences, no meta-commentary.
-3. **Output validation** — Empty or unparseable responses surface as a notification; the handoff is cancelled. A provider error or an aborted request also cancels the handoff, and the notification gives the provider's error message.
+3. **Output validation** — Empty or unparseable responses surface as a notification; the handoff is cancelled. A provider error or an aborted request also cancels the handoff, and the notification gives the provider's error message. The request carries a 60-second timeout and its own abort signal, so a stalled provider closes the modal with an error instead of hanging the session.
 
 ### Review and edit
 
@@ -46,7 +46,7 @@ The new session name comes from the goal, capitalized and truncated for display;
 
 ### Loading modal
 
-While the summary is generating, a framed modal (`ctx.ui.custom`, the same `renderModalFrame` chrome as the input modals) shows a braille spinner with "Generating summary…". Input is swallowed while it is up; it closes itself when generation finishes or fails, then the review editor opens (or an error notification is shown).
+While the summary is generating, a framed modal (`ctx.ui.custom`, the same `renderModalFrame` chrome as the input modals) shows a braille spinner with "Generating summary…". Escape cancels the handoff and aborts the request; other keys are swallowed. The modal also closes itself when generation finishes or fails (a stalled provider gives up after 60 seconds), then the review editor opens (or an error notification is shown).
 
 The modal is TUI-only. `ctx.hasUI` is also true in RPC mode, but RPC mode resolves `ctx.ui.custom()` to `undefined`, so the gate is `ctx.mode === "tui"`. RPC mode generates the summary without a modal and still opens the review editor. Print and JSON modes (`ctx.hasUI` false) stop at once with "handoff needs an interactive session" on stderr: they have no review editor or new session, and Pi forwards `process.stdout` to stderr in those modes, so the summary cannot reach stdout. A custom result that is not a summary result counts as a cancellation.
 
@@ -55,6 +55,7 @@ The modal is TUI-only. `ctx.hasUI` is also true in RPC mode, but RPC mode resolv
 - **Goal-guided summary** — A goal is part of the LLM prompt when given, not just metadata; without one the model infers the focus from the transcript. A good summary needs to know what it's summarizing *toward*.
 - **Editable output, not auto-sent** — The user reviews the summary before the new session opens. Auto-sending would lose the chance to correct a confused model.
 - **`completeSimple`, not `complete`** — The summary doesn't need streaming, tool calls, or full message construction. The simpler API is enough and avoids extra payload.
+- **Bounded request** — The summary call always carries an abort signal (its own, chained from the modal's cancel path) and a 60-second timeout, because a slash command runs while the agent is idle and not every provider adapter sets a default request timeout. A stalled provider surfaces as a normal error notification.
 - **Bounded transcript** — The source branch is summarized, not copied. Without bounds, a long session would blow the model's input window and produce a worse summary.
 - **Parent session recorded** — Linking the new session back to the old one keeps the conversation graph intact for later inspection.
 - **No new state, no persistence** — Handoff is a single command. There's nothing to reconstruct on reload, so it stays stateless.

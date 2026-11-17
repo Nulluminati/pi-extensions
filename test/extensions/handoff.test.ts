@@ -4,10 +4,12 @@ import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import handoffExtension from "../../extensions/handoff/handoff.ts";
+import { generateSummary } from "../../extensions/handoff/src/summary.ts";
 import { createMockCommandContext, createMockModel } from "../mocks/context-mocks.ts";
 import { mockFn } from "../mocks/mock-types.ts";
 import { createMockPi } from "../mocks/pi-mocks.ts";
 import {
+  fakeKeybindings,
   fakeTui,
   firstContentText,
   getCommandHandler,
@@ -590,6 +592,122 @@ describe("handoff-extension", () => {
       expect(mockCtx.ui.notify).toHaveBeenCalledWith("Handoff cancelled.", "info");
       expect(mockCtx.ui.editor).not.toHaveBeenCalled();
       expect(mockCtx.newSession).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("summary timeout and cancellation", () => {
+    it("bounds the request with a timeout signal and timeoutMs", async () => {
+      const mockCtx = createMockCommandContext();
+      const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+      vi.mocked(completeSimple).mockResolvedValue(
+        fauxAssistantMessage([{ type: "text", text: "summary text" }]),
+      );
+
+      const result = await generateSummary("transcript", "goal", mockCtx);
+
+      expect(result).toEqual({ ok: true, text: "summary text" });
+      const options = vi.mocked(completeSimple).mock.calls[0][2];
+      expect(options?.signal).toBeInstanceOf(AbortSignal);
+      expect(options?.signal?.aborted).toBe(false);
+      expect(options?.timeoutMs).toBe(60_000);
+    });
+
+    it("aborts the request after 60 seconds and reports a timeout", async () => {
+      vi.useFakeTimers();
+      const mockCtx = createMockCommandContext();
+      const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+      vi.mocked(completeSimple).mockImplementation(
+        (_model, _messages, options) =>
+          new Promise((resolve) => {
+            options?.signal?.addEventListener("abort", () => {
+              resolve(fauxAssistantMessage([], { stopReason: "aborted" }));
+            });
+          }),
+      );
+
+      const pending = generateSummary("transcript", "goal", mockCtx);
+      await vi.advanceTimersByTimeAsync(60_000);
+      const result = await pending;
+
+      expect(result).toEqual({
+        ok: false,
+        error: "Failed to generate handoff summary: request timed out after 60 seconds",
+      });
+    });
+
+    it("aborts the request when the caller cancels, without reporting a timeout", async () => {
+      const mockCtx = createMockCommandContext();
+      const cancel = new AbortController();
+      const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+      vi.mocked(completeSimple).mockImplementation(
+        (_model, _messages, options) =>
+          new Promise((resolve) => {
+            const settleAborted = () => {
+              resolve(fauxAssistantMessage([], { stopReason: "aborted" }));
+            };
+            // Real adapters check signal.aborted at call time; a listener on an
+            // already-aborted signal never fires.
+            if (options?.signal?.aborted) {
+              settleAborted();
+              return;
+            }
+            options?.signal?.addEventListener("abort", settleAborted);
+          }),
+      );
+
+      const pending = generateSummary("transcript", "goal", mockCtx, cancel.signal);
+      cancel.abort();
+      const result = await pending;
+
+      expect(result).toEqual({
+        ok: false,
+        error: "Failed to generate handoff summary: aborted",
+      });
+    });
+
+    it("cancels a stuck summary modal on Escape and aborts the request", async () => {
+      const mockPi = createMockPi();
+      const mockCtx = createMockCommandContext();
+      mockCtx.sessionManager.getBranch = vi.fn(() => sessionEntries(buildBranch()));
+      const keybindings = fakeKeybindings(
+        (data, keybinding) => keybinding === "tui.select.cancel" && data === "\x1b",
+      );
+      let modalComponent: { handleInput(data: string): void; dispose?(): void } | undefined;
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      mockCtx.ui.custom = mockFn((factory: any) => {
+        return new Promise((resolve) => {
+          modalComponent = factory(fakeTui(), mockCtx.ui.theme, keybindings, resolve);
+        });
+      });
+
+      const { completeSimple } = await import("@earendil-works/pi-ai/compat");
+      vi.mocked(completeSimple).mockImplementation(
+        (_model, _messages, options) =>
+          new Promise((resolve) => {
+            const settleAborted = () => {
+              resolve(fauxAssistantMessage([], { stopReason: "aborted" }));
+            };
+            // Real adapters check signal.aborted at call time; a listener on an
+            // already-aborted signal never fires.
+            if (options?.signal?.aborted) {
+              settleAborted();
+              return;
+            }
+            options?.signal?.addEventListener("abort", settleAborted);
+          }),
+      );
+
+      const handlerRun = runHandoff(mockPi, mockCtx, "finish the refactor");
+      await vi.waitFor(() => expect(modalComponent).toBeDefined());
+      modalComponent?.handleInput("\x1b");
+      await handlerRun;
+      modalComponent?.dispose?.();
+
+      expect(mockCtx.ui.notify).toHaveBeenCalledWith("Handoff cancelled.", "info");
+      expect(mockCtx.ui.editor).not.toHaveBeenCalled();
+      expect(mockCtx.newSession).not.toHaveBeenCalled();
+      const options = vi.mocked(completeSimple).mock.calls[0][2];
+      expect(options?.signal?.aborted).toBe(true);
     });
   });
 
