@@ -556,11 +556,7 @@ describe("session-recap-extension", () => {
       "Recap generation returned no output.",
       "warning",
     );
-    expect(mockCtx.ui.setWidget).not.toHaveBeenCalledWith(
-      "session-recap",
-      expect.any(Function),
-      expect.anything(),
-    );
+    expect(mockCtx.ui.setWidget).not.toHaveBeenCalledWith(STRIP_KEY_ABOVE, expect.any(Function));
   });
 
   it("/recap still shows when only a custom entry (e.g. todos-state) is appended during generation", async () => {
@@ -623,11 +619,7 @@ describe("session-recap-extension", () => {
     releaseGeneration(fauxAssistantMessage([{ type: "text", text: "recap: stale" }]));
     await recapDone;
 
-    expect(mockCtx.ui.setWidget).not.toHaveBeenCalledWith(
-      "session-recap",
-      expect.any(Function),
-      expect.anything(),
-    );
+    expect(mockCtx.ui.setWidget).not.toHaveBeenCalledWith(STRIP_KEY_ABOVE, expect.any(Function));
   });
 
   it("uses the global small model instead of the active model", async () => {
@@ -882,7 +874,7 @@ describe("session-recap-extension", () => {
 
     // Should not show the recap
     const recapCalls = (mockCtx.ui.setWidget as ReturnType<typeof vi.fn>).mock.calls.filter(
-      (call) => call[0] === "session-recap" && call[1] !== undefined,
+      (call) => call[0] === STRIP_KEY_ABOVE && call[1] !== undefined,
     );
     expect(recapCalls.length).toBe(0);
   });
