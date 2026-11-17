@@ -73,14 +73,29 @@ export function renderModalFrame(
   const border = (text: string) => theme.fg("borderAccent", text);
   const stroke = (color: string) => (text: string) => theme.fg(color, text);
   const frameStroke = options.borderColor !== undefined ? stroke(options.borderColor) : border;
-  const title = truncateToWidth(options.title, Math.max(1, innerWidth - 4), "…");
-  const titleCell = ` ${title} `;
+  // One character plus two padding spaces: the smallest a cell can be.
+  const minCellWidth = 3;
+  // The title yields to the right cell: the right cell is cut only to what
+  // fits beside a minimal title, the title is cut to what remains, and the
+  // right cell is dropped only when even a one-character label cannot fit.
+  // The composed top border never exceeds the inner width.
+  let rightCell = "";
+  let titleCell: string;
+  if (options.titleRight !== undefined && innerWidth >= 2 * minCellWidth) {
+    const rightBudget = Math.max(1, innerWidth - minCellWidth - 4);
+    rightCell = ` ${truncateToWidth(options.titleRight, rightBudget, "…")} `;
+    titleCell = ` ${truncateToWidth(options.title, Math.max(1, innerWidth - visibleWidth(rightCell) - 4), "…")} `;
+  } else {
+    titleCell = ` ${truncateToWidth(options.title, Math.max(1, innerWidth - 4), "…")} `;
+  }
+  let titleCellWidth = visibleWidth(titleCell);
+  if (titleCellWidth > innerWidth) {
+    // The inner width cannot hold even a one-character title cell (with or
+    // without a right cell): drop the title so the border still closes.
+    titleCell = "";
+    titleCellWidth = 0;
+  }
   const styledTitleCell = options.rawTitle ? titleCell : theme.fg("accent", titleCell);
-  const titleCellWidth = visibleWidth(titleCell);
-  const rightCell =
-    options.titleRight !== undefined
-      ? ` ${truncateToWidth(options.titleRight, Math.max(1, innerWidth - titleCellWidth - 4), "…")} `
-      : "";
   const rightCellWidth = visibleWidth(rightCell);
   const reservedWidth = titleCellWidth + rightCellWidth;
   const leftRuleWidth = Math.min(2, Math.max(0, innerWidth - reservedWidth));

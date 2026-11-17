@@ -1646,6 +1646,34 @@ describe("status-bar editor frame", () => {
     for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(40);
   });
 
+  it("keeps the border closed and the right label visible with a full-length title", () => {
+    // The real editor title when small and worker models are configured is
+    // long enough to fill the top border at common terminal widths; the
+    // title must yield to the right cell without breaking the frame.
+    const title = [
+      "anthropic/claude-sonnet-4-6",
+      "󰧑 high",
+      "/",
+      "󰧟 google/gemini-2.5-flash",
+      "/",
+      "󰠣 openai/gpt-5",
+    ].join("  ");
+    const lines = renderEditorModalFrame({
+      baseRendered: baseOutput(["hello"]),
+      autocompleteCount: 0,
+      width: 60,
+      title,
+      titleRight: "Approval Mode off",
+      theme: plainTheme(),
+    });
+    const top = lines[0] ?? "";
+
+    expect(top.startsWith("╭")).toBe(true);
+    expect(top.endsWith("╮")).toBe(true);
+    expect(top).toContain("Approval Mode off");
+    expect(visibleWidth(top)).toBe(60);
+  });
+
   it("renders the title raw (pre-colored), not re-wrapped in accent", () => {
     const fgMock = vi.fn((c: string, t: string) => (c === "accent" ? `⟧${t}⟧` : t));
     const lines = renderEditorModalFrame({

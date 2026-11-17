@@ -122,4 +122,71 @@ describe("TUI frame helpers", () => {
       expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
     }
   });
+
+  it("closes the top border at every width when a long title competes with a right cell", () => {
+    const title = "a".repeat(60);
+    for (const width of [120, 100, 80, 60, 40, 20]) {
+      const lines = renderModalFrame(ANSI_THEME, width, ["content"], {
+        title,
+        titleRight: "Approval Mode off",
+      });
+      const top = lines[0]?.replace(ANSI_PATTERN, "") ?? "";
+
+      expect(visibleWidth(lines[0] ?? "")).toBe(width);
+      expect(top.startsWith("╭")).toBe(true);
+      expect(top.endsWith("╮")).toBe(true);
+    }
+  });
+
+  it("cuts the title so the full right cell label stays visible", () => {
+    // The title yields to the right cell: the 17-char label keeps its full
+    // text while the 16-char title is trimmed, and the border stays closed.
+    const lines = renderModalFrame(ANSI_THEME, 40, ["content"], {
+      title: "abcdefghijklmnop",
+      titleRight: "Approval Mode off",
+    });
+    const top = lines[0]?.replace(ANSI_PATTERN, "") ?? "";
+
+    expect(top).toContain("Approval Mode off");
+    expect(top).toContain("abcdefghijklmn…");
+    expect(top.endsWith("╮")).toBe(true);
+    expect(visibleWidth(lines[0] ?? "")).toBe(40);
+  });
+
+  it("drops the right cell only when a one-character label cannot fit", () => {
+    // At width 8 (innerWidth 6) a one-char title cell and a one-char right
+    // cell use all six inner columns, so the label survives. Below that the
+    // label is dropped but the frame stays closed.
+    const fitted = renderModalFrame(ANSI_THEME, 8, ["content"], {
+      title: "t",
+      titleRight: "M",
+    });
+    expect(fitted[0]?.replace(ANSI_PATTERN, "")).toContain("M");
+    expect(fitted[0]?.replace(ANSI_PATTERN, "")).toContain("╮");
+
+    for (const width of [4, 5, 6, 7]) {
+      const lines = renderModalFrame(ANSI_THEME, width, ["content"], {
+        title: "t",
+        titleRight: "M",
+      });
+      const top = lines[0]?.replace(ANSI_PATTERN, "") ?? "";
+
+      expect(top.startsWith("╭")).toBe(true);
+      expect(top.endsWith("╮")).toBe(true);
+      expect(visibleWidth(lines[0] ?? "")).toBe(width);
+    }
+  });
+
+  it("closes the top border at every narrow width without a right cell", () => {
+    for (const width of [4, 5, 6, 7, 8]) {
+      const lines = renderModalFrame(ANSI_THEME, width, ["content"], {
+        title: "abcdefghijklmnop",
+      });
+      const top = lines[0]?.replace(ANSI_PATTERN, "") ?? "";
+
+      expect(top.startsWith("╭")).toBe(true);
+      expect(top.endsWith("╮")).toBe(true);
+      expect(visibleWidth(lines[0] ?? "")).toBe(width);
+    }
+  });
 });
