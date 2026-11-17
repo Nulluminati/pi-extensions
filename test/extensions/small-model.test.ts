@@ -277,6 +277,63 @@ describe("small-model-extension", () => {
     );
   });
 
+  it("reports status and the resolution error while PI_SMALL_MODEL overrides the config", async () => {
+    const path = configPath();
+    writeFileSync(
+      path,
+      JSON.stringify({ provider: "synthetic", model: "syn:small:text", thinkingLevel: "minimal" }),
+    );
+    vi.stubEnv("PI_SMALL_MODEL_CONFIG", path);
+    vi.stubEnv("PI_SMALL_MODEL", "missing/nope");
+    const pi = createMockPi();
+    const ctx = createMockCommandContext();
+    ctx.modelRegistry.find = vi.fn(() => undefined);
+    await smallModelExtension(pi);
+
+    await getCommandHandler(pi, "smallmodel")("status", ctx);
+
+    expect(ctx.ui.notify).toHaveBeenCalledTimes(1);
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      "Global small model is missing/nope (minimal, environment). Global small model not found: missing/nope. Unset PI_SMALL_MODEL or set it to a registered model.",
+      "warning",
+    );
+  });
+
+  it("reports an invalid PI_SMALL_MODEL value from the status command", async () => {
+    vi.stubEnv("PI_SMALL_MODEL_CONFIG", configPath());
+    vi.stubEnv("PI_SMALL_MODEL", "nope");
+    const pi = createMockPi();
+    const ctx = createMockCommandContext();
+    await smallModelExtension(pi);
+
+    await getCommandHandler(pi, "smallmodel")("status", ctx);
+
+    expect(ctx.ui.notify).toHaveBeenCalledTimes(1);
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      'Invalid PI_SMALL_MODEL value "nope". Expected provider/model-id.',
+      "error",
+    );
+  });
+
+  it("reports a resolved model from the status command", async () => {
+    vi.stubEnv("PI_SMALL_MODEL_CONFIG", configPath());
+    vi.stubEnv("PI_SMALL_MODEL", "synthetic/syn:small:text");
+    vi.stubEnv("PI_SMALL_MODEL_THINKING", "minimal");
+    const pi = createMockPi();
+    const ctx = createMockCommandContext();
+    ctx.modelRegistry.find = vi.fn(() =>
+      createMockModel({ id: "syn:small:text", provider: "synthetic" }),
+    );
+    await smallModelExtension(pi);
+
+    await getCommandHandler(pi, "smallmodel")("status", ctx);
+
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      "Global small model is synthetic/syn:small:text (minimal, environment).",
+      "info",
+    );
+  });
+
   it("session_start publishes a configuration error instead of the active model", async () => {
     vi.stubEnv("PI_SMALL_MODEL_CONFIG", configPath());
     vi.stubEnv("PI_SMALL_MODEL", "");

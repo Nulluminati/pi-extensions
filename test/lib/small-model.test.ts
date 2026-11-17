@@ -341,6 +341,29 @@ describe("resolveSmallModel", () => {
     expect(ctx.modelRegistry.getApiKeyAndHeaders).not.toHaveBeenCalled();
   });
 
+  it("tells the user to unset PI_SMALL_MODEL when the environment model is missing", async () => {
+    const ctx = createMockCommandContext();
+    ctx.modelRegistry.find = vi.fn(() => undefined);
+
+    const result = resolveSmallModel(ctx, {
+      configPath: configuredPath(),
+      env: { PI_SMALL_MODEL: "missing/nope" },
+    });
+
+    await expect(result).rejects.toThrow(
+      "Global small model not found: missing/nope. Unset PI_SMALL_MODEL or set it to a registered model.",
+    );
+  });
+
+  it("keeps the /smallmodel advice when the saved config names a missing model", async () => {
+    const ctx = createMockCommandContext();
+    ctx.modelRegistry.find = vi.fn(() => undefined);
+
+    await expect(resolveSmallModel(ctx, { configPath: configuredPath(), env: {} })).rejects.toThrow(
+      "Run /smallmodel to replace it.",
+    );
+  });
+
   it("rejects a configured model that cannot accept text", async () => {
     const ctx = createMockCommandContext();
     ctx.modelRegistry.find = vi.fn(() => createMockModel({ input: ["image"] }));

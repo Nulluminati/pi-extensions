@@ -57,7 +57,7 @@ pi
 
 `PI_SMALL_MODEL` replaces only the provider and model. The saved `thinkingLevel` stays in force. `PI_SMALL_MODEL_THINKING` sets the thinking level on its own, with or without `PI_SMALL_MODEL`. When both variables are set, the config file is not read.
 
-When `PI_SMALL_MODEL` is set, `/smallmodel` cannot replace it. Unset the variable first. `PI_SMALL_MODEL_CONFIG` can point at a different config file.
+When `PI_SMALL_MODEL` is set, `/smallmodel` cannot replace it. Unset the variable first. `/smallmodel status` still works: it shows the model, its source, and the error when the model does not resolve. `PI_SMALL_MODEL_CONFIG` can point at a different config file.
 
 The extension watches the config directory. Changes made by another Pi process or a text editor update the status in running sessions.
 

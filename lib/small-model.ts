@@ -198,13 +198,15 @@ export async function resolveSmallModelFromConfig(
   source: "config" | "environment" = "config",
 ): Promise<ResolvedSmallModel> {
   const label = `${config.provider}/${config.model}`;
+  // /smallmodel cannot replace an environment override, so name the variable instead.
+  const replaceAdvice =
+    source === "environment"
+      ? `Unset ${SMALL_MODEL_ENV_VAR} or set it to a registered model.`
+      : "Run /smallmodel to replace it.";
   const model = ctx.modelRegistry.find(config.provider, config.model);
-  if (!model)
-    throw new Error(`Global small model not found: ${label}. Run /smallmodel to replace it.`);
+  if (!model) throw new Error(`Global small model not found: ${label}. ${replaceAdvice}`);
   if (!model.input.includes("text")) {
-    throw new Error(
-      `Global small model ${label} does not accept text. Run /smallmodel to replace it.`,
-    );
+    throw new Error(`Global small model ${label} does not accept text. ${replaceAdvice}`);
   }
 
   const authResult = await ctx.modelRegistry.getApiKeyAndHeaders(model);

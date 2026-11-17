@@ -12,6 +12,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import {
   loadSmallModelConfig,
   resolveSmallModelConfigPath,
+  resolveSmallModelFromConfig,
   SMALL_MODEL_ENV_VAR,
 } from "../../lib/small-model.ts";
 import { applyConfig, applyThinkingLevel, parseCommandConfig, selectModel } from "./src/config.ts";
@@ -19,6 +20,31 @@ import { STATUS_ICON, STATUS_KEY, THINKING_LEVELS } from "./src/constants.ts";
 import { updateStatus } from "./src/status.ts";
 
 export { STATUS_ICON };
+
+/**
+ * Reports the selected model and its source. A model that does not resolve is
+ * still reported, followed by the resolution error.
+ */
+async function reportStatus(ctx: ExtensionContext): Promise<void> {
+  let loaded: ReturnType<typeof loadSmallModelConfig>;
+  try {
+    loaded = loadSmallModelConfig();
+  } catch (error) {
+    ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+    return;
+  }
+
+  const { config, source } = loaded;
+  const summary = `Global small model is ${config.provider}/${config.model} (${config.thinkingLevel}, ${source}).`;
+  try {
+    await resolveSmallModelFromConfig(ctx, config, source);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    ctx.ui.notify(`${summary} ${message}`, "warning");
+    return;
+  }
+  ctx.ui.notify(summary, "info");
+}
 
 // --- Extension ---
 
@@ -58,26 +84,19 @@ export default async function smallModelExtension(pi: ExtensionAPI) {
   pi.registerCommand("smallmodel", {
     description: "Select the global model used by lightweight extension tasks",
     handler: async (args, ctx) => {
+      const trimmed = args.trim();
+      // status is read-only, so it runs even while the environment overrides the config.
+      if (trimmed === "status") {
+        await reportStatus(ctx);
+        return;
+      }
+
       if (process.env[SMALL_MODEL_ENV_VAR]?.trim()) {
         ctx.ui.notify(
           `${SMALL_MODEL_ENV_VAR} is overriding the global config. Unset it before using /smallmodel.`,
           "warning",
         );
         await updateStatus(ctx);
-        return;
-      }
-
-      const trimmed = args.trim();
-      if (trimmed === "status") {
-        try {
-          const loaded = loadSmallModelConfig();
-          ctx.ui.notify(
-            `Global small model is ${loaded.config.provider}/${loaded.config.model} (${loaded.config.thinkingLevel}, ${loaded.source}).`,
-            "info",
-          );
-        } catch (error) {
-          ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
-        }
         return;
       }
 
