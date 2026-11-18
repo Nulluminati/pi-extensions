@@ -53,8 +53,10 @@ const ALWAYS_ON_THINKING_MAP: ThinkingLevelMap = {
  * Hardcoded catalog of always-on Synthetic models with tools support.
  *
  * Pricing is per million tokens, sourced from the authenticated
- * GET /openai/v1/models endpoint (verified 2026-08; GLM-5.2 dropped 1.4/4.4 to
- * 1.0/3.0 and syn:large:vision re-aliased onto Kimi-K3). Thinking maps reflect
+ * GET /openai/v1/models endpoint (checked 2026-11; syn:large:text and
+ * syn:small:vision re-aliased onto DeepSeek-V4.1-Flash-1017 and
+ * syn:large:vision onto Kimi-K3.1-Pro, so their rows were updated to
+ * match). Thinking maps reflect
  * the gateway's accepted reasoning_effort enum (probed 2026-08): every
  * reasoning model accepts none/minimal/low/medium/high/xhigh; the 2026-08
  * probes of GLM-5.2 and Kimi-K3 rejected the non-OpenAI "max" sentinel, while
@@ -73,16 +75,18 @@ const ALWAYS_ON_THINKING_MAP: ThinkingLevelMap = {
  */
 export const STATIC_MODELS: ProviderChatModelConfig[] = [
   // --- syn: aliases (first-class selectable ids) ---
-  // syn:large:* currently alias GLM-5.2 and Kimi-K3 respectively; pricing
-  // from the live catalog (2026-08).
+  // Live catalog targets (checked 2026-11): syn:large:text and
+  // syn:small:vision alias deepseek-ai/DeepSeek-V4.1-Flash-1017,
+  // syn:large:vision aliases moonshotai/Kimi-K3.1-Pro, and syn:small:text
+  // aliases zai-org/GLM-4.7-Flash. Pricing from the live catalog.
   {
     id: "syn:large:text",
     name: "syn:large:text",
     api: "openai-completions",
     reasoning: true,
     thinkingLevelMap: DISABLEABLE_THINKING_MAP,
-    input: ["text"],
-    cost: { input: 1.0, output: 3.0, cacheRead: 0.16, cacheWrite: 0 },
+    input: ["text", "image"],
+    cost: { input: 0.6, output: 1.2, cacheRead: 0.03, cacheWrite: 0 },
     contextWindow: 524288,
     maxTokens: 65536,
     compat: SYNTHETIC_COMPAT,
@@ -106,7 +110,7 @@ export const STATIC_MODELS: ProviderChatModelConfig[] = [
     reasoning: true,
     thinkingLevelMap: DISABLEABLE_THINKING_MAP,
     input: ["text", "image"],
-    cost: { input: 3.0, output: 15.0, cacheRead: 0.45, cacheWrite: 0 },
+    cost: { input: 2.0, output: 10.0, cacheRead: 0.2, cacheWrite: 0 },
     contextWindow: 524288,
     maxTokens: 65536,
     compat: SYNTHETIC_COMPAT,
@@ -118,8 +122,8 @@ export const STATIC_MODELS: ProviderChatModelConfig[] = [
     reasoning: true,
     thinkingLevelMap: DISABLEABLE_THINKING_MAP,
     input: ["text", "image"],
-    cost: { input: 0.45, output: 2.2, cacheRead: 0.09, cacheWrite: 0 },
-    contextWindow: 262144,
+    cost: { input: 0.6, output: 1.2, cacheRead: 0.03, cacheWrite: 0 },
+    contextWindow: 524288,
     maxTokens: 65536,
     compat: SYNTHETIC_COMPAT,
   },

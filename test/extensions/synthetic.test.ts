@@ -222,6 +222,40 @@ describe("synthetic-extension", () => {
     expect(STATIC_MODELS.some((m) => m.id === "hf:deepseek-ai/DeepSeek-V4.1-Flash")).toBe(true);
   });
 
+  it("keeps the syn:* alias rows in sync with the live catalog (checked 2026-11)", () => {
+    // The live GET /openai/v1/models payload re-aliased the syn:* ids:
+    // syn:large:text and syn:small:vision now point at
+    // DeepSeek-V4.1-Flash-1017 (text+image, 524K context, 0.6/1.2 per million
+    // with 0.03 cache reads) and syn:large:vision points at Kimi-K3.1-Pro
+    // (2/10 with 0.2 cache reads).
+    const largeText = STATIC_MODELS.find((m) => m.id === "syn:large:text");
+    expect(largeText).toEqual(
+      expect.objectContaining({
+        input: ["text", "image"],
+        cost: { input: 0.6, output: 1.2, cacheRead: 0.03, cacheWrite: 0 },
+        contextWindow: 524288,
+      }),
+    );
+
+    const largeVision = STATIC_MODELS.find((m) => m.id === "syn:large:vision");
+    expect(largeVision).toEqual(
+      expect.objectContaining({
+        input: ["text", "image"],
+        cost: { input: 2.0, output: 10.0, cacheRead: 0.2, cacheWrite: 0 },
+        contextWindow: 524288,
+      }),
+    );
+
+    const smallVision = STATIC_MODELS.find((m) => m.id === "syn:small:vision");
+    expect(smallVision).toEqual(
+      expect.objectContaining({
+        input: ["text", "image"],
+        cost: { input: 0.6, output: 1.2, cacheRead: 0.03, cacheWrite: 0 },
+        contextWindow: 524288,
+      }),
+    );
+  });
+
   it("configures Kimi-K3.1-Pro as an always-on vision sibling of Kimi-K3", () => {
     // Probed 2026-10: the gateway accepts every pi level, but `none` still
     // produces reasoning tokens, so thinking cannot be disabled and off is

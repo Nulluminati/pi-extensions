@@ -54,10 +54,10 @@ The extension ships a hardcoded list of always-on, tools-capable models with kno
 
 | Model | Context | Reasoning | Vision | Input/Output Cost |
 |-------|---------|-----------|--------|-------------------|
-| syn:large:text | 524K | ✓ | — | $1.00 / $3.00 |
+| syn:large:text | 524K | ✓ | ✓ | $0.60 / $1.20 |
 | syn:small:text | 196K | ✓ | — | $0.10 / $0.50 |
-| syn:large:vision | 524K | ✓ | ✓ | $3.00 / $15.00 |
-| syn:small:vision | 262K | ✓ | ✓ | $0.45 / $2.20 |
+| syn:large:vision | 524K | ✓ | ✓ | $2.00 / $10.00 |
+| syn:small:vision | 524K | ✓ | ✓ | $0.60 / $1.20 |
 | infinite:small:vision | 524K | ✓ | ✓ | $0 / $0 (Big plan) |
 | hf:zai-org/GLM-5.2 | 524K | ✓ | — | $1.00 / $3.00 |
 | hf:zai-org/GLM-5.3 | 524K | ✓ (always on) | — | $1.40 / $4.40 |
