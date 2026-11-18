@@ -8,6 +8,10 @@ import type { SyntheticCatalogModel, SyntheticModelsResponse } from "./types.ts"
 export const MISSING_MODELS_MESSAGE =
   "New Synthetic models available that are not in the static list";
 
+/** Prefix used for the retired-models notice so callers/tests can match it. */
+export const RETIRED_MODELS_MESSAGE =
+  "Registered Synthetic models no longer published by the live catalog";
+
 /**
  * Fetch the live catalog (id + always_on + supported_features only) for the
  * startup staleness check. Returns the model list on success (an empty array
@@ -48,9 +52,9 @@ export async function fetchCatalog(
 
 /**
  * Compare the live catalog against the static list and return any always-on,
- * tools-capable model ids the static list does not include. This is the only
- * signal we surface to the user — pricing and capability drift are ignored on
- * purpose (they have not changed historically).
+ * tools-capable model ids the static list does not include. This is one of
+ * the two signals we surface to the user — pricing and capability drift are
+ * ignored on purpose (they have not changed historically).
  */
 export function findMissingModels(catalog: SyntheticCatalogModel[]): string[] {
   const known = new Set(STATIC_MODELS.map((m) => m.id));
@@ -61,4 +65,15 @@ export function findMissingModels(catalog: SyntheticCatalogModel[]): string[] {
     if (!known.has(m.id)) missing.push(m.id);
   }
   return missing;
+}
+
+/**
+ * Compare the static list against the live catalog and return registered ids
+ * the catalog no longer publishes. Absence from /v1/models is the same
+ * retirement evidence used to remove past entries, so the check warns in this
+ * direction too.
+ */
+export function findRetiredModels(catalog: SyntheticCatalogModel[]): string[] {
+  const live = new Set(catalog.map((m) => m.id));
+  return STATIC_MODELS.map((m) => m.id).filter((id) => !live.has(id));
 }

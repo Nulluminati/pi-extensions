@@ -13,14 +13,20 @@
  * Auth (choose one):
  *   1. SYNTHETIC_API_KEY environment variable
  *   2. $PI_CODING_AGENT_DIR/auth.json (default ~/.pi/agent/auth.json): { "synthetic": { "type": "api_key", "key": "syn_..." } }
- *   3. CLI flag: pi --model synthetic/hf:zai-org/GLM-5.2 --api-key syn_...
+ *   3. CLI flag: pi --model synthetic/hf:zai-org/GLM-5.3 --api-key syn_...
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { authPath } from "../../lib/paths.ts";
 import { formatProviderModelList } from "../../lib/provider-models.ts";
 import { getResolvedApiKey } from "./src/auth.ts";
-import { fetchCatalog, findMissingModels, MISSING_MODELS_MESSAGE } from "./src/catalog.ts";
+import {
+  fetchCatalog,
+  findMissingModels,
+  findRetiredModels,
+  MISSING_MODELS_MESSAGE,
+  RETIRED_MODELS_MESSAGE,
+} from "./src/catalog.ts";
 import { SYNTHETIC_API_BASE_URL } from "./src/constants.ts";
 import { STATIC_MODELS } from "./src/models.ts";
 import { fetchQuota, formatQuotaDisplay } from "./src/quota.ts";
@@ -37,10 +43,11 @@ export default async function syntheticExtension(pi: ExtensionAPI) {
     models: STATIC_MODELS,
   });
 
-  // session_start: best-effort staleness check. Warns (once per session) when
-  // the live catalog exposes always-on, tools-capable models the static list
-  // does not include. Silent on missing key; a catalog fetch failure logs a
-  // debug diagnostic and skips the check without a UI warning.
+  // session_start: best-effort staleness check. Warns (once per session) in
+  // both directions: when the live catalog exposes always-on, tools-capable
+  // models the static list does not include, and when a registered id no
+  // longer appears in the catalog. Silent on missing key; a catalog fetch
+  // failure logs a debug diagnostic and skips the check without a UI warning.
   async function checkCatalog(
     apiKey: string,
     signal: AbortSignal | undefined,
@@ -48,9 +55,17 @@ export default async function syntheticExtension(pi: ExtensionAPI) {
   ) {
     const catalog = await fetchCatalog(apiKey, signal);
     if (catalog === undefined) return;
+    // An empty catalog cannot confirm retirement of every registered id, so
+    // treat it as no signal rather than a mass-retirement warning.
+    if (catalog.length === 0) return;
     const missing = findMissingModels(catalog);
-    if (missing.length === 0) return;
-    notify(`${MISSING_MODELS_MESSAGE}:\n${missing.map((id) => `  • ${id}`).join("\n")}`);
+    if (missing.length > 0) {
+      notify(`${MISSING_MODELS_MESSAGE}:\n${missing.map((id) => `  • ${id}`).join("\n")}`);
+    }
+    const retired = findRetiredModels(catalog);
+    if (retired.length > 0) {
+      notify(`${RETIRED_MODELS_MESSAGE}:\n${retired.map((id) => `  • ${id}`).join("\n")}`);
+    }
   }
 
   // Pi awaits session_start before the editor accepts input, so the handler

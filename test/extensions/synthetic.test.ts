@@ -1,7 +1,10 @@
 import { readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
-import { MISSING_MODELS_MESSAGE } from "../../extensions/synthetic/src/catalog.ts";
+import {
+  MISSING_MODELS_MESSAGE,
+  RETIRED_MODELS_MESSAGE,
+} from "../../extensions/synthetic/src/catalog.ts";
 import { FETCH_TIMEOUT_MS } from "../../extensions/synthetic/src/constants.ts";
 import { STATIC_MODELS } from "../../extensions/synthetic/src/models.ts";
 import type { SyntheticModelsResponse } from "../../extensions/synthetic/src/types.ts";
@@ -22,25 +25,32 @@ function settleStartupChecks(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-// Ids present in the live catalog snapshot. Startup check tests use these.
+// Ids present in the live catalog snapshot (checked 2026-11). Startup check
+// tests use these.
 const EXPECTED_MODEL_IDS = [
   "syn:large:text",
   "syn:small:text",
   "syn:large:vision",
   "syn:small:vision",
-  "hf:zai-org/GLM-5.2",
+  "infinite:small:vision",
+  "hf:openai/gpt-oss-120b",
   "hf:zai-org/GLM-5.3",
   "hf:zai-org/GLM-5.3-Flash",
-  "hf:moonshotai/Kimi-K3",
-  "hf:moonshotai/Kimi-K3.1-Pro",
-  "hf:Qwen/Qwen3.6-27B",
-  "hf:Qwen/Qwen3.8-27B",
   "hf:zai-org/GLM-4.7-Flash",
+  "hf:moonshotai/Kimi-K3.1-Pro",
+  "hf:Qwen/Qwen3.8-27B",
+  "hf:deepseek-ai/DeepSeek-V4.1-Flash-1017",
+];
+
+// Ids Synthetic removed from /v1/models (checked 2026-11; same retirement
+// evidence as Kimi-K2.7-Code and MiniMax-M3 before them). The static list must
+// never register these again while the catalog omits them.
+const RETIRED_MODEL_IDS = [
+  "hf:zai-org/GLM-5.2",
+  "hf:moonshotai/Kimi-K3",
+  "hf:Qwen/Qwen3.6-27B",
   "hf:nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4",
   "hf:deepseek-ai/DeepSeek-V4.1-Flash",
-  "hf:deepseek-ai/DeepSeek-V4.1-Flash-1017",
-  "hf:openai/gpt-oss-120b",
-  "infinite:small:vision",
 ];
 
 // Reasoning models whose thinking cannot be disabled (probed; see
@@ -92,6 +102,13 @@ describe("synthetic-extension", () => {
     const ids = STATIC_MODELS.map((m) => m.id).sort();
     for (const id of EXPECTED_MODEL_IDS) {
       expect(ids, `static list missing ${id}`).toContain(id);
+    }
+  });
+
+  it("registers no id absent from the live catalog", () => {
+    const ids = STATIC_MODELS.map((m) => m.id);
+    for (const id of RETIRED_MODEL_IDS) {
+      expect(ids, `static list registers retired ${id}`).not.toContain(id);
     }
   });
 
@@ -197,8 +214,9 @@ describe("synthetic-extension", () => {
   it("configures DeepSeek-V4.1-Flash-1017 as a distinct vision snapshot of V4.1-Flash", () => {
     // Probed 2026-10: the dated snapshot accepts every pi level and `none`
     // disables thinking, so it keeps the disableable identity map. It returns
-    // the thinking block under `reasoning_content`, unlike the base
-    // DeepSeek-V4.1-Flash entry, which returns it under `reasoning`.
+    // the thinking block under `reasoning_content`. The undated
+    // DeepSeek-V4.1-Flash is retired from the live catalog (checked 2026-11),
+    // so only the snapshot stays registered.
     const snapshot = STATIC_MODELS.find((m) => m.id === "hf:deepseek-ai/DeepSeek-V4.1-Flash-1017");
     expect(snapshot).toEqual(
       expect.objectContaining({
@@ -218,8 +236,7 @@ describe("synthetic-extension", () => {
         maxTokens: 65536,
       }),
     );
-    // The undated entry stays registered: Synthetic serves both snapshots.
-    expect(STATIC_MODELS.some((m) => m.id === "hf:deepseek-ai/DeepSeek-V4.1-Flash")).toBe(true);
+    expect(STATIC_MODELS.some((m) => m.id === "hf:deepseek-ai/DeepSeek-V4.1-Flash")).toBe(false);
   });
 
   it("keeps the syn:* alias rows in sync with the live catalog (checked 2026-11)", () => {
@@ -256,7 +273,7 @@ describe("synthetic-extension", () => {
     );
   });
 
-  it("configures Kimi-K3.1-Pro as an always-on vision sibling of Kimi-K3", () => {
+  it("configures Kimi-K3.1-Pro as an always-on vision reasoning model", () => {
     // Probed 2026-10: the gateway accepts every pi level, but `none` still
     // produces reasoning tokens, so thinking cannot be disabled and off is
     // hidden. The thinking block arrives under `reasoning`.
@@ -279,23 +296,21 @@ describe("synthetic-extension", () => {
       },
       compat: { supportsReasoningEffort: true },
     });
-    // Both Kimi ids stay registered: Synthetic serves the 3 and the 3.1.
-    expect(STATIC_MODELS.some((m) => m.id === "hf:moonshotai/Kimi-K3")).toBe(true);
+    expect(STATIC_MODELS.some((m) => m.id === "hf:moonshotai/Kimi-K3")).toBe(false);
   });
 
-  it("maps every reasoning model through the full identity map (incl. medium)", () => {
-    // Kimi-K3 briefly rejected `medium` (probed 2026-07) but the 2026-08 probe
-    // shows the gateway accepts the full enum again, so no level is hidden.
-    const kimi = STATIC_MODELS.find((m) => m.id === "hf:moonshotai/Kimi-K3");
-    expect(kimi).toBeDefined();
-    expect(kimi?.thinkingLevelMap).toEqual({
-      off: "none",
-      minimal: "minimal",
-      low: "low",
-      medium: "medium",
-      high: "high",
-      xhigh: "xhigh",
-    });
+  it("maps every disableable reasoning model through the full identity map (incl. medium)", () => {
+    for (const m of STATIC_MODELS) {
+      if (!m.reasoning || ALWAYS_ON_IDS.includes(m.id)) continue;
+      expect(m.thinkingLevelMap, `${m.id} should carry the identity map`).toEqual({
+        off: "none",
+        minimal: "minimal",
+        low: "low",
+        medium: "medium",
+        high: "high",
+        xhigh: "xhigh",
+      });
+    }
   });
 
   it("maps off to null for always-on reasoning models (thinking cannot be disabled)", () => {
@@ -369,6 +384,22 @@ describe("synthetic-extension", () => {
     );
   });
 
+  it("startup check warns when a registered id vanished from the live catalog", async () => {
+    const mockPi = createMockPi();
+    const mockCtx = createMockCommandContext();
+    await syntheticExtension(mockPi);
+
+    const live = STATIC_MODELS.map((m) => ({ id: m.id, always_on: true })).slice(0, -1);
+    mockFetch.mockResolvedValueOnce(mockModelsResponse(live));
+
+    const handler = getEventHandler(mockPi, "session_start");
+    await handler({ type: "session_start", reason: "new" }, mockCtx);
+    await settleStartupChecks();
+
+    const vanished = STATIC_MODELS[STATIC_MODELS.length - 1].id;
+    expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining(vanished), "warning");
+  });
+
   it("startup check does not warn when the catalog matches the static list", async () => {
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
@@ -432,7 +463,9 @@ describe("synthetic-extension", () => {
     expect(warnings).toEqual([]);
   });
 
-  it("startup check logs no diagnostic for a valid empty catalog", async () => {
+  it("startup check logs no diagnostic and no warning for a valid empty catalog", async () => {
+    // An empty catalog cannot confirm retirement, so it is treated as no
+    // signal rather than a mass-retirement warning.
     mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ data: [] }) });
     const mockPi = createMockPi();
     const mockCtx = createMockCommandContext();
@@ -511,6 +544,11 @@ describe("synthetic-extension", () => {
     expect(MISSING_MODELS_MESSAGE.length).toBeGreaterThan(0);
   });
 
+  it("exposes a static message id for the retired-models notice", () => {
+    expect(typeof RETIRED_MODELS_MESSAGE).toBe("string");
+    expect(RETIRED_MODELS_MESSAGE.length).toBeGreaterThan(0);
+  });
+
   // --- commands ---
 
   it("registers /synthetic:models command", async () => {
@@ -548,7 +586,7 @@ describe("synthetic-extension", () => {
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("vision"), "info");
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("reasoning"), "info");
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(
-      expect.stringContaining("hf:moonshotai/Kimi-K3"),
+      expect.stringContaining("hf:moonshotai/Kimi-K3.1-Pro"),
       "info",
     );
   });
@@ -640,8 +678,8 @@ describe("synthetic-extension", () => {
       {
         type: "model_select",
         model: {
-          id: "hf:zai-org/GLM-5.2",
-          name: "GLM-5.2",
+          id: "hf:zai-org/GLM-5.3",
+          name: "GLM-5.3",
           provider: "synthetic",
         },
         previousModel: undefined,
