@@ -111,7 +111,7 @@ All state is stored in a `WeakMap<ExtensionAPI, RecapState>` with the following 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--recap-idle-seconds` | string | `45` | Seconds after `turn_end` before the idle recap is generated |
-| `--recap-focus-min-seconds` | string | `3` | Minimum focus-out duration (seconds) before showing a recap on refocus |
+| `--recap-focus-min-seconds` | string | `3` | Minimum focus-out duration (seconds) before showing a recap on refocus. A value that is not a finite, non-negative number (for example `3s` or `-1`) falls back to `3` |
 | `--recap-disable-focus` | boolean | `false` | Disable DECSET ?1004 focus reporting (idle fallback still runs) |
 | `--recap-during-active` | boolean | `false` | Allow focus-triggered recaps while an agent turn is still running |
 | `--recap-disable` | boolean | `false` | Disable the automatic session recap entirely |
