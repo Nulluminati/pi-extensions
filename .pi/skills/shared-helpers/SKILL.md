@@ -104,6 +104,7 @@ render(width: number): string[] {
 
 - Compute body width with `modalContentWidth(width)` and render your content into that narrower width; the frame adds the border and padding around it.
 - Small widths are handled: below 4 columns the frame degrades to truncated raw lines. You don't need width guards beyond the empty case.
+- With `titleRight`, the right cell has priority over the title: the frame cuts the title first and drops the right cell only when a one-character label cannot fit. The top border always closes.
 - Lower-level pieces (`frameBorderLine`, `frameRuleLine`, `frameContentLine`) exist for custom layouts, but prefer `renderModalFrame` so all dialogs share one visual language.
 
 ## `lib/overlay-options.ts` — centered panel dimensions

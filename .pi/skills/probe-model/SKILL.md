@@ -36,7 +36,7 @@ with `python3`:
 ```bash
 cd /path/to/repo
 export SYNTHETIC_API_KEY=syn_...
-.pi/skills/probe-model/scripts/probe_model.py hf:zai-org/GLM-5.2
+.pi/skills/probe-model/scripts/probe_model.py hf:zai-org/GLM-5.3-Flash
 ```
 
 For a non-synthetic OpenAI-compatible provider, pass `--base-url` and `-k`:
@@ -94,7 +94,7 @@ have evidence the gateway rejects a value.
 
 ```typescript
 {
-  id: "hf:zai-org/GLM-5.2",
+  id: "hf:zai-org/GLM-5.3-Flash",
   reasoning: true,
   thinkingLevelMap: {
     off: "none",       // or null if the disable check showed thinks=True at none
