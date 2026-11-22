@@ -1,7 +1,11 @@
 import { resolve } from "node:path";
 import { Check } from "typebox/value";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { decodeHtmlEntities } from "../../extensions/web-search/src/html.ts";
+import {
+  decodeHtmlEntities,
+  extractTitle,
+  htmlToText,
+} from "../../extensions/web-search/src/html.ts";
 import webSearchExtension from "../../extensions/web-search/web-search.ts";
 import { createMockCommandContext } from "../mocks/context-mocks.ts";
 import { mockFn } from "../mocks/mock-types.ts";
@@ -1919,6 +1923,48 @@ describe("decodeHtmlEntities", () => {
     expect(decodeHtmlEntities("&amp;")).toBe("&");
     expect(decodeHtmlEntities("&nbsp;")).toBe(" ");
     expect(decodeHtmlEntities("&#x27;Tom&#x27;s &#65;bcd")).toBe("'Tom's Abcd");
+  });
+
+  it("decodes common typographic named entities", () => {
+    expect(
+      decodeHtmlEntities(
+        "&apos;&lsquo;&rsquo;&ldquo;&rdquo;&ndash;&mdash;&hellip;&copy;&reg;&trade;&laquo;&raquo;&times;&middot;&deg;&euro;",
+      ),
+    ).toBe(
+      "'\u2018\u2019\u201C\u201D\u2013\u2014\u2026\u00A9\u00AE\u2122\u00AB\u00BB\u00D7\u00B7\u00B0\u20AC",
+    );
+  });
+
+  it("leaves unknown named references as literal text", () => {
+    expect(decodeHtmlEntities("&bogus; &amp;")).toBe("&bogus; &");
+    expect(decodeHtmlEntities("&constructor; &toString;")).toBe("&constructor; &toString;");
+  });
+
+  it("decodes numeric references above U+FFFF as full code points", () => {
+    expect(decodeHtmlEntities("&#128512;")).toBe("\u{1F600}");
+    expect(decodeHtmlEntities("&#x1F600;")).toBe("\u{1F600}");
+  });
+
+  it("replaces out-of-range and surrogate numeric references with U+FFFD", () => {
+    expect(decodeHtmlEntities("&#x110000;")).toBe("\uFFFD");
+    expect(decodeHtmlEntities("&#xD800;")).toBe("\uFFFD");
+    expect(decodeHtmlEntities("&#0;")).toBe("\uFFFD");
+  });
+});
+
+describe("htmlToText", () => {
+  it("decodes typographic entities in page text", () => {
+    expect(htmlToText("<p>&ldquo;hi&rdquo; &mdash; Tom&rsquo;s &hellip;</p>")).toBe(
+      "\u201Chi\u201D \u2014 Tom\u2019s \u2026",
+    );
+  });
+});
+
+describe("extractTitle", () => {
+  it("decodes entities in the title", () => {
+    expect(extractTitle("<title>Tom &amp; Jerry &mdash; &#128512;</title>")).toBe(
+      "Tom & Jerry \u2014 \u{1F600}",
+    );
   });
 });
 

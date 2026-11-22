@@ -20,8 +20,48 @@ export const TITLE_TAG_REGEX = /<title[^>]*>([\s\S]*?)<\/title>/i;
 // Named, decimal, and hex character references, e.g. &#x27; (apostrophe). Brave
 // payloads use hex alongside the decimal form, so both must be handled. One
 // combined pass decodes each reference exactly once, so double-encoded input
-// such as "&amp;lt;" becomes "&lt;", never "<".
-export const HTML_ENTITY_REGEX = /&(?:amp|lt|gt|quot|nbsp|#[0-9]+|#[xX][0-9a-fA-F]+);/g;
+// such as "&amp;lt;" becomes "&lt;", never "<". Named references outside
+// NAMED_HTML_ENTITIES stay as literal text.
+export const HTML_ENTITY_REGEX = /&(?:[a-zA-Z][a-zA-Z0-9]*|#[0-9]+|#[xX][0-9a-fA-F]+);/g;
+
+// The named references that pages and search snippets commonly use. This is not
+// the full HTML5 table.
+export const NAMED_HTML_ENTITIES: ReadonlyMap<string, string> = new Map(
+  Object.entries({
+    amp: "&",
+    lt: "<",
+    gt: ">",
+    quot: '"',
+    apos: "'",
+    nbsp: " ",
+    lsquo: "\u2018",
+    rsquo: "\u2019",
+    ldquo: "\u201C",
+    rdquo: "\u201D",
+    ndash: "\u2013",
+    mdash: "\u2014",
+    hellip: "\u2026",
+    copy: "\u00A9",
+    reg: "\u00AE",
+    trade: "\u2122",
+    laquo: "\u00AB",
+    raquo: "\u00BB",
+    times: "\u00D7",
+    middot: "\u00B7",
+    deg: "\u00B0",
+    euro: "\u20AC",
+  }),
+);
+
+const REPLACEMENT_CHARACTER = "\uFFFD";
+
+// Follows the HTML parser: NUL, surrogates, and values above U+10FFFF become
+// U+FFFD instead of a broken or truncated character.
+function decodeCodePoint(codePoint: number): string {
+  const isInvalid =
+    codePoint === 0 || codePoint > 0x10ffff || (codePoint >= 0xd800 && codePoint <= 0xdfff);
+  return isInvalid ? REPLACEMENT_CHARACTER : String.fromCodePoint(codePoint);
+}
 
 export const HORIZONTAL_WHITESPACE_RUN = /[ \t]+/g;
 
@@ -44,24 +84,13 @@ export function stripRemainingTags(text: string): string {
 
 export function decodeHtmlEntities(text: string): string {
   return text.replace(HTML_ENTITY_REGEX, (entity: string) => {
-    switch (entity) {
-      case "&amp;":
-        return "&";
-      case "&lt;":
-        return "<";
-      case "&gt;":
-        return ">";
-      case "&quot;":
-        return '"';
-      case "&nbsp;":
-        return " ";
-      default: {
-        // Numeric reference: decimal (&#39;) or hex (&#x27;).
-        const isHex = entity[2]?.toLowerCase() === "x";
-        const digits = isHex ? entity.slice(3, -1) : entity.slice(2, -1);
-        return String.fromCharCode(parseInt(digits, isHex ? 16 : 10));
-      }
+    if (entity[1] !== "#") {
+      return NAMED_HTML_ENTITIES.get(entity.slice(1, -1)) ?? entity;
     }
+    // Numeric reference: decimal (&#39;) or hex (&#x27;).
+    const isHex = entity[2]?.toLowerCase() === "x";
+    const digits = isHex ? entity.slice(3, -1) : entity.slice(2, -1);
+    return decodeCodePoint(parseInt(digits, isHex ? 16 : 10));
   });
 }
 
@@ -81,7 +110,7 @@ export function htmlToText(html: string): string {
 export function extractTitle(html: string): string | undefined {
   const match = html.match(TITLE_TAG_REGEX);
   if (!match || match[1] === undefined) return undefined;
-  const title = match[1].replace(ANY_REMAINING_TAG_REGEX, "").trim();
+  const title = decodeHtmlEntities(match[1].replace(ANY_REMAINING_TAG_REGEX, "")).trim();
   return title || undefined;
 }
 
