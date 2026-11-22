@@ -335,6 +335,30 @@ describe("web-search-extension", () => {
       expect(calledUrl).toContain("count=1");
     });
 
+    it("slices results to max_results when Brave returns more than requested", async () => {
+      vi.stubEnv("BRAVE_API_KEY", "test-key");
+      mockFetch.mockResolvedValue(
+        braveSearchResponse(
+          Array.from({ length: 7 }, (_, i) => ({
+            title: `R${i}`,
+            url: `https://x.io/${i}`,
+            description: "d",
+          })),
+        ),
+      );
+
+      const { tool } = await setupWithBraveActive();
+      const result = await tool.execute(
+        "id-1",
+        { query: "q", max_results: 2 },
+        undefined,
+        undefined,
+        {},
+      );
+
+      expect(result.details.resultCount).toBe(2);
+    });
+
     it("defaults max_results to 5", async () => {
       vi.stubEnv("BRAVE_API_KEY", "test-key");
       mockFetch.mockResolvedValue(braveSearchResponse([]));

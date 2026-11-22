@@ -27,12 +27,14 @@ function getBraveApiKey(): string | undefined {
   return val ? val.trim() || undefined : undefined;
 }
 
-function normalizeBraveResults(raw: BraveRawResponse): SearchResult[] {
+function normalizeBraveResults(raw: BraveRawResponse, maxResults: number): SearchResult[] {
   // Brave's title/description fields carry stray markup (<strong> emphasis on
   // query terms) and HTML entities (named, decimal &#39;, and hex &#x27;).
   // Strip tags before decoding so a decoded &lt; isn't mistaken for a tag, then
   // collapse the whitespace left behind by removed tags.
-  return (raw.web?.results ?? []).map((r) => ({
+  // Brave honors the count parameter, but slice anyway so max_results holds
+  // even when the response carries more entries than requested.
+  return (raw.web?.results ?? []).slice(0, maxResults).map((r) => ({
     title: cleanSearchTextField(r.title),
     url: r.url ?? "",
     snippet: cleanSearchTextField(r.description),
@@ -82,7 +84,7 @@ async function braveSearch(
     }
 
     const raw = (await res.json()) as BraveRawResponse;
-    return normalizeBraveResults(raw);
+    return normalizeBraveResults(raw, maxResults);
   } finally {
     cleanup();
   }
