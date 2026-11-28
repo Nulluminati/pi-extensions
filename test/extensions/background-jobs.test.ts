@@ -200,7 +200,7 @@ describe("background-jobs-extension", () => {
       const factory = call?.[1] as (
         tui: unknown,
         theme: unknown,
-      ) => { render: (width: number) => string[] };
+      ) => { render: (width: number) => readonly string[] };
       const theme = { fg: (_color: string, text: string) => text };
       const component = factory(fakeTui(), theme);
       const text = component.render(80).join("\n");
@@ -226,7 +226,7 @@ describe("background-jobs-extension", () => {
       const factory = call?.[1] as (
         tui: unknown,
         theme: unknown,
-      ) => { render: (width: number) => string[] };
+      ) => { render: (width: number) => readonly string[] };
       const theme = { fg: (_color: string, text: string) => text };
       const component = factory(fakeTui(), theme);
       const text = component.render(80).join("\n");

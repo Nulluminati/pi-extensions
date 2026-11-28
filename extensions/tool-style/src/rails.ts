@@ -28,7 +28,7 @@ const STYLED_BACKGROUNDS = new Set([
 
 type ThemeColor = "accent" | "success" | "error" | "warning" | "bashMode" | "customMessageLabel";
 type ThemeBackground = "toolPendingBg" | "toolSuccessBg" | "toolErrorBg";
-type RenderFunction = (this: RenderInstance, width: number) => string[];
+type RenderFunction = (this: RenderInstance, width: number) => readonly string[];
 
 interface RenderInstance {
   isPartial?: boolean;
@@ -127,10 +127,10 @@ function addRail(
   theme: RailTheme,
   styleDirectCommand: boolean,
   onRenderFailure?: (instance: RenderInstance) => void,
-): string[] {
+): readonly string[] {
   const normalizedWidth = Math.max(1, Math.floor(width));
   const innerWidth = normalizedWidth === 1 ? 1 : normalizedWidth - 1;
-  let rendered: string[];
+  let rendered: readonly string[];
   try {
     rendered = original.call(instance, innerWidth);
   } catch {
@@ -155,7 +155,7 @@ function addRail(
   });
 }
 
-function removeDirectCommandBorders(lines: string[]): string[] {
+function removeDirectCommandBorders(lines: readonly string[]): readonly string[] {
   if (lines.length === 0) return lines;
   const leadingSpacer = lines[0] === "" ? [""] : [];
   const content = leadingSpacer.length > 0 ? lines.slice(1) : [...lines];

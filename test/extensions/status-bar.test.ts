@@ -1959,7 +1959,7 @@ function renderInstalledEditor(mockCtx: ReturnType<typeof createMockCommandConte
   if (typeof factory !== "function") throw new Error("No editor factory installed");
   const [, theme, keybindings] = EDITOR_FACTORY_ARGS;
   const editor = factory(fakeTui(), theme, keybindings);
-  return editor as { render(width: number): string[] };
+  return editor as { render(width: number): readonly string[] };
 }
 
 /**
