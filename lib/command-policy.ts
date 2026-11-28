@@ -1,7 +1,7 @@
 /** Deterministic command checks. Hard denies precede every approval path. */
 
 import { homedir } from "node:os";
-import { delimiter, isAbsolute } from "node:path";
+import { delimiter, isAbsolute, resolve } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { type AllowRule, checkCommand, commandWords, splitCommand } from "./bash-allow.ts";
 
@@ -59,11 +59,28 @@ const HOME_CREDENTIAL_STORE =
 
 export type CommandClass = "hard-deny" | "known-safe" | "needs-jev";
 
-function isRootDeletion(command: string, cwd: string, agentDir: string): boolean {
-  return command.split(COMMAND_STAGES).some((stage) => isRootDeletionStage(stage, cwd, agentDir));
+function isRootDeletion(command: string, cwd: string, agentDir: string, home: string): boolean {
+  return command
+    .split(COMMAND_STAGES)
+    .some((stage) => isRootDeletionStage(stage, cwd, agentDir, home));
 }
 
-function isRootDeletionStage(stage: string, cwd: string, agentDir: string): boolean {
+/** True when a literal path names the workspace, one of its ancestors, or the home directory. */
+function isWorkspaceOrHome(target: string, cwd: string, home: string): boolean {
+  // Shell expansions and globs have no literal path to resolve.
+  if (/[~$*?[\\]/.test(target)) return false;
+  const resolved = resolve(cwd, target);
+  const workspace = resolve(cwd);
+  return (
+    resolved === resolve(home) ||
+    resolved === workspace ||
+    workspace.startsWith(resolved.endsWith("/") ? resolved : `${resolved}/`) ||
+    // Every absolute spelling of a home directory: /home/<user>, /Users/<user>.
+    /^(?:\/home|\/Users)\/[^/]+$/.test(resolved)
+  );
+}
+
+function isRootDeletionStage(stage: string, cwd: string, agentDir: string, home: string): boolean {
   const match = RM_INVOCATION.exec(stage);
   if (!match || !RECURSIVE_FLAG.test(match[1] ?? "")) return false;
   const target = match[2]?.replace(/^["']|["'](?=\/*$)/g, "");
@@ -72,7 +89,7 @@ function isRootDeletionStage(stage: string, cwd: string, agentDir: string): bool
   const bareAgentDir = agentDir.replace(/\/+$/, "");
   return (
     ROOT_TARGETS.has(bareTarget) ||
-    bareTarget === cwd ||
+    isWorkspaceOrHome(bareTarget, cwd, home) ||
     bareTarget === bareAgentDir ||
     bareTarget.startsWith(`${bareAgentDir}/`) ||
     /^(?:\/home|\/root|\/etc|\/usr|\/var|\/tmp|\/opt|\/dev|\/sys|\/proc)$/.test(bareTarget) ||
@@ -285,7 +302,7 @@ export function classifyCommand(
 ): CommandClass {
   const trimmed = command.trim();
   if (
-    isRootDeletion(trimmed, cwd, agentDir) ||
+    isRootDeletion(trimmed, cwd, agentDir, home) ||
     isProtectedForcePush(trimmed) ||
     HARD_DENIES.some((pattern) => pattern.test(trimmed))
   ) {

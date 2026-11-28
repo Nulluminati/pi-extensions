@@ -109,6 +109,70 @@ describe("command policy", () => {
       expect(classifyCommand(command, "/workspace")).toBe("needs-jev");
   });
 
+  it.each([
+    "rm -rf /home/me",
+    "rm -rf /home/me/",
+    "rm -rf '/home/me/'",
+    'rm -rf "/home/me"',
+    "rm -rf /home/me/.",
+    "rm -rf /home/other",
+    "rm -rf /Users/me",
+    "rm -rf /Users/me/",
+    "rm -rf /root/",
+  ])("hard-denies recursive deletion of the absolute home directory in %s", (command) => {
+    expect(
+      classifyCommand(command, "/home/me/projects/demo", "/home/me/.pi/agent", "/home/me"),
+    ).toBe("hard-deny");
+  });
+
+  it("hard-denies recursive deletion of a home directory outside /home and /Users", () => {
+    expect(classifyCommand("rm -rf /srv/me", "/workspace", "/custom/agent", "/srv/me")).toBe(
+      "hard-deny",
+    );
+    expect(classifyCommand("rm -rf /srv/me/", "/workspace", "/custom/agent", "/srv/me/")).toBe(
+      "hard-deny",
+    );
+  });
+
+  it.each([
+    "./.",
+    "././",
+    "./..",
+    "../..",
+    "../../",
+    "../../..",
+    "dist/../..",
+    "/home/me/projects",
+    "/home/me/projects/demo",
+    "/home/me/projects/demo/.",
+  ])(
+    "hard-denies recursive deletion of %s, which resolves to the workspace or an ancestor",
+    (target) => {
+      expect(
+        classifyCommand(
+          `rm -rf ${target}`,
+          "/home/me/projects/demo",
+          "/home/me/.pi/agent",
+          "/home/me",
+        ),
+      ).toBe("hard-deny");
+    },
+  );
+
+  it("keeps deletions below the home directory and workspace judgeable", () => {
+    for (const command of [
+      "rm -rf /home/me/projects/other",
+      "rm -rf /home/me/projects/demo/dist",
+      "rm -rf ./dist/..x",
+      "rm -rf ../sibling",
+      "rm -rf /home/me/.cache",
+      "rm -rf /Users/me/Downloads",
+    ])
+      expect(
+        classifyCommand(command, "/home/me/projects/demo", "/home/me/.pi/agent", "/home/me"),
+      ).toBe("needs-jev");
+  });
+
   it("hard-denies recursive deletion of the resolved agent directory", () => {
     for (const command of [
       "rm -rf /custom/agent",
