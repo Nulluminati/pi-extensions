@@ -48,15 +48,15 @@
     "@earendil-works/pi-tui": "*"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.6.7",
+    "@biomejs/biome": "^2.6.9",
     "@earendil-works/pi-agent-core": "^1.7.0",
     "@earendil-works/pi-ai": "^1.7.0",
     "@earendil-works/pi-coding-agent": "^1.7.0",
     "@earendil-works/pi-tui": "^1.7.0",
-    "@types/node": "^26.6.6",
-    "@vitest/coverage-v8": "^5.1.0",
+    "@types/node": "^26.6.10",
+    "@vitest/coverage-v8": "^5.1.2",
     "husky": "^9.1.7",
-    "lint-staged": "^17.6.0",
+    "lint-staged": "^17.6.2",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^5.0.2"
