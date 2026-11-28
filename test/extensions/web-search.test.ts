@@ -475,6 +475,25 @@ describe("web-search-extension", () => {
       expect(result.content[0].text).not.toContain("&#x27;");
       expect(result.content[0].text).not.toContain("<strong>");
     });
+
+    it("keeps a literal less-than sign in Brave snippets", async () => {
+      vi.stubEnv("BRAVE_API_KEY", "test-key");
+      mockFetch.mockResolvedValue(
+        braveSearchResponse([
+          {
+            title: "Compare <strong>a</strong> < b",
+            url: "https://example.com/1",
+            description: "The condition a < b && c > d must hold.",
+          },
+        ]),
+      );
+
+      const { tool } = await setupWithBraveActive();
+      const result = await tool.execute("id-1", { query: "test" }, undefined, undefined, {});
+
+      expect(result.details.results[0].title).toBe("Compare a < b");
+      expect(result.details.results[0].snippet).toBe("The condition a < b && c > d must hold.");
+    });
   });
 
   // --- web_search via synthetic ---
@@ -1982,6 +2001,26 @@ describe("htmlToText", () => {
       "\u201Chi\u201D \u2014 Tom\u2019s \u2026",
     );
   });
+
+  it("keeps a literal less-than sign that does not start a tag", () => {
+    expect(htmlToText("<p>The condition a < b && c > d must hold.</p>")).toBe(
+      "The condition a < b && c > d must hold.",
+    );
+  });
+
+  it("keeps less-than signs before digits, symbols, and the end of the text", () => {
+    expect(htmlToText("<p>x <5, y <= 4, z <- f, <3 and <em>more</em> <</p>")).toBe(
+      "x <5, y <= 4, z <- f, <3 and more <",
+    );
+  });
+
+  it("strips tags with attributes, closing tags, comments, and doctypes", () => {
+    expect(
+      htmlToText(
+        '<!DOCTYPE html><html><body><!-- a <b> c --><span class="x">one</span> <em>two</em></body></html>',
+      ),
+    ).toBe("one two");
+  });
 });
 
 describe("extractTitle", () => {
@@ -1989,6 +2028,10 @@ describe("extractTitle", () => {
     expect(extractTitle("<title>Tom &amp; Jerry &mdash; &#128512;</title>")).toBe(
       "Tom & Jerry \u2014 \u{1F600}",
     );
+  });
+
+  it("keeps a literal less-than sign in the title", () => {
+    expect(extractTitle("<title>a < b and <em>c</em></title>")).toBe("a < b and c");
   });
 });
 

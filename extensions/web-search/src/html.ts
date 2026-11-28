@@ -13,7 +13,11 @@ export const BLOCK_CLOSER_REGEX =
 
 export const SELF_CLOSING_BR_REGEX = /<br\s*\/?>/gi;
 
-export const ANY_REMAINING_TAG_REGEX = /<[^>]+>/g;
+// A "<" starts a tag only when a letter, "/" plus a letter, "!" (comment or
+// doctype), or "?" follows it, as in the HTML tokenizer. Any other "<" (a
+// comparison such as "a < b", "<=", "<3") stays as text. The tag body excludes
+// "<", so the scan for an unclosed tag stops at the next "<".
+export const ANY_REMAINING_TAG_REGEX = /<(?:!--[\s\S]*?--|\/?[a-zA-Z][^<>]*|[!?][^<>]*)>/g;
 
 export const TITLE_TAG_REGEX = /<title[^>]*>([\s\S]*?)<\/title>/i;
 
